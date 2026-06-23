@@ -76,6 +76,14 @@ describe('chat model dropdown data', () => {
     expect(resolveDisplayedChatModel('gpt-4o', 'agnes-2.0-flash')).toBe('gpt-4o')
   })
 
+  it('shows the streaming assistant bubble before the first response token arrives', async () => {
+    const { shouldShowStreamingBubble } = await import('./Timeline')
+
+    expect(shouldShowStreamingBubble(true, '')).toBe(true)
+    expect(shouldShowStreamingBubble(true, 'Hello')).toBe(true)
+    expect(shouldShowStreamingBubble(false, '')).toBe(false)
+  })
+
   it('persists a selected model and reloads sessions', async () => {
     const loadSessions = vi.fn()
     const { useSessionStore } = await import('@renderer/store')

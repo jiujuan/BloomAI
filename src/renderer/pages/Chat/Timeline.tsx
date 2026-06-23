@@ -20,6 +20,10 @@ function DateDivider({ label }: { label: string }) {
   )
 }
 
+export function shouldShowStreamingBubble(isStreaming: boolean, streamingText: string): boolean {
+  return isStreaming || streamingText.length > 0
+}
+
 function SystemBadge({ text }: { text: string }) {
   return (
     <div className="timeline-system-badge">
@@ -68,7 +72,7 @@ export function Timeline({ messages, isStreaming, streamingText, streamError }: 
           : <MessageBubble key={item.message.id} message={item.message} />
       )}
 
-      {isStreaming && streamingText && (
+      {shouldShowStreamingBubble(isStreaming, streamingText) && (
         <MessageBubble
           message={{ id: 'streaming', session_id: '', role: 'assistant', content: '', created_at: Date.now() }}
           isStreaming

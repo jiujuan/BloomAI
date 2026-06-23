@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Copy, RefreshCw, ThumbsUp, ThumbsDown, Check } from 'lucide-react'
+import { Copy, Loader2, ThumbsUp, ThumbsDown, Check } from 'lucide-react'
 import { cn } from '@renderer/utils'
 import type { Message } from '@shared/schemas'
 
@@ -40,6 +40,7 @@ export function MessageBubble({ message, isStreaming, streamText }: MessageBubbl
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
   const content = isStreaming ? (streamText || '') : message.content
+  const isWaitingForStream = Boolean(isStreaming && !content)
 
   const copy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -66,6 +67,12 @@ export function MessageBubble({ message, isStreaming, streamText }: MessageBubbl
           {isUser ? (
             <p className="msg-text">{content}</p>
           ) : (
+            isWaitingForStream ? (
+              <div className="msg-waiting" role="status" aria-live="polite">
+                <Loader2 size={15} className="msg-waiting-spinner" aria-hidden="true" />
+                <span className="sr-only">Waiting for response</span>
+              </div>
+            ) : (
             <div className="msg-markdown">
               <ReactMarkdown
                 components={{
@@ -94,6 +101,7 @@ export function MessageBubble({ message, isStreaming, streamText }: MessageBubbl
               </ReactMarkdown>
               {isStreaming && <span className="streaming-cursor" aria-hidden="true" />}
             </div>
+            )
           )}
         </div>
         {!isUser && !isStreaming && content && (
