@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { toolRepo } from '../db/repositories/tool.repo'
-import { executeTool } from '../services/tool.service'
+import { executeTool } from '../tools/execute-tool'
 
 export const toolsRouter = Router()
 
@@ -38,3 +38,4 @@ toolsRouter.post('/:id/run', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: { code: 'TOOL_ERROR', message: err.message } }) }
 })
 toolsRouter.get('/:id/runs', (req: Request, res: Response) => res.json({ data: toolRepo.listRuns(req.params.id, parseInt(req.query.limit as string) || 50) }))
+

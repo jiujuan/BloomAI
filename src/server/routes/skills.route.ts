@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { skillRepo } from '../db/repositories/skill.repo'
-import { runSkill } from '../services/skill.service'
+import { runSkill } from '../skills/run-skill'
 
 export const skillsRouter = Router()
 
@@ -43,3 +43,4 @@ skillsRouter.post('/:id/run', async (req: Request, res: Response) => {
   catch (err: any) { res.status(500).json({ error: { code: 'SKILL_ERROR', message: err.message } }) }
 })
 skillsRouter.get('/:id/runs', (req: Request, res: Response) => res.json({ data: skillRepo.listRuns(req.params.id, parseInt(req.query.limit as string) || 20) }))
+
