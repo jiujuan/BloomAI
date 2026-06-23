@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express'
-import Anthropic from '@anthropic-ai/sdk'
 import { db } from '../db/client'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { personaRepo } from '../db/repositories/persona.repo'
+import { streamChatCompletion } from '../llm'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 
 export const chatRouter = Router()
@@ -13,13 +13,6 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
   const { sessionId, content, contextOverride } = req.body
   if (!sessionId || !content) {
     sendSSE(res, { type: 'error', error: 'sessionId and content required' })
-    return endSSE(res)
-  }
-
-  const keyRow = db.prepare("SELECT value FROM settings WHERE key='anthropic_api_key'").get() as any
-  const apiKey = keyRow?.value || process.env.ANTHROPIC_API_KEY || ''
-  if (!apiKey) {
-    sendSSE(res, { type: 'error', error: 'No API key. Please configure your Anthropic API key in Settings.' })
     return endSSE(res)
   }
 
@@ -52,22 +45,25 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
 
   let fullText = ''; let inTok = 0; let outTok = 0
   try {
-    const client = new Anthropic({ apiKey })
-    const stream = client.messages.stream({
-      model: persona?.model_override || session.model || 'claude-3-5-sonnet-20241022',
-      max_tokens: 4096,
+    const settingsModel = (db.prepare("SELECT value FROM settings WHERE key='model'").get() as any)?.value || ''
+    const model = persona?.model_override || session.model || settingsModel || 'claude-3-5-sonnet-20241022'
+
+    for await (const event of streamChatCompletion({
+      model,
+      maxTokens: 4096,
       system,
       messages,
-    })
-    stream.on('text', (text) => {
-      fullText += text
-      sendSSE(res, { type: 'delta', text })
-    })
-    stream.on('message', (msg) => {
-      inTok = msg.usage.input_tokens
-      outTok = msg.usage.output_tokens
-    })
-    await stream.finalMessage()
+    })) {
+      if (event.type === 'delta') {
+        fullText += event.text
+        sendSSE(res, { type: 'delta', text: event.text })
+      }
+      if (event.type === 'usage') {
+        inTok = event.input
+        outTok = event.output
+      }
+    }
+
     messageRepo.save({ session_id: sessionId, role: 'assistant', content: fullText, tokens: inTok + outTok })
     sendSSE(res, { type: 'done', tokens: { input: inTok, output: outTok } })
   } catch (err: any) {
