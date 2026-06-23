@@ -11,8 +11,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",
     "db:migrate": "node scripts/db-migrate.js",
-    "start:server": "tsx src/server/index.ts",
-    "start:server:legacy": "tsx packages/server/src/index.ts"
+    "start:server": "tsx src/server/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.26.0",
