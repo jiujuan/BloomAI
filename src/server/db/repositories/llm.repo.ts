@@ -226,4 +226,36 @@ export const llmRepo = {
   getVideoTask(id: string): LlmVideoTaskRecord | undefined {
     return db.prepare('SELECT * FROM llm_video_tasks WHERE id=?').get(id) as LlmVideoTaskRecord | undefined
   },
+
+  importOllamaModel(modelName: string): LlmModelRecord {
+    const existing = this.getModel(modelName)
+    if (existing) {
+      return this.updateModel(modelName, {
+        providerId: 'ollama',
+        modelId: modelName,
+        label: modelName,
+        modality: 'text',
+        capabilities: {},
+        isEnabled: true,
+        isBuiltin: false,
+        sortOrder: existing.sort_order,
+      })!
+    }
+
+    return this.createModel({
+      id: modelName,
+      providerId: 'ollama',
+      modelId: modelName,
+      label: modelName,
+      modality: 'text',
+      capabilities: {},
+      isEnabled: true,
+      isBuiltin: false,
+      sortOrder: 1000,
+    })
+  },
+}
+
+export function importOllamaModel(modelName: string): LlmModelRecord {
+  return llmRepo.importOllamaModel(modelName)
 }

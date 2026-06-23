@@ -4,6 +4,7 @@ import { createVideoTask, getVideoTask } from './media/video'
 import { createAgnesTextProvider } from './providers/agnes'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createDeepSeekProvider } from './providers/deepseek'
+import { createOllamaProvider } from './providers/ollama'
 import { createOpenAIProvider } from './providers/openai'
 import { listModels, listProviders, resolveModel } from './registry'
 import { parseOllamaNdjsonLine, parseOpenAICompatibleSseLine } from './stream'
@@ -27,6 +28,10 @@ export async function* streamChatCompletion(input: ChatStreamRequest): AsyncGene
     yield* createDeepSeekProvider(resolved).streamChat(input)
     return
   }
+  if (resolved.provider.kind === 'ollama') {
+    yield* createOllamaProvider(resolved).streamChat(input)
+    return
+  }
 
   throw new LlmUnsupportedModelError(`Chat streaming is not implemented for model "${input.model}"`)
 }
@@ -35,6 +40,7 @@ export { generateImage, createVideoTask, getVideoTask }
 export { createAgnesTextProvider }
 export { createAnthropicProvider }
 export { createDeepSeekProvider }
+export { createOllamaProvider, importOllamaModel, listOllamaRemoteModels } from './providers/ollama'
 export { createOpenAICompatibleProvider } from './providers/openai-compatible'
 export { createOpenAIProvider }
 export { listModels, listProviders, resolveModel }
