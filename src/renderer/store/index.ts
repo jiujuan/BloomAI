@@ -273,6 +273,7 @@ interface LlmState {
 }
 interface LlmActions {
   loadModels: () => Promise<void>
+  loadTextModels: () => Promise<void>
 }
 
 export const useLlmStore = create<LlmState & LlmActions>()(
@@ -296,6 +297,19 @@ export const useLlmStore = create<LlmState & LlmActions>()(
         set({
           loading: false,
           error: error instanceof Error ? error.message : 'Failed to load models',
+        })
+      }
+    },
+
+    loadTextModels: async () => {
+      set({ loading: true, error: null })
+      try {
+        const textModels = await platform.getLlmModels('text')
+        set({ textModels, loading: false })
+      } catch (error) {
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to load text models',
         })
       }
     },

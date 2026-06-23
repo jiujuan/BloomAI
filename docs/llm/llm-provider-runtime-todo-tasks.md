@@ -743,9 +743,9 @@ getOllamaModels(): Promise<OllamaRemoteModel[]>
 
 **Acceptance Evidence Checklist:**
 
-- [ ] Chat dropdown shows the same enabled text models as Settings.
-- [ ] Chat model selection persists to `sessions.model`.
-- [ ] Fallback prevents empty dropdown if LLM API is temporarily unavailable.
+- [x] Chat dropdown shows the same enabled text models as Settings.
+- [x] Chat model selection persists to `sessions.model`.
+- [x] Fallback prevents empty dropdown if LLM API is temporarily unavailable.
 
 ---
 
