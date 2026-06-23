@@ -815,10 +815,10 @@ saveGeneratedImage(url: string, saveTo: string): Promise<string>
 
 **Acceptance Evidence Checklist:**
 
-- [ ] Existing OpenAI `image_gen` behavior still works.
-- [ ] Agnes Image can be selected by model.
-- [ ] Tool schema includes new optional fields.
-- [ ] Agnes-specific request shape is covered by tests.
+- [x] Existing OpenAI `image_gen` behavior still works.
+- [x] Agnes Image can be selected by model.
+- [x] Tool schema includes new optional fields.
+- [x] Agnes-specific request shape is covered by tests.
 
 ---
 

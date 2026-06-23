@@ -197,6 +197,7 @@ export async function runMigrations() {
     ['claude-3-haiku-20240307','anthropic','claude-3-haiku-20240307','Claude 3 Haiku','text',30],
     ['gpt-4o','openai','gpt-4o','GPT-4o','text',40],
     ['gpt-4o-mini','openai','gpt-4o-mini','GPT-4o mini','text',50],
+    ['dall-e-3','openai','dall-e-3','DALL-E 3','image',20],
     ['agnes-2.0-flash','agnes','agnes-2.0-flash','Agnes 2.0 Flash','text',60],
     ['agnes-image-2.1-flash','agnes','agnes-image-2.1-flash','Agnes Image 2.1 Flash','image',10],
     ['agnes-video-v2.0','agnes','agnes-video-v2.0','Agnes Video V2.0','video',10],
@@ -242,6 +243,12 @@ export async function runMigrations() {
         .run(id, cat, name, desc, params, result, perm, now)
     }
   }
+
+  db.prepare("UPDATE tools SET params_schema=?, result_schema=? WHERE id='image_gen'")
+    .run(
+      '{"prompt":{"type":"string"},"model":{"type":"string"},"size":{"type":"string","default":"1024x1024"},"quality":{"type":"string","default":"standard"},"image":{"type":"array"},"responseFormat":{"type":"string","enum":["url","b64_json"]},"saveTo":{"type":"string"}}',
+      '{"providerId":{"type":"string"},"model":{"type":"string"},"url":{"type":"string"},"b64_json":{"type":"string"},"localPath":{"type":"string"}}'
+    )
 
   const sCount = db.prepare("SELECT COUNT(*) as c FROM skills WHERE author='official'").get() as any
   if (!sCount || sCount.c === 0) {

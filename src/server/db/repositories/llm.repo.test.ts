@@ -62,6 +62,7 @@ describe('llmRepo', () => {
     )
     expect(llmRepo.listModels({ modality: 'image' }).map((model) => model.id)).toEqual([
       'agnes-image-2.1-flash',
+      'dall-e-3',
     ])
     expect(llmRepo.listModels({ modality: 'video' }).map((model) => model.id)).toEqual([
       'agnes-video-v2.0',
