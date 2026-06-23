@@ -1,0 +1,28 @@
+{
+  "name": "bloomai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BloomAI - Local-first AI Desktop Assistant",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:desktop": "turbo run dev --filter=@bloomai/desktop",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:migrate": "node scripts/db-migrate.js",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.6",
+    "typescript": "^5.4.5",
+    "prettier": "^3.2.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

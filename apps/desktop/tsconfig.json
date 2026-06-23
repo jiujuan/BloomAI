@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@bloomai/ui": ["../../packages/ui/src"],
+      "@bloomai/ui/*": ["../../packages/ui/src/*"],
+      "@bloomai/server": ["../../packages/server/src"],
+      "@bloomai/server/*": ["../../packages/server/src/*"]
+    },
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*", "electron/**/*", "../../packages/ui/src/**/*"],
+  "exclude": ["node_modules", "dist", "dist-electron"]
+}
