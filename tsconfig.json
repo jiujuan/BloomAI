@@ -23,7 +23,6 @@
   },
   "include": [
     "src/**/*",
-    "apps/desktop/src/**/*",
     "packages/server/src/**/*",
     "packages/ui/src/**/*",
     "electron.vite.config.ts"
