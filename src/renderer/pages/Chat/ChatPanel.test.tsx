@@ -69,6 +69,13 @@ describe('chat model dropdown data', () => {
     expect(useLlmStore.getState().textModels.map(model => model.id)).toEqual(['gpt-4o'])
   })
 
+  it('uses the settings model for legacy default session models', async () => {
+    const { resolveDisplayedChatModel } = await import('./ChatPanel')
+
+    expect(resolveDisplayedChatModel('claude-3-5-sonnet-20241022', 'agnes-2.0-flash')).toBe('agnes-2.0-flash')
+    expect(resolveDisplayedChatModel('gpt-4o', 'agnes-2.0-flash')).toBe('gpt-4o')
+  })
+
   it('persists a selected model and reloads sessions', async () => {
     const loadSessions = vi.fn()
     const { useSessionStore } = await import('@renderer/store')

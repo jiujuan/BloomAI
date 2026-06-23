@@ -159,6 +159,17 @@ describe('chat stream route', () => {
     expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o' }))
   })
 
+  it('uses settings.model when the default built-in persona still has the legacy model override', async () => {
+    llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
+    const { app, db, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ persona_id: 'developer', model: 'agnes-2.0-flash' })
+    db.prepare("UPDATE settings SET value=? WHERE key='model'").run('agnes-2.0-flash')
+
+    await postSse(app, { sessionId: session.id, content: 'Use Agnes with the default persona' })
+
+    expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(expect.objectContaining({ model: 'agnes-2.0-flash' }))
+  })
+
   it('saves partial assistant text when streaming fails', async () => {
     llmMock.streamChatCompletion.mockReturnValue(failingEvents())
     const { app, messageRepo, sessionRepo } = await loadApp()

@@ -2,11 +2,38 @@ import { Router, Request, Response } from 'express'
 import { db } from '../db/client'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
-import { personaRepo } from '../db/repositories/persona.repo'
+import { personaRepo, type Persona } from '../db/repositories/persona.repo'
 import { streamChatCompletion } from '../llm'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 
 export const chatRouter = Router()
+
+const FALLBACK_CHAT_MODEL = 'claude-3-5-sonnet-20241022'
+const LEGACY_BUILTIN_PERSONA_MODELS = new Set([
+  'claude-3-5-sonnet-20241022',
+  'claude-3-opus-20240229',
+])
+
+function getSettingsModel(): string {
+  return (db.prepare("SELECT value FROM settings WHERE key='model'").get() as any)?.value || ''
+}
+
+function getPersonaModelOverride(persona: Persona | null): string {
+  const override = persona?.model_override || ''
+  if (!override) return ''
+  if (persona?.is_builtin && LEGACY_BUILTIN_PERSONA_MODELS.has(override)) return ''
+  return override
+}
+
+function getSessionModelOverride(sessionModel: string): string {
+  if (!sessionModel) return ''
+  if (sessionModel === FALLBACK_CHAT_MODEL) return ''
+  return sessionModel
+}
+
+function resolveChatModel(persona: Persona | null, sessionModel: string, settingsModel: string): string {
+  return getPersonaModelOverride(persona) || getSessionModelOverride(sessionModel) || settingsModel || sessionModel || FALLBACK_CHAT_MODEL
+}
 
 chatRouter.post('/stream', async (req: Request, res: Response) => {
   setupSSE(res)
@@ -22,7 +49,7 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
     return endSSE(res)
   }
 
-  const persona = session.persona_id ? personaRepo.get(session.persona_id) : null
+  const persona = session.persona_id ? personaRepo.get(session.persona_id) || null : null
   const history = messageRepo.getHistory(sessionId, 20)
   const basePrompt = persona?.system_prompt || 'You are BloomAI, a helpful AI assistant. Be concise, accurate, and friendly.'
 
@@ -45,8 +72,7 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
 
   let fullText = ''; let inTok = 0; let outTok = 0
   try {
-    const settingsModel = (db.prepare("SELECT value FROM settings WHERE key='model'").get() as any)?.value || ''
-    const model = persona?.model_override || session.model || settingsModel || 'claude-3-5-sonnet-20241022'
+    const model = resolveChatModel(persona, session.model, getSettingsModel())
 
     for await (const event of streamChatCompletion({
       model,

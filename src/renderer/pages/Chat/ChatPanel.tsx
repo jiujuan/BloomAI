@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { ChevronDown, MoreHorizontal, Search, Download } from 'lucide-react'
+import { Check, ChevronDown, MoreHorizontal, Search } from 'lucide-react'
 import { SessionList } from './SessionList'
 import { Timeline } from './Timeline'
 import { InputBar } from './InputBar'
@@ -24,6 +24,13 @@ const PROVIDER_NAMES: Record<string, string> = {
   agnes: 'Agnes',
   deepseek: 'DeepSeek',
   ollama: 'Ollama',
+}
+
+const FALLBACK_CHAT_MODEL = 'claude-3-5-sonnet-20241022'
+
+export function resolveDisplayedChatModel(sessionModel: string | undefined, settingsModel: string | undefined): string {
+  if (sessionModel && sessionModel !== FALLBACK_CHAT_MODEL) return sessionModel
+  return settingsModel || sessionModel || FALLBACK_CHAT_MODEL
 }
 
 export function getChatModelOptions(models: LlmModelSummary[]): ChatModelOption[] {
@@ -90,7 +97,7 @@ function ModelDropdown({ model, models, onSelect }: { model: string; models: Cha
                 <span className="model-option-name">{m.label}</span>
                 <span className="model-option-sub">{m.provider}{m.badge ? ` · ${m.badge}` : ''}</span>
               </div>
-              {model === m.id && <span className="model-check">✓</span>}
+              {model === m.id && <Check size={12} className="model-check" />}
             </button>
           ))}
         </div>
@@ -135,7 +142,7 @@ function PersonaPill({ personas, activeId, onSelect }: { personas: Persona[]; ac
                 {p.name[0]}
               </span>
               <span className="persona-option-name">{p.name}</span>
-              {activeId === p.id && <span className="persona-check">✓</span>}
+              {activeId === p.id && <Check size={12} className="persona-check" />}
             </button>
           ))}
         </div>
@@ -154,7 +161,7 @@ export function ChatPanel() {
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
-  const model = session?.model || settings.model || 'claude-3-5-sonnet-20241022'
+  const model = resolveDisplayedChatModel(session?.model, settings.model)
   const modelOptions = useMemo(() => getChatModelOptions(textModels), [textModels])
 
   useEffect(() => {
