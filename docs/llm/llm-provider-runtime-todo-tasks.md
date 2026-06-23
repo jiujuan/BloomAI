@@ -883,10 +883,10 @@ getAgnesVideoTask(task: LlmVideoTaskRecord): Promise<VideoTaskResult>
 
 **Acceptance Evidence Checklist:**
 
-- [ ] Agnes Video task can be created.
-- [ ] Task status can be queried.
-- [ ] Completed video URL is returned.
-- [ ] Video task is not coupled to Chat SSE.
+- [x] Agnes Video task can be created.
+- [x] Task status can be queried.
+- [x] Completed video URL is returned.
+- [x] Video task is not coupled to Chat SSE.
 
 ---
 

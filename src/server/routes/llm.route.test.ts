@@ -57,6 +57,17 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
+function mockProviderFetch(body: unknown) {
+  const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).startsWith('http://127.0.0.1:')) {
+      return originalFetch(url, init)
+    }
+    return jsonResponse(body)
+  })
+  globalThis.fetch = fetchMock as typeof fetch
+  return fetchMock
+}
+
 describe('LLM route', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-llm-route-'))
@@ -209,5 +220,78 @@ describe('LLM route', () => {
       expect(status).toBe(200)
       expect(body.data).toEqual([{ name: 'llama3.1:latest', size: 123 }])
     })
+  })
+
+  it('creates an Agnes video task through the LLM API', async () => {
+    process.env.AGNES_API_KEY = 'test-agnes-key'
+    const fetchMock = mockProviderFetch({ task_id: 'provider-task-1', video_id: 'video-1', status: 'queued' })
+    const { app, llmRepo } = await loadApp()
+
+    await withServer(app, async (baseUrl) => {
+      const { status, body } = await requestJson(baseUrl, '/llm/videos', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'agnes-video-v2.0',
+          prompt: 'A city blooming at sunrise',
+          width: 1280,
+          height: 720,
+          numFrames: 96,
+          frameRate: 24,
+          image: ['https://example.com/input.png'],
+        }),
+      })
+
+      expect(status).toBe(201)
+      expect(body.data).toMatchObject({
+        providerId: 'agnes',
+        model: 'agnes-video-v2.0',
+        videoId: 'video-1',
+        status: 'queued',
+      })
+      expect(llmRepo.getVideoTask(body.data.taskId)).toMatchObject({
+        provider_task_id: 'provider-task-1',
+        provider_video_id: 'video-1',
+      })
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('https://apihub.agnes-ai.com/v1/videos', expect.objectContaining({
+      body: expect.stringContaining('"num_frames":96'),
+    }))
+  })
+
+  it('queries an Agnes video task through the LLM API and updates local status', async () => {
+    process.env.AGNES_API_KEY = 'test-agnes-key'
+    const { app, llmRepo } = await loadApp()
+    const task = llmRepo.createVideoTask({
+      providerId: 'agnes',
+      model: 'agnes-video-v2.0',
+      providerTaskId: 'provider-task-1',
+      providerVideoId: 'video-1',
+      input: { prompt: 'A finished video' },
+      status: 'in_progress',
+    })
+    const fetchMock = mockProviderFetch({
+      status: 'completed',
+      progress: 100,
+      remixed_from_video_id: 'https://cdn.example/video.mp4',
+    })
+
+    await withServer(app, async (baseUrl) => {
+      const { status, body } = await requestJson(baseUrl, `/llm/videos/${task.id}`)
+
+      expect(status).toBe(200)
+      expect(body.data).toEqual({
+        taskId: task.id,
+        videoId: 'video-1',
+        providerId: 'agnes',
+        model: 'agnes-video-v2.0',
+        status: 'completed',
+        progress: 100,
+        url: 'https://cdn.example/video.mp4',
+      })
+      expect(llmRepo.getVideoTask(task.id)?.status).toBe('completed')
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('https://apihub.agnes-ai.com/agnesapi?video_id=video-1', expect.any(Object))
   })
 })

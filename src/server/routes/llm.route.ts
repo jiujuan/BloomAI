@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { llmRepo, type LlmModelRecord, type LlmProviderRecord } from '../db/repositories/llm.repo'
-import { listOllamaRemoteModels } from '../llm'
+import { createVideoTask, getVideoTask, listOllamaRemoteModels } from '../llm'
 import { getSettingValue } from '../llm/settings'
 import type { LlmModality } from '../llm'
 
@@ -130,6 +130,38 @@ llmRouter.patch('/models/:id', (req: Request, res: Response) => {
   if (typeof req.body.sortOrder === 'number') updates.sortOrder = req.body.sortOrder
 
   res.json({ data: modelSummary(llmRepo.updateModel(req.params.id, updates)!) })
+})
+
+llmRouter.post('/videos', async (req: Request, res: Response) => {
+  if (!req.body.model || !req.body.prompt) {
+    return validationError(res, 'model and prompt are required')
+  }
+
+  try {
+    const result = await createVideoTask({
+      model: req.body.model,
+      prompt: req.body.prompt,
+      image: req.body.image,
+      width: req.body.width,
+      height: req.body.height,
+      numFrames: req.body.numFrames,
+      frameRate: req.body.frameRate,
+      seed: req.body.seed,
+      negativePrompt: req.body.negativePrompt,
+    })
+    res.status(201).json({ data: result })
+  } catch (err: any) {
+    res.status(500).json({ error: { code: err.code || 'LLM_PROVIDER_ERROR', message: err.message || 'Video task creation failed' } })
+  }
+})
+
+llmRouter.get('/videos/:id', async (req: Request, res: Response) => {
+  try {
+    res.json({ data: await getVideoTask(req.params.id) })
+  } catch (err: any) {
+    const status = err.code === 'LLM_UNSUPPORTED_MODEL' ? 404 : 500
+    res.status(status).json({ error: { code: err.code || 'LLM_PROVIDER_ERROR', message: err.message || 'Video task lookup failed' } })
+  }
 })
 
 llmRouter.get('/ollama/models', async (_req: Request, res: Response) => {
