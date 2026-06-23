@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { Eye, EyeOff, Check, Sun, Moon, Monitor } from 'lucide-react'
 import { useSettingsStore, useUIStore } from '@renderer/store'
-import { AVAILABLE_MODELS, cn } from '@renderer/utils'
+import { cn } from '@renderer/utils'
+import { AVAILABLE_MODELS } from '@shared/constants'
 
 type Tab = 'models' | 'shortcuts' | 'appearance' | 'privacy'
 

@@ -1,10 +1,11 @@
 import { createApp } from './app'
+import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
 
-const PORT = parseInt(process.env.BLOOMAI_PORT || '3718', 10)
+const PORT = parseInt(process.env[BLOOMAI_PORT_ENV] || String(DEFAULT_SERVER_PORT), 10)
 
 createApp().then(app => {
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`[BloomAI Server] Running on http://127.0.0.1:${PORT}`)
+  app.listen(PORT, API_HOST, () => {
+    console.log(`[BloomAI Server] Running on http://${API_HOST}:${PORT}`)
   })
 })
 

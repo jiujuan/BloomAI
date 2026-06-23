@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, Save, Copy } from 'lucide-react'
 import { usePersonaStore } from '@renderer/store'
-import { PERSONA_COLORS, AVAILABLE_MODELS, cn } from '@renderer/utils'
+import { cn } from '@renderer/utils'
+import { AVAILABLE_MODELS, PERSONA_COLORS } from '@shared/constants'
 import type { Persona } from '@shared/schemas'
 
 export function PersonasPage() {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { Check, Eye, EyeOff, ChevronRight, ChevronLeft } from 'lucide-react'
 import { useSettingsStore, useUIStore } from '@renderer/store'
-import { AVAILABLE_MODELS, cn } from '@renderer/utils'
+import { cn } from '@renderer/utils'
+import { AVAILABLE_MODELS, HEALTH_ENDPOINT } from '@shared/constants'
 
 const STEPS = ['Welcome', 'AI Models', 'Permissions', 'Shortcuts']
 
@@ -18,7 +19,7 @@ export function Onboarding() {
     if (!apiKey.trim()) return
     setTestStatus('testing')
     try {
-      const res = await fetch('http://127.0.0.1:3718/api/v1/health')
+      const res = await fetch(HEALTH_ENDPOINT)
       if (res.ok) {
         // Save key first
         await updateSettings({ anthropic_api_key: apiKey, model: selectedModel })

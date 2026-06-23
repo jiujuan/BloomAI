@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import { API_BASE } from '@shared/constants'
 
 export interface Skill {
   id: string; name: string; description: string; type: string
@@ -20,9 +21,8 @@ interface SkillsActions {
   runSkill: (id: string, input: object) => Promise<any>
 }
 
-const API = 'http://127.0.0.1:3718/api/v1'
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
+  const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`)
   return data

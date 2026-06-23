@@ -5,8 +5,9 @@ import { Timeline } from './Timeline'
 import { InputBar } from './InputBar'
 import { ContextPills } from './ContextPills'
 import { useSessionStore, useChatStore, usePersonaStore, useSettingsStore } from '@renderer/store'
-import { AVAILABLE_MODELS, MODEL_LABELS, PERSONA_COLORS, cn } from '@renderer/utils'
+import { cn } from '@renderer/utils'
 import { platform } from '@renderer/api'
+import { AVAILABLE_MODELS, MODEL_LABELS, PERSONA_COLORS } from '@shared/constants'
 import type { Persona } from '@shared/schemas'
 
 function ModelDropdown({ model, onSelect }: { model: string; onSelect: (m: string) => void }) {

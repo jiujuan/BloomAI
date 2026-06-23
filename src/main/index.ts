@@ -3,10 +3,11 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { fork } from 'child_process'
 import type { ChildProcess } from 'child_process'
+import { BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT, IPC_CHANNELS } from '../shared/constants'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
-const PORT = 3718
+const PORT = DEFAULT_SERVER_PORT
 
 let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
@@ -22,12 +23,12 @@ function startServer() {
   if (isDev) {
     serverProcess = fork(serverPath, [], {
       execArgv: ['-r', 'tsx/cjs'],
-      env: { ...process.env, BLOOMAI_PORT: String(PORT) },
+      env: { ...process.env, [BLOOMAI_PORT_ENV]: String(PORT) },
       stdio: 'inherit',
     })
   } else {
     serverProcess = fork(serverPath, [], {
-      env: { ...process.env, BLOOMAI_PORT: String(PORT) },
+      env: { ...process.env, [BLOOMAI_PORT_ENV]: String(PORT) },
       stdio: 'inherit',
     })
   }
@@ -128,13 +129,13 @@ function toggleOverlay() {
 
 // ── IPC handlers ─────────────────────────────────────────────────────────────
 function setupIPC() {
-  ipcMain.handle('clipboard:read', () => clipboard.readText())
-  ipcMain.handle('clipboard:write', (_e, text: string) => { clipboard.writeText(text); return true })
-  ipcMain.handle('app:get-active-window', () => 'BloomAI')  // simplified
-  ipcMain.handle('window:close-overlay', () => overlayWindow?.hide())
-  ipcMain.handle('window:open-main', () => { mainWindow?.show(); mainWindow?.focus() })
-  ipcMain.handle('app:version', () => app.getVersion())
-  ipcMain.handle('shell:open-external', (_e, url: string) => shell.openExternal(url))
+  ipcMain.handle(IPC_CHANNELS.clipboardRead, () => clipboard.readText())
+  ipcMain.handle(IPC_CHANNELS.clipboardWrite, (_e, text: string) => { clipboard.writeText(text); return true })
+  ipcMain.handle(IPC_CHANNELS.appGetActiveWindow, () => 'BloomAI')  // simplified
+  ipcMain.handle(IPC_CHANNELS.windowCloseOverlay, () => overlayWindow?.hide())
+  ipcMain.handle(IPC_CHANNELS.windowOpenMain, () => { mainWindow?.show(); mainWindow?.focus() })
+  ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
+  ipcMain.handle(IPC_CHANNELS.shellOpenExternal, (_e, url: string) => shell.openExternal(url))
 }
 
 // ── App lifecycle ────────────────────────────────────────────────────────────

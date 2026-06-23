@@ -2,7 +2,7 @@
 // In Electron: window.bloomai exposes IPC bridge from preload
 // In future web: uses fetch + SSE directly
 
-const API_BASE = 'http://127.0.0.1:3718/api/v1'
+import { API_BASE } from '@shared/constants'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!(window as any).bloomai

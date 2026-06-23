@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import { API_BASE } from '@shared/constants'
 
 export interface Tool {
   id: string; category: string; name: string; description: string
@@ -32,9 +33,8 @@ interface ToolsActions {
   resolvePendingPermission: (granted: boolean) => void
 }
 
-const API = 'http://127.0.0.1:3718/api/v1'
 async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
+  const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`)
   return data
