@@ -157,7 +157,7 @@ export function ChatPanel() {
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
   const { settings } = useSettingsStore()
   const { textModels, loadTextModels } = useLlmStore()
-  const [context, setContext] = useState<{ activeApp?: string; clipboardContent?: string }>({})
+  const [context, setContext] = useState<{ activeApp?: string }>({})
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []

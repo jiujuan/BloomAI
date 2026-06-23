@@ -84,6 +84,16 @@ describe('chat model dropdown data', () => {
     expect(shouldShowStreamingBubble(false, '')).toBe(false)
   })
 
+  it('does not include clipboard content in chat context', async () => {
+    const { getChatContextPayload } = await import('./ContextPills')
+
+    expect(getChatContextPayload({
+      activeApp: 'Editor',
+      appEnabled: true,
+      clipboard: 'copied secret',
+    })).toEqual({ activeApp: 'Editor' })
+  })
+
   it('persists a selected model and reloads sessions', async () => {
     const loadSessions = vi.fn()
     const { useSessionStore } = await import('@renderer/store')
