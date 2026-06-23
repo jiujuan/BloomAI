@@ -9,6 +9,8 @@ settingsRouter.get('/', (_req: Request, res: Response) => {
   // Mask API keys
   if (settings.anthropic_api_key) settings.anthropic_api_key = settings.anthropic_api_key ? '***masked***' : ''
   if (settings.openai_api_key) settings.openai_api_key = settings.openai_api_key ? '***masked***' : ''
+  if (settings.agnes_api_key) settings.agnes_api_key = settings.agnes_api_key ? '***masked***' : ''
+  if (settings.deepseek_api_key) settings.deepseek_api_key = settings.deepseek_api_key ? '***masked***' : ''
   res.json({ data: settings })
 })
 

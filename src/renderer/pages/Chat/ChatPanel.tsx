@@ -1,18 +1,63 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { ChevronDown, MoreHorizontal, Search, Download } from 'lucide-react'
 import { SessionList } from './SessionList'
 import { Timeline } from './Timeline'
 import { InputBar } from './InputBar'
 import { ContextPills } from './ContextPills'
-import { useSessionStore, useChatStore, usePersonaStore, useSettingsStore } from '@renderer/store'
+import type { LlmModelSummary } from '@renderer/api'
+import { useSessionStore, useChatStore, usePersonaStore, useSettingsStore, useLlmStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { platform } from '@renderer/api'
 import { AVAILABLE_MODELS, MODEL_LABELS, PERSONA_COLORS } from '@shared/constants'
 import type { Persona } from '@shared/schemas'
 
-function ModelDropdown({ model, onSelect }: { model: string; onSelect: (m: string) => void }) {
+type ChatModelOption = {
+  id: string
+  label: string
+  provider: string
+  badge?: string
+}
+
+const PROVIDER_NAMES: Record<string, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  agnes: 'Agnes',
+  deepseek: 'DeepSeek',
+  ollama: 'Ollama',
+}
+
+export function getChatModelOptions(models: LlmModelSummary[]): ChatModelOption[] {
+  if (!models.length) {
+    return AVAILABLE_MODELS.map(model => ({
+      id: model.id,
+      label: model.label,
+      provider: model.provider,
+      badge: model.badge,
+    }))
+  }
+
+  return models.map(model => ({
+    id: model.id,
+    label: model.label,
+    provider: PROVIDER_NAMES[model.providerId] || model.providerId,
+    badge: typeof model.capabilities.badge === 'string' ? model.capabilities.badge : undefined,
+  }))
+}
+
+export async function persistChatModelSelection(sessionId: string | null, model: string) {
+  if (!sessionId) return
+  await platform.updateSession(sessionId, { model })
+  await useSessionStore.getState().loadSessions()
+}
+
+function getChatModelLabel(model: string, options: ChatModelOption[]) {
+  return options.find(option => option.id === model)?.label || MODEL_LABELS[model] || model
+}
+
+function ModelDropdown({ model, models, onSelect }: { model: string; models: ChatModelOption[]; onSelect: (m: string) => void }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const modelLabel = getChatModelLabel(model, models)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -26,13 +71,13 @@ function ModelDropdown({ model, onSelect }: { model: string; onSelect: (m: strin
     <div className="model-dropdown-wrap" ref={ref}>
       <button className="model-pill" onClick={() => setOpen(!open)} aria-haspopup="listbox">
         <span className="model-dot green" />
-        <span>{MODEL_LABELS[model] || model}</span>
+        <span>{modelLabel}</span>
         <ChevronDown size={11} />
       </button>
       {open && (
         <div className="model-dropdown" role="listbox" aria-label="Select model">
           <div className="model-dropdown-header">Model</div>
-          {AVAILABLE_MODELS.map(m => (
+          {models.map(m => (
             <button
               key={m.id}
               className={cn('model-option', model === m.id && 'selected')}
@@ -104,11 +149,17 @@ export function ChatPanel() {
   const { messagesBySession, streamingText, isStreaming, streamError, sendMessage, loadMessages } = useChatStore()
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
   const { settings } = useSettingsStore()
+  const { textModels, loadTextModels } = useLlmStore()
   const [context, setContext] = useState<{ activeApp?: string; clipboardContent?: string }>({})
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
   const model = session?.model || settings.model || 'claude-3-5-sonnet-20241022'
+  const modelOptions = useMemo(() => getChatModelOptions(textModels), [textModels])
+
+  useEffect(() => {
+    loadTextModels()
+  }, [loadTextModels])
 
   const handleSend = (content: string) => {
     if (!activeSessionId) return
@@ -116,11 +167,7 @@ export function ChatPanel() {
   }
 
   const handleModelChange = async (newModel: string) => {
-    if (!activeSessionId) return
-    // platform already imported
-    await platform.updateSession(activeSessionId, { model: newModel })
-    // store already imported
-    await useSessionStore.getState().loadSessions()
+    await persistChatModelSelection(activeSessionId, newModel)
   }
 
   const handlePersonaChange = async (personaId: string) => {
@@ -151,7 +198,7 @@ export function ChatPanel() {
       <div className="chat-header">
         <span className="chat-title">{session.title}</span>
         <PersonaPill personas={personas} activeId={activePersonaId} onSelect={handlePersonaChange} />
-        <ModelDropdown model={model} onSelect={handleModelChange} />
+        <ModelDropdown model={model} models={modelOptions} onSelect={handleModelChange} />
         <button className="hdr-btn" title="Search in chat" aria-label="Search in chat" disabled>
           <Search size={15} />
         </button>
@@ -181,7 +228,7 @@ export function ChatPanel() {
                 />
               </div>
               <span className="token-text">
-                {(tokenUsage.input + tokenUsage.output).toLocaleString()} / 8,192 · {MODEL_LABELS[model] || model}
+                {(tokenUsage.input + tokenUsage.output).toLocaleString()} / 8,192 · {getChatModelLabel(model, modelOptions)}
               </span>
             </div>
           </div>

@@ -21,6 +21,38 @@ async function apiFetch(path: string, options?: RequestInit) {
   return res.json()
 }
 
+export type LlmModality = 'text' | 'image' | 'video'
+
+export type LlmProviderSummary = {
+  id: string
+  name: string
+  kind: 'anthropic' | 'openai' | 'openai-compatible' | 'ollama'
+  baseUrl: string | null
+  isEnabled: boolean
+  config: Record<string, unknown>
+  hasApiKey: boolean
+}
+
+export type LlmModelSummary = {
+  id: string
+  providerId: string
+  modelId: string
+  label: string
+  modality: LlmModality
+  capabilities: Record<string, unknown>
+  isEnabled: boolean
+  isBuiltin: boolean
+  sortOrder: number
+}
+
+export type OllamaRemoteModel = {
+  name: string
+  modifiedAt?: string
+  size?: number
+  digest?: string
+  details?: Record<string, unknown>
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 export const platform = {
@@ -69,6 +101,33 @@ export const platform = {
   },
   async updateSettings(updates: Record<string, string>) {
     const { data } = await apiFetch('/settings', { method: 'PATCH', body: JSON.stringify(updates) })
+    return data
+  },
+
+  // LLM registry
+  async getLlmProviders(): Promise<LlmProviderSummary[]> {
+    const { data } = await apiFetch('/llm/providers')
+    return data
+  },
+  async updateLlmProvider(id: string, updates: object): Promise<LlmProviderSummary> {
+    const { data } = await apiFetch(`/llm/providers/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+    return data
+  },
+  async getLlmModels(modality?: LlmModality): Promise<LlmModelSummary[]> {
+    const suffix = modality ? `?modality=${encodeURIComponent(modality)}` : ''
+    const { data } = await apiFetch(`/llm/models${suffix}`)
+    return data
+  },
+  async createLlmModel(input: object): Promise<LlmModelSummary> {
+    const { data } = await apiFetch('/llm/models', { method: 'POST', body: JSON.stringify(input) })
+    return data
+  },
+  async updateLlmModel(id: string, updates: object): Promise<LlmModelSummary> {
+    const { data } = await apiFetch(`/llm/models/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
+    return data
+  },
+  async getOllamaModels(): Promise<OllamaRemoteModel[]> {
+    const { data } = await apiFetch('/llm/ollama/models')
     return data
   },
 

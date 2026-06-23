@@ -1,5 +1,6 @@
 import { toolRepo } from '../db/repositories/tool.repo'
 import { db } from '../db/client'
+import { generateImage } from '../llm'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import * as fs from 'fs'
@@ -237,24 +238,16 @@ async function visionAnalyze(input: { imagePath?: string; imageUrl?: string; que
   return { description: data.content?.[0]?.text || '', model: 'claude-3-5-sonnet-20241022' }
 }
 
-async function imageGen(input: { prompt: string; size?: string; quality?: string; saveTo?: string }) {
-  const apiKeyRow = db.prepare("SELECT value FROM settings WHERE key='openai_api_key'").get() as any
-  const apiKey = apiKeyRow?.value || process.env.OPENAI_API_KEY || ''
-  if (!apiKey) throw new Error('OpenAI API key required for image generation')
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: 'dall-e-3', prompt: input.prompt, n: 1, size: input.size || '1024x1024', quality: input.quality || 'standard' })
+async function imageGen(input: { prompt: string; model?: string; size?: string; quality?: string; image?: string | string[]; responseFormat?: 'url' | 'b64_json'; saveTo?: string }) {
+  return generateImage({
+    model: input.model || 'dall-e-3',
+    prompt: input.prompt,
+    size: input.size,
+    quality: input.quality,
+    image: input.image,
+    responseFormat: input.responseFormat,
+    saveTo: input.saveTo,
   })
-  const data = await response.json() as any
-  if (data.error) throw new Error(data.error.message)
-  const url = data.data?.[0]?.url || ''
-  if (input.saveTo && url) {
-    const filePath = resolveSafePath(input.saveTo)
-    const imgRes = await fetch(url)
-    fs.writeFileSync(filePath, Buffer.from(await imgRes.arrayBuffer()))
-    return { url, localPath: filePath }
-  }
-  return { url }
 }
 
 async function nodeRunner(input: { code: string; context?: object }) {

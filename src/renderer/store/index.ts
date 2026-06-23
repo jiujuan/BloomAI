@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
+import type { LlmModelSummary } from '@renderer/api'
 import type { Session, Message, Persona } from '@shared/schemas'
 
 // ── Session Store ────────────────────────────────────────────────────────────
@@ -259,6 +260,60 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       await platform.updateSettings(updates)
     },
   }), { name: 'bloomai-settings' })
+)
+
+// ── LLM Store ───────────────────────────────────────────────────────────────
+
+interface LlmState {
+  textModels: LlmModelSummary[]
+  imageModels: LlmModelSummary[]
+  videoModels: LlmModelSummary[]
+  loading: boolean
+  error: string | null
+}
+interface LlmActions {
+  loadModels: () => Promise<void>
+  loadTextModels: () => Promise<void>
+}
+
+export const useLlmStore = create<LlmState & LlmActions>()(
+  devtools((set) => ({
+    textModels: [],
+    imageModels: [],
+    videoModels: [],
+    loading: false,
+    error: null,
+
+    loadModels: async () => {
+      set({ loading: true, error: null })
+      try {
+        const [textModels, imageModels, videoModels] = await Promise.all([
+          platform.getLlmModels('text'),
+          platform.getLlmModels('image'),
+          platform.getLlmModels('video'),
+        ])
+        set({ textModels, imageModels, videoModels, loading: false })
+      } catch (error) {
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to load models',
+        })
+      }
+    },
+
+    loadTextModels: async () => {
+      set({ loading: true, error: null })
+      try {
+        const textModels = await platform.getLlmModels('text')
+        set({ textModels, loading: false })
+      } catch (error) {
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : 'Failed to load text models',
+        })
+      }
+    },
+  }), { name: 'bloomai-llm' })
 )
 
 // ── UI Store ─────────────────────────────────────────────────────────────────

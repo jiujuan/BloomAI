@@ -82,6 +82,47 @@ export async function runMigrations() {
   `)
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS llm_providers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      base_url TEXT,
+      api_key_setting_key TEXT,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      config_json TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS llm_models (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      modality TEXT NOT NULL,
+      capabilities_json TEXT NOT NULL DEFAULT '{}',
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      is_builtin INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS llm_video_tasks (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      provider_task_id TEXT,
+      provider_video_id TEXT,
+      input_json TEXT NOT NULL,
+      output_json TEXT,
+      status TEXT NOT NULL,
+      progress INTEGER,
+      error_msg TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `)
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS tools (
       id TEXT PRIMARY KEY, category TEXT NOT NULL, name TEXT NOT NULL,
       description TEXT NOT NULL, params_schema TEXT NOT NULL DEFAULT '{}',
@@ -127,9 +168,47 @@ export async function runMigrations() {
   for (const [k, v] of [
     ['model','claude-3-5-sonnet-20241022'],['theme','system'],
     ['shortcut_overlay','Alt+Space'],['anthropic_api_key',''],
-    ['openai_api_key',''],['clipboard_monitoring','true'],['context_awareness','true'],
+    ['openai_api_key',''],['agnes_api_key',''],['deepseek_api_key',''],
+    ['ollama_base_url','http://127.0.0.1:11434'],
+    ['default_image_model','agnes-image-2.1-flash'],['default_video_model','agnes-video-v2.0'],
+    ['clipboard_monitoring','true'],['context_awareness','true'],
   ]) {
     db.prepare("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)").run(k, v, Date.now())
+  }
+
+  const nowForLlm = Date.now()
+  const providers = [
+    ['anthropic','Anthropic','anthropic','https://api.anthropic.com','anthropic_api_key'],
+    ['openai','OpenAI','openai','https://api.openai.com/v1','openai_api_key'],
+    ['agnes','Agnes','openai-compatible','https://apihub.agnes-ai.com/v1','agnes_api_key'],
+    ['deepseek','DeepSeek','openai-compatible','https://api.deepseek.com/v1','deepseek_api_key'],
+    ['ollama','Ollama','ollama','http://127.0.0.1:11434',null],
+  ]
+  for (const [id, name, kind, baseUrl, apiKeySettingKey] of providers) {
+    db.prepare(`INSERT OR IGNORE INTO llm_providers
+      (id,name,kind,base_url,api_key_setting_key,is_enabled,config_json,created_at,updated_at)
+      VALUES(?,?,?,?,?,1,'{}',?,?)`)
+      .run(id, name, kind, baseUrl, apiKeySettingKey, nowForLlm, nowForLlm)
+  }
+
+  const models = [
+    ['claude-3-5-sonnet-20241022','anthropic','claude-3-5-sonnet-20241022','Claude 3.5 Sonnet','text',10],
+    ['claude-3-opus-20240229','anthropic','claude-3-opus-20240229','Claude 3 Opus','text',20],
+    ['claude-3-haiku-20240307','anthropic','claude-3-haiku-20240307','Claude 3 Haiku','text',30],
+    ['gpt-4o','openai','gpt-4o','GPT-4o','text',40],
+    ['gpt-4o-mini','openai','gpt-4o-mini','GPT-4o mini','text',50],
+    ['dall-e-3','openai','dall-e-3','DALL-E 3','image',20],
+    ['agnes-2.0-flash','agnes','agnes-2.0-flash','Agnes 2.0 Flash','text',60],
+    ['agnes-image-2.1-flash','agnes','agnes-image-2.1-flash','Agnes Image 2.1 Flash','image',10],
+    ['agnes-video-v2.0','agnes','agnes-video-v2.0','Agnes Video V2.0','video',10],
+    ['deepseek-chat','deepseek','deepseek-chat','DeepSeek Chat','text',70],
+    ['deepseek-reasoner','deepseek','deepseek-reasoner','DeepSeek Reasoner','text',80],
+  ]
+  for (const [id, providerId, modelId, label, modality, sortOrder] of models) {
+    db.prepare(`INSERT OR IGNORE INTO llm_models
+      (id,provider_id,model_id,label,modality,capabilities_json,is_enabled,is_builtin,sort_order,created_at,updated_at)
+      VALUES(?,?,?,?,?,'{}',1,1,?,?,?)`)
+      .run(id, providerId, modelId, label, modality, sortOrder, nowForLlm, nowForLlm)
   }
 
   const tCount = db.prepare("SELECT COUNT(*) as c FROM tools WHERE is_builtin=1").get() as any
@@ -164,6 +243,12 @@ export async function runMigrations() {
         .run(id, cat, name, desc, params, result, perm, now)
     }
   }
+
+  db.prepare("UPDATE tools SET params_schema=?, result_schema=? WHERE id='image_gen'")
+    .run(
+      '{"prompt":{"type":"string"},"model":{"type":"string"},"size":{"type":"string","default":"1024x1024"},"quality":{"type":"string","default":"standard"},"image":{"type":"array"},"responseFormat":{"type":"string","enum":["url","b64_json"]},"saveTo":{"type":"string"}}',
+      '{"providerId":{"type":"string"},"model":{"type":"string"},"url":{"type":"string"},"b64_json":{"type":"string"},"localPath":{"type":"string"}}'
+    )
 
   const sCount = db.prepare("SELECT COUNT(*) as c FROM skills WHERE author='official'").get() as any
   if (!sCount || sCount.c === 0) {
