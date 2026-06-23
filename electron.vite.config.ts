@@ -10,13 +10,13 @@ export default defineConfig({
     react(),
     electron([
       {
-        entry: 'electron/main.ts',
+        entry: 'src/main/index.ts',
         vite: {
           build: { outDir: 'dist-electron', sourcemap: false },
         },
       },
       {
-        entry: 'electron/preload.ts',
+        entry: 'src/preload/index.ts',
         onstart(options) { options.reload() },
         vite: {
           build: { outDir: 'dist-electron', sourcemap: false },
@@ -27,7 +27,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@main': path.resolve(__dirname, 'src/main'),
+      '@preload': path.resolve(__dirname, 'src/preload'),
+      '@renderer': path.resolve(__dirname, 'src/renderer'),
+      '@server': path.resolve(__dirname, 'src/server'),
+      '@shared': path.resolve(__dirname, 'src/shared'),
     },
   },
   build: {
