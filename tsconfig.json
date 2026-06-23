@@ -23,16 +23,11 @@
   },
   "include": [
     "src/**/*",
-    "packages/ui/src/**/*",
     "electron.vite.config.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "dist-electron",
-    "apps/desktop/dist",
-    "apps/desktop/dist-electron",
-    "packages/server/dist",
-    "packages/ui/dist"
+    "dist-electron"
   ]
 }

@@ -93,16 +93,19 @@ Building on v0.1's chat engine, v0.2 adds the complete **Tools System** and **Sk
 ```bash
 cd bloomai
 
-# Install & build server
-cd packages/server
+# Install dependencies once
 npm install --legacy-peer-deps --ignore-scripts
-npx tsc
-node dist/index.js &
 
-# Open the pre-built frontend
-cd ../../apps/desktop
-npx serve dist -p 5174
-# Visit http://localhost:5174
+# Typecheck and build the migrated root app
+npm run typecheck
+npm run build
+
+# Start the local API server
+npm run start:server
+
+# In another terminal, preview the built frontend
+npx vite preview --host 127.0.0.1 --port 5174
+# Visit http://127.0.0.1:5174
 ```
 
 Configure your Anthropic API key in Settings to enable chat, vision, and prompt-template skills. Configure OpenAI key to enable `image_gen`.
