@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --config electron.vite.config.ts",
-    "build": "tsc && vite build --config electron.vite.config.ts",
+    "build": "tsc --noEmit && vite build --config electron.vite.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",

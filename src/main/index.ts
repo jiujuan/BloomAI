@@ -16,7 +16,7 @@ let serverProcess: ChildProcess | null = null
 // ── Start embedded Express server ────────────────────────────────────────────
 function startServer() {
   const serverPath = isDev
-    ? path.join(__dirname, '../../packages/server/src/index.ts')
+    ? path.join(__dirname, '../packages/server/src/index.ts')
     : path.join(__dirname, '../server/index.js')
 
   if (isDev) {

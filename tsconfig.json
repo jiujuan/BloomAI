@@ -24,7 +24,6 @@
   "include": [
     "src/**/*",
     "apps/desktop/src/**/*",
-    "apps/desktop/electron/**/*",
     "packages/server/src/**/*",
     "packages/ui/src/**/*",
     "electron.vite.config.ts"

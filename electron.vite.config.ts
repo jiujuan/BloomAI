@@ -10,13 +10,13 @@ export default defineConfig({
     react(),
     electron([
       {
-        entry: 'src/main/index.ts',
+        entry: { main: 'src/main/index.ts' },
         vite: {
           build: { outDir: 'dist-electron', sourcemap: false },
         },
       },
       {
-        entry: 'src/preload/index.ts',
+        entry: { preload: 'src/preload/index.ts' },
         onstart(options) { options.reload() },
         vite: {
           build: { outDir: 'dist-electron', sourcemap: false },
