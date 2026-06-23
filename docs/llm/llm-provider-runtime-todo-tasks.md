@@ -952,12 +952,12 @@ npm run start:server
 
 **Acceptance Evidence Checklist:**
 
-- [ ] `npm run typecheck` passes.
-- [ ] `npm test` passes.
-- [ ] `npm run build` passes.
-- [ ] `chat.route.ts` imports no vendor SDK.
-- [ ] Provider runtime tests cover every supported provider.
-- [ ] Verification document records commands, results, and any residual risks.
+- [x] `npm run typecheck` passes.
+- [x] `npm test` passes.
+- [x] `npm run build` passes.
+- [x] `chat.route.ts` imports no vendor SDK.
+- [x] Provider runtime tests cover every supported provider.
+- [x] Verification document records commands, results, and any residual risks.
 
 ---
 
@@ -974,11 +974,11 @@ These are intentionally outside this implementation plan:
 
 ## Final Acceptance Criteria
 
-- [ ] `src/server/llm` owns all provider-specific text chat calls.
-- [ ] Database registry stores providers, models, and video tasks.
-- [ ] Settings can configure provider keys and default text/image/video models.
-- [ ] Chat can call Anthropic, OpenAI GPT, Agnes text, DeepSeek, and Ollama through one runtime.
-- [ ] Image generation can call OpenAI and Agnes Image through one runtime.
-- [ ] Agnes Video can create and query async tasks.
-- [ ] Existing Chat SSE protocol remains compatible with the current frontend store.
-- [ ] Claude default chat continues to work after migration.
+- [x] `src/server/llm` owns all provider-specific text chat calls.
+- [x] Database registry stores providers, models, and video tasks.
+- [x] Settings can configure provider keys and default text/image/video models.
+- [x] Chat can call Anthropic, OpenAI GPT, Agnes text, DeepSeek, and Ollama through one runtime.
+- [x] Image generation can call OpenAI and Agnes Image through one runtime.
+- [x] Agnes Video can create and query async tasks.
+- [x] Existing Chat SSE protocol remains compatible with the current frontend store.
+- [x] Claude default chat continues to work after migration.
