@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { ChevronDown, Loader2, Check, X, Copy, RefreshCw } from 'lucide-react'
+import { Check, ChevronDown, Copy, Folder, FileText, Loader2, RefreshCw, Search, TerminalSquare, X } from 'lucide-react'
 import { cn } from '@renderer/utils'
 
 export interface ToolCallData {
+  callId: string
   toolId: string
   category: string
   status: 'running' | 'success' | 'error'
@@ -12,12 +13,16 @@ export interface ToolCallData {
   durationMs?: number
 }
 
-const CATEGORY_ICON: Record<string, string> = {
-  web: '🌐', fs: '📁', document: '📄', multimodal: '🖼️', execution: '⚡'
+const CATEGORY_LABEL: Record<string, React.ReactNode> = {
+  web: <Search size={12} />,
+  fs: <Folder size={12} />,
+  document: <FileText size={12} />,
+  multimodal: <span>multimodal</span>,
+  execution: <TerminalSquare size={12} />,
 }
 
 function formatValue(v: any): string {
-  if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '…' : v
+  if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '...' : v
   return JSON.stringify(v)
 }
 
@@ -32,9 +37,9 @@ export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: 
   }
 
   return (
-    <div className={cn('tool-call-card', data.status === 'error' && 'error')}>
+    <div className={cn('tool-call-card', data.status === 'error' && 'error')} data-call-id={data.callId}>
       <div className="tcc-head" onClick={() => setOpen(!open)}>
-        <div className="tcc-icon">{CATEGORY_ICON[data.category] || '🔧'}</div>
+        <div className="tcc-icon">{CATEGORY_LABEL[data.category] || data.category}</div>
         <span className="tcc-name">{data.toolId}</span>
         {data.status === 'running' && <span className="tcc-status running"><Loader2 size={11} className="spin" /> Running</span>}
         {data.status === 'success' && (
