@@ -37,13 +37,14 @@ export function SessionList() {
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search sessions…"
+            placeholder="Search sessions..."
             className="session-search-input"
             aria-label="Search sessions"
           />
         </div>
-        <button className="btn-icon" onClick={handleNew} title="New chat" aria-label="New chat">
+        <button className="session-new-chat" onClick={handleNew} title="New chat" aria-label="New chat">
           <Plus size={15} />
+          <span>New chat</span>
         </button>
       </div>
 
