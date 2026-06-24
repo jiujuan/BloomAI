@@ -53,6 +53,40 @@ export type OllamaRemoteModel = {
   details?: Record<string, unknown>
 }
 
+export type ChatToolCallView = {
+  callId: string
+  toolId: string
+  category: string
+  status: 'running'
+  input: Record<string, unknown>
+}
+
+export type ChatToolCallStartEvent = {
+  type: 'tool_call_start'
+  call: ChatToolCallView
+}
+
+export type ChatToolCallResultEvent = {
+  type: 'tool_call_result'
+  callId: string
+  output: unknown
+  durationMs?: number
+}
+
+export type ChatToolCallErrorEvent = {
+  type: 'tool_call_error'
+  callId: string
+  error: string
+}
+
+export type ChatStreamEvent =
+  | { type: 'delta'; text: string }
+  | ChatToolCallStartEvent
+  | ChatToolCallResultEvent
+  | ChatToolCallErrorEvent
+  | { type: 'done'; tokens?: { input: number; output: number } | null; trace?: unknown }
+  | { type: 'error'; error: string }
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 export const platform = {
@@ -132,7 +166,7 @@ export const platform = {
   },
 
   // Chat streaming — returns an async generator of SSE events
-  async *chatStream(payload: { sessionId: string; content: string; contextOverride?: object }): AsyncGenerator<{ type: string; text?: string; error?: string; tokens?: object }> {
+  async *chatStream(payload: { sessionId: string; content: string; contextOverride?: object }): AsyncGenerator<ChatStreamEvent> {
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

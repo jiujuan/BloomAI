@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
-import type { LlmModelSummary } from '@renderer/api'
+import type { LlmModelSummary, ChatStreamEvent } from '@renderer/api'
 import type { Session, Message, Persona } from '@shared/schemas'
 
 // ── Session Store ────────────────────────────────────────────────────────────
@@ -66,17 +66,30 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
 // ── Chat Store ───────────────────────────────────────────────────────────────
 
+export type ToolCallState = {
+  callId: string
+  toolId: string
+  category: string
+  status: 'running' | 'success' | 'error'
+  input: Record<string, unknown>
+  output?: unknown
+  error?: string
+  durationMs?: number
+}
+
 interface ChatState {
   messagesBySession: Record<string, Message[]>
   streamingText: string
   isStreaming: boolean
   streamError: string | null
   tokenUsage: Record<string, { input: number; output: number }>
+  toolCallsBySession: Record<string, ToolCallState[]>
 }
 interface ChatActions {
   loadMessages: (sessionId: string) => Promise<void>
   sendMessage: (sessionId: string, content: string, contextOverride?: object) => Promise<void>
   clearMessages: (sessionId: string) => void
+  clearStreamingToolCalls: (sessionId: string) => void
   setStreamError: (error: string | null) => void
 }
 
@@ -87,6 +100,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
     isStreaming: false,
     streamError: null,
     tokenUsage: {},
+    toolCallsBySession: {},
 
     loadMessages: async (sessionId: string) => {
       if (get().messagesBySession[sessionId]) return
@@ -100,6 +114,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
 
     sendMessage: async (sessionId: string, content: string, contextOverride?: object) => {
       if (get().isStreaming) return
+      set(s => ({ toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] } }))
       const userMsg: Message = {
         id: `tmp-${Date.now()}`,
         session_id: sessionId,
@@ -130,7 +145,56 @@ export const useChatStore = create<ChatState & ChatActions>()(
           if (chunk.type === 'delta' && chunk.text) {
             fullText += chunk.text
             set({ streamingText: fullText })
+            continue
           }
+
+          if (chunk.type === 'tool_call_start') {
+            set(s => ({
+              toolCallsBySession: {
+                ...s.toolCallsBySession,
+                [sessionId]: [
+                  ...(s.toolCallsBySession[sessionId] || []).filter(call => call.callId !== chunk.call.callId),
+                  {
+                    callId: chunk.call.callId,
+                    toolId: chunk.call.toolId,
+                    category: chunk.call.category,
+                    status: 'running',
+                    input: chunk.call.input,
+                  },
+                ],
+              },
+            }))
+            continue
+          }
+
+          if (chunk.type === 'tool_call_result') {
+            set(s => ({
+              toolCallsBySession: {
+                ...s.toolCallsBySession,
+                [sessionId]: (s.toolCallsBySession[sessionId] || []).map(call =>
+                  call.callId === chunk.callId
+                    ? { ...call, status: 'success', output: chunk.output, durationMs: chunk.durationMs }
+                    : call
+                ),
+              },
+            }))
+            continue
+          }
+
+          if (chunk.type === 'tool_call_error') {
+            set(s => ({
+              toolCallsBySession: {
+                ...s.toolCallsBySession,
+                [sessionId]: (s.toolCallsBySession[sessionId] || []).map(call =>
+                  call.callId === chunk.callId
+                    ? { ...call, status: 'error', error: chunk.error }
+                    : call
+                ),
+              },
+            }))
+            continue
+          }
+
           if (chunk.type === 'error') {
             set({ streamError: chunk.error || 'Unknown error', isStreaming: false, streamingText: '' })
             return
@@ -176,8 +240,14 @@ export const useChatStore = create<ChatState & ChatActions>()(
       set(s => {
         const next = { ...s.messagesBySession }
         delete next[sessionId]
-        return { messagesBySession: next }
+        const nextToolCalls = { ...s.toolCallsBySession }
+        delete nextToolCalls[sessionId]
+        return { messagesBySession: next, toolCallsBySession: nextToolCalls }
       })
+    },
+
+    clearStreamingToolCalls: (sessionId: string) => {
+      set(s => ({ toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] } }))
     },
 
     setStreamError: (error) => set({ streamError: error }),

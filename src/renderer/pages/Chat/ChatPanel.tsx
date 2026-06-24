@@ -152,13 +152,14 @@ function PersonaPill({ personas, activeId, onSelect }: { personas: Persona[]; ac
 
 export function ChatPanel() {
   const { sessions, activeSessionId, updateSessionTitle } = useSessionStore()
-  const { messagesBySession, streamingText, isStreaming, streamError, sendMessage, loadMessages } = useChatStore()
+  const { messagesBySession, streamingText, isStreaming, streamError, sendMessage, loadMessages, toolCallsBySession } = useChatStore()
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
   const { settings } = useSettingsStore()
   const { textModels, loadTextModels } = useLlmStore()
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
+  const toolCalls = activeSessionId ? (toolCallsBySession[activeSessionId] || []) : []
   const model = resolveDisplayedChatModel(session?.model, settings.model)
   const modelOptions = useMemo(() => getChatModelOptions(textModels), [textModels])
 
@@ -218,6 +219,7 @@ export function ChatPanel() {
         isStreaming={isStreaming}
         streamingText={streamingText}
         streamError={streamError}
+        toolCalls={toolCalls}
       />
 
       <div className="chat-footer">

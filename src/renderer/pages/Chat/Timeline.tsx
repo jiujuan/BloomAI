@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { MessageBubble } from './MessageBubble'
+import { ToolCallCard } from './ToolCallCard'
+import type { ToolCallState } from '@renderer/store'
 import { formatDate } from '@renderer/utils'
 import type { Message } from '@shared/schemas'
 
@@ -8,6 +10,7 @@ interface TimelineProps {
   isStreaming: boolean
   streamingText: string
   streamError: string | null
+  toolCalls?: ToolCallState[]
 }
 
 function DateDivider({ label }: { label: string }) {
@@ -32,12 +35,12 @@ function SystemBadge({ text }: { text: string }) {
   )
 }
 
-export function Timeline({ messages, isStreaming, streamingText, streamError }: TimelineProps) {
+export function Timeline({ messages, isStreaming, streamingText, streamError, toolCalls = [] }: TimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, isStreaming, streamingText])
+  }, [messages.length, isStreaming, streamingText, toolCalls.length])
 
   // Group messages by date
   const grouped: Array<{ type: 'date'; label: string } | { type: 'message'; message: Message }> = []
@@ -50,6 +53,10 @@ export function Timeline({ messages, isStreaming, streamingText, streamError }: 
     }
     grouped.push({ type: 'message', message: msg })
   }
+
+  const toolCallItems = toolCalls.map((call) => (
+    <ToolCallCard key={call.callId} data={call} />
+  ))
 
   return (
     <div className="timeline" role="log" aria-label="Conversation" aria-live="polite">
@@ -71,6 +78,8 @@ export function Timeline({ messages, isStreaming, streamingText, streamError }: 
           ? <DateDivider key={`date-${i}`} label={item.label} />
           : <MessageBubble key={item.message.id} message={item.message} />
       )}
+
+      {toolCallItems}
 
       {shouldShowStreamingBubble(isStreaming, streamingText) && (
         <MessageBubble
