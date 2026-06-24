@@ -1,21 +1,6 @@
-﻿export type MastraModelResolution =
+export type MastraModelResolution =
   | { ok: true; model: string }
   | { ok: false; modelId: string; reason: string }
-
-export type ChatAgentToolDescriptor = {
-  id: string
-  description: string
-}
-
-export type ChatAgentDescriptor = {
-  id: string
-  name: string
-  instructions: string
-  model: string
-  tools: {
-    web_search: ChatAgentToolDescriptor
-  }
-}
 
 export type ChatAgentRunInput = {
   sessionId: string

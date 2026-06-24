@@ -1,4 +1,4 @@
-﻿# BloomAI Mastra Chat Agent v1 Todo Tasks
+# BloomAI Mastra Chat Agent v1 Todo Tasks
 
 ## 1. 总览
 
@@ -134,13 +134,13 @@
 
 **验收清单**
 
-- [ ] `package.json` 包含 Mastra 依赖。
-- [ ] `package-lock.json` 更新。
-- [ ] `createChatAgent(model)` 使用真实 Mastra Agent。
-- [ ] Agent instructions 已实现。
-- [ ] 没有 `model: 'openai/gpt-4o-mini'` 这类硬编码默认模型。
-- [ ] `npm run typecheck` 通过。
-- [ ] 相关单元测试通过。
+- [x] `package.json` 包含 Mastra 依赖。
+- [x] `package-lock.json` 更新。
+- [x] `createChatAgent(model)` 使用真实 Mastra Agent。
+- [x] Agent instructions 已实现。
+- [x] 没有 `model: 'openai/gpt-4o-mini'` 这类硬编码默认模型。
+- [x] `npm run typecheck` 通过。
+- [x] 相关单元测试通过。
 
 ---
 
@@ -716,7 +716,3 @@ Batch 4:
 Batch 5:
   Task 10
 ```
-
-
-
-
