@@ -191,12 +191,12 @@
 
 **验收清单**
 
-- [ ] `bloomai-web-search.tool.ts` 存在。
-- [ ] `createTool` 已使用。
-- [ ] input / output schema 已定义。
-- [ ] 内部调用 `executeTool('web_search')`。
-- [ ] 不直接调用 `webSearchTool`。
-- [ ] 单元测试通过。
+- [x] `bloomai-web-search.tool.ts` 存在。
+- [x] `createTool` 已使用。
+- [x] input / output schema 已定义。
+- [x] 内部调用 `executeTool('web_search')`。
+- [x] 不直接调用 `webSearchTool`。
+- [x] 单元测试通过。
 
 ---
 
@@ -308,11 +308,11 @@
 
 **验收清单**
 
-- [ ] `tool_call_start` 事件包含 `callId/toolId/category/status/input`。
-- [ ] `tool_call_result` 能通过 callId 找到对应卡片。
-- [ ] `tool_call_error` 有错误信息。
-- [ ] `delta` 行为保持兼容。
-- [ ] event mapper 单元测试通过。
+- [x] `tool_call_start` 事件包含 `callId/toolId/category/status/input`。
+- [x] `tool_call_result` 能通过 callId 找到对应卡片。
+- [x] `tool_call_error` 有错误信息。
+- [x] `delta` 行为保持兼容。
+- [x] event mapper 单元测试通过。
 
 ---
 
@@ -589,12 +589,12 @@
 
 **验收清单**
 
-- [ ] `npm run typecheck` 通过。
-- [ ] `npm test` 或相关测试集合通过。
-- [ ] 手动搜索 prompt 通过。
-- [ ] 手动普通聊天 prompt 通过。
-- [ ] feature flag 关闭后旧 chat 路径可用。
-- [ ] 记录验收证据到 verification 文档。
+- [x] `npm run typecheck` 通过。
+- [x] `npm test` 或相关测试集合通过。
+- [x] 手动搜索 prompt 通过。
+- [x] 手动普通聊天 prompt 通过。
+- [x] feature flag 关闭后旧 chat 路径可用。
+- [x] 记录验收证据到 verification 文档。
 
 ## 3. Checkpoints
 
