@@ -1,17 +1,26 @@
-﻿import fs from 'fs'
+import fs from 'fs'
 import http from 'http'
 import os from 'os'
 import path from 'path'
 import type { AddressInfo } from 'net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatStreamEvent, ChatStreamRequest } from '../llm'
+import type { ChatAgentRuntimeEvent } from '../agent/mastra/types'
 
 const llmMock = vi.hoisted(() => ({
   streamChatCompletion: vi.fn(),
 }))
 
+const agentMock = vi.hoisted(() => ({
+  runChatAgentV1: vi.fn(),
+}))
+
 vi.mock('../llm', () => ({
   streamChatCompletion: llmMock.streamChatCompletion,
+}))
+
+vi.mock('../agent/mastra/chat-agent-runtime-adapter', () => ({
+  runChatAgentV1: agentMock.runChatAgentV1,
 }))
 
 let dataDir: string
@@ -78,6 +87,7 @@ describe('chat stream route', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-chat-route-'))
     originalEnv = { ...process.env }
     llmMock.streamChatCompletion.mockReset()
+    agentMock.runChatAgentV1.mockReset()
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
