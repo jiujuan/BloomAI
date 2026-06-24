@@ -1,10 +1,11 @@
-﻿import { Router, Request, Response } from 'express'
+import { Router, Request, Response } from 'express'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
-import { personaRepo, type Persona } from '../db/repositories/persona.repo'
+import type { Persona } from '../db/repositories/persona.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
 import { streamChatCompletion } from '../llm'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
+import { buildChatContext, organizeChatPrompt } from '../prompts'
 
 export const chatRouter = Router()
 
@@ -43,42 +44,30 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
     return endSSE(res)
   }
 
-  const session = sessionRepo.get(sessionId)
-  if (!session) {
+  const promptContext = buildChatContext({ sessionId, userContent: content, contextOverride })
+  if (!promptContext) {
     sendSSE(res, { type: 'error', error: 'Session not found' })
     return endSSE(res)
   }
 
-  const persona = session.persona_id ? personaRepo.get(session.persona_id) || null : null
-  const history = messageRepo.getHistory(sessionId, 20)
-  const basePrompt = persona?.system_prompt || 'You are BloomAI, a helpful AI assistant. Be concise, accurate, and friendly.'
-
-  const ctxParts: string[] = []
-  if (contextOverride?.activeApp) ctxParts.push(`Active app: ${contextOverride.activeApp}`)
-  if (contextOverride?.clipboardContent) ctxParts.push(`Clipboard:\n${String(contextOverride.clipboardContent).slice(0,800)}`)
-  const system = ctxParts.length ? `${basePrompt}\n\n---\n${ctxParts.join('\n')}` : basePrompt
-
   messageRepo.save({ session_id: sessionId, role: 'user', content })
   sessionRepo.touch(sessionId)
 
-  if (history.length === 0) {
+  if (promptContext.history.length === 0) {
     sessionRepo.update(sessionId, { title: content.slice(0, 60).trim() })
   }
 
-  const messages = [
-    ...history.map(m => ({ role: m.role as 'user'|'assistant', content: m.content })),
-    { role: 'user' as const, content }
-  ]
+  const prompt = organizeChatPrompt(promptContext, { maxTokens: 4096 })
 
   let fullText = ''; let inTok = 0; let outTok = 0
   try {
-    const model = resolveChatModel(persona, session.model, getSettingsModel())
+    const model = resolveChatModel(promptContext.persona, promptContext.session.model, getSettingsModel())
 
     for await (const event of streamChatCompletion({
       model,
-      maxTokens: 4096,
-      system,
-      messages,
+      maxTokens: prompt.maxTokens,
+      system: prompt.system,
+      messages: prompt.messages,
     })) {
       if (event.type === 'delta') {
         fullText += event.text
