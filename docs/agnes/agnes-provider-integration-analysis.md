@@ -22,7 +22,7 @@
 
 ## 2. 当前程序架构骨架
 
-当前 BloomAI 是 Electron + React Renderer + 本地 Express API + sql.js 本地数据库：
+当前 BloomAI 是 Electron + React Renderer + 本地 Express API + Drizzle node:sqlite 本地数据库：
 
 ```mermaid
 flowchart LR
@@ -31,7 +31,7 @@ flowchart LR
   Api -->|REST/SSE| Server["Express /api/v1"]
   Server --> Routes["routes"]
   Routes --> Services["services"]
-  Services --> DB["sql.js settings/sessions/messages/tools"]
+  Services --> DB["Drizzle/node:sqlite settings/sessions/messages/tools"]
   Services --> Providers["Anthropic / OpenAI / Future Agnes"]
 ```
 

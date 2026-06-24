@@ -112,13 +112,13 @@ vite-plugin-electron-renderer
 @anthropic-ai/sdk
 cors
 express
-sql.js
+Drizzle node:sqlite
 uuid
 tsx
 vitest
 @types/cors
 @types/express
-@types/sql.js
+drizzle-kit
 @types/uuid
 ```
 
@@ -515,7 +515,7 @@ react
 express
 fs
 path
-sql.js
+Drizzle node:sqlite
 ```
 
 它只能放纯类型、schema、常量和无副作用工具。
@@ -802,7 +802,7 @@ npm run start:server
 | `packages/ui` 覆盖现有 UI | v0.2 页面倒退 | 明确以 `apps/desktop/src` 为主，`packages/ui` 只参考 |
 | server fork 路径错误 | Electron 启动后 API 不可用 | 先单独跑 `npm run start:server`，再接入 main |
 | preload 路径错误 | `window.bloomai` 不存在 | 单独检查 `contextBridge` 暴露对象 |
-| sql.js 数据路径变化 | 历史数据丢失或新建空库 | 保持 `DATA_DIR` 和 `DB_PATH` 逻辑不变 |
+| Drizzle node:sqlite 数据路径变化 | 历史数据丢失或新建空库 | 保持 `DATA_DIR` 和 `DB_PATH` 逻辑不变 |
 | 构建输出相对路径变化 | 生产包不能启动 server | 检查 `dist-electron` 输出结构后修正 `ServerProcessService` |
 
 ## 15. 完成定义

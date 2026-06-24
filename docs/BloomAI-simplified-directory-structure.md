@@ -75,7 +75,7 @@ React 渲染进程，负责所有用户界面和前端状态。
 
 - REST API
 - SSE chat stream
-- SQLite/sql.js 数据存储
+- SQLite/Drizzle node:sqlite 数据存储
 - Repository
 - AI model 调用
 - Tool 执行

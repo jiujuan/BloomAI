@@ -21,7 +21,7 @@ flowchart LR
   API --> Routes["Routes"]
   Routes --> Services["Services"]
   Services --> Repos["Repositories"]
-  Repos --> DB["sql.js database file ~/.bloomai/bloomai.db"]
+  Repos --> DB["node:sqlite database file ~/.bloomai/bloomai.db"]
   Services --> Anthropic["Anthropic API"]
   Services --> OpenAI["OpenAI Images API"]
   Services --> FS["Local FS / subprocess / vm"]
@@ -52,7 +52,7 @@ flowchart LR
 关键职责：
 
 - `src/app.ts`：创建 Express app，注册 chat、sessions、personas、settings、tools、skills 路由。
-- `src/db/client.ts`：初始化 sql.js，加载或保存 `~/.bloomai/bloomai.db`，并内联执行 schema migration 和 seed。
+- `src/db/client.ts`：初始化 Drizzle node:sqlite，加载或保存 `~/.bloomai/bloomai.db`，并内联执行 schema migration 和 seed。
 - `src/db/repositories/*`：表级数据访问层，管理 sessions、messages、personas、tools、skills。
 - `src/routes/*`：REST 路由层，处理输入、调用 repo/service、返回统一 `{ data }` 或 `{ error }`。
 - `src/services/tool.service.ts`：工具执行器，包含 web、fs、document、multimodal、execution 五类工具。
@@ -162,14 +162,14 @@ Skills 当前是轻量插件模型，核心表是 `skills` 和 `skill_runs`。
 
 ## 4. 数据架构
 
-当前数据库采用 sql.js，将 SQLite 数据导出保存到 `~/.bloomai/bloomai.db`。表大致分为四组：
+当前数据库采用 Drizzle node:sqlite，将 SQLite 数据导出保存到 `~/.bloomai/bloomai.db`。表大致分为四组：
 
 - 聊天核心：`personas`、`sessions`、`messages`、`settings`
 - 工具系统：`tools`、`tool_runs`、`tool_permissions`
 - Skills 系统：`skills`、`skill_runs`
 - 未来规划：路线图提到 `agents`、`agent_runs`、`workflows`、`workflow_runs`、`workflow_steps`，当前尚未落地。
 
-选择 sql.js 的实际原因在 README 中写得很清楚：避免 better-sqlite3 等 native dependency 的编译问题，适合受限环境和快速分发。
+选择 Drizzle node:sqlite 的实际原因在 README 中写得很清楚：避免 better-sqlite3 等 native dependency 的编译问题，适合受限环境和快速分发。
 
 这个选择的架构含义：
 
@@ -178,7 +178,7 @@ Skills 当前是轻量插件模型，核心表是 `skills` 和 `skill_runs`。
 - 代价：并发写入和崩溃恢复能力弱于原生 SQLite WAL。
 - 代价：迁移不是独立 migration 文件，而是 `runMigrations()` 内联 SQL，版本演进难以审计。
 
-如果 BloomAI 继续坚持“本地优先 + 桌面分发”，短期 sql.js 可以接受；但进入 v0.3/v0.4 后，Agent run 和 workflow log 会产生大量写入，建议重新评估迁移到原生 SQLite、SQLite WASM OPFS，或引入追加式运行日志存储。
+如果 BloomAI 继续坚持“本地优先 + 桌面分发”，短期 Drizzle node:sqlite 可以接受；但进入 v0.3/v0.4 后，Agent run 和 workflow log 会产生大量写入，建议重新评估迁移到原生 SQLite、SQLite WASM OPFS，或引入追加式运行日志存储。
 
 ## 5. 路线图与源码的主要差异
 
@@ -186,7 +186,7 @@ Skills 当前是轻量插件模型，核心表是 `skills` 和 `skill_runs`。
 |---|---|---|---|
 | UI 复用 | `apps/desktop/src` 复用 `packages/ui` | 桌面端主要使用自己的 `apps/desktop/src` | 共享边界不清，重复实现会漂移 |
 | Core 层 | `packages/core` 承载 Agent、context、model router | `packages/core` 不存在 | 业务逻辑直接进 server service，后续扩展压力大 |
-| 数据库 | 规划 node:sqlite/dbmate/迁移文件 | 实际使用 sql.js + 内联迁移 | 分发更轻，但迁移审计和写入能力较弱 |
+| 数据库 | 规划 node:sqlite/dbmate/迁移文件 | 实际使用 Drizzle node:sqlite + 内联迁移 | 分发更轻，但迁移审计和写入能力较弱 |
 | 平台抽象 | `isElectron ? IPC : fetch/SSE` | 大部分 API 均走 fetch/SSE，IPC 只处理原生能力 | 更接近本地 Web 服务架构，利于 Web 化 |
 | Agent | Mastra/AI SDK Agent 工厂 | 当前直接调用 Anthropic SDK | 工具尚未接入聊天推理循环 |
 | 工具权限 | 三层权限体系 | 数据表和 UI 有权限概念，执行侧校验不统一 | 高风险工具需要集中策略层 |

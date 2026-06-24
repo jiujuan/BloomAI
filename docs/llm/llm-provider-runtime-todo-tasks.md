@@ -1,4 +1,4 @@
-# LLM Provider Runtime Todo Tasks
+﻿# LLM Provider Runtime Todo Tasks
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` or an equivalent task-by-task execution flow. Execute tasks in order. Each task should leave the app in a buildable or narrowly testable state.
 
@@ -6,7 +6,7 @@
 
 **Architecture:** Add a backend LLM registry and provider runtime that resolves a model id to a provider implementation. Keep the existing Chat SSE contract stable while moving all vendor-specific model calls out of `chat.route.ts`. Settings keeps the current visual style, but model/provider data comes from backend registry APIs.
 
-**Tech Stack:** TypeScript, Express, React, Zustand, sql.js, Vitest, native `fetch`, existing Anthropic SDK.
+**Tech Stack:** TypeScript, Express, React, Zustand, Drizzle ORM, node:sqlite, Vitest, native `fetch`, existing Anthropic SDK.
 
 ---
 
@@ -136,7 +136,7 @@ export function parseOllamaNdjsonLine(line: string): OllamaStreamParseResult
 
 **Goal:** Add persistent provider/model registry storage and repository functions that the runtime can use.
 
-**Implementation Summary:** Extend sql.js migrations with `llm_providers`, `llm_models`, and `llm_video_tasks`. Seed built-in Anthropic, OpenAI, Agnes, DeepSeek, and Ollama providers plus their default models. Add repository functions for list, get, update, create, and video task state.
+**Implementation Summary:** Extend Drizzle/node:sqlite bootstrap migrations with `llm_providers`, `llm_models`, and `llm_video_tasks`. Seed built-in Anthropic, OpenAI, Agnes, DeepSeek, and Ollama providers plus their default models. Add repository functions for list, get, update, create, and video task state.
 
 **Files To Create:**
 
@@ -966,7 +966,7 @@ npm run start:server
 These are intentionally outside this implementation plan:
 
 - Do not redesign Chat UI.
-- Do not replace sql.js.
+- Drizzle node:sqlite has been replaced by Drizzle ORM over node:sqlite.
 - Do not add a full workflow engine.
 - Do not route Skills `prompt-template` through LLM runtime yet.
 - Do not implement multimodal image input in Chat text messages yet.
@@ -982,3 +982,4 @@ These are intentionally outside this implementation plan:
 - [x] Agnes Video can create and query async tasks.
 - [x] Existing Chat SSE protocol remains compatible with the current frontend store.
 - [x] Claude default chat continues to work after migration.
+
