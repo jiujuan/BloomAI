@@ -3,7 +3,6 @@ import { Check, ChevronDown, MoreHorizontal, Search } from 'lucide-react'
 import { SessionList } from './SessionList'
 import { Timeline } from './Timeline'
 import { InputBar } from './InputBar'
-import { ContextPills } from './ContextPills'
 import type { LlmModelSummary } from '@renderer/api'
 import { useSessionStore, useChatStore, usePersonaStore, useSettingsStore, useLlmStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
@@ -157,7 +156,6 @@ export function ChatPanel() {
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
   const { settings } = useSettingsStore()
   const { textModels, loadTextModels } = useLlmStore()
-  const [context, setContext] = useState<{ activeApp?: string }>({})
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
@@ -170,7 +168,7 @@ export function ChatPanel() {
 
   const handleSend = (content: string) => {
     if (!activeSessionId) return
-    sendMessage(activeSessionId, content, context)
+    sendMessage(activeSessionId, content)
   }
 
   const handleModelChange = async (newModel: string) => {
@@ -214,7 +212,6 @@ export function ChatPanel() {
         </button>
       </div>
 
-      <ContextPills onContextChange={setContext} />
 
       <Timeline
         messages={messages}
