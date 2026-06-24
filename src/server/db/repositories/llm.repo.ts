@@ -1,6 +1,8 @@
-import { db } from '../client'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type { LlmModality } from '../../llm/types'
+import { getOrmDb } from '../client'
+import { llm_models, llm_providers, llm_video_tasks } from '../schema'
 
 export interface LlmProviderRecord {
   id: string
@@ -96,135 +98,128 @@ export interface UpdateVideoTaskInput {
   error: string | null
 }
 
+
 function encodeJson(value: Record<string, unknown> | null | undefined): string | null {
   return value === undefined || value === null ? null : JSON.stringify(value)
 }
 
+function modelWhere(filter: { modality?: LlmModality; providerId?: string; enabledOnly?: boolean }) {
+  const conditions = []
+  if (filter.modality) conditions.push(eq(llm_models.modality, filter.modality))
+  if (filter.providerId) conditions.push(eq(llm_models.provider_id, filter.providerId))
+  if (filter.enabledOnly) conditions.push(eq(llm_models.is_enabled, 1))
+  return conditions.length ? and(...conditions) : undefined
+}
+
 export const llmRepo = {
   listProviders(): LlmProviderRecord[] {
-    return db.prepare('SELECT * FROM llm_providers ORDER BY name').all() as LlmProviderRecord[]
+    return getOrmDb().select().from(llm_providers).orderBy(asc(llm_providers.name)).all() as LlmProviderRecord[]
   },
 
   getProvider(id: string): LlmProviderRecord | undefined {
-    return db.prepare('SELECT * FROM llm_providers WHERE id=?').get(id) as LlmProviderRecord | undefined
+    return getOrmDb().select().from(llm_providers).where(eq(llm_providers.id, id)).get() as LlmProviderRecord | undefined
   },
 
   updateProvider(id: string, data: Partial<LlmProviderUpdate>): LlmProviderRecord | undefined {
-    const fields: string[] = []
-    const values: any[] = []
+    const updates: Partial<typeof llm_providers.$inferInsert> = { updated_at: Date.now() }
+    if (data.name !== undefined) updates.name = data.name
+    if (data.kind !== undefined) updates.kind = data.kind
+    if (data.baseUrl !== undefined) updates.base_url = data.baseUrl
+    if (data.apiKeySettingKey !== undefined) updates.api_key_setting_key = data.apiKeySettingKey
+    if (data.isEnabled !== undefined) updates.is_enabled = data.isEnabled ? 1 : 0
+    if (data.config !== undefined) updates.config_json = JSON.stringify(data.config)
 
-    if (data.name !== undefined) { fields.push('name=?'); values.push(data.name) }
-    if (data.kind !== undefined) { fields.push('kind=?'); values.push(data.kind) }
-    if (data.baseUrl !== undefined) { fields.push('base_url=?'); values.push(data.baseUrl) }
-    if (data.apiKeySettingKey !== undefined) { fields.push('api_key_setting_key=?'); values.push(data.apiKeySettingKey) }
-    if (data.isEnabled !== undefined) { fields.push('is_enabled=?'); values.push(data.isEnabled ? 1 : 0) }
-    if (data.config !== undefined) { fields.push('config_json=?'); values.push(JSON.stringify(data.config)) }
-
-    if (!fields.length) return this.getProvider(id)
-    values.push(Date.now(), id)
-    db.prepare(`UPDATE llm_providers SET ${fields.join(',')},updated_at=? WHERE id=?`).run(...values)
+    if (Object.keys(updates).length === 1) return this.getProvider(id)
+    getOrmDb().update(llm_providers).set(updates).where(eq(llm_providers.id, id)).run()
     return this.getProvider(id)
   },
 
   listModels(filter: { modality?: LlmModality; providerId?: string; enabledOnly?: boolean } = {}): LlmModelRecord[] {
-    const where: string[] = []
-    const values: any[] = []
-
-    if (filter.modality) { where.push('modality=?'); values.push(filter.modality) }
-    if (filter.providerId) { where.push('provider_id=?'); values.push(filter.providerId) }
-    if (filter.enabledOnly) { where.push('is_enabled=1') }
-
-    const sql = `SELECT * FROM llm_models${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY sort_order, label`
-    return db.prepare(sql).all(...values) as LlmModelRecord[]
+    const where = modelWhere(filter)
+    const query = getOrmDb().select().from(llm_models)
+    return (where ? query.where(where) : query).orderBy(asc(llm_models.sort_order), asc(llm_models.label)).all() as LlmModelRecord[]
   },
 
   getModel(id: string): LlmModelRecord | undefined {
-    return db.prepare('SELECT * FROM llm_models WHERE id=?').get(id) as LlmModelRecord | undefined
+    return getOrmDb().select().from(llm_models).where(eq(llm_models.id, id)).get() as LlmModelRecord | undefined
   },
 
   createModel(input: CreateLlmModelInput): LlmModelRecord {
     const id = input.id || input.modelId
     const now = Date.now()
-    db.prepare(`INSERT INTO llm_models
-      (id,provider_id,model_id,label,modality,capabilities_json,is_enabled,is_builtin,sort_order,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        id,
-        input.providerId,
-        input.modelId,
-        input.label,
-        input.modality,
-        JSON.stringify(input.capabilities || {}),
-        input.isEnabled === false ? 0 : 1,
-        input.isBuiltin === false ? 0 : 1,
-        input.sortOrder || 0,
-        now,
-        now
-      )
+    getOrmDb().insert(llm_models).values({
+      id,
+      provider_id: input.providerId,
+      model_id: input.modelId,
+      label: input.label,
+      modality: input.modality,
+      capabilities_json: JSON.stringify(input.capabilities || {}),
+      is_enabled: input.isEnabled === false ? 0 : 1,
+      is_builtin: input.isBuiltin === false ? 0 : 1,
+      sort_order: input.sortOrder || 0,
+      created_at: now,
+      updated_at: now,
+    }).run()
     return this.getModel(id)!
   },
 
   updateModel(id: string, data: Partial<UpdateLlmModelInput>): LlmModelRecord | undefined {
-    const fields: string[] = []
-    const values: any[] = []
+    const updates: Partial<typeof llm_models.$inferInsert> = { updated_at: Date.now() }
+    if (data.providerId !== undefined) updates.provider_id = data.providerId
+    if (data.modelId !== undefined) updates.model_id = data.modelId
+    if (data.label !== undefined) updates.label = data.label
+    if (data.modality !== undefined) updates.modality = data.modality
+    if (data.capabilities !== undefined) updates.capabilities_json = JSON.stringify(data.capabilities)
+    if (data.isEnabled !== undefined) updates.is_enabled = data.isEnabled ? 1 : 0
+    if (data.isBuiltin !== undefined) updates.is_builtin = data.isBuiltin ? 1 : 0
+    if (data.sortOrder !== undefined) updates.sort_order = data.sortOrder
 
-    if (data.providerId !== undefined) { fields.push('provider_id=?'); values.push(data.providerId) }
-    if (data.modelId !== undefined) { fields.push('model_id=?'); values.push(data.modelId) }
-    if (data.label !== undefined) { fields.push('label=?'); values.push(data.label) }
-    if (data.modality !== undefined) { fields.push('modality=?'); values.push(data.modality) }
-    if (data.capabilities !== undefined) { fields.push('capabilities_json=?'); values.push(JSON.stringify(data.capabilities)) }
-    if (data.isEnabled !== undefined) { fields.push('is_enabled=?'); values.push(data.isEnabled ? 1 : 0) }
-    if (data.isBuiltin !== undefined) { fields.push('is_builtin=?'); values.push(data.isBuiltin ? 1 : 0) }
-    if (data.sortOrder !== undefined) { fields.push('sort_order=?'); values.push(data.sortOrder) }
-
-    if (!fields.length) return this.getModel(id)
-    values.push(Date.now(), id)
-    db.prepare(`UPDATE llm_models SET ${fields.join(',')},updated_at=? WHERE id=?`).run(...values)
+    if (Object.keys(updates).length === 1) return this.getModel(id)
+    getOrmDb().update(llm_models).set(updates).where(eq(llm_models.id, id)).run()
     return this.getModel(id)
   },
 
   createVideoTask(input: CreateVideoTaskInput): LlmVideoTaskRecord {
     const id = uuidv4()
     const now = Date.now()
-    db.prepare(`INSERT INTO llm_video_tasks
-      (id,provider_id,model,provider_task_id,provider_video_id,input_json,output_json,status,progress,error_msg,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        id,
-        input.providerId,
-        input.model,
-        input.providerTaskId || null,
-        input.providerVideoId || null,
-        JSON.stringify(input.input),
-        encodeJson(input.output),
-        input.status,
-        input.progress ?? null,
-        input.error || null,
-        now,
-        now
-      )
+    getOrmDb().insert(llm_video_tasks).values({
+      id,
+      provider_id: input.providerId,
+      model: input.model,
+      provider_task_id: input.providerTaskId || null,
+      provider_video_id: input.providerVideoId || null,
+      input_json: JSON.stringify(input.input),
+      output_json: encodeJson(input.output),
+      status: input.status,
+      progress: input.progress ?? null,
+      error_msg: input.error || null,
+      created_at: now,
+      updated_at: now,
+    }).run()
     return this.getVideoTask(id)!
   },
 
   updateVideoTask(id: string, data: Partial<UpdateVideoTaskInput>): LlmVideoTaskRecord | undefined {
-    const fields: string[] = []
-    const values: any[] = []
+    const updates: Partial<typeof llm_video_tasks.$inferInsert> = { updated_at: Date.now() }
+    if (data.providerTaskId !== undefined) updates.provider_task_id = data.providerTaskId
+    if (data.providerVideoId !== undefined) updates.provider_video_id = data.providerVideoId
+    if (data.output !== undefined) updates.output_json = encodeJson(data.output)
+    if (data.status !== undefined) updates.status = data.status
+    if (data.progress !== undefined) updates.progress = data.progress
+    if (data.error !== undefined) updates.error_msg = data.error
 
-    if (data.providerTaskId !== undefined) { fields.push('provider_task_id=?'); values.push(data.providerTaskId) }
-    if (data.providerVideoId !== undefined) { fields.push('provider_video_id=?'); values.push(data.providerVideoId) }
-    if (data.output !== undefined) { fields.push('output_json=?'); values.push(encodeJson(data.output)) }
-    if (data.status !== undefined) { fields.push('status=?'); values.push(data.status) }
-    if (data.progress !== undefined) { fields.push('progress=?'); values.push(data.progress) }
-    if (data.error !== undefined) { fields.push('error_msg=?'); values.push(data.error) }
-
-    if (!fields.length) return this.getVideoTask(id)
-    values.push(Date.now(), id)
-    db.prepare(`UPDATE llm_video_tasks SET ${fields.join(',')},updated_at=? WHERE id=?`).run(...values)
+    if (Object.keys(updates).length === 1) return this.getVideoTask(id)
+    getOrmDb().update(llm_video_tasks).set(updates).where(eq(llm_video_tasks.id, id)).run()
     return this.getVideoTask(id)
   },
 
   getVideoTask(id: string): LlmVideoTaskRecord | undefined {
-    return db.prepare('SELECT * FROM llm_video_tasks WHERE id=?').get(id) as LlmVideoTaskRecord | undefined
+    return getOrmDb().select().from(llm_video_tasks).where(eq(llm_video_tasks.id, id)).get() as LlmVideoTaskRecord | undefined
+  },
+
+  listSettingKeys(): string[] {
+    const rows = getOrmDb().all<{ key: string }>(sql`SELECT key FROM settings ORDER BY key`)
+    return rows.map((row) => row.key)
   },
 
   importOllamaModel(modelName: string): LlmModelRecord {

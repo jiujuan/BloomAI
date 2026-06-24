@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import http from 'http'
 import os from 'os'
 import path from 'path'
@@ -14,11 +14,11 @@ async function loadApp() {
   process.env.DATA_DIR = dataDir
 
   const { createApp } = await import('../app')
-  const client = await import('../db/client')
   const { llmRepo } = await import('../db/repositories/llm.repo')
+  const { settingsRepo } = await import('../db/repositories/settings.repo')
   const app = await createApp()
 
-  return { app, db: client.db, llmRepo }
+  return { app, llmRepo, settingsRepo }
 }
 
 async function withServer<T>(
@@ -83,8 +83,8 @@ describe('LLM route', () => {
   })
 
   it('lists providers with hasApiKey and without secret values', async () => {
-    const { app, db } = await loadApp()
-    db.prepare("UPDATE settings SET value=? WHERE key='openai_api_key'").run('secret-openai-key')
+    const { app, settingsRepo } = await loadApp()
+    settingsRepo.setMany({ openai_api_key: 'secret-openai-key' })
 
     await withServer(app, async (baseUrl) => {
       const { status, body } = await requestJson(baseUrl, '/llm/providers')
@@ -295,3 +295,4 @@ describe('LLM route', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://apihub.agnes-ai.com/agnesapi?video_id=video-1', expect.any(Object))
   })
 })
+

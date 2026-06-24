@@ -1,5 +1,5 @@
+﻿import { settingsRepo } from '../db/repositories/settings.repo'
 import { LlmConfigError } from './errors'
-import { db } from '../db/client'
 import type { LlmProviderConfig } from './types'
 
 const PROVIDER_API_KEY_ENV: Record<string, string> = {
@@ -10,8 +10,7 @@ const PROVIDER_API_KEY_ENV: Record<string, string> = {
 }
 
 export function getSettingValue(key: string): string {
-  const row = db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value?: string } | undefined
-  return typeof row?.value === 'string' ? row.value : ''
+  return settingsRepo.getValue(key) || ''
 }
 
 export function getProviderApiKey(provider: LlmProviderConfig): string {

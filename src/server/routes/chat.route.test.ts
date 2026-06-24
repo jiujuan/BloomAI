@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import http from 'http'
 import os from 'os'
 import path from 'path'
@@ -37,10 +37,10 @@ async function loadApp() {
   const { sessionRepo } = await import('../db/repositories/session.repo')
   const { personaRepo } = await import('../db/repositories/persona.repo')
   const { messageRepo } = await import('../db/repositories/message.repo')
-  const client = await import('../db/client')
+  const { settingsRepo } = await import('../db/repositories/settings.repo')
   const app = await createApp()
 
-  return { app, db: client.db, sessionRepo, personaRepo, messageRepo }
+  return { app, sessionRepo, personaRepo, messageRepo, settingsRepo }
 }
 
 async function postSse(app: Awaited<ReturnType<typeof loadApp>>['app'], body: object): Promise<string> {
@@ -149,10 +149,10 @@ describe('chat stream route', () => {
 
   it('uses settings.model when the session has no model value', async () => {
     llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
-    const { app, db, sessionRepo } = await loadApp()
+    const { app, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'claude-3-haiku-20240307' })
-    db.prepare("UPDATE settings SET value=? WHERE key='model'").run('gpt-4o')
-    db.prepare('UPDATE sessions SET model=? WHERE id=?').run('', session.id)
+    settingsRepo.setMany({ model: 'gpt-4o' })
+    sessionRepo.update(session.id, { model: '' })
 
     await postSse(app, { sessionId: session.id, content: 'Use setting' })
 
@@ -161,9 +161,9 @@ describe('chat stream route', () => {
 
   it('uses settings.model when the default built-in persona still has the legacy model override', async () => {
     llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
-    const { app, db, sessionRepo } = await loadApp()
+    const { app, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ persona_id: 'developer', model: 'agnes-2.0-flash' })
-    db.prepare("UPDATE settings SET value=? WHERE key='model'").run('agnes-2.0-flash')
+    settingsRepo.setMany({ model: 'agnes-2.0-flash' })
 
     await postSse(app, { sessionId: session.id, content: 'Use Agnes with the default persona' })
 
@@ -187,3 +187,4 @@ describe('chat stream route', () => {
     ])
   })
 })
+

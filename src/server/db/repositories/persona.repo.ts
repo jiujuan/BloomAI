@@ -1,40 +1,55 @@
-import { db } from '../client'
+import { asc, desc, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
+import { getOrmDb } from '../client'
+import { personas } from '../schema'
 
 export interface Persona {
   id: string; name: string; system_prompt: string
-  model_override: string|null; is_builtin: number; created_at: number
+  model_override: string | null; is_builtin: number; created_at: number
 }
+
 
 export const personaRepo = {
   list(): Persona[] {
-    return db.prepare('SELECT * FROM personas ORDER BY is_builtin DESC, created_at ASC').all() as Persona[]
+    return getOrmDb().select().from(personas).orderBy(desc(personas.is_builtin), asc(personas.created_at)).all() as Persona[]
   },
-  get(id: string): Persona|undefined {
-    return db.prepare('SELECT * FROM personas WHERE id=?').get(id) as Persona|undefined
+
+  get(id: string): Persona | undefined {
+    return getOrmDb().select().from(personas).where(eq(personas.id, id)).get() as Persona | undefined
   },
-  create(data: Pick<Persona,'name'|'system_prompt'|'model_override'>): Persona {
-    const id = uuidv4(); const now = Date.now()
-    db.prepare('INSERT INTO personas (id,name,system_prompt,model_override,is_builtin,created_at) VALUES (?,?,?,?,0,?)')
-      .run(id, data.name, data.system_prompt, data.model_override||null, now)
+
+  create(data: Pick<Persona, 'name' | 'system_prompt' | 'model_override'>): Persona {
+    const id = uuidv4()
+    const now = Date.now()
+    getOrmDb().insert(personas).values({
+      id,
+      name: data.name,
+      system_prompt: data.system_prompt,
+      model_override: data.model_override || null,
+      is_builtin: 0,
+      created_at: now,
+    }).run()
     return this.get(id)!
   },
-  update(id: string, data: Partial<Pick<Persona,'name'|'system_prompt'|'model_override'>>): Persona|undefined {
-    const p = this.get(id)
-    if (!p || p.is_builtin) return p
-    const fields: string[] = []; const values: any[] = []
-    if (data.name!==undefined){fields.push('name=?');values.push(data.name)}
-    if (data.system_prompt!==undefined){fields.push('system_prompt=?');values.push(data.system_prompt)}
-    if (data.model_override!==undefined){fields.push('model_override=?');values.push(data.model_override)}
-    if (!fields.length) return p
-    values.push(id)
-    db.prepare(`UPDATE personas SET ${fields.join(',')} WHERE id=?`).run(...values)
+
+  update(id: string, data: Partial<Pick<Persona, 'name' | 'system_prompt' | 'model_override'>>): Persona | undefined {
+    const persona = this.get(id)
+    if (!persona || persona.is_builtin) return persona
+
+    const updates: Partial<typeof personas.$inferInsert> = {}
+    if (data.name !== undefined) updates.name = data.name
+    if (data.system_prompt !== undefined) updates.system_prompt = data.system_prompt
+    if (data.model_override !== undefined) updates.model_override = data.model_override
+    if (!Object.keys(updates).length) return persona
+
+    getOrmDb().update(personas).set(updates).where(eq(personas.id, id)).run()
     return this.get(id)
   },
+
   delete(id: string): boolean {
-    const p = this.get(id)
-    if (!p||p.is_builtin) return false
-    db.prepare('DELETE FROM personas WHERE id=?').run(id)
+    const persona = this.get(id)
+    if (!persona || persona.is_builtin) return false
+    getOrmDb().delete(personas).where(eq(personas.id, id)).run()
     return true
-  }
+  },
 }

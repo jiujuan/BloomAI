@@ -1,8 +1,8 @@
-import { Router, Request, Response } from 'express'
-import { db } from '../db/client'
+﻿import { Router, Request, Response } from 'express'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { personaRepo, type Persona } from '../db/repositories/persona.repo'
+import { settingsRepo } from '../db/repositories/settings.repo'
 import { streamChatCompletion } from '../llm'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 
@@ -15,7 +15,7 @@ const LEGACY_BUILTIN_PERSONA_MODELS = new Set([
 ])
 
 function getSettingsModel(): string {
-  return (db.prepare("SELECT value FROM settings WHERE key='model'").get() as any)?.value || ''
+  return settingsRepo.getValue('model') || ''
 }
 
 function getPersonaModelOverride(persona: Persona | null): string {

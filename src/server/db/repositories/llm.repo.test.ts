@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,7 +13,7 @@ async function loadDb() {
   await client.runMigrations()
   const repoModule = await import('./llm.repo')
 
-  return { db: client.db, llmRepo: repoModule.llmRepo }
+  return { llmRepo: repoModule.llmRepo }
 }
 
 describe('llmRepo', () => {
@@ -79,9 +79,9 @@ describe('llmRepo', () => {
   })
 
   it('seeds LLM settings keys', async () => {
-    const { db } = await loadDb()
+    const { llmRepo } = await loadDb()
 
-    const keys = db.prepare('SELECT key FROM settings ORDER BY key').all().map((row: any) => row.key)
+    const keys = llmRepo.listSettingKeys()
 
     expect(keys).toEqual(
       expect.arrayContaining([
@@ -116,3 +116,5 @@ describe('llmRepo', () => {
     expect(llmRepo.getVideoTask(created.id)?.output_json).toBe('{"url":"https://example.test/video.mp4"}')
   })
 })
+
+

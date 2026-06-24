@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,11 +13,12 @@ async function loadSettings() {
 
   const client = await import('../db/client')
   await client.runMigrations()
+  const { settingsRepo } = await import('../db/repositories/settings.repo')
   const settings = await import('./settings')
   const registry = await import('./registry')
   const errors = await import('./errors')
 
-  return { db: client.db, ...settings, ...registry, ...errors }
+  return { settingsRepo, ...settings, ...registry, ...errors }
 }
 
 function provider(overrides: Partial<LlmProviderConfig> = {}): LlmProviderConfig {
@@ -52,9 +53,9 @@ describe('LLM settings resolution', () => {
   })
 
   it('uses settings API keys before provider environment variables', async () => {
-    const { db, getProviderApiKey } = await loadSettings()
+    const { settingsRepo, getProviderApiKey } = await loadSettings()
     process.env.OPENAI_API_KEY = 'env-openai-key'
-    db.prepare("UPDATE settings SET value=? WHERE key='openai_api_key'").run('settings-openai-key')
+    settingsRepo.setMany({ openai_api_key: 'settings-openai-key' })
 
     expect(getProviderApiKey(provider())).toBe('settings-openai-key')
   })
@@ -77,14 +78,15 @@ describe('LLM settings resolution', () => {
   })
 
   it('resolves Ollama base URL from settings, provider config, then default', async () => {
-    const { db, getProviderBaseUrl } = await loadSettings()
+    const { settingsRepo, getProviderBaseUrl } = await loadSettings()
     const ollama = provider({ id: 'ollama', name: 'Ollama', kind: 'ollama', apiKeySettingKey: null })
 
-    db.prepare("UPDATE settings SET value=? WHERE key='ollama_base_url'").run('http://localhost:9999')
+    settingsRepo.setMany({ ollama_base_url: 'http://localhost:9999' })
     expect(getProviderBaseUrl(ollama)).toBe('http://localhost:9999')
 
-    db.prepare("UPDATE settings SET value=? WHERE key='ollama_base_url'").run('')
+    settingsRepo.setMany({ ollama_base_url: '' })
     expect(getProviderBaseUrl({ ...ollama, baseUrl: 'http://provider-host:11434' })).toBe('http://provider-host:11434')
     expect(getProviderBaseUrl({ ...ollama, baseUrl: null })).toBe('http://127.0.0.1:11434')
   })
 })
+

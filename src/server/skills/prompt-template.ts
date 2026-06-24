@@ -1,11 +1,10 @@
-import { db } from '../db/client'
+﻿import { settingsRepo } from '../db/repositories/settings.repo'
 import type { SkillRunner } from './types'
 
 export const promptTemplateRunner: SkillRunner = async (template, input) => {
   let prompt = template
   for (const [k, v] of Object.entries(input as Record<string, any>)) prompt = prompt.replace(new RegExp(`{{${k}}}`, 'g'), String(v))
-  const apiKeyRow = db.prepare("SELECT value FROM settings WHERE key='anthropic_api_key'").get() as any
-  const apiKey = apiKeyRow?.value || process.env.ANTHROPIC_API_KEY || ''
+  const apiKey = settingsRepo.getValue('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || ''
   if (!apiKey) throw new Error('Anthropic API key required for prompt-template skills')
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },

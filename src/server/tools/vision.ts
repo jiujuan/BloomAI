@@ -1,12 +1,11 @@
-import * as fs from 'fs'
+﻿import * as fs from 'fs'
 import * as path from 'path'
-import { db } from '../db/client'
+import { settingsRepo } from '../db/repositories/settings.repo'
 import type { ToolExecutor } from './types'
 import { resolveSafePath } from './utils/path'
 
 export const visionTool: ToolExecutor<{ imagePath?: string; imageUrl?: string; question?: string }> = async (input) => {
-  const apiKeyRow = db.prepare("SELECT value FROM settings WHERE key='anthropic_api_key'").get() as any
-  const apiKey = apiKeyRow?.value || process.env.ANTHROPIC_API_KEY || ''
+  const apiKey = settingsRepo.getValue('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || ''
   if (!apiKey) throw new Error('Anthropic API key required for vision analysis')
   const question = input.question || 'Describe this image in detail.'
   let imageData: string; let mediaType: string

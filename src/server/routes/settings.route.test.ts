@@ -13,10 +13,11 @@ async function loadApp() {
   process.env.DATA_DIR = dataDir
 
   const { createApp } = await import('../app')
-  const client = await import('../db/client')
+  await import('../db/client')
+  const { settingsRepo } = await import('../db/repositories/settings.repo')
   const app = await createApp()
 
-  return { app, db: client.db }
+  return { app, settingsRepo }
 }
 
 async function withServer<T>(
@@ -43,19 +44,23 @@ describe('settings route', () => {
     originalEnv = { ...process.env }
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    const client = await import('../db/client')
+    client.closeDb()
     vi.resetModules()
     process.env = originalEnv
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
   it('masks provider API keys and leaves Ollama base URL visible', async () => {
-    const { app, db } = await loadApp()
-    db.prepare("UPDATE settings SET value=? WHERE key='anthropic_api_key'").run('anthropic-secret')
-    db.prepare("UPDATE settings SET value=? WHERE key='openai_api_key'").run('openai-secret')
-    db.prepare("UPDATE settings SET value=? WHERE key='agnes_api_key'").run('agnes-secret')
-    db.prepare("UPDATE settings SET value=? WHERE key='deepseek_api_key'").run('deepseek-secret')
-    db.prepare("UPDATE settings SET value=? WHERE key='ollama_base_url'").run('http://localhost:11434')
+    const { app, settingsRepo } = await loadApp()
+    await settingsRepo.setMany({
+      anthropic_api_key: 'anthropic-secret',
+      openai_api_key: 'openai-secret',
+      agnes_api_key: 'agnes-secret',
+      deepseek_api_key: 'deepseek-secret',
+      ollama_base_url: 'http://localhost:11434',
+    })
 
     await withServer(app, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/settings`)
