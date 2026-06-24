@@ -7,6 +7,10 @@ describe('Mastra model mapping', () => {
       ok: true,
       model: 'openai/gpt-4o',
     })
+    expect(resolveMastraModel('agnes-2.0-flash')).toEqual({
+      ok: true,
+      model: 'openai/agnes-2.0-flash',
+    })
   })
 
   it('returns unsupported for unknown model ids', () => {
