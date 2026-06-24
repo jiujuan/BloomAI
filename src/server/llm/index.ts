@@ -44,6 +44,8 @@ export { createOllamaProvider, importOllamaModel, listOllamaRemoteModels } from 
 export { createOpenAICompatibleProvider } from './providers/openai-compatible'
 export { createOpenAIProvider }
 export { listModels, listProviders, resolveModel }
+export { resolveRuntimeModel, selectRuntimeModel } from './model-selection'
+export type { ModelConsumer, ResolvedRuntimeModel, ResolveRuntimeModelInput, RuntimeModelSource } from './model-selection'
 export { parseOpenAICompatibleSseLine, parseOllamaNdjsonLine }
 export * from './errors'
 export type * from './types'

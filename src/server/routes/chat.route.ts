@@ -3,9 +3,9 @@ import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
 import { streamChatCompletion } from '../llm'
+import { selectRuntimeModel } from '../llm/model-selection'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 import { buildChatContext, organizeChatPrompt } from '../prompts'
-import { resolveChatModel } from '../agent/mastra/chat-model-resolution'
 
 export const chatRouter = Router()
 
@@ -39,7 +39,13 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
 
   let fullText = ''; let inTok = 0; let outTok = 0
   try {
-    const model = resolveChatModel(promptContext.persona, promptContext.session.model, getSettingsModel())
+    const { selectedModelId: model } = selectRuntimeModel({
+      consumer: 'chat',
+      modality: 'text',
+      persona: promptContext.persona,
+      sessionModel: promptContext.session.model,
+      settingsModel: getSettingsModel(),
+    })
 
     for await (const event of streamChatCompletion({
       model,
