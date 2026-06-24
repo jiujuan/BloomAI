@@ -1,7 +1,3 @@
-export type MastraModelResolution =
-  | { ok: true; model: string }
-  | { ok: false; modelId: string; reason: string }
-
 export type ChatAgentRunInput = {
   sessionId: string
   content: string
@@ -18,10 +14,18 @@ export type ChatToolCallTrace = {
   durationMs?: number
 }
 
+export type ChatAgentTokenUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  [key: string]: unknown
+}
+
 export type ChatAgentRunTrace = {
   runtime: 'mastra-chat-agent-v1'
   maxSteps: number
   toolCalls: ChatToolCallTrace[]
+  tokens?: ChatAgentTokenUsage
 }
 
 export type ToolCallViewModel = {
