@@ -1,19 +1,32 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_AGENT_MAX_STEPS } from './constants'
-import { createChatAgent } from './chat-agent'
 import { runChatAgentV1 } from './chat-agent-runtime-adapter'
 
+const createChatAgentMock = vi.hoisted(() => vi.fn())
+
+vi.mock('./chat-agent', () => ({
+  createChatAgent: createChatAgentMock,
+}))
+
 describe('Mastra chat agent runtime adapter skeleton', () => {
+  beforeEach(() => {
+    createChatAgentMock.mockClear()
+  })
+
   it('defines a max step default of 10', () => {
     expect(DEFAULT_AGENT_MAX_STEPS).toBe(10)
   })
 
-  it('creates a chat agent with the provided model', () => {
-    expect(createChatAgent('openai/gpt-4o')).toMatchObject({
-      id: 'bloomai-chat-agent-v1',
-      name: 'BloomAI Chat Agent v1',
+  it('injects the session id when creating the Mastra chat agent', async () => {
+    for await (const _event of runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'hello',
       model: 'openai/gpt-4o',
-    })
+    })) {
+      // consume stream
+    }
+
+    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', { sessionId: 'session-1' })
   })
 
   it('returns a testable async event stream with a done trace', async () => {

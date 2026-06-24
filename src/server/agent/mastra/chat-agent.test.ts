@@ -6,9 +6,17 @@ const agentConstructor = vi.hoisted(() =>
     this.config = config
   }),
 )
+const createWebSearchToolMock = vi.hoisted(() => vi.fn((options: { sessionId?: string }) => ({
+  id: 'web_search',
+  description: `Search the web for ${options.sessionId ?? 'unknown session'}`,
+})))
 
 vi.mock('@mastra/core/agent', () => ({
   Agent: agentConstructor,
+}))
+
+vi.mock('./web-search-adapter.tool', () => ({
+  createWebSearchAdapterTool: createWebSearchToolMock,
 }))
 
 import { CHAT_AGENT_V1_INSTRUCTIONS, createChatAgent } from './chat-agent'
@@ -16,6 +24,7 @@ import { CHAT_AGENT_V1_INSTRUCTIONS, createChatAgent } from './chat-agent'
 describe('createChatAgent', () => {
   beforeEach(() => {
     agentConstructor.mockClear()
+    createWebSearchToolMock.mockClear()
   })
 
   it('creates a Mastra Agent with the runtime model argument', () => {
@@ -31,14 +40,15 @@ describe('createChatAgent', () => {
     )
   })
 
-  it('mounts the web_search placeholder tool and documents when it should be used', () => {
-    createChatAgent('settings-selected-model')
+  it('mounts the BloomAI web_search tool with the injected session id', () => {
+    createChatAgent('settings-selected-model', { sessionId: 'session-1' })
 
     const config = agentConstructor.mock.calls[0][0] as {
       instructions: string
       tools: Record<string, { id: string; description: string }>
     }
 
+    expect(createWebSearchToolMock).toHaveBeenCalledWith({ sessionId: 'session-1' })
     expect(config.instructions).toContain('Use web_search when')
     expect(config.tools.web_search).toMatchObject({
       id: 'web_search',

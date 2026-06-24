@@ -1,4 +1,4 @@
-﻿import { DEFAULT_AGENT_MAX_STEPS, MASTRA_CHAT_AGENT_V1_RUNTIME } from './constants'
+import { DEFAULT_AGENT_MAX_STEPS, MASTRA_CHAT_AGENT_V1_RUNTIME } from './constants'
 import { createChatAgent } from './chat-agent'
 import { resolveMastraModel } from './model-map'
 import type { ChatAgentRunInput, ChatAgentRuntimeEvent } from './types'
@@ -10,7 +10,7 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
     return
   }
 
-  createChatAgent(modelResolution.model)
+  createChatAgent(modelResolution.model, { sessionId: input.sessionId })
   const maxSteps = Math.min(input.maxSteps ?? DEFAULT_AGENT_MAX_STEPS, DEFAULT_AGENT_MAX_STEPS)
 
   yield {
