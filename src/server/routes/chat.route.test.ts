@@ -180,6 +180,50 @@ describe('chat stream route', () => {
     expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(expect.objectContaining({ model: 'agnes-2.0-flash' }))
   })
 
+  it('streams Mastra tool call SSE events and persists assistant tool calls', async () => {
+    agentMock.runChatAgentV1.mockReturnValue(
+      (async function* () {
+        yield { type: 'tool_call_start', call: { callId: 'call-1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'Mastra' } } }
+        yield { type: 'tool_call_result', callId: 'call-1', output: { query: 'Mastra', results: [{ title: 'Result 1', url: 'https://example.com', snippet: 'snippet' }] }, durationMs: 12 }
+        yield { type: 'delta', text: 'Hello from agent' }
+        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }], tokens: { inputTokens: 2, outputTokens: 4, totalTokens: 6 } } }
+      })()
+    )
+
+    const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+    settingsRepo.setMany({
+      agent_runtime_enabled: 'true',
+      agent_runtime_provider: 'mastra',
+      agent_runtime_max_steps: '25',
+    })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'search mastra' })
+    const events = parseSse(responseText)
+
+    expect(agentMock.runChatAgentV1).toHaveBeenCalledWith({
+      sessionId: session.id,
+      content: 'search mastra',
+      model: 'gpt-4o',
+      maxSteps: 10,
+    })
+    expect(events).toEqual([
+      { type: 'tool_call_start', call: { callId: 'call-1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'Mastra' } } },
+      { type: 'tool_call_result', callId: 'call-1', output: { query: 'Mastra', results: [{ title: 'Result 1', url: 'https://example.com', snippet: 'snippet' }] }, durationMs: 12 },
+      { type: 'delta', text: 'Hello from agent' },
+      { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }], tokens: { inputTokens: 2, outputTokens: 4, totalTokens: 6 } } },
+    ])
+
+    const assistant = messageRepo.list(session.id).find((message) => message.role === 'assistant')
+    expect(assistant).toMatchObject({
+      content: 'Hello from agent',
+      tokens: 6,
+    })
+    expect(JSON.parse(assistant?.tool_calls || '[]')).toEqual([
+      { callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 },
+    ])
+  })
+
   it('saves partial assistant text when streaming fails', async () => {
     llmMock.streamChatCompletion.mockReturnValue(failingEvents())
     const { app, messageRepo, sessionRepo } = await loadApp()
