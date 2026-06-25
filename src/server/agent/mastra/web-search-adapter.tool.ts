@@ -19,6 +19,8 @@ export const webSearchOutputSchema = z.object({
       }),
     )
     .default([]),
+  provider: z.enum(['tavily', 'duckduckgo']).optional(),
+  fallbackFrom: z.enum(['tavily']).optional(),
   error: z.string().optional(),
 })
 

@@ -20,6 +20,10 @@ describe('web_search Mastra adapter tool', () => {
     expect(tool.description).toContain('Search the web')
     expect(webSearchInputSchema.safeParse({ query: 'mastra', limit: 3 }).success).toBe(true)
     expect(webSearchOutputSchema.safeParse({ query: 'mastra', total: 0, results: [] }).success).toBe(true)
+    expect(webSearchOutputSchema.parse({ query: 'mastra', total: 0, provider: 'tavily', fallbackFrom: 'tavily', results: [] })).toMatchObject({
+      provider: 'tavily',
+      fallbackFrom: 'tavily',
+    })
   })
 
   it('executes through BloomAI executeTool with the injected session id', async () => {
