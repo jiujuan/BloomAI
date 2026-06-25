@@ -1,5 +1,6 @@
 import { z } from 'zod'
 export * from './response'
+export * from './message-trace'
 
 export const MessageSchema = z.object({
   id: z.string(),
