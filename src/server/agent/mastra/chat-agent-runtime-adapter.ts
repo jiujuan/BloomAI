@@ -2,6 +2,9 @@ import { DEFAULT_AGENT_MAX_STEPS, MASTRA_CHAT_AGENT_V1_RUNTIME } from './constan
 import { createChatAgent } from './chat-agent'
 import { mapMastraChunkToBloomEvent, mapMastraFinalOutputToBloomEvents } from './mastra-event-mapper'
 import { resolveRuntimeModel, toMastraModelId } from '../../llm/model-selection'
+import { getProviderApiKey, getProviderBaseUrl } from '../../llm/settings'
+import type { OpenAICompatibleConfig } from '@mastra/core/llm'
+import type { ResolvedLlmModel } from '../../llm/types'
 import type { ChatAgentRunInput, ChatAgentRuntimeEvent } from './types'
 
 type StreamOutputLike = {
@@ -18,7 +21,7 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
     return
   }
 
-  const agent = createChatAgent(toMastraModelId(modelResolution.resolved), { sessionId: input.sessionId })
+  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), { sessionId: input.sessionId })
   const maxSteps = Math.min(input.maxSteps ?? DEFAULT_AGENT_MAX_STEPS, DEFAULT_AGENT_MAX_STEPS)
   const emittedCallIds = new Set<string>()
   const emittedResultIds = new Set<string>()
@@ -50,6 +53,22 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
   yield createDoneEvent(maxSteps)
 }
 
+function toMastraOpenAICompatibleModelId(resolved: ResolvedLlmModel): `${string}/${string}` {
+  const modelId = toMastraModelId(resolved)
+  if (!modelId.includes('/')) throw new Error(`Mastra model id must include provider and model: ${modelId}`)
+  return modelId as `${string}/${string}`
+}
+function toMastraModelConfig(resolved: ResolvedLlmModel): string | OpenAICompatibleConfig {
+  if (resolved.provider.kind === 'openai-compatible') {
+    return {
+      id: toMastraOpenAICompatibleModelId(resolved),
+      url: getProviderBaseUrl(resolved.provider),
+      apiKey: getProviderApiKey(resolved.provider),
+    }
+  }
+
+  return toMastraModelId(resolved)
+}
 async function resolveAgentModel(model: string): Promise<{ ok: true; resolved: Awaited<ReturnType<typeof resolveRuntimeModel>>['resolved'] } | { ok: false; error: string }> {
   try {
     const modelResolution = await resolveRuntimeModel({

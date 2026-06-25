@@ -12,6 +12,11 @@ describe('mapMastraChunkToBloomEvent', () => {
       type: 'delta',
       text: ' world',
     })
+
+    expect(mapMastraChunkToBloomEvent({ type: 'text-delta', payload: { text: ' from payload' } })).toEqual({
+      type: 'delta',
+      text: ' from payload',
+    })
   })
 
   it('maps tool call chunks to running tool call cards', () => {
@@ -32,6 +37,26 @@ describe('mapMastraChunkToBloomEvent', () => {
         input: { query: 'Mastra' },
       },
     })
+
+    expect(
+      mapMastraChunkToBloomEvent({
+        type: 'tool-call',
+        payload: {
+          toolCallId: 'call-2',
+          toolName: 'web_search',
+          args: { query: 'NBA trades' },
+        },
+      }),
+    ).toEqual({
+      type: 'tool_call_start',
+      call: {
+        callId: 'call-2',
+        toolId: 'web_search',
+        category: 'search',
+        status: 'running',
+        input: { query: 'NBA trades' },
+      },
+    })
   })
 
   it('maps tool result chunks to result updates with the same call id', () => {
@@ -49,6 +74,21 @@ describe('mapMastraChunkToBloomEvent', () => {
       callId: 'call-1',
       output,
     })
+
+    expect(
+      mapMastraChunkToBloomEvent({
+        type: 'tool-result',
+        payload: {
+          toolCallId: 'call-2',
+          toolName: 'web_search',
+          result: output,
+        },
+      }),
+    ).toEqual({
+      type: 'tool_call_result',
+      callId: 'call-2',
+      output,
+    })
   })
 
   it('maps tool error chunks to error updates with the same call id', () => {
@@ -63,6 +103,21 @@ describe('mapMastraChunkToBloomEvent', () => {
       type: 'tool_call_error',
       callId: 'call-1',
       error: 'search failed',
+    })
+
+    expect(
+      mapMastraChunkToBloomEvent({
+        type: 'tool-error',
+        payload: {
+          toolCallId: 'call-2',
+          toolName: 'web_search',
+          error: { message: 'payload search failed' },
+        },
+      }),
+    ).toEqual({
+      type: 'tool_call_error',
+      callId: 'call-2',
+      error: 'payload search failed',
     })
   })
 
@@ -82,6 +137,28 @@ describe('mapMastraChunkToBloomEvent', () => {
         maxSteps: 10,
         toolCalls: [],
         tokens: { inputTokens: 12, outputTokens: 7, totalTokens: 19 },
+      },
+    })
+
+    expect(
+      mapMastraChunkToBloomEvent(
+        {
+          type: 'finish',
+          payload: {
+            output: {
+              usage: { inputTokens: 13, outputTokens: 8, totalTokens: 21 },
+            },
+          },
+        },
+        { maxSteps: 10 },
+      ),
+    ).toEqual({
+      type: 'done',
+      trace: {
+        runtime: 'mastra-chat-agent-v1',
+        maxSteps: 10,
+        toolCalls: [],
+        tokens: { inputTokens: 13, outputTokens: 8, totalTokens: 21 },
       },
     })
   })

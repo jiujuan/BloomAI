@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent'
+import type { MastraModelConfig } from '@mastra/core/llm'
 import { CHAT_AGENT_V1_ID, CHAT_AGENT_V1_NAME } from './constants'
 import { createWebSearchAdapterTool } from './web-search-adapter.tool'
 
@@ -14,7 +15,7 @@ export type CreateChatAgentOptions = {
   sessionId?: string
 }
 
-export function createChatAgent(model: string, options: CreateChatAgentOptions = {}): Agent {
+export function createChatAgent(model: MastraModelConfig, options: CreateChatAgentOptions = {}): Agent {
   return new Agent({
     id: CHAT_AGENT_V1_ID,
     name: CHAT_AGENT_V1_NAME,

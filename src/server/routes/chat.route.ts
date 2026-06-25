@@ -16,16 +16,43 @@ import { createChatResponseStreamWriter, type ChatResponseStreamState } from './
 
 export const chatRouter = Router()
 
+console.log('[Chat route] module loaded', {
+  cwd: process.cwd(),
+  dotenvPath: path.join(process.cwd(), '.env'),
+  dotenvExists: fs.existsSync(path.join(process.cwd(), '.env')),
+})
+
 type ChatResponseStreamWriter = ReturnType<typeof createChatResponseStreamWriter>
+
+type RuntimeSettingSource = 'process.env' | '.env' | 'settings' | 'default'
+
+type RuntimeSetting = { value: string; source: RuntimeSettingSource; key?: string }
 
 function getSettingsModel(): string {
   return settingsRepo.getValue('model') || ''
 }
 
+function getRuntimeSetting(envKey: string, settingsKey: string): RuntimeSetting {
+  const processEnvValue = process.env[envKey]?.trim()
+  if (processEnvValue) return { value: processEnvValue, source: 'process.env', key: envKey }
+
+  const processEnvSettingsValue = process.env[settingsKey]?.trim()
+  if (processEnvSettingsValue) return { value: processEnvSettingsValue, source: 'process.env', key: settingsKey }
+
+  const dotEnvValue = getDotEnvValue(envKey)
+  if (dotEnvValue) return { value: dotEnvValue, source: '.env', key: envKey }
+
+  const dotEnvSettingsValue = getDotEnvValue(settingsKey)
+  if (dotEnvSettingsValue) return { value: dotEnvSettingsValue, source: '.env', key: settingsKey }
+
+  const settingsValue = settingsRepo.getValue(settingsKey) || ''
+  if (settingsValue) return { value: settingsValue, source: 'settings', key: settingsKey }
+
+  return { value: '', source: 'default' }
+}
+
 function getEnvSettingValue(envKey: string, settingsKey: string): string {
-  const envValue = process.env[envKey]?.trim() || process.env[settingsKey]?.trim() || getDotEnvValue(envKey) || getDotEnvValue(settingsKey)
-  if (envValue) return envValue
-  return settingsRepo.getValue(settingsKey) || ''
+  return getRuntimeSetting(envKey, settingsKey).value
 }
 
 function getDotEnvValue(key: string): string {
@@ -59,11 +86,55 @@ function getAgentRuntimeMaxSteps(): number {
   return Math.min(parsed, 10)
 }
 
+function getAgentRuntimeDebugConfig() {
+  const enabled = getRuntimeSetting('AGENT_RUNTIME_ENABLED', 'agent_runtime_enabled')
+  const provider = getRuntimeSetting('AGENT_RUNTIME_PROVIDER', 'agent_runtime_provider')
+  const maxSteps = getRuntimeSetting('AGENT_RUNTIME_MAX_STEPS', 'agent_runtime_max_steps')
+  const parsedMaxSteps = getAgentRuntimeMaxSteps()
+  const useAgentRuntime = (enabled.value === 'true' || enabled.value === '1') && provider.value === 'mastra'
+
+  return { enabled, provider, maxSteps, parsedMaxSteps, useAgentRuntime }
+}
+
 function shouldUseAgentRuntime(): boolean {
   return getAgentRuntimeEnabled() && getAgentRuntimeProvider() === 'mastra'
 }
 
+function logAgentRuntimeConfig(input: {
+  sessionId: string
+  model: string
+  content: string
+  debugConfig: ReturnType<typeof getAgentRuntimeDebugConfig>
+}): void {
+  const { enabled, provider, maxSteps, parsedMaxSteps, useAgentRuntime } = input.debugConfig
+  console.log('[AgentRuntime config]', {
+    sessionId: input.sessionId,
+    model: input.model,
+    contentPreview: input.content.slice(0, 120),
+    enabled: maskRuntimeSetting(enabled),
+    provider: maskRuntimeSetting(provider),
+    maxSteps: maskRuntimeSetting(maxSteps),
+    parsedMaxSteps,
+    useAgentRuntime,
+    cwd: process.cwd(),
+    dotenvPath: path.join(process.cwd(), '.env'),
+    dotenvExists: fs.existsSync(path.join(process.cwd(), '.env')),
+  })
+}
+
+function maskRuntimeSetting(setting: RuntimeSetting) {
+  return {
+    value: setting.value,
+    source: setting.source,
+    key: setting.key,
+  }
+}
+
 chatRouter.post('/stream', async (req: Request, res: Response) => {
+  console.log('[Chat route] POST /stream received', {
+    hasSessionId: Boolean(req.body?.sessionId),
+    contentPreview: typeof req.body?.content === 'string' ? req.body.content.slice(0, 120) : undefined,
+  })
   setupSSE(res)
   const { sessionId, content, contextOverride } = req.body
   if (!sessionId || !content) {
@@ -93,19 +164,26 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
     settingsModel: getSettingsModel(),
   })
 
+  const agentRuntimeDebugConfig = getAgentRuntimeDebugConfig()
+  logAgentRuntimeConfig({ sessionId, content, model, debugConfig: agentRuntimeDebugConfig })
+
   try {
-    if (shouldUseAgentRuntime()) {
+    if (agentRuntimeDebugConfig.useAgentRuntime) {
+      console.log('[AgentRuntime mastra] starting', { sessionId, model, maxSteps: agentRuntimeDebugConfig.parsedMaxSteps })
       const agentHandled = await streamMastraChat({
         sessionId,
         content,
         model,
-        maxSteps: getAgentRuntimeMaxSteps(),
+        maxSteps: agentRuntimeDebugConfig.parsedMaxSteps,
         res,
       })
+      console.log('[AgentRuntime mastra] completed', { sessionId, model, agentHandled })
       if (!agentHandled) {
+        console.warn('[AgentRuntime mastra] falling back to direct LLM because agent produced no usable output', { sessionId, model })
         await streamLegacyChat({ sessionId, prompt, model, res })
       }
     } else {
+      console.log('[AgentRuntime mastra] disabled; using direct LLM', { sessionId, model })
       await streamLegacyChat({ sessionId, prompt, model, res })
     }
   } catch (err: any) {
@@ -175,6 +253,11 @@ async function* createAgentChatSource(input: AgentChatInput) {
 }
 
 async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
+  console.log('[AgentRuntime mastra] stream begin', {
+    sessionId: input.sessionId,
+    model: input.model,
+    maxSteps: input.maxSteps,
+  })
   const writer = createChatResponseStreamWriter({
     res: input.res,
     sessionId: input.sessionId,
@@ -187,13 +270,42 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
   })
   let seenEvent = false
   let seenNonErrorEvent = false
+  let deltaEventCount = 0
+  let deltaCharCount = 0
 
   try {
     for await (const event of createAgentChatSource(input)) {
       seenEvent = true
 
+      if (event.type === 'delta') {
+        deltaEventCount += 1
+        deltaCharCount += event.text.length
+        if (deltaEventCount === 1 || deltaEventCount % 20 === 0) {
+          console.log('[AgentRuntime mastra] delta progress', {
+            sessionId: input.sessionId,
+            model: input.model,
+            deltaEvents: deltaEventCount,
+            deltaChars: deltaCharCount,
+          })
+        }
+      } else {
+        console.log('[AgentRuntime mastra] event', {
+          sessionId: input.sessionId,
+          model: input.model,
+          type: event.type,
+          toolId: event.type === 'tool_call_start' ? event.call.toolId : undefined,
+          error: event.type === 'error' ? event.error : undefined,
+          deltaEvents: deltaEventCount || undefined,
+          deltaChars: deltaCharCount || undefined,
+        })
+      }
+
       if (event.type === 'error') {
-        if (!seenNonErrorEvent) return false
+        console.error('[AgentRuntime mastra] runtime error event', { sessionId: input.sessionId, model: input.model, error: event.error })
+        if (!seenNonErrorEvent) {
+          console.warn('[AgentRuntime mastra] error before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
+          return false
+        }
         sendMappedEvents(writer, mapper.map(event))
         persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
         return true
@@ -203,18 +315,31 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
       sendMappedEvents(writer, mapper.map(event))
 
       if (event.type === 'done') {
+        console.log('[AgentRuntime mastra] done', { sessionId: input.sessionId, model: input.model })
         persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
         return true
       }
     }
 
-    if (!seenEvent) return false
+    if (!seenEvent) {
+      console.warn('[AgentRuntime mastra] no events emitted; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
+      return false
+    }
 
+    console.warn('[AgentRuntime mastra] completed without done event', { sessionId: input.sessionId, model: input.model })
     sendMappedEvents(writer, mapper.completeWithoutDone())
     persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
     return true
   } catch (err) {
-    if (!seenNonErrorEvent) return false
+    console.error('[AgentRuntime mastra] exception', {
+      sessionId: input.sessionId,
+      model: input.model,
+      error: err instanceof Error ? err.message : err,
+    })
+    if (!seenNonErrorEvent) {
+      console.warn('[AgentRuntime mastra] exception before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
+      return false
+    }
     sendMappedEvents(writer, mapper.fail(err))
     persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
     return true

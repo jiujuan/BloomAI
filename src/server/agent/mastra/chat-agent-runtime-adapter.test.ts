@@ -45,6 +45,24 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', { sessionId: 'session-1' })
   })
 
+  it('passes Agnes to Mastra as an OpenAI-compatible custom endpoint config', async () => {
+    const { settingsRepo } = await import('../../db/repositories/settings.repo')
+    settingsRepo.setMany({ agnes_api_key: 'test-agnes-key' })
+
+    for await (const _event of runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'hello',
+      model: 'agnes-2.0-flash',
+    })) {
+      // consume stream
+    }
+
+    expect(createChatAgentMock).toHaveBeenCalledWith({
+      id: 'agnes/agnes-2.0-flash',
+      url: 'https://apihub.agnes-ai.com/v1',
+      apiKey: 'test-agnes-key',
+    }, { sessionId: 'session-1' })
+  })
   it('emits an error event when the selected model is not configured', async () => {
     const events = []
     for await (const event of runChatAgentV1({

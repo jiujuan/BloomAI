@@ -70,15 +70,17 @@ export function mapMastraFinalOutputToBloomEvents(
 }
 
 function mapTextDelta(record: UnknownRecord): ChatAgentRuntimeEvent | null {
-  const text = firstString(record.textDelta, record.delta, record.text)
+  const payload = getPayloadRecord(record)
+  const text = firstString(payload.textDelta, payload.delta, payload.text, record.textDelta, record.delta, record.text)
   if (!text) return null
   return { type: 'delta', text }
 }
 
 function mapToolCall(record: UnknownRecord | null): Extract<ChatAgentRuntimeEvent, { type: 'tool_call_start' }> | null {
   if (!record) return null
-  const callId = getCallId(record)
-  const toolId = getToolId(record)
+  const data = getPayloadRecord(record)
+  const callId = getCallId(data)
+  const toolId = getToolId(data)
   if (!callId || !toolId) return null
 
   return {
@@ -88,31 +90,33 @@ function mapToolCall(record: UnknownRecord | null): Extract<ChatAgentRuntimeEven
       toolId,
       category: getToolCategory(toolId),
       status: 'running',
-      input: getToolInput(record),
+      input: getToolInput(data),
     },
   }
 }
 
 function mapToolResult(record: UnknownRecord | null): Extract<ChatAgentRuntimeEvent, { type: 'tool_call_result' }> | null {
   if (!record) return null
-  const callId = getCallId(record)
+  const data = getPayloadRecord(record)
+  const callId = getCallId(data)
   if (!callId) return null
 
   return {
     type: 'tool_call_result',
     callId,
-    output: record.result ?? record.output,
+    output: data.result ?? data.output,
   }
 }
 
 function mapToolError(record: UnknownRecord): Extract<ChatAgentRuntimeEvent, { type: 'tool_call_error' }> | null {
-  const callId = getCallId(record)
+  const data = getPayloadRecord(record)
+  const callId = getCallId(data)
   if (!callId) return null
 
   return {
     type: 'tool_call_error',
     callId,
-    error: getErrorMessage(record.error ?? record.message),
+    error: getErrorMessage(data.error ?? data.message),
   }
 }
 
@@ -122,15 +126,22 @@ function mapFinish(
 ): Extract<ChatAgentRuntimeEvent, { type: 'done' }> | null {
   if (options.maxSteps === undefined) return null
 
+  const payload = getPayloadRecord(record)
+  const usage = record.usage ?? asRecord(payload.output)?.usage
+
   return {
     type: 'done',
     trace: {
       runtime: MASTRA_CHAT_AGENT_V1_RUNTIME,
       maxSteps: options.maxSteps,
       toolCalls: [],
-      ...(getTokenUsage(record.usage) ? { tokens: getTokenUsage(record.usage) } : {}),
+      ...(getTokenUsage(usage) ? { tokens: getTokenUsage(usage) } : {}),
     },
   }
+}
+
+function getPayloadRecord(record: UnknownRecord): UnknownRecord {
+  return asRecord(record.payload) ?? record
 }
 
 function getTokenUsage(usage: unknown): ChatAgentTokenUsage | undefined {
