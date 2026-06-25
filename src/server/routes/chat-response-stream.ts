@@ -1,0 +1,161 @@
+import type { Response } from 'express'
+import {
+  RESPONSE_SCHEMA_VERSION,
+  type ResponseRuntime,
+  type ResponseStreamEvent,
+  type ResponseTrace,
+  type TokenUsage,
+  type ToolCallTrace,
+} from '@shared/schemas/response'
+
+export type ChatResponseStreamState = {
+  responseId: string
+  text: string
+  usage?: TokenUsage
+  trace?: ResponseTrace
+  toolCalls: ToolCallTrace[]
+}
+
+type ToolCallDraft = {
+  callId: string
+  toolId: string
+  status: 'success' | 'error' | 'running'
+  input?: unknown
+  outputSummary?: string
+  durationMs?: number
+}
+
+export function createChatResponseStreamWriter(input: {
+  res: Response
+  sessionId: string
+  sendSSE: (res: Response, payload: ResponseStreamEvent) => void
+}): {
+  send(event: ResponseStreamEvent): void
+  state(): ChatResponseStreamState
+} {
+  let responseId = ''
+  let runtime: ResponseRuntime | undefined
+  let usage: TokenUsage | undefined
+  let trace: ResponseTrace | undefined
+  let text = ''
+  const toolCallDrafts = new Map<string, ToolCallDraft>()
+
+  function currentToolCalls(): ToolCallTrace[] {
+    return Array.from(toolCallDrafts.values())
+      .filter((toolCall): toolCall is ToolCallDraft & { status: ToolCallTrace['status'] } => toolCall.status === 'success' || toolCall.status === 'error')
+      .map((toolCall) => ({
+        callId: toolCall.callId,
+        toolId: toolCall.toolId,
+        status: toolCall.status,
+        input: toolCall.input,
+        outputSummary: toolCall.outputSummary,
+        durationMs: toolCall.durationMs,
+      }))
+  }
+
+  function mergeTrace(nextTrace: ResponseTrace | undefined): void {
+    const toolCalls = currentToolCalls()
+    trace = {
+      schemaVersion: RESPONSE_SCHEMA_VERSION,
+      ...(trace ?? {}),
+      ...(nextTrace ?? {}),
+      runtime: nextTrace?.runtime ?? trace?.runtime ?? runtime ?? 'direct-llm',
+      finishReason: nextTrace?.finishReason ?? trace?.finishReason,
+      toolCalls: nextTrace?.toolCalls?.length ? nextTrace.toolCalls : toolCalls,
+    }
+  }
+
+  return {
+    send(event: ResponseStreamEvent): void {
+      input.sendSSE(input.res, event)
+
+      if ('responseId' in event && event.responseId) responseId = event.responseId
+
+      if (event.type === 'response_started') {
+        runtime = event.runtime
+        trace = {
+          schemaVersion: RESPONSE_SCHEMA_VERSION,
+          runtime: event.runtime,
+          providerId: event.providerId,
+          model: event.model,
+          toolCalls: currentToolCalls(),
+        }
+        return
+      }
+
+      if (event.type === 'content_delta') {
+        text += event.delta
+        return
+      }
+
+      if (event.type === 'usage_updated') {
+        usage = event.usage
+        return
+      }
+
+      if (event.type === 'tool_call_started') {
+        toolCallDrafts.set(event.block.callId, {
+          callId: event.block.callId,
+          toolId: event.block.toolId,
+          status: 'running',
+          input: event.block.input,
+        })
+        mergeTrace(trace)
+        return
+      }
+
+      if (event.type === 'tool_call_completed') {
+        const existing = toolCallDrafts.get(event.callId)
+        if (existing) {
+          toolCallDrafts.set(event.callId, {
+            ...existing,
+            status: 'success',
+            outputSummary: event.outputSummary,
+            durationMs: event.durationMs ?? existing.durationMs,
+          })
+        }
+        mergeTrace(trace)
+        return
+      }
+
+      if (event.type === 'tool_call_failed') {
+        const existing = toolCallDrafts.get(event.callId)
+        if (existing) {
+          toolCallDrafts.set(event.callId, {
+            ...existing,
+            status: 'error',
+            outputSummary: event.error.message,
+            durationMs: event.durationMs ?? existing.durationMs,
+          })
+        }
+        mergeTrace(trace)
+        return
+      }
+
+      if (event.type === 'response_completed') {
+        usage = event.usage ?? usage
+        mergeTrace(event.trace)
+        return
+      }
+
+      if (event.type === 'response_failed') {
+        mergeTrace({
+          schemaVersion: RESPONSE_SCHEMA_VERSION,
+          runtime: runtime ?? 'direct-llm',
+          finishReason: 'error',
+          toolCalls: currentToolCalls(),
+        })
+      }
+    },
+
+    state(): ChatResponseStreamState {
+      return {
+        responseId,
+        text,
+        usage,
+        trace,
+        toolCalls: currentToolCalls(),
+      }
+    },
+  }
+}

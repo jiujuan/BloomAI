@@ -1,15 +1,20 @@
 import { Router, Request, Response } from 'express'
+import { RESPONSE_SCHEMA_VERSION, type ResponseStreamEvent, type TokenUsage } from '@shared/schemas/response'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
 import { streamChatCompletion } from '../llm'
+import { mapLlmStreamToResponseEvents } from '../llm/response-event-mapper'
 import { selectRuntimeModel } from '../llm/model-selection'
 import { runChatAgentV1 } from '../agent/mastra/chat-agent-runtime-adapter'
+import { createAgentResponseEventMapper } from '../agent/mastra/response-event-mapper'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 import { buildChatContext, organizeChatPrompt } from '../prompts'
-import type { ChatAgentRuntimeEvent, ChatAgentTokenUsage, ChatToolCallTrace } from '../agent/mastra/types'
+import { createChatResponseStreamWriter, type ChatResponseStreamState } from './chat-response-stream'
 
 export const chatRouter = Router()
+
+type ChatResponseStreamWriter = ReturnType<typeof createChatResponseStreamWriter>
 
 function getSettingsModel(): string {
   return settingsRepo.getValue('model') || ''
@@ -103,239 +108,132 @@ type AgentChatInput = {
   res: Response
 }
 
-type MastraDoneTrace = {
-  runtime: 'mastra-chat-agent-v1'
-  maxSteps: number
-  toolCalls: ChatToolCallTrace[]
-  tokens?: ChatAgentTokenUsage
-}
-
-type ToolTraceDraft = {
-  callId: string
-  toolId: string
-  status?: 'success' | 'error'
-  input?: unknown
-  outputSummary?: string
-  durationMs?: number
+async function* createLegacyChatSource(input: LegacyChatInput) {
+  yield* streamChatCompletion({
+    model: input.model,
+    maxTokens: input.prompt.maxTokens,
+    system: input.prompt.system,
+    messages: input.prompt.messages,
+  })
 }
 
 async function streamLegacyChat(input: LegacyChatInput): Promise<void> {
-  let fullText = ''
-  let inputTokens = 0
-  let outputTokens = 0
+  const writer = createChatResponseStreamWriter({
+    res: input.res,
+    sessionId: input.sessionId,
+    sendSSE,
+  })
+  let shouldPersist = false
 
-  try {
-    for await (const event of streamChatCompletion({
-      model: input.model,
-      maxTokens: input.prompt.maxTokens,
-      system: input.prompt.system,
-      messages: input.prompt.messages,
-    })) {
-      if (event.type === 'delta') {
-        fullText += event.text
-        sendSSE(input.res, { type: 'delta', text: event.text })
-      }
-      if (event.type === 'usage') {
-        inputTokens = event.input
-        outputTokens = event.output
-      }
-    }
+  const responseEvents = mapLlmStreamToResponseEvents(createLegacyChatSource(input), {
+    sessionId: input.sessionId,
+    model: input.model,
+  })
 
-    messageRepo.save({
-      session_id: input.sessionId,
-      role: 'assistant',
-      content: fullText,
-      tokens: inputTokens + outputTokens,
-    })
-    sendSSE(input.res, { type: 'done', tokens: { input: inputTokens, output: outputTokens } })
-  } catch (err: any) {
-    if (fullText) {
-      messageRepo.save({
-        session_id: input.sessionId,
-        role: 'assistant',
-        content: fullText,
-        tokens: inputTokens + outputTokens,
-      })
+  for await (const event of responseEvents) {
+    writer.send(event)
+    if (event.type === 'response_completed' || (event.type === 'response_failed' && writer.state().text)) {
+      shouldPersist = true
     }
-    throw err
+  }
+
+  if (shouldPersist) {
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
   }
 }
 
+async function* createAgentChatSource(input: AgentChatInput) {
+  yield* runChatAgentV1({
+    sessionId: input.sessionId,
+    content: input.content,
+    model: input.model,
+    maxSteps: input.maxSteps,
+  })
+}
+
 async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
-  let fullText = ''
+  const writer = createChatResponseStreamWriter({
+    res: input.res,
+    sessionId: input.sessionId,
+    sendSSE,
+  })
+  const mapper = createAgentResponseEventMapper({
+    sessionId: input.sessionId,
+    model: input.model,
+    maxSteps: input.maxSteps,
+  })
   let seenEvent = false
   let seenNonErrorEvent = false
-  let lastDoneTrace: { runtime: 'mastra-chat-agent-v1'; maxSteps: number; toolCalls: ChatToolCallTrace[]; tokens?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } } | null = null
-  const toolTraceDrafts = new Map<string, ToolTraceDraft>()
 
   try {
-    for await (const event of runChatAgentV1({
-      sessionId: input.sessionId,
-      content: input.content,
-      model: input.model,
-      maxSteps: input.maxSteps,
-    })) {
+    for await (const event of createAgentChatSource(input)) {
       seenEvent = true
+
       if (event.type === 'error') {
         if (!seenNonErrorEvent) return false
-        sendSSE(input.res, event)
-        const toolCalls = buildAssistantToolCalls(lastDoneTrace, toolTraceDrafts)
-        const tokens = getDoneTraceTokens(lastDoneTrace)
-        persistAssistantMessage(input.sessionId, fullText, toolCalls, tokens)
+        sendMappedEvents(writer, mapper.map(event))
+        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
         return true
       }
 
       seenNonErrorEvent = true
-      if (event.type === 'delta') {
-        fullText += event.text
-        sendSSE(input.res, event)
-        continue
-      }
+      sendMappedEvents(writer, mapper.map(event))
 
-      if (event.type === 'tool_call_start') {
-        trackToolCallDraft(event.call, toolTraceDrafts)
-        sendSSE(input.res, event)
-        continue
+      if (event.type === 'done') {
+        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+        return true
       }
-
-      if (event.type === 'tool_call_result') {
-        trackToolCallResult(event.callId, event.output, event.durationMs, toolTraceDrafts)
-        sendSSE(input.res, event)
-        continue
-      }
-
-      if (event.type === 'tool_call_error') {
-        trackToolCallError(event.callId, event.error, toolTraceDrafts)
-        sendSSE(input.res, event)
-        continue
-      }
-
-      lastDoneTrace = {
-        runtime: event.trace.runtime,
-        maxSteps: event.trace.maxSteps,
-        toolCalls: event.trace.toolCalls.length ? event.trace.toolCalls : finalizeToolCallTraces(toolTraceDrafts),
-        tokens: event.trace.tokens,
-      }
-      sendSSE(input.res, { type: 'done', trace: lastDoneTrace })
-      const toolCalls = buildAssistantToolCalls(lastDoneTrace, toolTraceDrafts)
-      persistAssistantMessage(input.sessionId, fullText, toolCalls, getDoneTraceTokens(lastDoneTrace))
-      return true
     }
 
     if (!seenEvent) return false
 
-    const fallbackTrace = finalizeToolCallTraces(toolTraceDrafts)
-    const doneEvent = {
-      type: 'done' as const,
-      trace: {
-        runtime: 'mastra-chat-agent-v1' as const,
-        maxSteps: input.maxSteps,
-        toolCalls: fallbackTrace,
-      },
-    }
-    sendSSE(input.res, doneEvent)
-    persistAssistantMessage(input.sessionId, fullText, fallbackTrace)
+    sendMappedEvents(writer, mapper.completeWithoutDone())
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
     return true
-  } catch (err: any) {
+  } catch (err) {
     if (!seenNonErrorEvent) return false
-    sendSSE(input.res, { type: 'error', error: err?.message || 'AI request failed' })
-    const toolCalls = buildAssistantToolCalls(lastDoneTrace, toolTraceDrafts)
-    persistAssistantMessage(input.sessionId, fullText, toolCalls, getDoneTraceTokens(lastDoneTrace))
+    sendMappedEvents(writer, mapper.fail(err))
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
     return true
   }
 }
 
-function persistAssistantMessage(
+function sendMappedEvents(writer: ChatResponseStreamWriter, events: ResponseStreamEvent[]): void {
+  for (const event of events) {
+    writer.send(event)
+  }
+}
+
+function persistAssistantFromWriter(
   sessionId: string,
-  content: string,
-  toolCalls: ChatToolCallTrace[] = [],
-  tokens?: ChatAgentTokenUsage,
+  state: ChatResponseStreamState,
+  options: { persistEmpty?: boolean } = {},
 ): void {
+  if (!options.persistEmpty && !state.text && state.toolCalls.length === 0) return
+
+  const trace = state.trace
+    ? {
+        schemaVersion: RESPONSE_SCHEMA_VERSION,
+        ...state.trace,
+        toolCalls: state.trace.toolCalls ?? state.toolCalls,
+      }
+    : null
+
   messageRepo.save({
     session_id: sessionId,
     role: 'assistant',
-    content,
-    tool_calls: JSON.stringify(toolCalls),
-    tokens: getTokenCount(tokens),
+    content: state.text,
+    tool_calls: trace ? JSON.stringify(trace) : null,
+    tokens: getTokenCount(state.usage),
   })
 }
 
-function getTokenCount(tokens?: ChatAgentTokenUsage): number | undefined {
-  if (!tokens) return undefined
-  const total = typeof tokens.totalTokens === 'number' ? tokens.totalTokens : undefined
-  const input = typeof tokens.inputTokens === 'number' ? tokens.inputTokens : undefined
-  const output = typeof tokens.outputTokens === 'number' ? tokens.outputTokens : undefined
+function getTokenCount(usage?: TokenUsage): number | undefined {
+  if (!usage) return undefined
+  const total = typeof usage.totalTokens === 'number' ? usage.totalTokens : undefined
+  const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined
+  const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined
   if (typeof total === 'number') return total
   if (typeof input === 'number' || typeof output === 'number') return (input || 0) + (output || 0)
   return undefined
-}
-
-function trackToolCallDraft(call: { callId: string; toolId: string; input: Record<string, unknown> }, drafts: Map<string, ToolTraceDraft>): void {
-  const existing = drafts.get(call.callId)
-  drafts.set(call.callId, {
-    callId: call.callId,
-    toolId: call.toolId,
-    input: call.input,
-    status: existing?.status,
-    outputSummary: existing?.outputSummary,
-    durationMs: existing?.durationMs,
-  })
-}
-
-function trackToolCallResult(
-  callId: string,
-  output: unknown,
-  durationMs: number | undefined,
-  drafts: Map<string, ToolTraceDraft>,
-): void {
-  const existing = drafts.get(callId)
-  if (!existing) return
-  existing.status = 'success'
-  existing.outputSummary = summarizeToolOutput(output)
-  existing.durationMs = durationMs ?? existing.durationMs
-}
-
-function trackToolCallError(callId: string, error: string, drafts: Map<string, ToolTraceDraft>): void {
-  const existing = drafts.get(callId)
-  if (!existing) return
-  existing.status = 'error'
-  existing.outputSummary = error
-}
-
-function finalizeToolCallTraces(drafts: Map<string, ToolTraceDraft>): ChatToolCallTrace[] {
-  const traces: ChatToolCallTrace[] = []
-  for (const draft of drafts.values()) {
-    if (!draft.status) continue
-    traces.push({
-      callId: draft.callId,
-      toolId: draft.toolId,
-      status: draft.status,
-      input: draft.input,
-      outputSummary: draft.outputSummary,
-      durationMs: draft.durationMs,
-    })
-  }
-  return traces
-}
-
-function summarizeToolOutput(output: unknown): string | undefined {
-  if (output === null || output === undefined) return undefined
-  if (typeof output === 'string') return output.slice(0, 160)
-  if (Array.isArray(output)) return `${output.length} items`
-  if (typeof output === 'object') {
-    const record = output as Record<string, unknown>
-    if (Array.isArray(record.results)) return `${record.results.length} results`
-    if (typeof record.summary === 'string') return record.summary
-    if (typeof record.text === 'string') return record.text.slice(0, 160)
-  }
-  return undefined
-}
-function buildAssistantToolCalls(
-  doneTrace: { toolCalls: ChatToolCallTrace[] } | null,
-  drafts: Map<string, ToolTraceDraft>,
-): ChatToolCallTrace[] {
-  return doneTrace?.toolCalls ?? finalizeToolCallTraces(drafts)
-}
-function getDoneTraceTokens(doneTrace: MastraDoneTrace | null): ChatAgentTokenUsage | undefined {
-  return doneTrace ? doneTrace.tokens : undefined
 }
