@@ -5,6 +5,11 @@ import { AVAILABLE_MODELS } from '@shared/constants'
 const platformMock = vi.hoisted(() => ({
   getLlmModels: vi.fn(),
   updateSession: vi.fn(),
+  setTheme: vi.fn(),
+  updateSettings: vi.fn(),
+  getPersonas: vi.fn(),
+  getMessages: vi.fn(),
+  getSessions: vi.fn(),
 }))
 
 vi.mock('@renderer/api', () => ({
@@ -104,5 +109,21 @@ describe('chat model dropdown data', () => {
 
     expect(platformMock.updateSession).toHaveBeenCalledWith('session-1', { model: 'agnes-2.0-flash' })
     expect(loadSessions).toHaveBeenCalled()
+  })
+  it('selects the active session streaming response for Timeline', async () => {
+    const { selectStreamingResponseForSession } = await import('./ChatPanel')
+    const activeResponse = {
+      responseId: 'r1',
+      sessionId: 's1',
+      isComplete: false,
+      blocks: [],
+    }
+
+    expect(selectStreamingResponseForSession('s1', {
+      s1: activeResponse,
+      s2: { responseId: 'r2', sessionId: 's2', isComplete: false, blocks: [] },
+    })).toBe(activeResponse)
+    expect(selectStreamingResponseForSession(null, { s1: activeResponse })).toBeNull()
+    expect(selectStreamingResponseForSession('missing', { s1: activeResponse })).toBeNull()
   })
 })

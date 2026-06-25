@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { Check, ChevronDown, Copy, Folder, FileText, Loader2, RefreshCw, Search, TerminalSquare, X } from 'lucide-react'
+import { Check, ChevronDown, Copy, FileText, Folder, Image, Loader2, RefreshCw, Search, TerminalSquare, Video, X } from 'lucide-react'
 import { cn } from '@renderer/utils'
+import type { ResponseError, ToolCallBlock } from '@shared/schemas'
 
-export interface ToolCallData {
+export interface LegacyToolCallData {
   callId: string
   toolId: string
   category: string
@@ -13,8 +14,28 @@ export interface ToolCallData {
   durationMs?: number
 }
 
+export type ToolCallData = ToolCallBlock | LegacyToolCallData
+
+type NormalizedToolCallData = {
+  callId: string
+  toolId: string
+  category: string
+  status: 'running' | 'success' | 'error'
+  input: Record<string, any>
+  output?: any
+  outputSummary?: string
+  errorMessage?: string
+  durationMs?: number
+}
+
 const CATEGORY_LABEL: Record<string, React.ReactNode> = {
+  search: <Search size={12} />,
   web: <Search size={12} />,
+  file: <Folder size={12} />,
+  shell: <TerminalSquare size={12} />,
+  image: <Image size={12} />,
+  video: <Video size={12} />,
+  tool: <span>tool</span>,
   fs: <Folder size={12} />,
   document: <FileText size={12} />,
   multimodal: <span>multimodal</span>,
@@ -29,26 +50,27 @@ function formatValue(v: any): string {
 export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: () => void }) {
   const [open, setOpen] = useState(true)
   const [copied, setCopied] = useState(false)
+  const normalized = normalizeToolCall(data)
 
   const copy = () => {
-    navigator.clipboard.writeText(JSON.stringify(data.output, null, 2))
+    navigator.clipboard.writeText(JSON.stringify(normalized.output, null, 2))
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
 
   return (
-    <div className={cn('tool-call-card', data.status === 'error' && 'error')} data-call-id={data.callId}>
+    <div className={cn('tool-call-card', normalized.status === 'error' && 'error')} data-call-id={normalized.callId}>
       <div className="tcc-head" onClick={() => setOpen(!open)}>
-        <div className="tcc-icon">{CATEGORY_LABEL[data.category] || data.category}</div>
-        <span className="tcc-name">{data.toolId}</span>
-        {data.status === 'running' && <span className="tcc-status running"><Loader2 size={11} className="spin" /> Running</span>}
-        {data.status === 'success' && (
+        <div className="tcc-icon">{CATEGORY_LABEL[normalized.category] || normalized.category}</div>
+        <span className="tcc-name">{normalized.toolId}</span>
+        {normalized.status === 'running' && <span className="tcc-status running"><Loader2 size={11} className="spin" /> Running</span>}
+        {normalized.status === 'success' && (
           <>
             <span className="tcc-status success"><Check size={11} /> Done</span>
-            {data.durationMs !== undefined && <span className="tcc-time">{data.durationMs}ms</span>}
+            {normalized.durationMs !== undefined && <span className="tcc-time">{normalized.durationMs}ms</span>}
           </>
         )}
-        {data.status === 'error' && <span className="tcc-status error"><X size={11} /> Failed</span>}
+        {normalized.status === 'error' && <span className="tcc-status error"><X size={11} /> Failed</span>}
         <ChevronDown size={13} className={cn('tcc-chevron', open && 'open')} />
       </div>
 
@@ -56,7 +78,7 @@ export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: 
         <div className="tcc-body">
           <div className="tcc-section">
             <div className="tcc-label">Parameters</div>
-            {Object.entries(data.input).map(([k, v]) => (
+            {Object.entries(normalized.input).map(([k, v]) => (
               <div key={k} className="tcc-kv">
                 <span className="tcc-key">{k}</span>
                 <span className="tcc-val">{formatValue(v)}</span>
@@ -64,28 +86,30 @@ export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: 
             ))}
           </div>
 
-          {data.status === 'running' && (
+          {normalized.status === 'running' && (
             <div className="tcc-section">
               <div className="tcc-progress-track"><div className="tcc-progress-fill" /></div>
             </div>
           )}
 
-          {data.status === 'success' && data.output && (
+          {normalized.status === 'success' && (normalized.output || normalized.outputSummary) && (
             <div className="tcc-section">
               <div className="tcc-label">Result</div>
-              <ToolResultView output={data.output} />
-              <div className="tcc-actions">
-                <button className="tcc-action-btn" onClick={copy}>
-                  {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Copied' : 'Copy result'}
-                </button>
-              </div>
+              <ToolResultView output={normalized.output ?? { description: normalized.outputSummary }} />
+              {normalized.output && (
+                <div className="tcc-actions">
+                  <button className="tcc-action-btn" onClick={copy}>
+                    {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Copied' : 'Copy result'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {data.status === 'error' && (
+          {normalized.status === 'error' && (
             <div className="tcc-section">
               <div className="tcc-label">Error</div>
-              <div className="tcc-error-box">{data.error}</div>
+              <div className="tcc-error-box">{normalized.errorMessage}</div>
               {onRetry && (
                 <div className="tcc-actions">
                   <button className="tcc-action-btn" onClick={onRetry}><RefreshCw size={11} /> Retry</button>
@@ -97,6 +121,25 @@ export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: 
       )}
     </div>
   )
+}
+
+function normalizeToolCall(data: ToolCallData): NormalizedToolCallData {
+  return {
+    callId: data.callId,
+    toolId: data.toolId,
+    category: data.category,
+    status: data.status,
+    input: data.input,
+    output: data.output,
+    outputSummary: 'outputSummary' in data ? data.outputSummary : undefined,
+    errorMessage: getErrorMessage(data.error),
+    durationMs: data.durationMs,
+  }
+}
+
+function getErrorMessage(error: string | ResponseError | undefined): string | undefined {
+  if (!error) return undefined
+  return typeof error === 'string' ? error : error.message
 }
 
 function ToolResultView({ output }: { output: any }) {

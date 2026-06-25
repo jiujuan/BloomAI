@@ -44,4 +44,48 @@ describe('ToolCallCard', () => {
     expect(html).toContain('boom')
     expect(html).toContain('Failed')
   })
+
+  it('uses ResponseError.message from v1 tool call blocks', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        data={{
+          id: 'tool-block-1',
+          type: 'tool_call',
+          callId: 'c4',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'error',
+          input: { query: 'oops' },
+          error: { code: 'TOOL_CALL_ERROR', message: 'provider failed', details: { retryable: false } },
+          createdAt: 1,
+          completedAt: 2,
+        }}
+      />
+    )
+
+    expect(html).toContain('data-call-id="c4"')
+    expect(html).toContain('provider failed')
+    expect(html).not.toContain('TOOL_CALL_ERROR')
+  })
+
+  it('falls back to a readable category label for v1 categories without icons', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        data={{
+          id: 'tool-block-2',
+          type: 'tool_call',
+          callId: 'c5',
+          toolId: 'render_video',
+          category: 'video',
+          status: 'running',
+          input: { prompt: 'bloom' },
+          createdAt: 1,
+        }}
+      />
+    )
+
+    expect(html).toContain('data-call-id="c5"')
+    expect(html).toContain('video')
+    expect(html).toContain('render_video')
+  })
 })

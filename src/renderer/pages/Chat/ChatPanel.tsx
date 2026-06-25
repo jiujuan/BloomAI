@@ -9,6 +9,7 @@ import { cn } from '@renderer/utils'
 import { platform } from '@renderer/api'
 import { AVAILABLE_MODELS, MODEL_LABELS, PERSONA_COLORS } from '@shared/constants'
 import type { Persona } from '@shared/schemas'
+import type { StreamingResponseState } from '@renderer/store/chat-response-reducer'
 
 type ChatModelOption = {
   id: string
@@ -54,6 +55,13 @@ export async function persistChatModelSelection(sessionId: string | null, model:
   if (!sessionId) return
   await platform.updateSession(sessionId, { model })
   await useSessionStore.getState().loadSessions()
+}
+
+export function selectStreamingResponseForSession(
+  activeSessionId: string | null,
+  streamingResponsesBySession: Record<string, StreamingResponseState | null>,
+): StreamingResponseState | null {
+  return activeSessionId ? (streamingResponsesBySession[activeSessionId] ?? null) : null
 }
 
 function getChatModelLabel(model: string, options: ChatModelOption[]) {
@@ -152,7 +160,16 @@ function PersonaPill({ personas, activeId, onSelect }: { personas: Persona[]; ac
 
 export function ChatPanel() {
   const { sessions, activeSessionId, updateSessionTitle } = useSessionStore()
-  const { messagesBySession, streamingText, isStreaming, streamError, sendMessage, loadMessages, toolCallsBySession } = useChatStore()
+  const {
+    messagesBySession,
+    streamingText,
+    isStreaming,
+    streamError,
+    sendMessage,
+    loadMessages,
+    toolCallsBySession,
+    streamingResponsesBySession,
+  } = useChatStore()
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
   const { settings } = useSettingsStore()
   const { textModels, loadTextModels } = useLlmStore()
@@ -160,6 +177,7 @@ export function ChatPanel() {
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
   const toolCalls = activeSessionId ? (toolCallsBySession[activeSessionId] || []) : []
+  const streamingResponse = selectStreamingResponseForSession(activeSessionId, streamingResponsesBySession)
   const model = resolveDisplayedChatModel(session?.model, settings.model)
   const modelOptions = useMemo(() => getChatModelOptions(textModels), [textModels])
 
@@ -220,6 +238,7 @@ export function ChatPanel() {
         streamingText={streamingText}
         streamError={streamError}
         toolCalls={toolCalls}
+        streamingResponse={streamingResponse}
       />
 
       <div className="chat-footer">
