@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
-import type { LlmModelSummary, ChatStreamEvent } from '@renderer/api'
-import type { Session, Message, Persona } from '@shared/schemas'
+import type { LlmModelSummary } from '@renderer/api'
+import type { MarkdownBlock, Message, Persona, Session, ToolCallBlock } from '@shared/schemas'
+import { reduceStreamingResponse, type StreamingResponseState } from './chat-response-reducer'
 
-// ── Session Store ────────────────────────────────────────────────────────────
+// Session Store
 
 interface SessionState {
   sessions: Session[]
@@ -64,7 +65,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
   }), { name: 'bloomai-sessions' })
 )
 
-// ── Chat Store ───────────────────────────────────────────────────────────────
+// Chat Store
 
 export type ToolCallState = {
   callId: string
@@ -84,6 +85,7 @@ interface ChatState {
   streamError: string | null
   tokenUsage: Record<string, { input: number; output: number }>
   toolCallsBySession: Record<string, ToolCallState[]>
+  streamingResponsesBySession: Record<string, StreamingResponseState | null>
 }
 interface ChatActions {
   loadMessages: (sessionId: string) => Promise<void>
@@ -101,6 +103,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
     streamError: null,
     tokenUsage: {},
     toolCallsBySession: {},
+    streamingResponsesBySession: {},
 
     loadMessages: async (sessionId: string) => {
       if (get().messagesBySession[sessionId]) return
@@ -114,7 +117,10 @@ export const useChatStore = create<ChatState & ChatActions>()(
 
     sendMessage: async (sessionId: string, content: string, contextOverride?: object) => {
       if (get().isStreaming) return
-      set(s => ({ toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] } }))
+      set(s => ({
+        toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] },
+        streamingResponsesBySession: { ...s.streamingResponsesBySession, [sessionId]: null },
+      }))
       const userMsg: Message = {
         id: `tmp-${Date.now()}`,
         session_id: sessionId,
@@ -132,98 +138,62 @@ export const useChatStore = create<ChatState & ChatActions>()(
         streamError: null,
       }))
 
-      // Update session order in session store
+// Session Store
       useSessionStore.setState(s => ({
         sessions: s.sessions.map(sess =>
           sess.id === sessionId ? { ...sess, updated_at: Date.now() } : sess
         ).sort((a, b) => b.updated_at - a.updated_at)
       }))
 
-      let fullText = ''
       try {
-        for await (const chunk of platform.chatStream({ sessionId, content, contextOverride })) {
-          if (chunk.type === 'delta' && chunk.text) {
-            fullText += chunk.text
-            set({ streamingText: fullText })
-            continue
-          }
-
-          if (chunk.type === 'tool_call_start') {
-            set(s => ({
-              toolCallsBySession: {
-                ...s.toolCallsBySession,
-                [sessionId]: [
-                  ...(s.toolCallsBySession[sessionId] || []).filter(call => call.callId !== chunk.call.callId),
-                  {
-                    callId: chunk.call.callId,
-                    toolId: chunk.call.toolId,
-                    category: chunk.call.category,
-                    status: 'running',
-                    input: chunk.call.input,
-                  },
-                ],
+        for await (const event of platform.chatStream({ sessionId, content, contextOverride })) {
+          set((state) => {
+            const current = state.streamingResponsesBySession[sessionId] ?? null
+            const next = reduceStreamingResponse(current, event, sessionId)
+            const nextUsage = event.type === 'usage_updated' || event.type === 'response_completed'
+              ? mergeTokenUsage(state.tokenUsage, sessionId, next?.usage)
+              : state.tokenUsage
+            return {
+              streamingResponsesBySession: {
+                ...state.streamingResponsesBySession,
+                [sessionId]: next,
               },
-            }))
-            continue
-          }
-
-          if (chunk.type === 'tool_call_result') {
-            set(s => ({
+              streamingText: deriveStreamingText(next),
               toolCallsBySession: {
-                ...s.toolCallsBySession,
-                [sessionId]: (s.toolCallsBySession[sessionId] || []).map(call =>
-                  call.callId === chunk.callId
-                    ? { ...call, status: 'success', output: chunk.output, durationMs: chunk.durationMs }
-                    : call
-                ),
+                ...state.toolCallsBySession,
+                [sessionId]: deriveToolCalls(next),
               },
-            }))
-            continue
-          }
-
-          if (chunk.type === 'tool_call_error') {
-            set(s => ({
-              toolCallsBySession: {
-                ...s.toolCallsBySession,
-                [sessionId]: (s.toolCallsBySession[sessionId] || []).map(call =>
-                  call.callId === chunk.callId
-                    ? { ...call, status: 'error', error: chunk.error }
-                    : call
-                ),
-              },
-            }))
-            continue
-          }
-
-          if (chunk.type === 'error') {
-            set({ streamError: chunk.error || 'Unknown error', isStreaming: false, streamingText: '' })
-            return
-          }
-          if (chunk.type === 'done') {
-            if (chunk.tokens) {
-              set(s => ({
-                tokenUsage: {
-                  ...s.tokenUsage,
-                  [sessionId]: chunk.tokens as { input: number; output: number }
-                }
-              }))
+              streamError: next?.error?.message ?? state.streamError,
+              tokenUsage: nextUsage,
             }
+          })
+        }
+
+        const finalResponse = get().streamingResponsesBySession[sessionId] ?? null
+        const assistantText = deriveStreamingText(finalResponse)
+        if (assistantText) {
+          const assistantMsg: Message = {
+            id: `tmp-ai-${Date.now()}`,
+            session_id: sessionId,
+            role: 'assistant',
+            content: assistantText,
+            created_at: Date.now(),
           }
+          set(s => ({
+            messagesBySession: {
+              ...s.messagesBySession,
+              [sessionId]: [...(s.messagesBySession[sessionId] || []), assistantMsg],
+            },
+          }))
         }
-        const assistantMsg: Message = {
-          id: `tmp-ai-${Date.now()}`,
-          session_id: sessionId,
-          role: 'assistant',
-          content: fullText,
-          created_at: Date.now(),
-        }
+
         set(s => ({
-          messagesBySession: {
-            ...s.messagesBySession,
-            [sessionId]: [...(s.messagesBySession[sessionId] || []), assistantMsg],
-          },
           isStreaming: false,
           streamingText: '',
+          streamingResponsesBySession: {
+            ...s.streamingResponsesBySession,
+            [sessionId]: null,
+          },
         }))
         // Reload messages from server to get real IDs
         const messages = await platform.getMessages(sessionId)
@@ -232,7 +202,15 @@ export const useChatStore = create<ChatState & ChatActions>()(
         const sessions = await platform.getSessions()
         useSessionStore.setState({ sessions })
       } catch (err: any) {
-        set({ streamError: err.message, isStreaming: false, streamingText: '' })
+        set(s => ({
+          streamError: err.message,
+          isStreaming: false,
+          streamingText: '',
+          streamingResponsesBySession: {
+            ...s.streamingResponsesBySession,
+            [sessionId]: null,
+          },
+        }))
       }
     },
 
@@ -242,7 +220,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
         delete next[sessionId]
         const nextToolCalls = { ...s.toolCallsBySession }
         delete nextToolCalls[sessionId]
-        return { messagesBySession: next, toolCallsBySession: nextToolCalls }
+        const nextStreamingResponses = { ...s.streamingResponsesBySession }
+        delete nextStreamingResponses[sessionId]
+        return { messagesBySession: next, toolCallsBySession: nextToolCalls, streamingResponsesBySession: nextStreamingResponses }
       })
     },
 
@@ -254,7 +234,44 @@ export const useChatStore = create<ChatState & ChatActions>()(
   }), { name: 'bloomai-chat' })
 )
 
-// ── Persona Store ────────────────────────────────────────────────────────────
+function deriveStreamingText(response: StreamingResponseState | null): string {
+  return response?.blocks
+    .filter((block): block is MarkdownBlock => block.type === 'markdown')
+    .map((block) => block.markdown)
+    .join('') ?? ''
+}
+
+function deriveToolCalls(response: StreamingResponseState | null): ToolCallState[] {
+  return response?.blocks
+    .filter((block): block is ToolCallBlock => block.type === 'tool_call')
+    .map((block) => ({
+      callId: block.callId,
+      toolId: block.toolId,
+      category: block.category,
+      status: block.status,
+      input: block.input,
+      output: block.output,
+      error: block.error?.message,
+      durationMs: block.durationMs,
+    })) ?? []
+}
+
+function mergeTokenUsage(
+  current: Record<string, { input: number; output: number }>,
+  sessionId: string,
+  usage: StreamingResponseState['usage'],
+): Record<string, { input: number; output: number }> {
+  if (!usage) return current
+  return {
+    ...current,
+    [sessionId]: {
+      input: usage.inputTokens ?? 0,
+      output: usage.outputTokens ?? 0,
+    },
+  }
+}
+
+// Persona Store
 
 interface PersonaState {
   personas: Persona[]
@@ -298,7 +315,7 @@ export const usePersonaStore = create<PersonaState & PersonaActions>()(
   }), { name: 'bloomai-personas' })
 )
 
-// ── Settings Store ───────────────────────────────────────────────────────────
+// Settings Store
 
 interface SettingsState {
   settings: Record<string, string>
@@ -332,7 +349,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
   }), { name: 'bloomai-settings' })
 )
 
-// ── LLM Store ───────────────────────────────────────────────────────────────
+// LLM Store
 
 interface LlmState {
   textModels: LlmModelSummary[]
@@ -386,7 +403,7 @@ export const useLlmStore = create<LlmState & LlmActions>()(
   }), { name: 'bloomai-llm' })
 )
 
-// ── UI Store ─────────────────────────────────────────────────────────────────
+// UI Store
 
 interface UIState {
   sidebarOpen: boolean

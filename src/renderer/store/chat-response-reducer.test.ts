@@ -1,0 +1,209 @@
+import { describe, expect, it } from 'vitest'
+import type { ResponseStreamEvent } from '@shared/schemas/response'
+import { reduceStreamingResponse } from './chat-response-reducer'
+
+describe('reduceStreamingResponse', () => {
+  it('creates a streaming response and appends markdown deltas', () => {
+    const events: ResponseStreamEvent[] = [
+      {
+        type: 'response_started',
+        responseId: 'response-1',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 1,
+      },
+      {
+        type: 'content_block_started',
+        responseId: 'response-1',
+        block: {
+          id: 'block-1',
+          type: 'markdown',
+          status: 'streaming',
+          role: 'answer',
+          createdAt: 2,
+        },
+      },
+      { type: 'content_delta', responseId: 'response-1', blockId: 'block-1', delta: 'Hel' },
+      { type: 'content_delta', responseId: 'response-1', blockId: 'block-1', delta: 'lo' },
+      { type: 'content_block_completed', responseId: 'response-1', blockId: 'block-1', completedAt: 3 },
+    ]
+
+    const state = reduceAll(events)
+
+    expect(state).toEqual({
+      responseId: 'response-1',
+      sessionId: 'session-1',
+      blocks: [
+        {
+          id: 'block-1',
+          type: 'markdown',
+          status: 'completed',
+          role: 'answer',
+          markdown: 'Hello',
+          createdAt: 2,
+          completedAt: 3,
+        },
+      ],
+      isComplete: false,
+    })
+  })
+
+  it('updates tool call blocks to success and error states', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-2',
+        sessionId: 'session-1',
+        runtime: 'agent-runtime',
+        createdAt: 1,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-2',
+        block: {
+          id: 'tool-block-1',
+          type: 'tool_call',
+          callId: 'call-1',
+          toolId: 'web_search',
+          category: 'web',
+          status: 'running',
+          input: { query: 'BloomAI' },
+          createdAt: 2,
+        },
+      },
+      {
+        type: 'tool_call_completed',
+        responseId: 'response-2',
+        callId: 'call-1',
+        output: { results: [{ title: 'BloomAI' }] },
+        outputSummary: '1 results',
+        durationMs: 12,
+        completedAt: 3,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-2',
+        block: {
+          id: 'tool-block-2',
+          type: 'tool_call',
+          callId: 'call-2',
+          toolId: 'shell_exec',
+          category: 'shell',
+          status: 'running',
+          input: { command: 'npm test' },
+          createdAt: 4,
+        },
+      },
+      {
+        type: 'tool_call_failed',
+        responseId: 'response-2',
+        callId: 'call-2',
+        error: { code: 'TOOL_CALL_ERROR', message: 'denied' },
+        durationMs: 5,
+        completedAt: 5,
+      },
+    ])
+
+    expect(state?.blocks).toEqual([
+      {
+        id: 'tool-block-1',
+        type: 'tool_call',
+        callId: 'call-1',
+        toolId: 'web_search',
+        category: 'web',
+        status: 'success',
+        input: { query: 'BloomAI' },
+        output: { results: [{ title: 'BloomAI' }] },
+        outputSummary: '1 results',
+        durationMs: 12,
+        createdAt: 2,
+        completedAt: 3,
+      },
+      {
+        id: 'tool-block-2',
+        type: 'tool_call',
+        callId: 'call-2',
+        toolId: 'shell_exec',
+        category: 'shell',
+        status: 'error',
+        input: { command: 'npm test' },
+        error: { code: 'TOOL_CALL_ERROR', message: 'denied' },
+        durationMs: 5,
+        createdAt: 4,
+        completedAt: 5,
+      },
+    ])
+  })
+
+  it('stores usage and marks the response complete', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-3',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 1,
+      },
+      {
+        type: 'usage_updated',
+        responseId: 'response-3',
+        usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 },
+      },
+      {
+        type: 'response_completed',
+        responseId: 'response-3',
+        usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 },
+        finishReason: 'stop',
+        completedAt: 2,
+      },
+    ])
+
+    expect(state).toMatchObject({
+      responseId: 'response-3',
+      usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 },
+      isComplete: true,
+    })
+  })
+
+  it('marks failures complete and appends an error block', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-4',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 1,
+      },
+      {
+        type: 'response_failed',
+        responseId: 'response-4',
+        error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+        completedAt: 2,
+      },
+    ])
+
+    expect(state).toEqual({
+      responseId: 'response-4',
+      sessionId: 'session-1',
+      blocks: [
+        {
+          id: 'response-4-error',
+          type: 'error',
+          status: 'failed',
+          error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+          createdAt: 2,
+          completedAt: 2,
+        },
+      ],
+      error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+      isComplete: true,
+    })
+  })
+})
+
+function reduceAll(events: ResponseStreamEvent[]) {
+  return events.reduce(
+    (current, event) => reduceStreamingResponse(current, event, 'session-1'),
+    null as ReturnType<typeof reduceStreamingResponse>,
+  )
+}

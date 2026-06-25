@@ -1,13 +1,15 @@
-// Platform abstraction — switches between Electron IPC and direct HTTP fetch
+// Platform abstraction: switches between Electron IPC and direct HTTP fetch
 // In Electron: window.bloomai exposes IPC bridge from preload
 // In future web: uses fetch + SSE directly
 
 import { API_BASE } from '@shared/constants'
+import type { ResponseStreamEvent } from '@shared/schemas/response'
+import { createChatStreamNormalizer } from './chat-stream-normalizer'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!(window as any).bloomai
 
-// ── API helpers ────────────────────────────────────────────────────────────
+// API helpers
 
 async function apiFetch(path: string, options?: RequestInit) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -87,7 +89,7 @@ export type ChatStreamEvent =
   | { type: 'done'; tokens?: { input: number; output: number } | null; trace?: unknown }
   | { type: 'error'; error: string }
 
-// ── Sessions ────────────────────────────────────────────────────────────────
+// Platform API
 
 export const platform = {
   // Sessions
@@ -165,17 +167,20 @@ export const platform = {
     return data
   },
 
-  // Chat streaming — returns an async generator of SSE events
-  async *chatStream(payload: { sessionId: string; content: string; contextOverride?: object }): AsyncGenerator<ChatStreamEvent> {
+  // Chat streaming: returns an async generator of v1 SSE events.
+  async *chatStream(payload: { sessionId: string; content: string; contextOverride?: object }): AsyncGenerator<ResponseStreamEvent> {
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     if (!res.body) throw new Error('No response body')
+
+    const normalizer = createChatStreamNormalizer({ sessionId: payload.sessionId })
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -185,11 +190,19 @@ export const platform = {
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const raw = line.slice(6).trim()
-          if (raw === '[DONE]') return
-          try { yield JSON.parse(raw) } catch { /* skip */ }
+          if (raw === '[DONE]') {
+            for (const event of normalizer.flush()) yield event
+            return
+          }
+          try {
+            const chunk = JSON.parse(raw)
+            for (const event of normalizer.normalize(chunk)) yield event
+          } catch { /* skip */ }
         }
       }
     }
+
+    for (const event of normalizer.flush()) yield event
   },
 
   // Clipboard (Electron only, graceful fallback)
