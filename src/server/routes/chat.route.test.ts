@@ -312,6 +312,76 @@ describe('chat stream route', () => {
     })
   })
 
+  it('uses agent runtime environment variables before database settings', async () => {
+    agentMock.runChatAgentV1.mockReturnValue(
+      (async function* () {
+        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 7, toolCalls: [] } }
+      })()
+    )
+    process.env.AGENT_RUNTIME_ENABLED = 'true'
+    process.env.AGENT_RUNTIME_PROVIDER = 'mastra'
+    process.env.AGENT_RUNTIME_MAX_STEPS = '7'
+    const { app, sessionRepo, settingsRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+    settingsRepo.setMany({
+      agent_runtime_enabled: 'false',
+      agent_runtime_provider: 'direct',
+      agent_runtime_max_steps: '2',
+    })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'search with env config' })
+    const sseEvents = parseSse(responseText)
+
+    expect(agentMock.runChatAgentV1).toHaveBeenCalledWith({
+      sessionId: session.id,
+      content: 'search with env config',
+      model: 'gpt-4o',
+      maxSteps: 7,
+    })
+    expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
+    expect(sseEvents[0]).toMatchObject({
+      type: 'response_started',
+      runtime: 'mastra-chat-agent-v1',
+    })
+  })
+  it('uses agent runtime values from .env before database settings', async () => {
+    const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-chat-env-'))
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(envDir)
+    agentMock.runChatAgentV1.mockReturnValue(
+      (async function* () {
+        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 6, toolCalls: [] } }
+      })()
+    )
+
+    try {
+      fs.writeFileSync(
+        path.join(envDir, '.env'),
+        [
+          'AGENT_RUNTIME_ENABLED=true',
+          'AGENT_RUNTIME_PROVIDER=mastra',
+          'AGENT_RUNTIME_MAX_STEPS=6',
+        ].join('\n'),
+      )
+      const { app, sessionRepo, settingsRepo } = await loadApp()
+      const session = sessionRepo.create({ model: 'gpt-4o' })
+      settingsRepo.setMany({
+        agent_runtime_enabled: 'false',
+        agent_runtime_provider: 'direct',
+        agent_runtime_max_steps: '2',
+      })
+
+      await postSse(app, { sessionId: session.id, content: 'search with dotenv config' })
+
+      expect(agentMock.runChatAgentV1).toHaveBeenCalledWith(expect.objectContaining({
+        content: 'search with dotenv config',
+        maxSteps: 6,
+      }))
+      expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
+    } finally {
+      cwdSpy.mockRestore()
+      fs.rmSync(envDir, { recursive: true, force: true })
+    }
+  })
   it('saves partial assistant text when streaming fails', async () => {
     llmMock.streamChatCompletion.mockReturnValue(failingEvents())
     const { app, messageRepo, sessionRepo } = await loadApp()

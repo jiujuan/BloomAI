@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { Router, Request, Response } from 'express'
 import { RESPONSE_SCHEMA_VERSION, type ResponseStreamEvent, type TokenUsage } from '@shared/schemas/response'
 import { sessionRepo } from '../db/repositories/session.repo'
@@ -20,17 +22,38 @@ function getSettingsModel(): string {
   return settingsRepo.getValue('model') || ''
 }
 
+function getEnvSettingValue(envKey: string, settingsKey: string): string {
+  const envValue = process.env[envKey]?.trim() || process.env[settingsKey]?.trim() || getDotEnvValue(envKey) || getDotEnvValue(settingsKey)
+  if (envValue) return envValue
+  return settingsRepo.getValue(settingsKey) || ''
+}
+
+function getDotEnvValue(key: string): string {
+  const envPath = path.join(process.cwd(), '.env')
+  if (!fs.existsSync(envPath)) return ''
+
+  try {
+    const content = fs.readFileSync(envPath, 'utf8')
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = content.match(new RegExp(`^\\s*(?:export\\s+)?${escapedKey}\\s*=\\s*(.*)\\s*$`, 'm'))
+    if (!match) return ''
+    return match[1].trim().replace(/^['\"]|['\"]$/g, '')
+  } catch {
+    return ''
+  }
+}
+
 function getAgentRuntimeEnabled(): boolean {
-  const value = settingsRepo.getValue('agent_runtime_enabled') || ''
+  const value = getEnvSettingValue('AGENT_RUNTIME_ENABLED', 'agent_runtime_enabled')
   return value === 'true' || value === '1'
 }
 
 function getAgentRuntimeProvider(): string {
-  return settingsRepo.getValue('agent_runtime_provider') || ''
+  return getEnvSettingValue('AGENT_RUNTIME_PROVIDER', 'agent_runtime_provider')
 }
 
 function getAgentRuntimeMaxSteps(): number {
-  const rawValue = settingsRepo.getValue('agent_runtime_max_steps') || ''
+  const rawValue = getEnvSettingValue('AGENT_RUNTIME_MAX_STEPS', 'agent_runtime_max_steps')
   const parsed = Number.parseInt(rawValue, 10)
   if (!Number.isFinite(parsed) || parsed <= 0) return 10
   return Math.min(parsed, 10)
