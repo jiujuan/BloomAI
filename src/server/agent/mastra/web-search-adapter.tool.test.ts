@@ -20,9 +20,10 @@ describe('web_search Mastra adapter tool', () => {
     expect(tool.description).toContain('Search the web')
     expect(webSearchInputSchema.safeParse({ query: 'mastra', limit: 3 }).success).toBe(true)
     expect(webSearchOutputSchema.safeParse({ query: 'mastra', total: 0, results: [] }).success).toBe(true)
-    expect(webSearchOutputSchema.parse({ query: 'mastra', total: 0, provider: 'tavily', fallbackFrom: 'tavily', results: [] })).toMatchObject({
-      provider: 'tavily',
+    expect(webSearchOutputSchema.parse({ query: 'mastra', total: 0, provider: 'duckduckgo', fallbackFrom: 'tavily', fallbackReason: 'Tavily failed', results: [] })).toMatchObject({
+      provider: 'duckduckgo',
       fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily failed',
     })
   })
 
@@ -30,6 +31,9 @@ describe('web_search Mastra adapter tool', () => {
     executeToolMock.mockResolvedValue({
       query: 'mastra',
       total: 1,
+      provider: 'duckduckgo',
+      fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily search failed with HTTP 429',
       results: [{ title: 'Mastra', url: 'https://mastra.ai', snippet: 'Agent framework' }],
     })
 
@@ -40,6 +44,9 @@ describe('web_search Mastra adapter tool', () => {
     expect(result).toEqual({
       query: 'mastra',
       total: 1,
+      provider: 'duckduckgo',
+      fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily search failed with HTTP 429',
       results: [{ title: 'Mastra', url: 'https://mastra.ai', snippet: 'Agent framework' }],
     })
   })

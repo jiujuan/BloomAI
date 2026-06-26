@@ -247,6 +247,7 @@ describe('chat stream route', () => {
     expect(events.map((event) => event.type)).toEqual([
       'response_started',
       'tool_call_started',
+      'tool_call_delta',
       'tool_call_completed',
       'content_block_started',
       'content_delta',
@@ -271,19 +272,25 @@ describe('chat stream route', () => {
       },
     })
     expect(events[2]).toMatchObject({
+      type: 'tool_call_delta',
+      responseId: events[0].responseId,
+      callId: 'call-1',
+      patch: { statusMessage: 'Searching Mastra with tavily', metadata: { query: 'Mastra', provider: 'tavily' } },
+    })
+    expect(events[3]).toMatchObject({
       type: 'tool_call_completed',
       responseId: events[0].responseId,
       callId: 'call-1',
       outputSummary: '1 results',
       durationMs: 12,
     })
-    expect(events[4]).toMatchObject({
+    expect(events[5]).toMatchObject({
       type: 'content_delta',
       responseId: events[0].responseId,
-      blockId: events[3].block.id,
+      blockId: events[4].block.id,
       delta: 'Hello from agent',
     })
-    expect(events[6]).toMatchObject({
+    expect(events[7]).toMatchObject({
       type: 'response_completed',
       responseId: events[0].responseId,
       usage: { inputTokens: 2, outputTokens: 4, totalTokens: 6, model: 'gpt-4o' },
@@ -316,6 +323,61 @@ describe('chat stream route', () => {
     })
   })
 
+  it('streams web search fallback status in the same tool call SSE group', async () => {
+    agentMock.runChatAgentV1.mockReturnValue(
+      (async function* () {
+        yield { type: 'tool_call_start', call: { callId: 'call-fallback', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'Tavily fail DuckDuckGo success' } } }
+        yield {
+          type: 'tool_call_result',
+          callId: 'call-fallback',
+          output: {
+            query: 'Tavily fail DuckDuckGo success',
+            provider: 'duckduckgo',
+            fallbackFrom: 'tavily',
+            fallbackReason: 'Tavily search failed with HTTP 429',
+            total: 2,
+            results: [{ title: 'Result', url: 'https://example.com', snippet: 'snippet' }],
+          },
+          durationMs: 42,
+        }
+        yield { type: 'delta', text: 'Answer with fallback search.' }
+        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [] } }
+      })()
+    )
+    const { app, sessionRepo, settingsRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+    settingsRepo.setMany({ agent_runtime_enabled: 'true', agent_runtime_provider: 'mastra' })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'search fallback' })
+    const events = parseSse(responseText)
+
+    expect(events.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_delta',
+      'tool_call_delta',
+      'tool_call_completed',
+      'content_block_started',
+      'content_delta',
+      'content_block_completed',
+      'response_completed',
+    ])
+    expect(events[1]).toMatchObject({ type: 'tool_call_started', block: { callId: 'call-fallback', toolId: 'web_search' } })
+    expect(events[2]).toMatchObject({ type: 'tool_call_delta', callId: 'call-fallback', patch: { statusMessage: 'Searching Tavily fail DuckDuckGo success with tavily' } })
+    expect(events[3]).toMatchObject({
+      type: 'tool_call_delta',
+      callId: 'call-fallback',
+      patch: {
+        statusMessage: 'Tavily failed; searching with duckduckgo',
+        metadata: { provider: 'duckduckgo', fallbackFrom: 'tavily', fallbackReason: 'Tavily search failed with HTTP 429', resultCount: 2 },
+      },
+    })
+    expect(events[4]).toMatchObject({
+      type: 'tool_call_completed',
+      callId: 'call-fallback',
+      outputSummary: '2 results from duckduckgo after tavily fallback',
+    })
+  })
   it('uses agent runtime environment variables before database settings', async () => {
     agentMock.runChatAgentV1.mockReturnValue(
       (async function* () {
@@ -502,6 +564,7 @@ describe('chat stream route', () => {
     expect(sseEvents.map((event) => event.type)).toEqual([
       'response_started',
       'tool_call_started',
+      'tool_call_delta',
       'response_failed',
     ])
     expect(sseEvents[1]).toMatchObject({
@@ -513,6 +576,11 @@ describe('chat stream route', () => {
       },
     })
     expect(sseEvents[2]).toMatchObject({
+      type: 'tool_call_delta',
+      callId: 'call-fail',
+      patch: { statusMessage: 'Searching BloomAI with tavily' },
+    })
+    expect(sseEvents[3]).toMatchObject({
       type: 'response_failed',
       error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed after tool' },
     })

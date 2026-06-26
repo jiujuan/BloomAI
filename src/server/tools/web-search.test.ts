@@ -89,7 +89,28 @@ describe('webSearchTool', () => {
       total: 1,
       provider: 'duckduckgo',
       fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily search failed with HTTP 429: {"error":"rate limited"}',
       results: [{ title: 'NBA trade news', url: 'https://example.com/ddg', snippet: 'NBA trade news - Latest movement' }],
+    })
+  })
+
+  it('returns a soft failure summary when all web search providers fail', async () => {
+    process.env.TAVILY_API_KEY = 'tvly-test-key'
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: 'rate limited' }, { status: 429, ok: false }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'offline' }, { status: 503, ok: false }))
+
+    const output = await webSearchTool({ query: 'NBA trades', limit: 5 }, { toolId: 'web_search', sessionId: 'session-1' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(output).toMatchObject({
+      query: 'NBA trades',
+      total: 0,
+      provider: 'duckduckgo',
+      fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily search failed with HTTP 429: {"error":"rate limited"}',
+      error: 'DuckDuckGo search failed with HTTP 503: {"error":"offline"}',
+      results: [],
     })
   })
 

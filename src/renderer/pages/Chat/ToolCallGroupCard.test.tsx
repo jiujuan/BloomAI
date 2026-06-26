@@ -29,6 +29,42 @@ describe('ToolCallGroupCard', () => {
     expect(html).toContain('data-call-id="c3"')
   })
 
+  it('shows web search fallback stage and result summary in one group row', () => {
+    const fallbackGroup = {
+      key: 'search:web_search',
+      toolId: 'web_search',
+      category: 'search' as const,
+      calls: [
+        {
+          id: 'tool-fallback',
+          type: 'tool_call' as const,
+          callId: 'call-search',
+          toolId: 'web_search',
+          category: 'search' as const,
+          status: 'success' as const,
+          input: { query: 'Tavily fail DuckDuckGo success' },
+          outputSummary: '2 results from duckduckgo after tavily fallback',
+          metadata: {
+            statusMessage: 'Tavily failed; searching with duckduckgo',
+            provider: 'duckduckgo',
+            fallbackFrom: 'tavily',
+            resultCount: 2,
+          },
+          createdAt: 1,
+          completedAt: 2,
+        },
+      ],
+    }
+
+    expect(getOverallStatus(fallbackGroup.calls)).toBe('success')
+
+    const html = renderToStaticMarkup(<ToolCallGroupCard group={fallbackGroup} />)
+
+    expect(html).toContain('data-tool-group-key="search:web_search"')
+    expect(html).toContain('1 calls')
+    expect(html).toContain('Tavily failed; searching with duckduckgo')
+    expect(html).toContain('2 results from duckduckgo after tavily fallback')
+  })
   it('reports partial_error when a completed group has both success and failed calls', () => {
     const completedMixedGroup = {
       ...group,

@@ -9,6 +9,7 @@ type WebSearchOutput = {
   results: WebSearchResult[]
   provider?: 'tavily' | 'duckduckgo'
   fallbackFrom?: 'tavily'
+  fallbackReason?: string
   error?: string
 }
 
@@ -55,6 +56,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
   })
 
   const tavilyApiKey = getTavilyApiKey()
+  let fallbackReason: string | undefined
   if (tavilyApiKey) {
     try {
       const output = await searchWithTavily({ query, limit, apiKey: tavilyApiKey, debugContext })
@@ -68,6 +70,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
       return output
     } catch (err: unknown) {
       const error = getErrorDetails(err)
+      fallbackReason = error.message
       console.warn('[web_search] provider fallback', {
         ...debugContext,
         from: 'tavily',
@@ -85,7 +88,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
   }
 
   try {
-    const output = await searchWithDuckDuckGo({ query, limit, debugContext, fallbackFrom: tavilyApiKey ? 'tavily' : undefined })
+    const output = await searchWithDuckDuckGo({ query, limit, debugContext, fallbackFrom: tavilyApiKey ? 'tavily' : undefined, fallbackReason })
     console.log('[web_search] done', {
       ...debugContext,
       provider: output.provider,
@@ -103,7 +106,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
       ...error,
       durationMs: Date.now() - startedAt,
     })
-    return { results: [], query, total: 0, provider: 'duckduckgo', fallbackFrom: tavilyApiKey ? 'tavily' : undefined, error: error.message }
+    return { results: [], query, total: 0, provider: 'duckduckgo', fallbackFrom: tavilyApiKey ? 'tavily' : undefined, fallbackReason, error: error.message }
   }
 }
 
@@ -173,6 +176,7 @@ async function searchWithDuckDuckGo(input: {
   limit: number
   debugContext: SearchDebugContext
   fallbackFrom?: 'tavily'
+  fallbackReason?: string
 }): Promise<WebSearchOutput> {
   const startedAt = Date.now()
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(input.query)}&format=json&no_html=1&skip_disambig=1`
@@ -181,6 +185,7 @@ async function searchWithDuckDuckGo(input: {
     ...input.debugContext,
     provider: 'duckduckgo',
     fallbackFrom: input.fallbackFrom,
+    fallbackReason: input.fallbackReason,
   })
 
   const res = await fetch(url, { signal: AbortSignal.timeout(DUCKDUCKGO_TIMEOUT_MS) })
@@ -220,6 +225,7 @@ async function searchWithDuckDuckGo(input: {
     total: results.length,
     provider: 'duckduckgo',
     fallbackFrom: input.fallbackFrom,
+    fallbackReason: input.fallbackReason,
   }
 }
 

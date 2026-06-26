@@ -61,6 +61,7 @@ describe('createAgentResponseEventMapper', () => {
     expect(mapped.map((event) => event.type)).toEqual([
       'response_started',
       'tool_call_started',
+      'tool_call_delta',
       'tool_call_completed',
       'content_block_started',
       'content_delta',
@@ -81,13 +82,19 @@ describe('createAgentResponseEventMapper', () => {
       },
     })
     expect(mapped[2]).toMatchObject({
+      type: 'tool_call_delta',
+      responseId: 'resp-agent',
+      callId: 'call-1',
+      patch: { statusMessage: 'Searching BloomAI with tavily', metadata: { query: 'BloomAI', provider: 'tavily' } },
+    })
+    expect(mapped[3]).toMatchObject({
       type: 'tool_call_completed',
       responseId: 'resp-agent',
       callId: 'call-1',
       outputSummary: '1 results',
       durationMs: 12,
     })
-    expect(mapped[6]).toMatchObject({
+    expect(mapped[7]).toMatchObject({
       type: 'response_completed',
       responseId: 'resp-agent',
       usage: { inputTokens: 2, outputTokens: 4, totalTokens: 6, model: 'gpt-4o' },
@@ -173,8 +180,15 @@ describe('createAgentResponseEventMapper', () => {
       'response_started',
       'tool_call_started',
       'tool_call_delta',
+      'tool_call_delta',
     ])
     expect(mapped[2]).toMatchObject({
+      type: 'tool_call_delta',
+      responseId: 'resp-agent',
+      callId: 'call-1',
+      patch: { statusMessage: 'Searching BloomAI with tavily', metadata: { query: 'BloomAI', provider: 'tavily' } },
+    })
+    expect(mapped[3]).toMatchObject({
       type: 'tool_call_delta',
       responseId: 'resp-agent',
       callId: 'call-1',
@@ -182,6 +196,68 @@ describe('createAgentResponseEventMapper', () => {
         statusMessage: 'Primary search failed, switching to fallback search',
         metadata: { provider: 'duckduckgo', fallbackFrom: 'tavily' },
       },
+    })
+  })
+  it('adds web search query and fallback stage deltas to the same tool call', () => {
+    const mapped = mapAll([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'call-search',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'running',
+          input: { query: 'Tavily fail DuckDuckGo success' },
+        },
+      },
+      {
+        type: 'tool_call_result',
+        callId: 'call-search',
+        output: {
+          query: 'Tavily fail DuckDuckGo success',
+          provider: 'duckduckgo',
+          fallbackFrom: 'tavily',
+          fallbackReason: 'Tavily search failed with HTTP 429',
+          total: 2,
+          results: [{ title: 'Result', url: 'https://example.com', snippet: 'snippet' }],
+        },
+        durationMs: 42,
+      },
+    ])
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_delta',
+      'tool_call_delta',
+      'tool_call_completed',
+    ])
+    expect(mapped[2]).toMatchObject({
+      type: 'tool_call_delta',
+      callId: 'call-search',
+      patch: {
+        statusMessage: 'Searching Tavily fail DuckDuckGo success with tavily',
+        metadata: { query: 'Tavily fail DuckDuckGo success', provider: 'tavily' },
+      },
+    })
+    expect(mapped[3]).toMatchObject({
+      type: 'tool_call_delta',
+      callId: 'call-search',
+      patch: {
+        statusMessage: 'Tavily failed; searching with duckduckgo',
+        metadata: {
+          provider: 'duckduckgo',
+          fallbackFrom: 'tavily',
+          fallbackReason: 'Tavily search failed with HTTP 429',
+          resultCount: 2,
+        },
+      },
+    })
+    expect(mapped[4]).toMatchObject({
+      type: 'tool_call_completed',
+      callId: 'call-search',
+      outputSummary: '2 results from duckduckgo after tavily fallback',
+      durationMs: 42,
     })
   })
   it('maps tool call errors into failed tool call events', () => {
@@ -242,13 +318,14 @@ describe('createAgentResponseEventMapper', () => {
     expect(mapped.map((event) => event.type)).toEqual([
       'response_started',
       'tool_call_started',
+      'tool_call_delta',
       'tool_call_failed',
       'content_block_started',
       'content_delta',
       'content_block_completed',
       'response_completed',
     ])
-    expect(mapped[6]).toMatchObject({
+    expect(mapped[7]).toMatchObject({
       type: 'response_completed',
       trace: {
         toolCalls: [

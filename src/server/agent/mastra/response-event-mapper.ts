@@ -9,9 +9,11 @@ import type {
   ResponseTrace,
   TokenUsage,
   ToolCallBlock,
+  ToolCallDeltaEvent,
   ToolCallTrace,
 } from '@shared/schemas/response'
 import { RESPONSE_SCHEMA_VERSION } from '@shared/schemas/response'
+import { sanitizeErrorMessage } from '../../logger/logger'
 import type { ChatAgentRuntimeEvent, ChatAgentTokenUsage } from './types'
 
 export type AgentResponseEventMapperOptions = {
@@ -133,6 +135,7 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
             createdAt: now(),
           } satisfies ToolCallBlock,
         })
+        events.push(...createWebSearchStartDeltas(responseId, event.call.callId, event.call.toolId, event.call.input))
         return events
       }
 
@@ -149,6 +152,28 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
       if (event.type === 'tool_call_result') {
         const outputSummary = summarizeToolOutput(event.output)
         const existing = toolTraceDrafts.get(event.callId)
+        const toolId = existing?.toolId
+        events.push(...createWebSearchResultDeltas(responseId, event.callId, event.output))
+        if (isFailedToolOutput(event.output)) {
+          const message = sanitizeErrorMessage(event.output.error, 'Tool call failed')
+          if (existing) {
+            toolTraceDrafts.set(event.callId, {
+              ...existing,
+              status: 'error',
+              outputSummary: message,
+              durationMs: event.durationMs,
+            })
+          }
+          events.push({
+            type: 'tool_call_failed',
+            responseId,
+            callId: event.callId,
+            error: { code: toolId === 'web_search' ? 'WEB_SEARCH_FAILED' : 'TOOL_CALL_ERROR', message },
+            durationMs: event.durationMs,
+            completedAt: now(),
+          })
+          return events
+        }
         if (existing) {
           toolTraceDrafts.set(event.callId, {
             ...existing,
@@ -182,7 +207,7 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
           type: 'tool_call_failed',
           responseId,
           callId: event.callId,
-          error: { code: 'TOOL_CALL_ERROR', message: event.error },
+          error: { code: 'TOOL_CALL_ERROR', message: sanitizeErrorMessage(event.error, 'Tool call failed') },
           completedAt: now(),
         })
         return events
@@ -205,7 +230,7 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
       events.push({
         type: 'response_failed',
         responseId,
-        error: { code: 'AGENT_RUNTIME_ERROR', message: event.error },
+        error: { code: 'AGENT_RUNTIME_ERROR', message: sanitizeErrorMessage(event.error, 'Agent request failed') },
         completedAt: now(),
       })
       return events
@@ -231,7 +256,7 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
         {
           type: 'response_failed',
           responseId,
-          error: { code: 'AGENT_RUNTIME_ERROR', message: getErrorMessage(error, 'Agent request failed') },
+          error: { code: 'AGENT_RUNTIME_ERROR', message: sanitizeErrorMessage(error, 'Agent request failed') },
           completedAt: now(),
         } satisfies ResponseFailedEvent,
       ]
@@ -255,11 +280,73 @@ export function summarizeToolOutput(output: unknown): string | undefined {
   if (Array.isArray(output)) return `${output.length} items`
   if (typeof output === 'object') {
     const record = output as Record<string, unknown>
-    if (Array.isArray(record.results)) return `${record.results.length} results`
+    if (Array.isArray(record.results)) return summarizeSearchOutput(record, getSearchResultCount(record))
     if (typeof record.summary === 'string') return record.summary
     if (typeof record.text === 'string') return record.text.slice(0, 160)
   }
   return undefined
+}
+
+function createWebSearchStartDeltas(
+  responseId: string,
+  callId: string,
+  toolId: string,
+  input: Record<string, unknown>,
+): ToolCallDeltaEvent[] {
+  if (toolId !== 'web_search') return []
+  const query = typeof input.query === 'string' ? input.query : undefined
+  if (!query) return []
+  return [{
+    type: 'tool_call_delta',
+    responseId,
+    callId,
+    patch: {
+      statusMessage: `Searching ${query} with tavily`,
+      metadata: { query, provider: 'tavily' },
+    },
+  }]
+}
+
+function createWebSearchResultDeltas(responseId: string, callId: string, output: unknown): ToolCallDeltaEvent[] {
+  const record = asRecord(output)
+  if (!record || record.provider !== 'duckduckgo' || record.fallbackFrom !== 'tavily') return []
+  const resultCount = getSearchResultCount(record)
+  return [{
+    type: 'tool_call_delta',
+    responseId,
+    callId,
+    patch: {
+      statusMessage: 'Tavily failed; searching with duckduckgo',
+      metadata: {
+        provider: 'duckduckgo',
+        fallbackFrom: 'tavily',
+        ...(typeof record.fallbackReason === 'string' ? { fallbackReason: record.fallbackReason } : {}),
+        resultCount,
+      },
+    },
+  }]
+}
+
+function summarizeSearchOutput(record: Record<string, unknown>, resultCount: number): string {
+  const provider = typeof record.provider === 'string' ? record.provider : undefined
+  const fallbackFrom = typeof record.fallbackFrom === 'string' ? record.fallbackFrom : undefined
+  if (provider && fallbackFrom) return `${resultCount} results from ${provider} after ${fallbackFrom} fallback`
+  if (provider) return `${resultCount} results from ${provider}`
+  return `${resultCount} results`
+}
+
+function isFailedToolOutput(output: unknown): output is { error: string } {
+  const record = asRecord(output)
+  return typeof record?.error === 'string' && record.error.length > 0
+}
+
+function getSearchResultCount(record: Record<string, unknown>): number {
+  if (typeof record.total === 'number') return record.total
+  return Array.isArray(record.results) ? record.results.length : 0
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
 
 function normalizeTokenUsage(tokens: ChatAgentTokenUsage | undefined, model: string): TokenUsage | undefined {
@@ -280,8 +367,3 @@ function normalizeTokenUsage(tokens: ChatAgentTokenUsage | undefined, model: str
   }
 }
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === 'string' && error) return error
-  return fallback
-}
