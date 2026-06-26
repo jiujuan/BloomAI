@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Check, ChevronDown, Copy, FileText, Folder, Image, Loader2, RefreshCw, Search, TerminalSquare, Video, X } from 'lucide-react'
 import { cn } from '@renderer/utils'
 import type { ResponseError, ToolCallBlock } from '@shared/schemas'
+import { isKnownResponseErrorCode, resolveErrorTimeline } from '@shared/llm-response-contract/error-timeline-registry'
 
 export interface LegacyToolCallData {
   callId: string
@@ -139,7 +140,12 @@ function normalizeToolCall(data: ToolCallData): NormalizedToolCallData {
 
 function getErrorMessage(error: string | ResponseError | undefined): string | undefined {
   if (!error) return undefined
-  return typeof error === 'string' ? error : error.message
+  if (typeof error === 'string') return error
+  const definition = resolveErrorTimeline(error)
+  if (isKnownResponseErrorCode(error.code)) {
+    return `${error.code}: ${definition.timelineMessage} - ${error.message}`
+  }
+  return error.message
 }
 
 function ToolResultView({ output }: { output: any }) {

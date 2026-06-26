@@ -1043,3 +1043,51 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .editor-btn:hover { background: var(--bg-secondary); }
 .editor-btn.primary { background: var(--bg-info); border-color: var(--border-info); color: var(--text-info); }
 .editor-btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.timeline-wait-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  margin: 4px 0 6px 44px;
+  padding: 6px 10px;
+  border: 0.5px solid var(--border-tertiary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.timeline-error-block {
+  margin: 4px 0 6px 44px;
+  max-width: 720px;
+  border: 0.5px solid var(--border-danger);
+  border-radius: var(--radius-md);
+  background: var(--bg-danger);
+  color: var(--text-danger);
+  padding: 8px 10px;
+}
+.timeline-error-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.timeline-error-message { font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+
+.tool-call-group-card.partial_error,
+.tool-call-group-card.interrupted { border-color: var(--border-danger); }
+.tcg-status.partial_error,
+.tcg-section-status.partial_error,
+.tcg-status.interrupted,
+.tcg-section-status.interrupted { background: var(--bg-danger); color: var(--text-danger); }
+.tcg-call-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.tcg-call-index { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.tcg-call-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 11px; }
+.tcg-call-summary { color: var(--text-secondary); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.tcg-call-error { color: var(--text-danger); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.tcg-call-time { color: var(--text-tertiary); font-size: 10px; font-family: var(--font-mono); white-space: nowrap; }

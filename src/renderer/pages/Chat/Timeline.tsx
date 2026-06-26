@@ -1,11 +1,14 @@
 import React, { useEffect, useRef } from 'react'
+import { Loader2 } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolCallGroupCard, createToolCallGroupKey, type ToolCallGroup } from './ToolCallGroupCard'
 import type { ToolCallState } from '@renderer/store'
 import type { StreamingResponseState } from '@renderer/store/chat-response-reducer'
 import { formatDate } from '@renderer/utils'
-import type { Message, ResponseContentBlock } from '@shared/schemas'
+import type { ErrorBlock, Message, ResponseContentBlock } from '@shared/schemas'
+import { resolveErrorTimeline } from '@shared/llm-response-contract/error-timeline-registry'
+import { getTimelineStateDefinition } from '@shared/llm-response-contract/timeline-state-registry'
 
 interface TimelineProps {
   messages: Message[]
@@ -26,7 +29,12 @@ function DateDivider({ label }: { label: string }) {
   )
 }
 
-export function shouldShowStreamingBubble(isStreaming: boolean, streamingText: string): boolean {
+export function shouldShowStreamingBubble(
+  isStreaming: boolean,
+  streamingText: string,
+  streamingResponse: StreamingResponseState | null = null,
+): boolean {
+  if (streamingResponse) return false
   return isStreaming || streamingText.length > 0
 }
 
@@ -53,7 +61,6 @@ export function Timeline({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, isStreaming, streamingText, toolCalls.length, activeBlocks?.length])
 
-  // Group messages by date
   const grouped: Array<{ type: 'date'; label: string } | { type: 'message'; message: Message }> = []
   let lastDate = ''
   for (const msg of messages) {
@@ -71,9 +78,9 @@ export function Timeline({
 
   return (
     <div className="timeline" role="log" aria-label="Conversation" aria-live="polite">
-      {messages.length === 0 && !isStreaming && (
+      {messages.length === 0 && !isStreaming && !streamingResponse && (
         <div className="timeline-empty">
-          <div className="timeline-empty-icon">🌸</div>
+          <div className="timeline-empty-icon">Bloom</div>
           <h2 className="timeline-empty-title">BloomAI is ready</h2>
           <p className="timeline-empty-desc">Ask me anything -I'm here to help with coding, writing, analysis, and more.</p>
           <div className="timeline-empty-suggestions">
@@ -90,13 +97,13 @@ export function Timeline({
           : <MessageBubble key={item.message.id} message={item.message} />
       )}
 
-      {activeBlocks
-        ? groupStreamingBlocks(activeBlocks).map(renderStreamingItem)
+      {streamingResponse
+        ? renderStreamingResponse(streamingResponse)
         : (
           <>
             {toolCallItems}
 
-            {shouldShowStreamingBubble(isStreaming, streamingText) && (
+            {shouldShowStreamingBubble(isStreaming, streamingText, streamingResponse) && (
               <MessageBubble
                 message={{ id: 'streaming', session_id: '', role: 'assistant', content: '', created_at: Date.now() }}
                 isStreaming
@@ -117,9 +124,26 @@ export function Timeline({
   )
 }
 
+function renderStreamingResponse(response: StreamingResponseState) {
+  if (response.blocks.length === 0 && !response.isComplete && !response.error) {
+    return <TimelineWaitState />
+  }
+  return groupStreamingBlocks(response.blocks).map(renderStreamingItem)
+}
+
+function TimelineWaitState() {
+  const definition = getTimelineStateDefinition('response_started_no_block')
+  return (
+    <div className="timeline-wait-state" role="status" aria-live="polite">
+      <Loader2 size={13} className="spin" aria-hidden="true" />
+      <span>{definition.label}</span>
+    </div>
+  )
+}
+
 type StreamingRenderItem = ResponseContentBlock | { type: 'tool_call_group'; group: ToolCallGroup }
 
-function groupStreamingBlocks(blocks: ResponseContentBlock[]): StreamingRenderItem[] {
+export function groupStreamingBlocks(blocks: ResponseContentBlock[]): StreamingRenderItem[] {
   const items: StreamingRenderItem[] = []
   for (const block of blocks) {
     if (block.type !== 'tool_call') {
@@ -154,7 +178,7 @@ function renderStreamingBlock(block: ResponseContentBlock) {
     return (
       <MessageBubble
         key={block.id}
-        message={{ id: block.id, session_id: '', role: 'assistant', content: '', created_at: block.createdAt }}
+        message={{ id: block.id, session_id: '', role: 'assistant', content: block.markdown, created_at: block.createdAt }}
         isStreaming={block.status === 'streaming' || block.status === 'pending'}
         streamText={block.markdown}
       />
@@ -166,12 +190,26 @@ function renderStreamingBlock(block: ResponseContentBlock) {
   }
 
   if (block.type === 'error') {
-    return (
-      <div key={block.id} className="stream-error" role="alert">
-        <span>Warning: {block.error.message}</span>
-      </div>
-    )
+    return <TimelineErrorBlock key={block.id} block={block} />
+  }
+
+  if (block.type === 'artifact') {
+    return <SystemBadge key={block.id} text={`${block.title} (${block.artifactType})`} />
+  }
+
+  if (block.type === 'citation') {
+    return <SystemBadge key={block.id} text={`${block.citations.length} citations`} />
   }
 
   return null
+}
+
+function TimelineErrorBlock({ block }: { block: ErrorBlock }) {
+  const definition = resolveErrorTimeline(block.error)
+  return (
+    <div className="timeline-error-block" role="alert" data-error-code={block.error.code}>
+      <div className="timeline-error-title">{definition.timelineMessage}</div>
+      <div className="timeline-error-message">{block.error.message}</div>
+    </div>
+  )
 }

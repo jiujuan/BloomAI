@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Check, ChevronDown, FileText, Folder, Image, Loader2, Search, TerminalSquare, Video, X } from 'lucide-react'
+import { Check, ChevronDown, FileText, Folder, Image, Loader2, Search, TerminalSquare, Video, X, AlertTriangle, Ban } from 'lucide-react'
 import { cn } from '@renderer/utils'
 import type { ResponseError, ToolCallBlock } from '@shared/schemas'
 
@@ -10,20 +10,26 @@ export type ToolCallGroup = {
   calls: ToolCallBlock[]
 }
 
-type ToolStatus = ToolCallBlock['status']
+type BaseToolStatus = ToolCallBlock['status']
+export type ToolGroupStatus = BaseToolStatus | 'partial_error' | 'interrupted'
+type ToolStatusSection = BaseToolStatus | 'interrupted'
 
-const STATUS_ORDER: ToolStatus[] = ['running', 'success', 'error']
+const STATUS_ORDER: ToolStatusSection[] = ['running', 'success', 'error', 'interrupted']
 
-const STATUS_LABEL: Record<ToolStatus, string> = {
+const STATUS_LABEL: Record<ToolGroupStatus, string> = {
   running: 'Running',
   success: 'Done',
   error: 'Failed',
+  partial_error: 'Partial failed',
+  interrupted: 'Interrupted',
 }
 
-const STATUS_ICON: Record<ToolStatus, React.ReactNode> = {
+const STATUS_ICON: Record<ToolGroupStatus, React.ReactNode> = {
   running: <Loader2 size={11} className="spin" />,
   success: <Check size={11} />,
   error: <X size={11} />,
+  partial_error: <AlertTriangle size={11} />,
+  interrupted: <Ban size={11} />,
 }
 
 const CATEGORY_ICON: Record<string, React.ReactNode> = {
@@ -47,12 +53,17 @@ export function ToolCallGroupCard({ group }: { group: ToolCallGroup }) {
     running: true,
     success: true,
     error: true,
+    interrupted: true,
   })
   const statusGroups = useMemo(() => groupCallsByStatus(group.calls), [group.calls])
   const overallStatus = getOverallStatus(group.calls)
 
   return (
-    <div className={cn('tool-call-group-card', overallStatus === 'error' && 'error')} data-tool-group-key={group.key}>
+    <div
+      className={cn('tool-call-group-card', overallStatus)}
+      data-tool-group-key={group.key}
+      data-tool-group-status={overallStatus}
+    >
       <button className="tcg-head" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="tcg-icon">{CATEGORY_ICON[group.category] || group.category}</span>
         <span className="tcg-name">{group.toolId}</span>
@@ -68,7 +79,7 @@ export function ToolCallGroupCard({ group }: { group: ToolCallGroup }) {
             if (!calls.length) return null
             const sectionOpen = openStatuses[status] ?? true
             return (
-              <div key={status} className="tcg-section">
+              <div key={status} className="tcg-section" data-tool-section-status={status}>
                 <button
                   type="button"
                   className="tcg-section-head"
@@ -93,10 +104,15 @@ export function ToolCallGroupCard({ group }: { group: ToolCallGroup }) {
 }
 
 function ToolCallSummaryRow({ call, index }: { call: ToolCallBlock; index: number }) {
+  const statusMessage = typeof call.metadata?.statusMessage === 'string'
+    ? call.metadata.statusMessage
+    : undefined
+
   return (
     <div className="tcg-call-row" data-call-id={call.callId}>
       <span className="tcg-call-index">#{index}</span>
       <span className="tcg-call-main">{formatInput(call.input)}</span>
+      {statusMessage && <span className="tcg-call-summary">{statusMessage}</span>}
       {call.outputSummary && <span className="tcg-call-summary">{call.outputSummary}</span>}
       {call.error && <span className="tcg-call-error">{getErrorMessage(call.error)}</span>}
       {call.durationMs !== undefined && <span className="tcg-call-time">{call.durationMs}ms</span>}
@@ -104,17 +120,26 @@ function ToolCallSummaryRow({ call, index }: { call: ToolCallBlock; index: numbe
   )
 }
 
-function groupCallsByStatus(calls: ToolCallBlock[]): Record<ToolStatus, ToolCallBlock[]> {
-  return calls.reduce<Record<ToolStatus, ToolCallBlock[]>>((groups, call) => {
-    groups[call.status].push(call)
+export function groupCallsByStatus(calls: ToolCallBlock[]): Record<ToolStatusSection, ToolCallBlock[]> {
+  return calls.reduce<Record<ToolStatusSection, ToolCallBlock[]>>((groups, call) => {
+    const status = isInterrupted(call) ? 'interrupted' : call.status
+    groups[status].push(call)
     return groups
-  }, { running: [], success: [], error: [] })
+  }, { running: [], success: [], error: [], interrupted: [] })
 }
 
-function getOverallStatus(calls: ToolCallBlock[]): ToolStatus {
+export function getOverallStatus(calls: ToolCallBlock[]): ToolGroupStatus {
+  if (calls.some(isInterrupted)) return 'interrupted'
   if (calls.some((call) => call.status === 'running')) return 'running'
-  if (calls.some((call) => call.status === 'error')) return 'error'
+  const hasSuccess = calls.some((call) => call.status === 'success')
+  const hasError = calls.some((call) => call.status === 'error')
+  if (hasSuccess && hasError) return 'partial_error'
+  if (hasError) return 'error'
   return 'success'
+}
+
+function isInterrupted(call: ToolCallBlock): boolean {
+  return call.metadata?.interrupted === true || call.error?.code === 'STREAM_ABORTED'
 }
 
 function formatInput(input: Record<string, unknown>): string {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Timeline, shouldShowStreamingBubble } from './Timeline'
+import { Timeline, groupStreamingBlocks, shouldShowStreamingBubble } from './Timeline'
 
 describe('Timeline', () => {
   it('shows streaming bubble when text exists', () => {
@@ -131,5 +131,92 @@ describe('Timeline', () => {
     expect(html).toContain('tool-call-card')
     expect(html).toContain('data-call-id="c1"')
     expect(html.indexOf('tool-call-card')).toBeLessThan(html.indexOf('typing'))
+  })
+
+  it('shows a lightweight wait state for response_started_no_block without an empty assistant bubble', () => {
+    expect(shouldShowStreamingBubble(true, '', { responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
+
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming
+        streamingText=""
+        streamError={null}
+        streamingResponse={{ responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any}
+      />
+    )
+
+    expect(html).toContain('timeline-wait-state')
+    expect(html).not.toContain('message-bubble')
+  })
+
+  it('renders response failures before content as registry-mapped errors without empty assistant bubbles', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingText=""
+        streamError={null}
+        streamingResponse={{
+          responseId: 'r-fail',
+          sessionId: 's1',
+          isComplete: true,
+          error: { code: 'STREAM_ABORTED', message: 'raw aborted' },
+          blocks: [
+            { id: 'err-1', type: 'error', status: 'failed', error: { code: 'STREAM_ABORTED', message: 'raw aborted' }, createdAt: 1, completedAt: 1 },
+          ],
+        } as any}
+      />
+    )
+
+    expect(html).toContain('timeline-error-block')
+    expect(html).toContain('raw aborted')
+    expect(html).not.toContain('id=&quot;streaming&quot;')
+  })
+
+  it('renders partial answer and error when a response fails after content', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingText=""
+        streamError={null}
+        streamingResponse={{
+          responseId: 'r-partial',
+          sessionId: 's1',
+          isComplete: true,
+          error: { code: 'LLM_PROVIDER_ERROR', message: 'provider failed' },
+          blocks: [
+            { id: 'md-1', type: 'markdown', status: 'completed', markdown: 'Partial answer', createdAt: 1, completedAt: 2 },
+            { id: 'err-1', type: 'error', status: 'failed', error: { code: 'LLM_PROVIDER_ERROR', message: 'provider failed' }, createdAt: 3, completedAt: 3 },
+          ],
+        } as any}
+      />
+    )
+
+    expect(html).toContain('Partial answer')
+    expect(html).toContain('provider failed')
+    expect(html.indexOf('Partial answer')).toBeLessThan(html.indexOf('provider failed'))
+  })
+
+  it('keeps five adjacent web_search calls in a single group and splits across markdown', () => {
+    const fiveSearches = Array.from({ length: 5 }, (_, index) => ({
+      id: `tool-${index}`,
+      type: 'tool_call' as const,
+      callId: `c${index}`,
+      toolId: 'web_search',
+      category: 'web' as const,
+      status: 'success' as const,
+      input: { query: String(index) },
+      createdAt: index,
+      completedAt: index + 1,
+    }))
+
+    expect(groupStreamingBlocks(fiveSearches)).toHaveLength(1)
+    expect(groupStreamingBlocks([
+      fiveSearches[0],
+      { id: 'md', type: 'markdown' as const, status: 'completed' as const, markdown: 'break', createdAt: 6, completedAt: 7 },
+      fiveSearches[1],
+    ])).toHaveLength(3)
   })
 })

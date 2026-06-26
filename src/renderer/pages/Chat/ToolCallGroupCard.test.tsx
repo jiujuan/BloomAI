@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ToolCallGroupCard } from './ToolCallGroupCard'
+import { ToolCallGroupCard, getOverallStatus, groupCallsByStatus } from './ToolCallGroupCard'
 
 const group = {
   key: 'web:web_search',
@@ -27,5 +27,43 @@ describe('ToolCallGroupCard', () => {
     expect(html).toContain('data-call-id="c1"')
     expect(html).toContain('data-call-id="c2"')
     expect(html).toContain('data-call-id="c3"')
+  })
+
+  it('reports partial_error when a completed group has both success and failed calls', () => {
+    const completedMixedGroup = {
+      ...group,
+      calls: [group.calls[0], group.calls[2]],
+    }
+
+    expect(getOverallStatus(completedMixedGroup.calls)).toBe('partial_error')
+
+    const html = renderToStaticMarkup(<ToolCallGroupCard group={completedMixedGroup} />)
+
+    expect(html).toContain('Partial failed')
+    expect(html).toContain('partial_error')
+  })
+
+  it('reports interrupted when any call was interrupted by a response failure', () => {
+    const interruptedGroup = {
+      ...group,
+      calls: [
+        { ...group.calls[0] },
+        {
+          ...group.calls[1],
+          status: 'error' as const,
+          error: { code: 'STREAM_ABORTED', message: 'aborted' },
+          metadata: { interrupted: true },
+          completedAt: 6,
+        },
+      ],
+    }
+
+    expect(getOverallStatus(interruptedGroup.calls)).toBe('interrupted')
+    expect(groupCallsByStatus(interruptedGroup.calls).interrupted.map((call) => call.callId)).toEqual(['c2'])
+
+    const html = renderToStaticMarkup(<ToolCallGroupCard group={interruptedGroup} />)
+
+    expect(html).toContain('Interrupted')
+    expect(html).toContain('data-tool-group-status="interrupted"')
   })
 })

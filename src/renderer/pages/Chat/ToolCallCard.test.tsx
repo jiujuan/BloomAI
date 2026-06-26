@@ -65,7 +65,6 @@ describe('ToolCallCard', () => {
 
     expect(html).toContain('data-call-id="c4"')
     expect(html).toContain('provider failed')
-    expect(html).not.toContain('TOOL_CALL_ERROR')
   })
 
   it('falls back to a readable category label for v1 categories without icons', () => {
@@ -87,5 +86,27 @@ describe('ToolCallCard', () => {
     expect(html).toContain('data-call-id="c5"')
     expect(html).toContain('video')
     expect(html).toContain('render_video')
+  })
+
+  it('uses the error timeline registry label for known response errors', () => {
+    const html = renderToStaticMarkup(
+      <ToolCallCard
+        data={{
+          id: 'tool-block-3',
+          type: 'tool_call',
+          callId: 'c6',
+          toolId: 'web_search',
+          category: 'web',
+          status: 'error',
+          input: { query: 'oops' },
+          error: { code: 'STREAM_ABORTED', message: 'user cancelled' },
+          createdAt: 1,
+          completedAt: 2,
+        }}
+      />
+    )
+
+    expect(html).toContain('user cancelled')
+    expect(html).toContain('STREAM_ABORTED')
   })
 })
