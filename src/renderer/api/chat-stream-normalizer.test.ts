@@ -140,7 +140,52 @@ describe('createChatStreamNormalizer', () => {
     }
 
     expect(normalizer.normalize(event)).toEqual([event])
-    expect(normalizer.flush()).toEqual([])
+  })
+
+  it('passes v1 tool status messages through unchanged', () => {
+    const normalizer = createChatStreamNormalizer({ sessionId: 'session-1' })
+    const event: ResponseStreamEvent = {
+      type: 'tool_call_delta',
+      responseId: 'response-v1',
+      callId: 'call-1',
+      patch: { statusMessage: 'Searching docs' },
+    }
+
+    expect(normalizer.normalize(event)).toEqual([event])
+  })
+
+  it('flushes an unfinished v1 stream as a completed v1 response', () => {
+    const normalizer = createChatStreamNormalizer({
+      sessionId: 'session-1',
+      now: createNow(500),
+    })
+
+    expect(normalizer.normalize({
+      type: 'response_started',
+      responseId: 'response-v1',
+      sessionId: 'session-1',
+      runtime: 'agent-runtime',
+      createdAt: 1,
+    })).toEqual([{
+      type: 'response_started',
+      responseId: 'response-v1',
+      sessionId: 'session-1',
+      runtime: 'agent-runtime',
+      createdAt: 1,
+    }])
+
+    expect(normalizer.flush()).toEqual([{
+      type: 'response_completed',
+      responseId: 'response-v1',
+      usage: undefined,
+      trace: {
+        schemaVersion: 'bloom-response-v1',
+        runtime: 'agent-runtime',
+        finishReason: 'stop',
+      },
+      finishReason: 'stop',
+      completedAt: 500,
+    }])
   })
 
   it('flushes an unfinished legacy stream as a completed v1 response', () => {
@@ -200,6 +245,58 @@ describe('createChatStreamNormalizer', () => {
       },
     ])
     expect(normalizer.flush()).toEqual([])
+  })
+  it('maps aborts and disconnects into STREAM_ABORTED failures', () => {
+    const normalizer = createChatStreamNormalizer({
+      sessionId: 'session-1',
+      responseId: 'response-5',
+      now: createNow(600),
+    })
+
+    expect(normalizer.fail(new DOMException('The operation was aborted', 'AbortError'))).toEqual([
+      {
+        type: 'response_started',
+        responseId: 'response-5',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 600,
+      },
+      {
+        type: 'response_failed',
+        responseId: 'response-5',
+        error: { code: 'STREAM_ABORTED', message: 'The operation was aborted' },
+        completedAt: 601,
+      },
+    ])
+    expect(normalizer.flush()).toEqual([])
+  })
+
+  it('turns malformed or unknown chunks into visible response failures', () => {
+    const normalizer = createChatStreamNormalizer({
+      sessionId: 'session-1',
+      responseId: 'response-6',
+      now: createNow(700),
+    })
+
+    expect(normalizer.normalize({ type: 'wat' })).toEqual([
+      {
+        type: 'response_started',
+        responseId: 'response-6',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 700,
+      },
+      {
+        type: 'response_failed',
+        responseId: 'response-6',
+        error: {
+          code: 'MALFORMED_CHAT_STREAM_EVENT',
+          message: 'Received an unknown chat stream event.',
+          details: { type: 'wat' },
+        },
+        completedAt: 701,
+      },
+    ])
   })
 })
 

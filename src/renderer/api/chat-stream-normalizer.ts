@@ -1,5 +1,6 @@
 import {
   RESPONSE_SCHEMA_VERSION,
+  type ResponseError,
   type ResponseRuntime,
   type ResponseStreamEvent,
   type TokenUsage,
@@ -13,6 +14,7 @@ export type LegacyChatStreamEvent =
   | { type: 'tool_call_error'; callId: string; error: string }
   | { type: 'done'; tokens?: { input: number; output: number } | null; trace?: unknown }
   | { type: 'error'; error: string }
+  | { type: 'abort' | 'disconnect'; error?: unknown; message?: string }
 
 export type LegacyToolCallView = {
   callId: string
@@ -28,12 +30,13 @@ export function createChatStreamNormalizer(input: {
   now?: () => number
   idFactory?: () => string
 }): {
-  normalize(chunk: LegacyChatStreamEvent | ResponseStreamEvent): ResponseStreamEvent[]
+  normalize(chunk: unknown): ResponseStreamEvent[]
+  fail(error: unknown): ResponseStreamEvent[]
   flush(): ResponseStreamEvent[]
 } {
   const now = input.now ?? Date.now
   const idFactory = input.idFactory ?? createId
-  const responseId = input.responseId ?? idFactory()
+  let responseId = input.responseId ?? idFactory()
   let responseStarted = false
   let contentStarted = false
   let contentCompleted = false
@@ -86,6 +89,20 @@ export function createChatStreamNormalizer(input: {
     }]
   }
 
+  function failResponse(error: ResponseError): ResponseStreamEvent[] {
+    if (completed || failed) return []
+    failed = true
+    return [
+      ...startResponse(runtime),
+      {
+        type: 'response_failed',
+        responseId,
+        error,
+        completedAt: now(),
+      },
+    ]
+  }
+
   function completeResponse(): ResponseStreamEvent[] {
     if (completed || failed) return []
     completed = true
@@ -107,15 +124,39 @@ export function createChatStreamNormalizer(input: {
   }
 
   return {
-    normalize(chunk: LegacyChatStreamEvent | ResponseStreamEvent): ResponseStreamEvent[] {
+    normalize(chunk: unknown): ResponseStreamEvent[] {
       if (isResponseStreamEvent(chunk)) {
-        responseStarted = responseStarted || chunk.type === 'response_started'
+        if (chunk.type === 'response_started') {
+          responseStarted = true
+          legacyStarted = true
+          responseId = chunk.responseId
+          runtime = chunk.runtime
+        }
+        if (chunk.type === 'content_block_started') {
+          contentStarted = true
+          contentCompleted = false
+          blockId = chunk.block.id
+        }
+        if (chunk.type === 'content_block_completed') {
+          contentCompleted = true
+        }
+        if (chunk.type === 'usage_updated') {
+          usage = chunk.usage
+        }
         completed = completed || chunk.type === 'response_completed'
         failed = failed || chunk.type === 'response_failed'
         return [chunk]
       }
 
       if (completed || failed) return []
+
+      if (!isLegacyChatStreamEvent(chunk)) {
+        return failResponse({
+          code: 'MALFORMED_CHAT_STREAM_EVENT',
+          message: 'Received an unknown chat stream event.',
+          details: chunk,
+        })
+      }
 
       if (chunk.type === 'delta') {
         return [
@@ -196,26 +237,34 @@ export function createChatStreamNormalizer(input: {
         ]
       }
 
-      failed = true
-      return [
-        ...startResponse(runtime),
-        {
-          type: 'response_failed',
-          responseId,
-          error: { code: 'LEGACY_CHAT_STREAM_ERROR', message: chunk.error },
-          completedAt: now(),
-        },
-      ]
+      if (chunk.type === 'abort' || chunk.type === 'disconnect') {
+        return failResponse(createStreamFailure(chunk.error ?? chunk.message ?? chunk.type))
+      }
+
+      if (chunk.type === 'error') {
+        return failResponse({ code: 'LEGACY_CHAT_STREAM_ERROR', message: chunk.error })
+      }
+
+      return failResponse({
+        code: 'MALFORMED_CHAT_STREAM_EVENT',
+        message: 'Received an unknown chat stream event.',
+        details: chunk,
+      })
+    },
+
+    fail(error: unknown): ResponseStreamEvent[] {
+      return failResponse(createStreamFailure(error))
     },
 
     flush(): ResponseStreamEvent[] {
-      if (!legacyStarted || !responseStarted || completed || failed) return []
+      if (!responseStarted || completed || failed) return []
       return completeResponse()
     },
   }
 }
 
-function isResponseStreamEvent(chunk: LegacyChatStreamEvent | ResponseStreamEvent): chunk is ResponseStreamEvent {
+function isResponseStreamEvent(chunk: unknown): chunk is ResponseStreamEvent {
+  if (!isRecord(chunk) || typeof chunk.type !== 'string') return false
   return [
     'response_started',
     'content_block_started',
@@ -229,6 +278,65 @@ function isResponseStreamEvent(chunk: LegacyChatStreamEvent | ResponseStreamEven
     'response_completed',
     'response_failed',
   ].includes(chunk.type)
+}
+
+function isLegacyChatStreamEvent(chunk: unknown): chunk is LegacyChatStreamEvent {
+  if (!isRecord(chunk) || typeof chunk.type !== 'string') return false
+  if (chunk.type === 'delta') return typeof chunk.text === 'string'
+  if (chunk.type === 'tool_call_start') return isLegacyToolCallView(chunk.call)
+  if (chunk.type === 'tool_call_result') return typeof chunk.callId === 'string'
+  if (chunk.type === 'tool_call_error') return typeof chunk.callId === 'string' && typeof chunk.error === 'string'
+  if (chunk.type === 'done') return true
+  if (chunk.type === 'error') return typeof chunk.error === 'string'
+  if (chunk.type === 'abort' || chunk.type === 'disconnect') return true
+  return false
+}
+
+function isLegacyToolCallView(value: unknown): value is LegacyToolCallView {
+  return isRecord(value)
+    && typeof value.callId === 'string'
+    && typeof value.toolId === 'string'
+    && typeof value.category === 'string'
+    && value.status === 'running'
+    && isRecord(value.input)
+}
+
+function createStreamFailure(error: unknown): ResponseError {
+  return {
+    code: isAbortOrDisconnect(error) ? 'STREAM_ABORTED' : 'CHAT_STREAM_ERROR',
+    message: getErrorMessage(error, 'Chat stream failed.'),
+  }
+}
+
+function isAbortOrDisconnect(error: unknown): boolean {
+  if (error instanceof Error) {
+    const name = error.name.toLowerCase()
+    const message = error.message.toLowerCase()
+    return name === 'aborterror'
+      || message.includes('abort')
+      || message.includes('cancel')
+      || message.includes('disconnect')
+      || message.includes('network')
+  }
+  if (typeof error === 'string') {
+    const message = error.toLowerCase()
+    return message.includes('abort')
+      || message.includes('cancel')
+      || message.includes('disconnect')
+      || message.includes('network')
+  }
+  return false
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error) return error
+  if (isRecord(error) && typeof error.message === 'string') return error.message
+  return fallback
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function normalizeToolCategory(category: string, toolId: string): ToolCallBlock['category'] {

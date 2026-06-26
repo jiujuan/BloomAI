@@ -181,25 +181,36 @@ export const platform = {
     const decoder = new TextDecoder()
     let buffer = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const raw = line.slice(6).trim()
-          if (raw === '[DONE]') {
-            for (const event of normalizer.flush()) yield event
-            return
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') {
+              for (const event of normalizer.flush()) yield event
+              return
+            }
+            try {
+              const chunk = JSON.parse(raw)
+              for (const event of normalizer.normalize(chunk)) yield event
+            } catch (error) {
+              for (const event of normalizer.normalize({
+                type: 'error',
+                error: error instanceof Error ? error.message : 'Malformed chat stream event.',
+              })) yield event
+              return
+            }
           }
-          try {
-            const chunk = JSON.parse(raw)
-            for (const event of normalizer.normalize(chunk)) yield event
-          } catch { /* skip */ }
         }
       }
+    } catch (error) {
+      for (const event of normalizer.fail(error)) yield event
+      return
     }
 
     for (const event of normalizer.flush()) yield event
