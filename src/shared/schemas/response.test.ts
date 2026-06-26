@@ -49,6 +49,66 @@ describe('response contract v1', () => {
     })
   })
 
+  it('accepts optional status messages on tool call delta patches', () => {
+    const event = ResponseStreamEventSchema.parse({
+      type: 'tool_call_delta',
+      responseId: 'resp-1',
+      callId: 'call-1',
+      patch: {
+        outputSummary: 'Primary search failed',
+        statusMessage: 'Switching to fallback search',
+      },
+    })
+
+    if (event.type !== 'tool_call_delta') {
+      throw new Error('Expected tool_call_delta')
+    }
+    expect(event.patch.statusMessage).toBe('Switching to fallback search')
+  })
+
+  it('accepts optional metadata on tool call delta patches', () => {
+    const event = ResponseStreamEventSchema.parse({
+      type: 'tool_call_delta',
+      responseId: 'resp-1',
+      callId: 'call-1',
+      patch: {
+        metadata: {
+          provider: 'duckduckgo',
+          fallbackFrom: 'tavily',
+        },
+      },
+    })
+
+    if (event.type !== 'tool_call_delta') {
+      throw new Error('Expected tool_call_delta')
+    }
+    expect(event.patch.metadata).toEqual({
+      provider: 'duckduckgo',
+      fallbackFrom: 'tavily',
+    })
+  })
+
+  it('keeps legacy tool call delta payloads valid without optional fields', () => {
+    const event = ResponseStreamEventSchema.parse({
+      type: 'tool_call_delta',
+      responseId: 'resp-1',
+      callId: 'call-1',
+      patch: {
+        outputSummary: 'Fetched 3 results',
+        durationMs: 120,
+      },
+    })
+
+    expect(event).toMatchObject({
+      type: 'tool_call_delta',
+      responseId: 'resp-1',
+      callId: 'call-1',
+      patch: {
+        outputSummary: 'Fetched 3 results',
+        durationMs: 120,
+      },
+    })
+  })
   it('rejects unknown stream event types', () => {
     expect(() =>
       ResponseStreamEventSchema.parse({

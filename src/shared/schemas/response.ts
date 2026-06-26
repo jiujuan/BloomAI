@@ -62,6 +62,7 @@ export type ToolCallBlock = BaseBlockFields & {
   error?: ResponseError
   durationMs?: number
   permission?: ToolPermissionView
+  metadata?: Record<string, unknown>
 }
 
 export type ArtifactBlock = BaseBlockFields & {
@@ -182,7 +183,9 @@ export type ToolCallDeltaEvent = {
   type: 'tool_call_delta'
   responseId: string
   callId: string
-  patch: Partial<Pick<ToolCallBlock, 'outputSummary' | 'durationMs' | 'permission'>>
+  patch: Partial<Pick<ToolCallBlock, 'outputSummary' | 'durationMs' | 'permission' | 'metadata'>> & {
+    statusMessage?: string
+  }
 }
 
 export type ToolCallCompletedEvent = {
@@ -283,6 +286,7 @@ const ToolCallBlockSchema = z.object({
   error: ResponseErrorSchema.optional(),
   durationMs: z.number().optional(),
   permission: ToolPermissionViewSchema.optional(),
+  metadata: z.record(z.unknown()).optional(),
   createdAt: z.number(),
   completedAt: z.number().optional(),
 })
@@ -327,6 +331,8 @@ export const ResponseStreamEventSchema = z.discriminatedUnion('type', [
       outputSummary: z.string().optional(),
       durationMs: z.number().optional(),
       permission: ToolPermissionViewSchema.optional(),
+      statusMessage: z.string().optional(),
+      metadata: z.record(z.unknown()).optional(),
     }),
   }),
   z.object({
