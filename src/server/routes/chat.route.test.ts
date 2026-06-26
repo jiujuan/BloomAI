@@ -480,6 +480,67 @@ describe('chat stream route', () => {
     ])
   })
 
+  it('streams response_failed instead of falling back when Mastra errors after a visible tool event', async () => {
+    process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
+    agentMock.runChatAgentV1.mockReturnValue(
+      (async function* () {
+        yield { type: 'tool_call_start', call: { callId: 'call-fail', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'BloomAI' } } }
+        yield { type: 'error', error: 'agent failed after tool' }
+      })()
+    )
+    const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+    settingsRepo.setMany({
+      agent_runtime_enabled: 'true',
+      agent_runtime_provider: 'mastra',
+    })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'agent tool then fail' })
+    const sseEvents = parseSse(responseText)
+
+    expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
+    expect(sseEvents.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'response_failed',
+    ])
+    expect(sseEvents[1]).toMatchObject({
+      type: 'tool_call_started',
+      block: {
+        callId: 'call-fail',
+        toolId: 'web_search',
+        status: 'running',
+      },
+    })
+    expect(sseEvents[2]).toMatchObject({
+      type: 'response_failed',
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed after tool' },
+    })
+
+    const messages = messageRepo.list(session.id)
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', 'agent tool then fail'],
+      ['assistant', 'AI request failed: agent failed after tool'],
+    ])
+    expect(JSON.parse(messages[1].tool_calls || '{}')).toMatchObject({
+      runtime: 'mastra-chat-agent-v1',
+      finishReason: 'error',
+      toolCalls: [
+        {
+          callId: 'call-fail',
+          toolId: 'web_search',
+          status: 'error',
+          input: { query: 'BloomAI' },
+          outputSummary: 'agent failed after tool',
+        },
+      ],
+    })
+
+    const logFiles = fs.readdirSync(process.env.LOG_DATA_DIR)
+    expect(logFiles.length).toBeGreaterThan(0)
+    const logContent = fs.readFileSync(path.join(process.env.LOG_DATA_DIR, logFiles[0]), 'utf8')
+    expect(logContent).toContain('agent failed after tool')
+  })
   it('streams response_failed and persists partial text when Mastra errors after output starts', async () => {
     agentMock.runChatAgentV1.mockReturnValue(
       (async function* () {
