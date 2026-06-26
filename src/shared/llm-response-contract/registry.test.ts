@@ -58,4 +58,15 @@ describe('LLM response contract registries', () => {
     expect(resolveErrorTimeline({ code: 'NOT_A_KNOWN_CODE', message: 'Unexpected' }))
       .toBe(ERROR_TIMELINE_REGISTRY.UNKNOWN_ERROR)
   })
+
+  it('uses readable Chinese labels and unknown fallback log level', () => {
+    expect(resolveErrorTimeline({ code: 'LLM_PROVIDER_ERROR', message: 'offline' })).toMatchObject({
+      timelineMessage: '大模型调用失败',
+      logLevel: 'error',
+    })
+    expect(resolveErrorTimeline({ code: 'NOT_A_KNOWN_CODE', message: 'Unexpected' })).toMatchObject({
+      timelineMessage: '发生未知错误',
+      logLevel: 'error',
+    })
+  })
 })

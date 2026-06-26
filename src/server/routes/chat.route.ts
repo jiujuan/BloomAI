@@ -6,7 +6,7 @@ import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
 import { readConfigValue } from '../config/config'
-import { logError } from '../logger/logger'
+import { logError, sanitizeErrorMessage } from '../logger/logger'
 import { streamChatCompletion } from '../llm'
 import { mapLlmStreamToResponseEvents } from '../llm/response-event-mapper'
 import { selectRuntimeModel } from '../llm/model-selection'
@@ -174,9 +174,10 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
       await streamLegacyChat({ sessionId, prompt, model, res })
     }
   } catch (err: any) {
-    console.error('[Chat stream]', err?.message || err)
-    logError('chat.stream', err, { sessionId, model })
-    sendSSE(res, { type: 'error', error: err?.message || 'AI request failed' })
+    const message = sanitizeErrorMessage(err, 'AI request failed')
+    console.error('[Chat stream]', message)
+    logError('chat.stream', { code: 'UNKNOWN_ERROR', message }, { sessionId, model, rawError: err })
+    sendSSE(res, { type: 'error', error: message })
   }
 
   endSSE(res)
@@ -296,13 +297,14 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
 
       if (event.type === 'error') {
         console.error('[AgentRuntime mastra] runtime error event', { sessionId: input.sessionId, model: input.model, error: event.error })
-        logError('agent.runtime', event.error, { sessionId: input.sessionId, model: input.model })
+        const message = sanitizeErrorMessage(event.error, 'Agent request failed')
+        logError('agent.runtime', { code: 'AGENT_RUNTIME_ERROR', message }, { sessionId: input.sessionId, model: input.model })
         if (!seenNonErrorEvent) {
           console.warn('[AgentRuntime mastra] error before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
           return false
         }
         sendMappedEvents(writer, mapper.map(event))
-        if (!writer.state().text) failureMessage = 'AI request failed: ' + event.error
+        if (!writer.state().text) failureMessage = 'AI request failed: ' + message
         persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
         return true
       }
@@ -332,22 +334,17 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
       model: input.model,
       error: err instanceof Error ? err.message : err,
     })
-    logError('agent.runtime', err, { sessionId: input.sessionId, model: input.model })
+    const message = sanitizeErrorMessage(err, 'Agent request failed')
+    logError('agent.runtime', { code: 'AGENT_RUNTIME_ERROR', message }, { sessionId: input.sessionId, model: input.model, rawError: err })
     if (!seenNonErrorEvent) {
       console.warn('[AgentRuntime mastra] exception before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
       return false
     }
     sendMappedEvents(writer, mapper.fail(err))
-    if (!writer.state().text) failureMessage = 'AI request failed: ' + getErrorMessage(err)
+    if (!writer.state().text) failureMessage = 'AI request failed: ' + message
     persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
     return true
   }
-}
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === 'string' && error) return error
-  return 'AI request failed'
 }
 
 function sendMappedEvents(writer: ChatResponseStreamWriter, events: ResponseStreamEvent[]): void {

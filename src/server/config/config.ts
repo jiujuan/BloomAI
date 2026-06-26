@@ -36,14 +36,14 @@ function readDotEnvValue(filePath: string, key: string): string {
   const content = fs.readFileSync(filePath, 'utf8')
   const lines = content.split(/\r?\n/)
   for (let i = 0; i < lines.length; i += 1) {
-    const rawLine = lines[i].trim()
+    const rawLine = stripBom(lines[i]).trim()
     if (!rawLine || rawLine.startsWith('#')) continue
     const normalized = rawLine.startsWith('export ') ? rawLine.slice(7).trim() : rawLine
     const separator = normalized.indexOf('=')
     if (separator < 0) continue
     const currentKey = normalized.slice(0, separator).trim()
     if (currentKey !== key) continue
-    return unquote(normalized.slice(separator + 1).trim())
+    return unquote(stripInlineComment(normalized.slice(separator + 1).trim()))
   }
   return ''
 }
@@ -52,7 +52,7 @@ function writeDotEnvValue(content: string, key: string, value: string): string {
   const lines = content ? content.split(/\r?\n/) : []
   let replaced = false
   for (let i = 0; i < lines.length; i += 1) {
-    const rawLine = lines[i].trim()
+    const rawLine = stripBom(lines[i]).trim()
     if (!rawLine || rawLine.startsWith('#')) continue
     const normalized = rawLine.startsWith('export ') ? rawLine.slice(7).trim() : rawLine
     const separator = normalized.indexOf('=')
@@ -72,6 +72,16 @@ function serializeScalar(value: string): string {
   return JSON.stringify(value)
 }
 
+function stripBom(value: string): string {
+  return value.charCodeAt(0) === 0xFEFF ? value.slice(1) : value
+}
+
+function stripInlineComment(value: string): string {
+  const first = value.charCodeAt(0)
+  if (first === 34 || first === 39) return value
+  const index = value.indexOf(' #')
+  return index >= 0 ? value.slice(0, index).trim() : value
+}
 function unquote(value: string): string {
   const first = value.charCodeAt(0)
   const last = value.charCodeAt(value.length - 1)

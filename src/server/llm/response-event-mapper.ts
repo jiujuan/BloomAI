@@ -10,7 +10,7 @@ import type {
   TokenUsage,
 } from '@shared/schemas/response'
 import { RESPONSE_SCHEMA_VERSION } from '@shared/schemas/response'
-import { logError } from '../logger/logger'
+import { logError, sanitizeErrorMessage } from '../logger/logger'
 import type { ChatStreamEvent } from './types'
 
 export type LlmResponseEventMapperOptions = {
@@ -87,17 +87,20 @@ export async function* mapLlmStreamToResponseEvents(
     }
     yield createResponseCompletedEvent(responseId, options.model, options.providerId, usage, now())
   } catch (error) {
-    logError('llm.stream', error, {
+    const code = getResponseErrorCode(error)
+    const message = sanitizeErrorMessage(error, 'AI request failed')
+    logError('llm.stream', { code, message }, {
       sessionId: options.sessionId,
       model: options.model,
       providerId: options.providerId,
+      rawError: error,
     })
     yield {
       type: 'response_failed',
       responseId,
       error: {
-        code: getResponseErrorCode(error),
-        message: getErrorMessage(error, 'AI request failed'),
+        code,
+        message,
       },
       completedAt: now(),
     } satisfies ResponseFailedEvent

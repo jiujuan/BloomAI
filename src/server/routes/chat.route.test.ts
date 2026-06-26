@@ -574,4 +574,33 @@ describe('chat stream route', () => {
       ['assistant', 'agent partial'],
     ])
   })
+
+  it('sanitizes provider raw errors in SSE failures and log files', async () => {
+    process.env.AGENT_RUNTIME_ENABLED = 'false'
+    process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
+    llmMock.streamChatCompletion.mockReturnValue((async function* () {
+      throw new Error('provider rejected api_key=sk-test-secret with bearer hidden-token')
+    })())
+    const { app, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'sanitize please' })
+    const sseEvents = parseSse(responseText)
+
+    expect(sseEvents[1]).toMatchObject({
+      type: 'response_failed',
+      error: { code: 'LLM_PROVIDER_ERROR' },
+    })
+    expect(sseEvents[1].error.message).toContain('[REDACTED]')
+    expect(sseEvents[1].error.message).not.toContain('sk-test-secret')
+    expect(sseEvents[1].error.message).not.toContain('hidden-token')
+
+    const logFiles = fs.readdirSync(process.env.LOG_DATA_DIR)
+    expect(logFiles.length).toBeGreaterThan(0)
+    const logContent = fs.readFileSync(path.join(process.env.LOG_DATA_DIR, logFiles[0]), 'utf8')
+    expect(logContent).toContain('"scope":"llm.stream"')
+    expect(logContent).toContain('[REDACTED]')
+    expect(logContent).not.toContain('sk-test-secret')
+    expect(logContent).not.toContain('hidden-token')
+  })
 })

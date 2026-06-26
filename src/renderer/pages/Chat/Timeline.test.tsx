@@ -195,6 +195,7 @@ describe('Timeline', () => {
     )
 
     expect(html).toContain('Partial answer')
+    expect(html).toContain('大模型调用失败')
     expect(html).toContain('provider failed')
     expect(html.indexOf('Partial answer')).toBeLessThan(html.indexOf('provider failed'))
   })
@@ -218,5 +219,28 @@ describe('Timeline', () => {
       { id: 'md', type: 'markdown' as const, status: 'completed' as const, markdown: 'break', createdAt: 6, completedAt: 7 },
       fiveSearches[1],
     ])).toHaveLength(3)
+  })
+
+  it('renders unknown error codes with UNKNOWN_ERROR registry text', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingText=""
+        streamError={null}
+        streamingResponse={{
+          responseId: 'r-unknown',
+          sessionId: 's1',
+          isComplete: true,
+          error: { code: 'ODD_VENDOR_CODE', message: 'safe vendor failure' },
+          blocks: [
+            { id: 'err-unknown', type: 'error', status: 'failed', error: { code: 'ODD_VENDOR_CODE', message: 'safe vendor failure' }, createdAt: 1, completedAt: 1 },
+          ],
+        } as any}
+      />
+    )
+
+    expect(html).toContain('发生未知错误')
+    expect(html).toContain('safe vendor failure')
   })
 })
