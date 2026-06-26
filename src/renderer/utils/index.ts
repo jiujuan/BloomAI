@@ -28,8 +28,8 @@ export function formatDate(ts: number): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export function groupSessionsByDate(sessions: Array<{ id: string; updated_at: number; [k: string]: any }>) {
-  const groups: Record<string, typeof sessions> = {}
+export function groupSessionsByDate<T extends { id: string; updated_at: number }>(sessions: T[]): Record<string, T[]> {
+  const groups: Record<string, T[]> = {}
   for (const s of sessions) {
     const label = formatDate(s.updated_at)
     if (!groups[label]) groups[label] = []
@@ -37,3 +37,4 @@ export function groupSessionsByDate(sessions: Array<{ id: string; updated_at: nu
   }
   return groups
 }
+

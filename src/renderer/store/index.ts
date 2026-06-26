@@ -17,7 +17,7 @@ interface SessionActions {
   createSession: (opts?: { persona_id?: string; model?: string }) => Promise<Session>
   deleteSession: (id: string) => Promise<void>
   setActiveSession: (id: string) => void
-  updateSessionTitle: (id: string, title: string) => void
+  updateSessionTitle: (id: string, title: string) => Promise<void>
 }
 
 export const useSessionStore = create<SessionState & SessionActions>()(
@@ -56,11 +56,21 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
     setActiveSession: (id: string) => set({ activeSessionId: id }),
 
-    updateSessionTitle: (id: string, title: string) => {
+    updateSessionTitle: async (id: string, title: string) => {
+      const previousTitle = get().sessions.find(x => x.id === id)?.title
       set(s => ({
         sessions: s.sessions.map(x => x.id === id ? { ...x, title } : x)
       }))
-      platform.updateSession(id, { title }).catch(() => {})
+      try {
+        await platform.updateSession(id, { title })
+      } catch (error) {
+        if (previousTitle !== undefined) {
+          set(s => ({
+            sessions: s.sessions.map(x => x.id === id ? { ...x, title: previousTitle } : x)
+          }))
+        }
+        throw error
+      }
     },
   }), { name: 'bloomai-sessions' })
 )
@@ -434,3 +444,4 @@ export const useUIStore = create<UIState & UIActions>()(
     setShowOnboarding: (showOnboarding) => set({ showOnboarding }),
   }), { name: 'bloomai-ui' })
 )
+
