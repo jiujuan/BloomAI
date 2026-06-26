@@ -671,4 +671,43 @@ describe('chat stream route', () => {
     expect(logContent).not.toContain('sk-test-secret')
     expect(logContent).not.toContain('hidden-token')
   })
+  it('logs assistant persistence failures after response_completed without sending another terminal event', async () => {
+    process.env.AGENT_RUNTIME_ENABLED = 'false'
+    process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
+    llmMock.streamChatCompletion.mockReturnValue(events([
+      { type: 'delta', text: 'Saved in the stream only' },
+      { type: 'usage', input: 4, output: 6 },
+      { type: 'done' },
+    ]))
+    const { app, messageRepo, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+    const originalSave = messageRepo.save.bind(messageRepo)
+    vi.spyOn(messageRepo, 'save').mockImplementation((message) => {
+      if (message.role === 'assistant') throw new Error('assistant insert failed')
+      return originalSave(message)
+    })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'persist after completed' })
+    const sseEvents = parseSse(responseText)
+
+    expect(sseEvents.map((event) => event.type)).toEqual([
+      'response_started',
+      'content_block_started',
+      'content_delta',
+      'usage_updated',
+      'content_block_completed',
+      'response_completed',
+    ])
+    expect(sseEvents.filter((event) => event.type === 'response_completed' || event.type === 'response_failed' || event.type === 'error')).toHaveLength(1)
+
+    const logFiles = fs.readdirSync(process.env.LOG_DATA_DIR)
+    expect(logFiles.length).toBeGreaterThan(0)
+    const logContent = fs.readFileSync(path.join(process.env.LOG_DATA_DIR, logFiles[0]), 'utf8')
+    expect(logContent).toContain('"scope":"chat.persistence"')
+    expect(logContent).toContain('assistant insert failed')
+    expect(logContent).toContain(session.id)
+    expect(logContent).toContain(sseEvents[0].responseId)
+    expect(logContent).toContain('"textLength":24')
+    expect(logContent).toContain('"toolCallCount":0')
+  })
 })

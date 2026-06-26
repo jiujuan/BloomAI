@@ -369,13 +369,25 @@ function persistAssistantFromWriter(
       }
     : null
 
-  messageRepo.save({
-    session_id: sessionId,
-    role: 'assistant',
-    content,
-    tool_calls: trace ? JSON.stringify(trace) : null,
-    tokens: getTokenCount(state.usage),
-  })
+  try {
+    messageRepo.save({
+      session_id: sessionId,
+      role: 'assistant',
+      content,
+      tool_calls: trace ? JSON.stringify(trace) : null,
+      tokens: getTokenCount(state.usage),
+    })
+  } catch (error) {
+    const message = sanitizeErrorMessage(error, 'Assistant persistence failed')
+    console.error('[Chat persistence]', message)
+    logError('chat.persistence', { code: 'PERSISTENCE_ERROR', message }, {
+      sessionId,
+      responseId: state.responseId,
+      textLength: content.length,
+      toolCallCount: state.toolCalls.length,
+      rawError: error,
+    })
+  }
 }
 
 function getTokenCount(usage?: TokenUsage): number | undefined {
