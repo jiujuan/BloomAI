@@ -388,7 +388,10 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 /* ── Markdown styles ──────────────────────────────────────── */
-.msg-markdown { display: flex; flex-direction: column; gap: 6px; }
+.msg-markdown { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
+.msg-markdown table { width: 100%; border-collapse: collapse; margin: 4px 0; font-size: 12px; }
+.msg-markdown th, .msg-markdown td { border: 0.5px solid var(--border-tertiary); padding: 6px 8px; text-align: left; vertical-align: top; }
+.msg-markdown th { background: var(--bg-secondary); font-weight: 600; }
 .md-p { margin: 0; }
 .md-ul, .md-ol { padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }
 .md-li { }

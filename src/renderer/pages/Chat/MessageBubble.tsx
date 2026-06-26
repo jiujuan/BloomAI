@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Copy, Loader2, ThumbsUp, ThumbsDown, Check } from 'lucide-react'
 import { cn } from '@renderer/utils'
 import type { Message } from '@shared/schemas'
@@ -75,6 +76,7 @@ export function MessageBubble({ message, isStreaming, streamText }: MessageBubbl
             ) : (
             <div className="msg-markdown">
               <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
                 components={{
                   code(props) {
                     const { children, className, node, ...rest } = props as any
