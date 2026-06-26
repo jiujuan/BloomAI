@@ -5,6 +5,8 @@ import { RESPONSE_SCHEMA_VERSION, type ResponseStreamEvent, type TokenUsage } fr
 import { sessionRepo } from '../db/repositories/session.repo'
 import { messageRepo } from '../db/repositories/message.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
+import { readConfigValue } from '../config/config'
+import { logError } from '../logger/logger'
 import { streamChatCompletion } from '../llm'
 import { mapLlmStreamToResponseEvents } from '../llm/response-event-mapper'
 import { selectRuntimeModel } from '../llm/model-selection'
@@ -39,11 +41,11 @@ function getRuntimeSetting(envKey: string, settingsKey: string): RuntimeSetting 
   const processEnvSettingsValue = process.env[settingsKey]?.trim()
   if (processEnvSettingsValue) return { value: processEnvSettingsValue, source: 'process.env', key: settingsKey }
 
-  const dotEnvValue = getDotEnvValue(envKey)
-  if (dotEnvValue) return { value: dotEnvValue, source: '.env', key: envKey }
+  const dotEnvValue = readConfigValue(envKey)
+  if (dotEnvValue.value) return { value: dotEnvValue.value, source: dotEnvValue.source, key: envKey }
 
-  const dotEnvSettingsValue = getDotEnvValue(settingsKey)
-  if (dotEnvSettingsValue) return { value: dotEnvSettingsValue, source: '.env', key: settingsKey }
+  const dotEnvSettingsValue = readConfigValue(settingsKey)
+  if (dotEnvSettingsValue.value) return { value: dotEnvSettingsValue.value, source: dotEnvSettingsValue.source, key: settingsKey }
 
   const settingsValue = settingsRepo.getValue(settingsKey) || ''
   if (settingsValue) return { value: settingsValue, source: 'settings', key: settingsKey }
@@ -53,21 +55,6 @@ function getRuntimeSetting(envKey: string, settingsKey: string): RuntimeSetting 
 
 function getEnvSettingValue(envKey: string, settingsKey: string): string {
   return getRuntimeSetting(envKey, settingsKey).value
-}
-
-function getDotEnvValue(key: string): string {
-  const envPath = path.join(process.cwd(), '.env')
-  if (!fs.existsSync(envPath)) return ''
-
-  try {
-    const content = fs.readFileSync(envPath, 'utf8')
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const match = content.match(new RegExp(`^\\s*(?:export\\s+)?${escapedKey}\\s*=\\s*(.*)\\s*$`, 'm'))
-    if (!match) return ''
-    return match[1].trim().replace(/^['\"]|['\"]$/g, '')
-  } catch {
-    return ''
-  }
 }
 
 function getAgentRuntimeEnabled(): boolean {
@@ -188,6 +175,7 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     console.error('[Chat stream]', err?.message || err)
+    logError('chat.stream', err, { sessionId, model })
     sendSSE(res, { type: 'error', error: err?.message || 'AI request failed' })
   }
 
@@ -225,6 +213,7 @@ async function streamLegacyChat(input: LegacyChatInput): Promise<void> {
     sendSSE,
   })
   let shouldPersist = false
+  let failureMessage = ''
 
   const responseEvents = mapLlmStreamToResponseEvents(createLegacyChatSource(input), {
     sessionId: input.sessionId,
@@ -233,13 +222,17 @@ async function streamLegacyChat(input: LegacyChatInput): Promise<void> {
 
   for await (const event of responseEvents) {
     writer.send(event)
-    if (event.type === 'response_completed' || (event.type === 'response_failed' && writer.state().text)) {
+    if (event.type === 'response_completed') {
       shouldPersist = true
+    }
+    if (event.type === 'response_failed') {
+      shouldPersist = true
+      if (!writer.state().text) failureMessage = 'AI request failed: ' + event.error.message
     }
   }
 
   if (shouldPersist) {
-    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
   }
 }
 
@@ -272,6 +265,7 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
   let seenNonErrorEvent = false
   let deltaEventCount = 0
   let deltaCharCount = 0
+  let failureMessage = ''
 
   try {
     for await (const event of createAgentChatSource(input)) {
@@ -302,12 +296,14 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
 
       if (event.type === 'error') {
         console.error('[AgentRuntime mastra] runtime error event', { sessionId: input.sessionId, model: input.model, error: event.error })
+        logError('agent.runtime', event.error, { sessionId: input.sessionId, model: input.model })
         if (!seenNonErrorEvent) {
           console.warn('[AgentRuntime mastra] error before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
           return false
         }
         sendMappedEvents(writer, mapper.map(event))
-        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+        if (!writer.state().text) failureMessage = 'AI request failed: ' + event.error
+        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
         return true
       }
 
@@ -316,7 +312,7 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
 
       if (event.type === 'done') {
         console.log('[AgentRuntime mastra] done', { sessionId: input.sessionId, model: input.model })
-        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+        persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
         return true
       }
     }
@@ -328,7 +324,7 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
 
     console.warn('[AgentRuntime mastra] completed without done event', { sessionId: input.sessionId, model: input.model })
     sendMappedEvents(writer, mapper.completeWithoutDone())
-    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
     return true
   } catch (err) {
     console.error('[AgentRuntime mastra] exception', {
@@ -336,14 +332,22 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
       model: input.model,
       error: err instanceof Error ? err.message : err,
     })
+    logError('agent.runtime', err, { sessionId: input.sessionId, model: input.model })
     if (!seenNonErrorEvent) {
       console.warn('[AgentRuntime mastra] exception before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
       return false
     }
     sendMappedEvents(writer, mapper.fail(err))
-    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true })
+    if (!writer.state().text) failureMessage = 'AI request failed: ' + getErrorMessage(err)
+    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
     return true
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error) return error
+  return 'AI request failed'
 }
 
 function sendMappedEvents(writer: ChatResponseStreamWriter, events: ResponseStreamEvent[]): void {
@@ -355,9 +359,10 @@ function sendMappedEvents(writer: ChatResponseStreamWriter, events: ResponseStre
 function persistAssistantFromWriter(
   sessionId: string,
   state: ChatResponseStreamState,
-  options: { persistEmpty?: boolean } = {},
+  options: { persistEmpty?: boolean; fallbackContent?: string } = {},
 ): void {
-  if (!options.persistEmpty && !state.text && state.toolCalls.length === 0) return
+  const content = state.text || options.fallbackContent || ''
+  if (!options.persistEmpty && !content && state.toolCalls.length === 0) return
 
   const trace = state.trace
     ? {
@@ -370,7 +375,7 @@ function persistAssistantFromWriter(
   messageRepo.save({
     session_id: sessionId,
     role: 'assistant',
-    content: state.text,
+    content,
     tool_calls: trace ? JSON.stringify(trace) : null,
     tokens: getTokenCount(state.usage),
   })

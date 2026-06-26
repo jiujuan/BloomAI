@@ -1,8 +1,13 @@
 import { Request, Response, NextFunction, ErrorRequestHandler } from 'express'
 import { ZodError } from 'zod'
+import { logError } from '../logger/logger'
 
-export const errorMiddleware: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorMiddleware: ErrorRequestHandler = (err, req, res, _next) => {
   console.error('[Error]', err.message)
+  logError('http.error', err, {
+    method: req.method,
+    path: req.originalUrl,
+  })
   if (err instanceof ZodError) {
     return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request', details: err.flatten() } })
   }
@@ -30,3 +35,4 @@ export function endSSE(res: Response) {
   res.write('data: [DONE]\n\n')
   res.end()
 }
+

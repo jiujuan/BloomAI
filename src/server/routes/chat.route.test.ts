@@ -37,9 +37,13 @@ async function* failingEvents(): AsyncGenerator<ChatStreamEvent> {
   throw new Error('stream failed')
 }
 
+async function* failingBeforeOutput(): AsyncGenerator<ChatStreamEvent> {
+  throw new Error('provider offline')
+}
 async function loadApp() {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
+  process.env.LOG_DATA_DIR = process.env.LOG_DATA_DIR || path.join(dataDir, 'logs')
 
   const { createApp } = await import('../app')
   const { sessionRepo } = await import('../db/repositories/session.repo')
@@ -410,6 +414,36 @@ describe('chat stream route', () => {
     ])
   })
 
+  it('persists visible error text and writes a log when LLM fails before output', async () => {
+    process.env.AGENT_RUNTIME_ENABLED = 'false'
+    const logDir = path.join(dataDir, 'logs')
+    process.env.LOG_DATA_DIR = logDir
+    llmMock.streamChatCompletion.mockReturnValue(failingBeforeOutput())
+    const { app, messageRepo, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'Break before output' })
+    const sseEvents = parseSse(responseText)
+
+    expect(sseEvents.map((event) => event.type)).toEqual([
+      'response_started',
+      'response_failed',
+    ])
+    expect(sseEvents[1]).toMatchObject({
+      type: 'response_failed',
+      error: { code: 'LLM_PROVIDER_ERROR', message: 'provider offline' },
+    })
+    expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
+      ['user', 'Break before output'],
+      ['assistant', 'AI request failed: provider offline'],
+    ])
+
+    const logFiles = fs.readdirSync(logDir)
+    expect(logFiles.length).toBeGreaterThan(0)
+    const logContent = fs.readFileSync(path.join(logDir, logFiles[0]), 'utf8')
+    expect(logContent).toContain('"scope":"llm.stream"')
+    expect(logContent).toContain('provider offline')
+  })
   it('falls back to direct LLM when the Mastra runtime first reports an error', async () => {
     agentMock.runChatAgentV1.mockReturnValue(
       (async function* () {

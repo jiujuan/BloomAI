@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { readConfigValue } from '../config/config'
 import type { ToolExecutionContext, ToolExecutor } from './types'
 
 type WebSearchInput = { query: string; limit?: number }
@@ -34,23 +33,8 @@ function getErrorDetails(error: unknown): { name?: string; message: string } {
   return { message: 'Unknown web search error' }
 }
 
-function getDotEnvValue(key: string): string {
-  const envPath = path.join(process.cwd(), '.env')
-  if (!fs.existsSync(envPath)) return ''
-
-  try {
-    const content = fs.readFileSync(envPath, 'utf8')
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const match = content.match(new RegExp(`^\\s*(?:export\\s+)?${escapedKey}\\s*=\\s*(.*)\\s*$`, 'm'))
-    if (!match) return ''
-    return match[1].trim().replace(/^['\"]|['\"]$/g, '')
-  } catch {
-    return ''
-  }
-}
-
 function getTavilyApiKey(): string {
-  return process.env.TAVILY_API_KEY?.trim() || getDotEnvValue('TAVILY_API_KEY')
+  return readConfigValue('TAVILY_API_KEY').value
 }
 
 export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = async (input, context: ToolExecutionContext) => {
