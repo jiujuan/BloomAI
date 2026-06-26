@@ -1,5 +1,7 @@
 # BloomAI LLM Response Contract v1 事件与 Timeline 统一表
 
+- Verification evidence: [llm-response-contract-v1-event-timeline-verification.md](./llm-response-contract-v1-event-timeline-verification.md)
+
 ## 1. 文档信息
 
 - 日期：2026-06-26
