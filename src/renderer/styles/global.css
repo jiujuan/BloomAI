@@ -787,6 +787,59 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .tcc-action-btn { height: 24px; padding: 0 9px; border: 0.5px solid var(--border-secondary); border-radius: 5px; background: transparent; cursor: pointer; font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; }
 .tcc-action-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
 
+
+.tool-call-group-card {
+  border: 0.5px solid var(--border-tertiary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-primary);
+  margin: 4px 0;
+  font-size: 12px;
+}
+.tool-call-group-card.error { border-color: var(--border-danger); }
+.tcg-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.tcg-head:hover { background: var(--bg-secondary); }
+.tcg-icon { font-size: 14px; flex-shrink: 0; display: inline-flex; align-items: center; }
+.tcg-name { font-weight: 500; color: var(--text-primary); flex: 1; min-width: 0; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcg-status,
+.tcg-section-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; }
+.tcg-status.running,
+.tcg-section-status.running { background: var(--bg-info); color: var(--text-info); }
+.tcg-status.success,
+.tcg-section-status.success { background: var(--bg-success); color: var(--text-success); }
+.tcg-status.error,
+.tcg-section-status.error { background: var(--bg-danger); color: var(--text-danger); }
+.tcg-count { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+.tcg-chevron { color: var(--text-tertiary); transition: transform 0.2s; flex-shrink: 0; }
+.tcg-chevron.open { transform: rotate(180deg); }
+.tcg-body { border-top: 0.5px solid var(--border-tertiary); background: var(--bg-primary); }
+.tcg-section { border-bottom: 0.5px solid var(--border-tertiary); }
+.tcg-section:last-child { border-bottom: 0; }
+.tcg-section-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 0;
+  background: var(--bg-secondary);
+  color: inherit;
+  cursor: pointer;
+}
+.tcg-call-list { padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+.tcg-call-list .tool-call-card { margin: 0; }
 /* ── Permission Dialog ────────────────────────────────────────────────── */
 .perm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 400; }
 .perm-dialog { background: var(--bg-primary); border: 0.5px solid var(--border-secondary); border-radius: var(--radius-xl); overflow: hidden; width: 320px; box-shadow: var(--shadow-md); }

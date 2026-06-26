@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { MessageBubble } from './MessageBubble'
 import { ToolCallCard } from './ToolCallCard'
+import { ToolCallGroupCard, createToolCallGroupKey, type ToolCallGroup } from './ToolCallGroupCard'
 import type { ToolCallState } from '@renderer/store'
 import type { StreamingResponseState } from '@renderer/store/chat-response-reducer'
 import { formatDate } from '@renderer/utils'
@@ -90,7 +91,7 @@ export function Timeline({
       )}
 
       {activeBlocks
-        ? activeBlocks.map(renderStreamingBlock)
+        ? groupStreamingBlocks(activeBlocks).map(renderStreamingItem)
         : (
           <>
             {toolCallItems}
@@ -107,13 +108,45 @@ export function Timeline({
 
       {streamError && (
         <div className="stream-error" role="alert">
-          <span>⚠ {streamError}</span>
+          <span>Warning: {streamError}</span>
         </div>
       )}
 
       <div ref={bottomRef} />
     </div>
   )
+}
+
+type StreamingRenderItem = ResponseContentBlock | { type: 'tool_call_group'; group: ToolCallGroup }
+
+function groupStreamingBlocks(blocks: ResponseContentBlock[]): StreamingRenderItem[] {
+  const items: StreamingRenderItem[] = []
+  for (const block of blocks) {
+    if (block.type !== 'tool_call') {
+      items.push(block)
+      continue
+    }
+
+    const key = createToolCallGroupKey(block)
+    const previous = items[items.length - 1]
+    if (previous && previous.type === 'tool_call_group' && previous.group.key === key) {
+      previous.group.calls.push(block)
+      continue
+    }
+
+    items.push({
+      type: 'tool_call_group',
+      group: { key, toolId: block.toolId, category: block.category, calls: [block] },
+    })
+  }
+  return items
+}
+
+function renderStreamingItem(item: StreamingRenderItem) {
+  if (item.type === 'tool_call_group') {
+    return <ToolCallGroupCard key={item.group.calls.map((call) => call.callId).join(':')} group={item.group} />
+  }
+  return renderStreamingBlock(item)
 }
 
 function renderStreamingBlock(block: ResponseContentBlock) {
@@ -135,7 +168,7 @@ function renderStreamingBlock(block: ResponseContentBlock) {
   if (block.type === 'error') {
     return (
       <div key={block.id} className="stream-error" role="alert">
-        <span>⚠ {block.error.message}</span>
+        <span>Warning: {block.error.message}</span>
       </div>
     )
   }
