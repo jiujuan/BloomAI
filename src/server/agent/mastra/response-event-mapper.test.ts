@@ -111,6 +111,79 @@ describe('createAgentResponseEventMapper', () => {
     })
   })
 
+  it('maps no-tool assistant deltas and done into markdown response events', () => {
+    const mapped = mapAll([
+      { type: 'delta', text: 'Hello' },
+      { type: 'delta', text: ' world' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [],
+        },
+      },
+    ])
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'content_block_started',
+      'content_delta',
+      'content_delta',
+      'content_block_completed',
+      'response_completed',
+    ])
+    expect(mapped[2]).toMatchObject({
+      type: 'content_delta',
+      blockId: 'block-tool-1',
+      delta: 'Hello',
+    })
+    expect(mapped[5]).toMatchObject({
+      type: 'response_completed',
+      trace: {
+        runtime: 'mastra-chat-agent-v1',
+        toolCalls: [],
+      },
+    })
+  })
+
+  it('maps tool status deltas into tool_call_delta events', () => {
+    const mapped = mapAll([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'call-1',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'running',
+          input: { query: 'BloomAI' },
+        },
+      },
+      {
+        type: 'tool_call_delta',
+        callId: 'call-1',
+        patch: {
+          statusMessage: 'Primary search failed, switching to fallback search',
+          metadata: { provider: 'duckduckgo', fallbackFrom: 'tavily' },
+        },
+      },
+    ])
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_delta',
+    ])
+    expect(mapped[2]).toMatchObject({
+      type: 'tool_call_delta',
+      responseId: 'resp-agent',
+      callId: 'call-1',
+      patch: {
+        statusMessage: 'Primary search failed, switching to fallback search',
+        metadata: { provider: 'duckduckgo', fallbackFrom: 'tavily' },
+      },
+    })
+  })
   it('maps tool call errors into failed tool call events', () => {
     const mapped = mapAll([
       {
@@ -142,6 +215,83 @@ describe('createAgentResponseEventMapper', () => {
     })
   })
 
+  it('allows soft tool failures to continue into completed content with error trace', () => {
+    const mapped = mapAll([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'call-soft',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'running',
+          input: { query: 'BloomAI' },
+        },
+      },
+      { type: 'tool_call_error', callId: 'call-soft', error: 'primary provider failed' },
+      { type: 'delta', text: 'Answer from context' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [],
+        },
+      },
+    ])
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_failed',
+      'content_block_started',
+      'content_delta',
+      'content_block_completed',
+      'response_completed',
+    ])
+    expect(mapped[6]).toMatchObject({
+      type: 'response_completed',
+      trace: {
+        toolCalls: [
+          {
+            callId: 'call-soft',
+            toolId: 'web_search',
+            status: 'error',
+            input: { query: 'BloomAI' },
+            outputSummary: 'primary provider failed',
+          },
+        ],
+      },
+    })
+  })
+
+  it('maps hard tool failures followed by agent errors into response_failed', () => {
+    const mapped = mapAll([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'call-hard',
+          toolId: 'required_tool',
+          category: 'tool',
+          status: 'running',
+          input: { id: 1 },
+        },
+      },
+      { type: 'tool_call_error', callId: 'call-hard', error: 'required tool failed' },
+      { type: 'error', error: 'agent cannot continue' },
+    ])
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_failed',
+      'response_failed',
+    ])
+    expect(mapped[3]).toMatchObject({
+      type: 'response_failed',
+      responseId: 'resp-agent',
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent cannot continue' },
+    })
+  })
   it('maps agent runtime errors into response failures', () => {
     const mapped = mapAll([{ type: 'error', error: 'agent failed' }])
 

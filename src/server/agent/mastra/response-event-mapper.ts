@@ -136,6 +136,16 @@ export function createAgentResponseEventMapper(options: AgentResponseEventMapper
         return events
       }
 
+      if (event.type === 'tool_call_delta') {
+        events.push({
+          type: 'tool_call_delta',
+          responseId,
+          callId: event.callId,
+          patch: event.patch,
+        })
+        return events
+      }
+
       if (event.type === 'tool_call_result') {
         const outputSummary = summarizeToolOutput(event.output)
         const existing = toolTraceDrafts.get(event.callId)
