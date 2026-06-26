@@ -3,6 +3,8 @@ import type { ChatStreamEvent } from './types'
 
 vi.mock('../logger/logger', () => ({
   logError: vi.fn(),
+  sanitizeErrorMessage: (error: unknown, fallback = 'Unknown error') =>
+    error instanceof Error ? error.message : fallback,
 }))
 
 import { mapLlmStreamToResponseEvents } from './response-event-mapper'
