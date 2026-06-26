@@ -96,7 +96,7 @@ export async function* mapLlmStreamToResponseEvents(
       type: 'response_failed',
       responseId,
       error: {
-        code: 'LLM_PROVIDER_ERROR',
+        code: getResponseErrorCode(error),
         message: getErrorMessage(error, 'AI request failed'),
       },
       completedAt: now(),
@@ -156,6 +156,24 @@ function createResponseCompletedEvent(
     finishReason: 'stop',
     completedAt,
   }
+}
+
+function getResponseErrorCode(error: unknown): 'LLM_PROVIDER_ERROR' | 'STREAM_ABORTED' {
+  if (isAbortError(error)) return 'STREAM_ABORTED'
+  return 'LLM_PROVIDER_ERROR'
+}
+
+function isAbortError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const name = error.name.toLowerCase()
+    const message = error.message.toLowerCase()
+    return name === 'aborterror' || message.includes('abort') || message.includes('cancel')
+  }
+  if (typeof error === 'string') {
+    const message = error.toLowerCase()
+    return message.includes('abort') || message.includes('cancel')
+  }
+  return false
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ChatStreamEvent } from './types'
+
+vi.mock('../logger/logger', () => ({
+  logError: vi.fn(),
+}))
+
 import { mapLlmStreamToResponseEvents } from './response-event-mapper'
 
 async function* events(items: ChatStreamEvent[]): AsyncGenerator<ChatStreamEvent> {
@@ -108,6 +113,34 @@ describe('mapLlmStreamToResponseEvents', () => {
     ])
   })
 
+  it('does not start an empty content block when the source fails before content', async () => {
+    async function* failing(): AsyncGenerator<ChatStreamEvent> {
+      throw new Error('provider unavailable')
+    }
+
+    const mapped = await collect(
+      mapLlmStreamToResponseEvents(failing(), {
+        sessionId: 'session-1',
+        model: 'gpt-4o',
+        responseId: 'resp-before-content-fail',
+        now: () => 250,
+        idFactory: () => 'block-before-content-fail',
+      }),
+    )
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'response_failed',
+    ])
+    expect(mapped[1]).toMatchObject({
+      type: 'response_failed',
+      responseId: 'resp-before-content-fail',
+      error: {
+        code: 'LLM_PROVIDER_ERROR',
+        message: 'provider unavailable',
+      },
+    })
+  })
   it('emits response_failed when the source stream throws', async () => {
     async function* failing(): AsyncGenerator<ChatStreamEvent> {
       yield { type: 'delta', text: 'partial' }
@@ -136,6 +169,37 @@ describe('mapLlmStreamToResponseEvents', () => {
       error: {
         code: 'LLM_PROVIDER_ERROR',
         message: 'stream failed',
+      },
+    })
+  })
+
+  it('maps aborted streams to STREAM_ABORTED failures', async () => {
+    async function* aborted(): AsyncGenerator<ChatStreamEvent> {
+      const error = new Error('The operation was aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+
+    const mapped = await collect(
+      mapLlmStreamToResponseEvents(aborted(), {
+        sessionId: 'session-1',
+        model: 'gpt-4o',
+        responseId: 'resp-abort',
+        now: () => 400,
+        idFactory: () => 'block-abort',
+      }),
+    )
+
+    expect(mapped.map((event) => event.type)).toEqual([
+      'response_started',
+      'response_failed',
+    ])
+    expect(mapped[1]).toMatchObject({
+      type: 'response_failed',
+      responseId: 'resp-abort',
+      error: {
+        code: 'STREAM_ABORTED',
+        message: 'The operation was aborted',
       },
     })
   })
