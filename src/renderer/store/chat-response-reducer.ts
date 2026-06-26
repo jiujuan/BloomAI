@@ -17,6 +17,46 @@ export type StreamingResponseState = {
   isComplete: boolean
 }
 
+export type DerivedToolCallState = {
+  callId: string
+  toolId: string
+  category: string
+  status: ToolCallBlock['status']
+  input: Record<string, unknown>
+  output?: unknown
+  error?: string
+  durationMs?: number
+  metadata?: Record<string, unknown>
+  interrupted?: boolean
+}
+
+export function deriveStreamingText(response: StreamingResponseState | null): string {
+  return response?.blocks
+    .filter((block): block is MarkdownBlock => block.type === 'markdown')
+    .map((block) => block.markdown)
+    .join('') ?? ''
+}
+
+export function deriveToolCalls(response: StreamingResponseState | null): DerivedToolCallState[] {
+  return response?.blocks
+    .filter((block): block is ToolCallBlock => block.type === 'tool_call')
+    .map((block) => {
+      const call: DerivedToolCallState = {
+        callId: block.callId,
+        toolId: block.toolId,
+        category: block.category,
+        status: block.status,
+        input: block.input,
+      }
+      if (block.output !== undefined) call.output = block.output
+      if (block.error?.message) call.error = block.error.message
+      if (block.durationMs !== undefined) call.durationMs = block.durationMs
+      if (block.metadata !== undefined) call.metadata = block.metadata
+      if (block.metadata?.interrupted === true) call.interrupted = true
+      return call
+    }) ?? []
+}
+
 export function reduceStreamingResponse(
   current: StreamingResponseState | null,
   event: ResponseStreamEvent,
@@ -62,7 +102,14 @@ export function reduceStreamingResponse(
   }
 
   if (event.type === 'tool_call_delta') {
-    return updateToolCall(current, event.callId, (block) => ({ ...block, ...event.patch }))
+    return updateToolCall(current, event.callId, (block) => {
+      const { statusMessage, metadata, ...rest } = event.patch
+      return {
+        ...block,
+        ...rest,
+        metadata: mergeMetadata(block.metadata, metadata, statusMessage),
+      }
+    })
   }
 
   if (event.type === 'tool_call_completed') {
@@ -108,13 +155,43 @@ export function reduceStreamingResponse(
       completedAt: event.completedAt,
     }
     return {
-      ...appendBlock(current, errorBlock),
+      ...appendBlock(interruptRunningTools(current, event.error, event.completedAt), errorBlock),
       error: event.error,
       isComplete: true,
     }
   }
 
   return current
+}
+
+function interruptRunningTools(
+  state: StreamingResponseState,
+  error: ResponseError,
+  completedAt: number,
+): StreamingResponseState {
+  return {
+    ...state,
+    blocks: state.blocks.map((block) => {
+      if (block.type !== 'tool_call' || block.status !== 'running') return block
+      return {
+        ...block,
+        status: 'error',
+        error,
+        completedAt,
+        metadata: { ...block.metadata, interrupted: true },
+      }
+    }),
+  }
+}
+
+function mergeMetadata(
+  current: Record<string, unknown> | undefined,
+  patch: Record<string, unknown> | undefined,
+  statusMessage: string | undefined,
+): Record<string, unknown> | undefined {
+  const next = { ...current, ...patch }
+  if (statusMessage !== undefined) next.statusMessage = statusMessage
+  return Object.keys(next).length > 0 ? next : undefined
 }
 
 function appendBlock(state: StreamingResponseState, block: ResponseContentBlock): StreamingResponseState {

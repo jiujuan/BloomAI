@@ -2,8 +2,14 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
 import type { LlmModelSummary } from '@renderer/api'
-import type { MarkdownBlock, Message, Persona, Session, ToolCallBlock } from '@shared/schemas'
-import { reduceStreamingResponse, type StreamingResponseState } from './chat-response-reducer'
+import type { Message, Persona, Session } from '@shared/schemas'
+import {
+  deriveStreamingText,
+  deriveToolCalls,
+  reduceStreamingResponse,
+  type DerivedToolCallState,
+  type StreamingResponseState,
+} from './chat-response-reducer'
 
 // Session Store
 
@@ -77,16 +83,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
 // Chat Store
 
-export type ToolCallState = {
-  callId: string
-  toolId: string
-  category: string
-  status: 'running' | 'success' | 'error'
-  input: Record<string, unknown>
-  output?: unknown
-  error?: string
-  durationMs?: number
-}
+export type ToolCallState = DerivedToolCallState
 
 interface ChatState {
   messagesBySession: Record<string, Message[]>
@@ -243,28 +240,6 @@ export const useChatStore = create<ChatState & ChatActions>()(
     setStreamError: (error) => set({ streamError: error }),
   }), { name: 'bloomai-chat' })
 )
-
-function deriveStreamingText(response: StreamingResponseState | null): string {
-  return response?.blocks
-    .filter((block): block is MarkdownBlock => block.type === 'markdown')
-    .map((block) => block.markdown)
-    .join('') ?? ''
-}
-
-function deriveToolCalls(response: StreamingResponseState | null): ToolCallState[] {
-  return response?.blocks
-    .filter((block): block is ToolCallBlock => block.type === 'tool_call')
-    .map((block) => ({
-      callId: block.callId,
-      toolId: block.toolId,
-      category: block.category,
-      status: block.status,
-      input: block.input,
-      output: block.output,
-      error: block.error?.message,
-      durationMs: block.durationMs,
-    })) ?? []
-}
 
 function mergeTokenUsage(
   current: Record<string, { input: number; output: number }>,

@@ -260,6 +260,70 @@ describe('chat store response events', () => {
     expect(useChatStore.getState().streamingResponsesBySession.s1).toBeNull()
     await sendPromise
   })
+
+  it('does not append an empty assistant message when the stream fails before content', async () => {
+    const { useChatStore } = await import('./index')
+    platformMock.getMessages.mockResolvedValueOnce([
+      { id: 'server-user-1', session_id: 's1', role: 'user', content: 'hello', created_at: 1 },
+    ])
+    platformMock.chatStream.mockImplementation(async function* () {
+      yield* streamEvents([
+        {
+          type: 'response_started',
+          responseId: 'response-empty-fail',
+          sessionId: 's1',
+          runtime: 'direct-llm',
+          createdAt: 1,
+        },
+        {
+          type: 'response_failed',
+          responseId: 'response-empty-fail',
+          error: { code: 'LLM_PROVIDER_ERROR', message: 'failed before content' },
+          completedAt: 2,
+        },
+      ])
+    })
+
+    await useChatStore.getState().sendMessage('s1', 'hello')
+
+    const finalState = useChatStore.getState()
+    expect(finalState.streamError).toBe('failed before content')
+    expect(finalState.messagesBySession.s1).toEqual([
+      { id: 'server-user-1', session_id: 's1', role: 'user', content: 'hello', created_at: 1 },
+    ])
+    expect(finalState.messagesBySession.s1.some((message) => message.role === 'assistant' && message.content === '')).toBe(false)
+  })
+
+  it('keeps legacy-normalized streams compatible with store derived fields', async () => {
+    const { createChatStreamNormalizer } = await import('@renderer/api/chat-stream-normalizer')
+    const { useChatStore } = await import('./index')
+    const gate = deferred()
+    platformMock.chatStream.mockImplementation(async function* () {
+      const normalizer = createChatStreamNormalizer({
+        sessionId: 's1',
+        responseId: 'legacy-response',
+        now: createNow(100),
+        idFactory: createIds(['block-1']),
+      })
+      for (const event of normalizer.normalize({ type: 'delta', text: 'Hel' })) yield event
+      for (const event of normalizer.normalize({ type: 'delta', text: 'lo' })) yield event
+      await gate.promise
+      for (const event of normalizer.normalize({ type: 'done', tokens: { input: 2, output: 3 } })) yield event
+    })
+
+    const sendPromise = useChatStore.getState().sendMessage('s1', 'hello')
+    await waitForState(() => useChatStore.getState().streamingText === 'Hello')
+
+    expect(useChatStore.getState().streamingResponsesBySession.s1).toMatchObject({
+      responseId: 'legacy-response',
+      blocks: [expect.objectContaining({ type: 'markdown', markdown: 'Hello' })],
+    })
+
+    gate.resolve()
+    await sendPromise
+
+    expect(useChatStore.getState().tokenUsage.s1).toEqual({ input: 2, output: 3 })
+  })
 })
 
 function deferred() {
@@ -268,6 +332,16 @@ function deferred() {
     resolve = done
   })
   return { promise, resolve }
+}
+
+function createNow(start: number): () => number {
+  let current = start
+  return () => current++
+}
+
+function createIds(ids: string[]): () => string {
+  let index = 0
+  return () => ids[index++] ?? `id-${index}`
 }
 
 async function waitForState(assertion: () => boolean): Promise<void> {

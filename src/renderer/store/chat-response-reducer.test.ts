@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ResponseStreamEvent } from '@shared/schemas/response'
-import { reduceStreamingResponse } from './chat-response-reducer'
+import { deriveStreamingText, deriveToolCalls, reduceStreamingResponse } from './chat-response-reducer'
 
 describe('reduceStreamingResponse', () => {
   it('creates a streaming response and appends markdown deltas', () => {
@@ -198,6 +198,123 @@ describe('reduceStreamingResponse', () => {
       error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
       isComplete: true,
     })
+  })
+
+  it('applies tool call delta status messages and metadata patches', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-5',
+        sessionId: 'session-1',
+        runtime: 'agent-runtime',
+        createdAt: 1,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-5',
+        block: {
+          id: 'tool-block-1',
+          type: 'tool_call',
+          callId: 'call-1',
+          toolId: 'web_search',
+          category: 'web',
+          status: 'running',
+          input: { query: 'BloomAI' },
+          createdAt: 2,
+        },
+      },
+      {
+        type: 'tool_call_delta',
+        responseId: 'response-5',
+        callId: 'call-1',
+        patch: {
+          statusMessage: 'Searching docs',
+          outputSummary: '2 partial results',
+          metadata: { page: 1 },
+        },
+      },
+    ])
+
+    expect(state?.blocks[0]).toMatchObject({
+      type: 'tool_call',
+      outputSummary: '2 partial results',
+      metadata: { page: 1, statusMessage: 'Searching docs' },
+    })
+  })
+
+  it('marks running tools as interrupted when the response fails', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-6',
+        sessionId: 'session-1',
+        runtime: 'agent-runtime',
+        createdAt: 1,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-6',
+        block: {
+          id: 'tool-block-1',
+          type: 'tool_call',
+          callId: 'call-1',
+          toolId: 'web_search',
+          category: 'web',
+          status: 'running',
+          input: { query: 'BloomAI' },
+          createdAt: 2,
+        },
+      },
+      {
+        type: 'response_failed',
+        responseId: 'response-6',
+        error: { code: 'STREAM_ABORTED', message: 'aborted' },
+        completedAt: 3,
+      },
+    ])
+
+    expect(state?.blocks[0]).toMatchObject({
+      type: 'tool_call',
+      status: 'error',
+      error: { code: 'STREAM_ABORTED', message: 'aborted' },
+      metadata: { interrupted: true },
+      completedAt: 3,
+    })
+    expect(deriveToolCalls(state)[0]).toMatchObject({
+      status: 'error',
+      error: 'aborted',
+      interrupted: true,
+    })
+  })
+
+  it('preserves partial markdown and derives legacy streaming text after failure', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-7',
+        sessionId: 'session-1',
+        runtime: 'direct-llm',
+        createdAt: 1,
+      },
+      {
+        type: 'content_block_started',
+        responseId: 'response-7',
+        block: { id: 'block-1', type: 'markdown', status: 'streaming', role: 'answer', createdAt: 2 },
+      },
+      { type: 'content_delta', responseId: 'response-7', blockId: 'block-1', delta: 'partial' },
+      {
+        type: 'response_failed',
+        responseId: 'response-7',
+        error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+        completedAt: 3,
+      },
+    ])
+
+    expect(deriveStreamingText(state)).toBe('partial')
+    expect(state?.blocks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'markdown', markdown: 'partial' }),
+      expect.objectContaining({ type: 'error', error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' } }),
+    ]))
   })
 })
 
