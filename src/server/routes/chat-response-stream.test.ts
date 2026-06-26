@@ -205,6 +205,7 @@ describe('createChatResponseStreamWriter', () => {
       responseId: 'response-3',
       text: 'partial',
       usage: undefined,
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'Agent failed' },
       trace: {
         schemaVersion: RESPONSE_SCHEMA_VERSION,
         runtime: 'mastra-chat-agent-v1',
@@ -228,6 +229,117 @@ describe('createChatResponseStreamWriter', () => {
           input: { command: 'npm test' },
           outputSummary: 'Permission denied',
           durationMs: 5,
+        },
+      ],
+    })
+  })
+
+  it('applies tool call delta patches before completion', () => {
+    const { writer } = createWriter()
+
+    writer.send({
+      type: 'response_started',
+      responseId: 'response-4',
+      sessionId: 'session-1',
+      runtime: 'mastra-chat-agent-v1',
+      createdAt: 1,
+    })
+    writer.send({
+      type: 'tool_call_started',
+      responseId: 'response-4',
+      block: {
+        id: 'tool-block-3',
+        type: 'tool_call',
+        callId: 'call-3',
+        toolId: 'web_search',
+        category: 'search',
+        status: 'running',
+        input: { query: 'BloomAI' },
+        createdAt: 2,
+      },
+    })
+    writer.send({
+      type: 'tool_call_delta',
+      responseId: 'response-4',
+      callId: 'call-3',
+      patch: {
+        outputSummary: 'Primary failed, using fallback',
+        durationMs: 25,
+        statusMessage: 'Switching to fallback search',
+      },
+    })
+    writer.send({
+      type: 'tool_call_completed',
+      responseId: 'response-4',
+      callId: 'call-3',
+      completedAt: 3,
+    })
+
+    expect(writer.state().toolCalls).toEqual([
+      {
+        callId: 'call-3',
+        toolId: 'web_search',
+        status: 'success',
+        input: { query: 'BloomAI' },
+        outputSummary: 'Primary failed, using fallback',
+        durationMs: 25,
+      },
+    ])
+  })
+
+  it('marks running tool calls as failed when the response fails', () => {
+    const { writer } = createWriter()
+
+    writer.send({
+      type: 'response_started',
+      responseId: 'response-5',
+      sessionId: 'session-1',
+      runtime: 'mastra-chat-agent-v1',
+      createdAt: 1,
+    })
+    writer.send({
+      type: 'tool_call_started',
+      responseId: 'response-5',
+      block: {
+        id: 'tool-block-4',
+        type: 'tool_call',
+        callId: 'call-4',
+        toolId: 'web_search',
+        category: 'search',
+        status: 'running',
+        input: { query: 'BloomAI' },
+        createdAt: 2,
+      },
+    })
+    writer.send({
+      type: 'response_failed',
+      responseId: 'response-5',
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'Agent failed' },
+      completedAt: 3,
+    })
+
+    expect(writer.state()).toMatchObject({
+      responseId: 'response-5',
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'Agent failed' },
+      trace: {
+        finishReason: 'error',
+        toolCalls: [
+          {
+            callId: 'call-4',
+            toolId: 'web_search',
+            status: 'error',
+            input: { query: 'BloomAI' },
+            outputSummary: 'Agent failed',
+          },
+        ],
+      },
+      toolCalls: [
+        {
+          callId: 'call-4',
+          toolId: 'web_search',
+          status: 'error',
+          input: { query: 'BloomAI' },
+          outputSummary: 'Agent failed',
         },
       ],
     })

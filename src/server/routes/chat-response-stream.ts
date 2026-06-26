@@ -3,6 +3,7 @@ import {
   RESPONSE_SCHEMA_VERSION,
   type ResponseRuntime,
   type ResponseStreamEvent,
+  type ResponseError,
   type ResponseTrace,
   type TokenUsage,
   type ToolCallTrace,
@@ -12,6 +13,7 @@ export type ChatResponseStreamState = {
   responseId: string
   text: string
   usage?: TokenUsage
+  error?: ResponseError
   trace?: ResponseTrace
   toolCalls: ToolCallTrace[]
 }
@@ -36,6 +38,7 @@ export function createChatResponseStreamWriter(input: {
   let responseId = ''
   let runtime: ResponseRuntime | undefined
   let usage: TokenUsage | undefined
+  let error: ResponseError | undefined
   let trace: ResponseTrace | undefined
   let text = ''
   const toolCallDrafts = new Map<string, ToolCallDraft>()
@@ -53,6 +56,16 @@ export function createChatResponseStreamWriter(input: {
       }))
   }
 
+  function markRunningToolCallsFailed(message: string): void {
+    for (const [callId, toolCall] of toolCallDrafts.entries()) {
+      if (toolCall.status !== 'running') continue
+      toolCallDrafts.set(callId, {
+        ...toolCall,
+        status: 'error',
+        outputSummary: toolCall.outputSummary ?? message,
+      })
+    }
+  }
   function mergeTrace(nextTrace: ResponseTrace | undefined): void {
     const toolCalls = currentToolCalls()
     trace = {
@@ -104,13 +117,26 @@ export function createChatResponseStreamWriter(input: {
         return
       }
 
+      if (event.type === 'tool_call_delta') {
+        const existing = toolCallDrafts.get(event.callId)
+        if (existing) {
+          toolCallDrafts.set(event.callId, {
+            ...existing,
+            outputSummary: event.patch.outputSummary ?? existing.outputSummary,
+            durationMs: event.patch.durationMs ?? existing.durationMs,
+          })
+        }
+        mergeTrace(trace)
+        return
+      }
+
       if (event.type === 'tool_call_completed') {
         const existing = toolCallDrafts.get(event.callId)
         if (existing) {
           toolCallDrafts.set(event.callId, {
             ...existing,
             status: 'success',
-            outputSummary: event.outputSummary,
+            outputSummary: event.outputSummary ?? existing.outputSummary,
             durationMs: event.durationMs ?? existing.durationMs,
           })
         }
@@ -139,6 +165,8 @@ export function createChatResponseStreamWriter(input: {
       }
 
       if (event.type === 'response_failed') {
+        error = event.error
+        markRunningToolCallsFailed(event.error.message)
         mergeTrace({
           schemaVersion: RESPONSE_SCHEMA_VERSION,
           runtime: runtime ?? 'direct-llm',
@@ -153,6 +181,7 @@ export function createChatResponseStreamWriter(input: {
         responseId,
         text,
         usage,
+        error,
         trace,
         toolCalls: currentToolCalls(),
       }
