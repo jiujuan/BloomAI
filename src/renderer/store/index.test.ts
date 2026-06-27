@@ -197,7 +197,7 @@ describe('chat store response events', () => {
           type: 'response_started',
           responseId: 'response-2',
           sessionId: 's1',
-          runtime: 'direct-llm',
+          runtime: 'mastra-chat-agent-v1',
           createdAt: 1,
         },
         {
@@ -378,7 +378,7 @@ describe('chat store response events', () => {
           type: 'response_started',
           responseId: 'response-empty-fail',
           sessionId: 's1',
-          runtime: 'direct-llm',
+          runtime: 'mastra-chat-agent-v1',
           createdAt: 1,
         },
         {

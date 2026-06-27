@@ -3,7 +3,7 @@ import type { ResponseStreamEvent } from '@shared/schemas/response'
 import { createChatStreamNormalizer } from './chat-stream-normalizer'
 
 describe('createChatStreamNormalizer', () => {
-  it('normalizes legacy delta and done chunks into v1 response events', () => {
+  it('normalizes legacy delta and done chunks into agent v1 response events', () => {
     const normalizer = createChatStreamNormalizer({
       sessionId: 'session-1',
       responseId: 'response-1',
@@ -22,7 +22,7 @@ describe('createChatStreamNormalizer', () => {
         type: 'response_started',
         responseId: 'response-1',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 100,
       },
       {
@@ -50,7 +50,7 @@ describe('createChatStreamNormalizer', () => {
         usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 },
         trace: {
           schemaVersion: 'bloom-response-v1',
-          runtime: 'direct-llm',
+          runtime: 'mastra-chat-agent-v1',
           finishReason: 'stop',
         },
         finishReason: 'stop',
@@ -135,7 +135,7 @@ describe('createChatStreamNormalizer', () => {
       type: 'response_started',
       responseId: 'response-v1',
       sessionId: 'session-1',
-      runtime: 'direct-llm',
+      runtime: 'mastra-chat-agent-v1',
       createdAt: 1,
     }
 
@@ -212,7 +212,7 @@ describe('createChatStreamNormalizer', () => {
         usage: undefined,
         trace: {
           schemaVersion: 'bloom-response-v1',
-          runtime: 'direct-llm',
+          runtime: 'mastra-chat-agent-v1',
           finishReason: 'stop',
         },
         finishReason: 'stop',
@@ -234,7 +234,7 @@ describe('createChatStreamNormalizer', () => {
         type: 'response_started',
         responseId: 'response-4',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 400,
       },
       {
@@ -258,7 +258,7 @@ describe('createChatStreamNormalizer', () => {
         type: 'response_started',
         responseId: 'response-5',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 600,
       },
       {
@@ -283,7 +283,7 @@ describe('createChatStreamNormalizer', () => {
         type: 'response_started',
         responseId: 'response-6',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 700,
       },
       {

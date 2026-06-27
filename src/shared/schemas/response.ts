@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const RESPONSE_SCHEMA_VERSION = 'bloom-response-v1' as const
 
 export type ResponseRuntime =
+  // Legacy saved traces may still contain direct-llm; active emitters should use mastra-chat-agent-v1.
   | 'direct-llm'
   | 'mastra-chat-agent-v1'
   | 'agent-runtime'

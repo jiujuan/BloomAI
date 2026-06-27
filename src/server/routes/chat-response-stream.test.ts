@@ -17,14 +17,14 @@ function createWriter() {
 }
 
 describe('createChatResponseStreamWriter', () => {
-  it('sends v1 events unchanged and accumulates markdown text and usage', () => {
+  it('sends active agent runtime events unchanged and accumulates markdown text and usage', () => {
     const { sent, writer } = createWriter()
     const events: ResponseStreamEvent[] = [
       {
         type: 'response_started',
         responseId: 'response-1',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         model: 'gpt-4o',
         createdAt: 1,
       },
@@ -52,7 +52,7 @@ describe('createChatResponseStreamWriter', () => {
         usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8, model: 'gpt-4o' },
         trace: {
           schemaVersion: RESPONSE_SCHEMA_VERSION,
-          runtime: 'direct-llm',
+          runtime: 'mastra-chat-agent-v1',
           model: 'gpt-4o',
           finishReason: 'stop',
         },
@@ -70,7 +70,7 @@ describe('createChatResponseStreamWriter', () => {
       usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8, model: 'gpt-4o' },
       trace: {
         schemaVersion: RESPONSE_SCHEMA_VERSION,
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         model: 'gpt-4o',
         finishReason: 'stop',
         toolCalls: [],

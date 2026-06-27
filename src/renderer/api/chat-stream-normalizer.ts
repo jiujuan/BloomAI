@@ -7,6 +7,8 @@ import {
   type ToolCallBlock,
 } from '@shared/schemas/response'
 
+const DEFAULT_ACTIVE_RESPONSE_RUNTIME: ResponseRuntime = 'mastra-chat-agent-v1'
+
 export type LegacyChatStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'tool_call_start'; call: LegacyToolCallView }
@@ -44,7 +46,7 @@ export function createChatStreamNormalizer(input: {
   let failed = false
   let legacyStarted = false
   let blockId: string | null = null
-  let runtime: ResponseRuntime = 'direct-llm'
+  let runtime: ResponseRuntime = DEFAULT_ACTIVE_RESPONSE_RUNTIME
   let usage: TokenUsage | undefined
 
   function startResponse(nextRuntime: ResponseRuntime): ResponseStreamEvent[] {
@@ -160,7 +162,7 @@ export function createChatStreamNormalizer(input: {
 
       if (chunk.type === 'delta') {
         return [
-          ...startResponse('direct-llm'),
+          ...startResponse(DEFAULT_ACTIVE_RESPONSE_RUNTIME),
           ...startContent(),
           {
             type: 'content_delta',
@@ -231,6 +233,7 @@ export function createChatStreamNormalizer(input: {
           ? [{ type: 'usage_updated', responseId, usage }]
           : []
         return [
+          // Legacy chunks are still accepted, but newly synthesized v1 events use the active agent runtime.
           ...startResponse(runtime),
           ...usageEvent,
           ...completeResponse(),

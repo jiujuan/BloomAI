@@ -23,6 +23,36 @@ describe('response contract v1', () => {
     })
   })
 
+
+  it('validates active response start events with the agent runtime', () => {
+    const event = ResponseStreamEventSchema.parse({
+      type: 'response_started',
+      responseId: 'resp-agent',
+      sessionId: 'session-1',
+      runtime: 'mastra-chat-agent-v1',
+      model: 'gpt-4o',
+      createdAt: 100,
+    })
+
+    expect(event).toMatchObject({
+      type: 'response_started',
+      runtime: 'mastra-chat-agent-v1',
+    })
+  })
+
+  it('keeps direct-llm valid only for legacy response compatibility', () => {
+    const event = ResponseStreamEventSchema.parse({
+      type: 'response_started',
+      responseId: 'resp-legacy',
+      runtime: 'direct-llm',
+      createdAt: 100,
+    })
+
+    expect(event).toMatchObject({
+      type: 'response_started',
+      runtime: 'direct-llm',
+    })
+  })
   it('validates tool call started stream events', () => {
     const event = ResponseStreamEventSchema.parse({
       type: 'tool_call_started',

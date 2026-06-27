@@ -53,7 +53,7 @@ describe('mapLlmStreamToResponseEvents', () => {
       type: 'response_started',
       responseId: 'resp-1',
       sessionId: 'session-1',
-      runtime: 'direct-llm',
+      runtime: 'mastra-chat-agent-v1',
       providerId: 'openai',
       model: 'gpt-4o',
     })
@@ -90,7 +90,7 @@ describe('mapLlmStreamToResponseEvents', () => {
       },
       trace: {
         schemaVersion: 'bloom-response-v1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         providerId: 'openai',
         model: 'gpt-4o',
         finishReason: 'stop',

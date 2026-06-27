@@ -9,7 +9,7 @@ describe('reduceStreamingResponse', () => {
         type: 'response_started',
         responseId: 'response-1',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 1,
       },
       {
@@ -141,7 +141,7 @@ describe('reduceStreamingResponse', () => {
         type: 'response_started',
         responseId: 'response-3',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 1,
       },
       {
@@ -171,13 +171,13 @@ describe('reduceStreamingResponse', () => {
         type: 'response_started',
         responseId: 'response-4',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 1,
       },
       {
         type: 'response_failed',
         responseId: 'response-4',
-        error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+        error: { code: 'AGENT_RUNTIME_ERROR', message: 'failed' },
         completedAt: 2,
       },
     ])
@@ -190,12 +190,12 @@ describe('reduceStreamingResponse', () => {
           id: 'response-4-error',
           type: 'error',
           status: 'failed',
-          error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+          error: { code: 'AGENT_RUNTIME_ERROR', message: 'failed' },
           createdAt: 2,
           completedAt: 2,
         },
       ],
-      error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+      error: { code: 'AGENT_RUNTIME_ERROR', message: 'failed' },
       isComplete: true,
     })
   })
@@ -293,7 +293,7 @@ describe('reduceStreamingResponse', () => {
         type: 'response_started',
         responseId: 'response-7',
         sessionId: 'session-1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         createdAt: 1,
       },
       {
@@ -305,7 +305,7 @@ describe('reduceStreamingResponse', () => {
       {
         type: 'response_failed',
         responseId: 'response-7',
-        error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' },
+        error: { code: 'AGENT_RUNTIME_ERROR', message: 'failed' },
         completedAt: 3,
       },
     ])
@@ -313,7 +313,7 @@ describe('reduceStreamingResponse', () => {
     expect(deriveStreamingText(state)).toBe('partial')
     expect(state?.blocks).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'markdown', markdown: 'partial' }),
-      expect.objectContaining({ type: 'error', error: { code: 'LLM_PROVIDER_ERROR', message: 'failed' } }),
+      expect.objectContaining({ type: 'error', error: { code: 'AGENT_RUNTIME_ERROR', message: 'failed' } }),
     ]))
   })
 })

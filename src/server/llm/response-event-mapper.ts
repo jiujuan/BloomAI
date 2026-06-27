@@ -13,6 +13,8 @@ import { RESPONSE_SCHEMA_VERSION } from '@shared/schemas/response'
 import { logError, sanitizeErrorMessage } from '../logger/logger'
 import type { ChatStreamEvent } from './types'
 
+const DEFAULT_ACTIVE_RESPONSE_RUNTIME = 'mastra-chat-agent-v1' as const
+
 export type LlmResponseEventMapperOptions = {
   sessionId: string
   model: string
@@ -38,7 +40,7 @@ export async function* mapLlmStreamToResponseEvents(
     type: 'response_started',
     responseId,
     sessionId: options.sessionId,
-    runtime: 'direct-llm',
+    runtime: DEFAULT_ACTIVE_RESPONSE_RUNTIME,
     providerId: options.providerId,
     model: options.model,
     createdAt: now(),
@@ -151,7 +153,8 @@ function createResponseCompletedEvent(
     usage,
     trace: {
       schemaVersion: RESPONSE_SCHEMA_VERSION,
-      runtime: 'direct-llm',
+      // Direct provider streams can still be mapped for tests/tools, but new traces use the agent runtime contract.
+      runtime: DEFAULT_ACTIVE_RESPONSE_RUNTIME,
       providerId,
       model,
       finishReason: 'stop',

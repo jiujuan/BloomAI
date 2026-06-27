@@ -30,7 +30,7 @@ describe('parseMessageTrace', () => {
     })
   })
 
-  it('returns v1 trace objects as-is', () => {
+  it('keeps old direct-llm v1 trace objects parseable for history compatibility', () => {
     const v1Trace = {
       schemaVersion: 'bloom-response-v1',
       runtime: 'direct-llm',

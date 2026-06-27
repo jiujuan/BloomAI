@@ -9,6 +9,8 @@ import {
   type ToolCallTrace,
 } from '@shared/schemas/response'
 
+const DEFAULT_ACTIVE_RESPONSE_RUNTIME: ResponseRuntime = 'mastra-chat-agent-v1'
+
 export type ChatResponseStreamState = {
   responseId: string
   text: string
@@ -72,7 +74,8 @@ export function createChatResponseStreamWriter(input: {
       schemaVersion: RESPONSE_SCHEMA_VERSION,
       ...(trace ?? {}),
       ...(nextTrace ?? {}),
-      runtime: nextTrace?.runtime ?? trace?.runtime ?? runtime ?? 'direct-llm',
+      // New active responses default to the agent runtime; direct-llm is accepted only when replaying explicit legacy traces.
+      runtime: nextTrace?.runtime ?? trace?.runtime ?? runtime ?? DEFAULT_ACTIVE_RESPONSE_RUNTIME,
       finishReason: nextTrace?.finishReason ?? trace?.finishReason,
       toolCalls: nextTrace?.toolCalls?.length ? nextTrace.toolCalls : toolCalls,
     }
@@ -169,7 +172,7 @@ export function createChatResponseStreamWriter(input: {
         markRunningToolCallsFailed(event.error.message)
         mergeTrace({
           schemaVersion: RESPONSE_SCHEMA_VERSION,
-          runtime: runtime ?? 'direct-llm',
+          runtime: runtime ?? DEFAULT_ACTIVE_RESPONSE_RUNTIME,
           finishReason: 'error',
           toolCalls: currentToolCalls(),
         })
