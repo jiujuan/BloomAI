@@ -10,7 +10,7 @@ import { logError, sanitizeErrorMessage } from '../logger/logger'
 import { streamChatCompletion } from '../llm'
 import { mapLlmStreamToResponseEvents } from '../llm/response-event-mapper'
 import { selectRuntimeModel } from '../llm/model-selection'
-import { runChatAgentV1 } from '../agent/mastra/chat-agent-runtime-adapter'
+import { streamChatAgentRoute } from '../agent/runtime/chat-agent-router'
 import { createAgentResponseEventMapper } from '../agent/mastra/response-event-mapper'
 import { setupSSE, sendSSE, endSSE } from '../middleware/index'
 import { buildChatContext, organizeChatPrompt } from '../prompts'
@@ -162,6 +162,7 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
         content,
         model,
         maxSteps: agentRuntimeDebugConfig.parsedMaxSteps,
+        prompt,
         res,
       })
       console.log('[AgentRuntime mastra] completed', { sessionId, model, agentHandled })
@@ -195,6 +196,7 @@ type AgentChatInput = {
   content: string
   model: string
   maxSteps: number
+  prompt: ReturnType<typeof organizeChatPrompt>
   res: Response
 }
 
@@ -238,11 +240,12 @@ async function streamLegacyChat(input: LegacyChatInput): Promise<void> {
 }
 
 async function* createAgentChatSource(input: AgentChatInput) {
-  yield* runChatAgentV1({
+  yield* streamChatAgentRoute({
     sessionId: input.sessionId,
     content: input.content,
     model: input.model,
     maxSteps: input.maxSteps,
+    prompt: input.prompt,
   })
 }
 
