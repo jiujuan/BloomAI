@@ -84,9 +84,9 @@ describe('chat model dropdown data', () => {
   it('shows the streaming assistant bubble before the first response token arrives', async () => {
     const { shouldShowStreamingBubble } = await import('./Timeline')
 
-    expect(shouldShowStreamingBubble(true, '')).toBe(true)
-    expect(shouldShowStreamingBubble(true, 'Hello')).toBe(true)
-    expect(shouldShowStreamingBubble(false, '')).toBe(false)
+    expect(shouldShowStreamingBubble(true, null)).toBe(true)
+    expect(shouldShowStreamingBubble(true, { responseId: 'r', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
+    expect(shouldShowStreamingBubble(false, null)).toBe(false)
   })
 
   it('does not include clipboard content in chat context', async () => {

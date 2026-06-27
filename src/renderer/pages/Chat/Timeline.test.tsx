@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { Timeline, groupStreamingBlocks, shouldShowStreamingBubble } from './Timeline'
 
 describe('Timeline', () => {
-  it('shows streaming bubble when text exists', () => {
-    expect(shouldShowStreamingBubble(false, 'hello')).toBe(true)
+  it('hides fallback streaming bubble when a v1 streaming response exists', () => {
+    expect(shouldShowStreamingBubble(false, { responseId: 'r', sessionId: 's1', isComplete: false, blocks: [{ id: 'md', type: 'markdown', status: 'streaming', markdown: 'hello', createdAt: 1 }] } as any)).toBe(false)
   })
 
   it('renders streaming response blocks in their contract order', () => {
@@ -12,9 +12,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming
-        streamingText="legacy fallback text"
-        streamError={null}
-        toolCalls={[{ callId: 'legacy', toolId: 'legacy_tool', category: 'web', status: 'running', input: {} }] as any}
         streamingResponse={{
           responseId: 'r1',
           sessionId: 's1',
@@ -65,8 +62,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming
-        streamingText=""
-        streamError={null}
         streamingResponse={{
           responseId: 'r1',
           sessionId: 's1',
@@ -96,8 +91,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming
-        streamingText=""
-        streamError={null}
         streamingResponse={{
           responseId: 'r1',
           sessionId: 's1',
@@ -117,31 +110,33 @@ describe('Timeline', () => {
     expect(html.indexOf('Answer text')).toBeLessThan(html.indexOf('data-call-id="c2"'))
     expect(html.indexOf('data-call-id="c2"')).toBeLessThan(html.indexOf('data-call-id="c3"'))
   })
-  it('renders tool call cards before the streaming bubble', () => {
+  it('derives tool call cards from v1 streaming response blocks', () => {
     const html = renderToStaticMarkup(
       <Timeline
         messages={[] as any}
         isStreaming
-        streamingText="typing"
-        streamError={null}
-        toolCalls={[{ callId: 'c1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'bloomai' } }] as any}
+        streamingResponse={{
+          responseId: 'r-tool',
+          sessionId: 's1',
+          isComplete: false,
+          blocks: [
+            { id: 'tool-1', type: 'tool_call', callId: 'c1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'bloomai' }, createdAt: 1 },
+          ],
+        } as any}
       />
     )
 
-    expect(html).toContain('tool-call-card')
+    expect(html).toContain('tool-call-group-card')
     expect(html).toContain('data-call-id="c1"')
-    expect(html.indexOf('tool-call-card')).toBeLessThan(html.indexOf('typing'))
   })
 
   it('shows a lightweight wait state for response_started_no_block without an empty assistant bubble', () => {
-    expect(shouldShowStreamingBubble(true, '', { responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
+    expect(shouldShowStreamingBubble(true, { responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
 
     const html = renderToStaticMarkup(
       <Timeline
         messages={[] as any}
         isStreaming
-        streamingText=""
-        streamError={null}
         streamingResponse={{ responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any}
       />
     )
@@ -155,8 +150,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming={false}
-        streamingText=""
-        streamError={null}
         streamingResponse={{
           responseId: 'r-fail',
           sessionId: 's1',
@@ -179,8 +172,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming={false}
-        streamingText=""
-        streamError={null}
         streamingResponse={{
           responseId: 'r-partial',
           sessionId: 's1',
@@ -195,7 +186,7 @@ describe('Timeline', () => {
     )
 
     expect(html).toContain('Partial answer')
-    expect(html).toContain('大模型调用失败')
+    expect(html).toContain('provider failed')
     expect(html).toContain('provider failed')
     expect(html.indexOf('Partial answer')).toBeLessThan(html.indexOf('provider failed'))
   })
@@ -226,8 +217,6 @@ describe('Timeline', () => {
       <Timeline
         messages={[] as any}
         isStreaming={false}
-        streamingText=""
-        streamError={null}
         streamingResponse={{
           responseId: 'r-unknown',
           sessionId: 's1',

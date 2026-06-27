@@ -162,12 +162,9 @@ export function ChatPanel() {
   const { sessions, activeSessionId, updateSessionTitle } = useSessionStore()
   const {
     messagesBySession,
-    streamingText,
     isStreaming,
-    streamError,
     sendMessage,
     loadMessages,
-    toolCallsBySession,
     streamingResponsesBySession,
   } = useChatStore()
   const { personas, activePersonaId, setActivePersona } = usePersonaStore()
@@ -176,7 +173,6 @@ export function ChatPanel() {
 
   const session = sessions.find(s => s.id === activeSessionId)
   const messages = activeSessionId ? (messagesBySession[activeSessionId] || []) : []
-  const toolCalls = activeSessionId ? (toolCallsBySession[activeSessionId] || []) : []
   const streamingResponse = selectStreamingResponseForSession(activeSessionId, streamingResponsesBySession)
   const model = resolveDisplayedChatModel(session?.model, settings.model)
   const modelOptions = useMemo(() => getChatModelOptions(textModels), [textModels])
@@ -235,9 +231,6 @@ export function ChatPanel() {
       <Timeline
         messages={messages}
         isStreaming={isStreaming}
-        streamingText={streamingText}
-        streamError={streamError}
-        toolCalls={toolCalls}
         streamingResponse={streamingResponse}
       />
 

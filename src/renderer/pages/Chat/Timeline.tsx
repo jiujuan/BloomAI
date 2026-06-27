@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolCallGroupCard, createToolCallGroupKey, type ToolCallGroup } from './ToolCallGroupCard'
-import type { ToolCallState } from '@renderer/store'
+import { deriveStreamingText, deriveToolCalls } from '@renderer/store/chat-response-reducer'
 import type { StreamingResponseState } from '@renderer/store/chat-response-reducer'
 import { formatDate } from '@renderer/utils'
 import type { ErrorBlock, Message, ResponseContentBlock } from '@shared/schemas'
@@ -13,9 +13,6 @@ import { getTimelineStateDefinition } from '@shared/llm-response-contract/timeli
 interface TimelineProps {
   messages: Message[]
   isStreaming: boolean
-  streamingText: string
-  streamError: string | null
-  toolCalls?: ToolCallState[]
   streamingResponse?: StreamingResponseState | null
 }
 
@@ -31,11 +28,10 @@ function DateDivider({ label }: { label: string }) {
 
 export function shouldShowStreamingBubble(
   isStreaming: boolean,
-  streamingText: string,
   streamingResponse: StreamingResponseState | null = null,
 ): boolean {
   if (streamingResponse) return false
-  return isStreaming || streamingText.length > 0
+  return isStreaming
 }
 
 function SystemBadge({ text }: { text: string }) {
@@ -49,17 +45,16 @@ function SystemBadge({ text }: { text: string }) {
 export function Timeline({
   messages,
   isStreaming,
-  streamingText,
-  streamError,
-  toolCalls = [],
   streamingResponse = null,
 }: TimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeBlocks = streamingResponse?.blocks ?? null
+  const activeStreamText = deriveStreamingText(streamingResponse)
+  const toolCalls = deriveToolCalls(streamingResponse)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, isStreaming, streamingText, toolCalls.length, activeBlocks?.length])
+  }, [messages.length, isStreaming, activeStreamText, toolCalls.length, activeBlocks?.length])
 
   const grouped: Array<{ type: 'date'; label: string } | { type: 'message'; message: Message }> = []
   let lastDate = ''
@@ -103,21 +98,15 @@ export function Timeline({
           <>
             {toolCallItems}
 
-            {shouldShowStreamingBubble(isStreaming, streamingText, streamingResponse) && (
+            {shouldShowStreamingBubble(isStreaming, streamingResponse) && (
               <MessageBubble
                 message={{ id: 'streaming', session_id: '', role: 'assistant', content: '', created_at: Date.now() }}
                 isStreaming
-                streamText={streamingText}
+                streamText={activeStreamText}
               />
             )}
           </>
         )}
-
-      {streamError && (
-        <div className="stream-error" role="alert">
-          <span>Warning: {streamError}</span>
-        </div>
-      )}
 
       <div ref={bottomRef} />
     </div>

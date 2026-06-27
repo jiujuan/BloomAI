@@ -5,9 +5,7 @@ import type { LlmModelSummary } from '@renderer/api'
 import type { Message, Persona, Session } from '@shared/schemas'
 import {
   deriveStreamingText,
-  deriveToolCalls,
   reduceStreamingResponse,
-  type DerivedToolCallState,
   type StreamingResponseState,
 } from './chat-response-reducer'
 
@@ -83,33 +81,23 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
 // Chat Store
 
-export type ToolCallState = DerivedToolCallState
-
 interface ChatState {
   messagesBySession: Record<string, Message[]>
-  streamingText: string
   isStreaming: boolean
-  streamError: string | null
   tokenUsage: Record<string, { input: number; output: number }>
-  toolCallsBySession: Record<string, ToolCallState[]>
   streamingResponsesBySession: Record<string, StreamingResponseState | null>
 }
 interface ChatActions {
   loadMessages: (sessionId: string) => Promise<void>
   sendMessage: (sessionId: string, content: string, contextOverride?: object) => Promise<void>
   clearMessages: (sessionId: string) => void
-  clearStreamingToolCalls: (sessionId: string) => void
-  setStreamError: (error: string | null) => void
 }
 
 export const useChatStore = create<ChatState & ChatActions>()(
   devtools((set, get) => ({
     messagesBySession: {},
-    streamingText: '',
     isStreaming: false,
-    streamError: null,
     tokenUsage: {},
-    toolCallsBySession: {},
     streamingResponsesBySession: {},
 
     loadMessages: async (sessionId: string) => {
@@ -125,7 +113,6 @@ export const useChatStore = create<ChatState & ChatActions>()(
     sendMessage: async (sessionId: string, content: string, contextOverride?: object) => {
       if (get().isStreaming) return
       set(s => ({
-        toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] },
         streamingResponsesBySession: { ...s.streamingResponsesBySession, [sessionId]: null },
       }))
       const userMsg: Message = {
@@ -141,11 +128,8 @@ export const useChatStore = create<ChatState & ChatActions>()(
           [sessionId]: [...(s.messagesBySession[sessionId] || []), userMsg],
         },
         isStreaming: true,
-        streamingText: '',
-        streamError: null,
       }))
 
-// Session Store
       useSessionStore.setState(s => ({
         sessions: s.sessions.map(sess =>
           sess.id === sessionId ? { ...sess, updated_at: Date.now() } : sess
@@ -165,12 +149,6 @@ export const useChatStore = create<ChatState & ChatActions>()(
                 ...state.streamingResponsesBySession,
                 [sessionId]: next,
               },
-              streamingText: deriveStreamingText(next),
-              toolCallsBySession: {
-                ...state.toolCallsBySession,
-                [sessionId]: deriveToolCalls(next),
-              },
-              streamError: next?.error?.message ?? state.streamError,
               tokenUsage: nextUsage,
             }
           })
@@ -197,23 +175,16 @@ export const useChatStore = create<ChatState & ChatActions>()(
 
         set(s => ({
           isStreaming: false,
-          streamingText: '',
-          streamError: finalResponse?.error?.message ?? s.streamError,
           streamingResponsesBySession: {
             ...s.streamingResponsesBySession,
             [sessionId]: responseFailed ? finalResponse : null,
           },
-          toolCallsBySession: {
-            ...s.toolCallsBySession,
-            [sessionId]: responseFailed ? deriveToolCalls(finalResponse) : [],
-          },
         }))
         if (responseFailed) return
 
-        // Reload messages from server to get real IDs
+        // Persisted messages replace temporary rows only after the v1 response stream completes successfully.
         const messages = await platform.getMessages(sessionId)
         set(s => ({ messagesBySession: { ...s.messagesBySession, [sessionId]: messages } }))
-        // Update session title from server
         const sessions = await platform.getSessions()
         useSessionStore.setState({ sessions })
       } catch (err: any) {
@@ -228,16 +199,10 @@ export const useChatStore = create<ChatState & ChatActions>()(
             }, sessionId)
           : current
         set(s => ({
-          streamError: message,
           isStreaming: false,
-          streamingText: '',
           streamingResponsesBySession: {
             ...s.streamingResponsesBySession,
             [sessionId]: failedResponse,
-          },
-          toolCallsBySession: {
-            ...s.toolCallsBySession,
-            [sessionId]: deriveToolCalls(failedResponse),
           },
         }))
       }
@@ -247,19 +212,11 @@ export const useChatStore = create<ChatState & ChatActions>()(
       set(s => {
         const next = { ...s.messagesBySession }
         delete next[sessionId]
-        const nextToolCalls = { ...s.toolCallsBySession }
-        delete nextToolCalls[sessionId]
         const nextStreamingResponses = { ...s.streamingResponsesBySession }
         delete nextStreamingResponses[sessionId]
-        return { messagesBySession: next, toolCallsBySession: nextToolCalls, streamingResponsesBySession: nextStreamingResponses }
+        return { messagesBySession: next, streamingResponsesBySession: nextStreamingResponses }
       })
     },
-
-    clearStreamingToolCalls: (sessionId: string) => {
-      set(s => ({ toolCallsBySession: { ...s.toolCallsBySession, [sessionId]: [] } }))
-    },
-
-    setStreamError: (error) => set({ streamError: error }),
   }), { name: 'bloomai-chat' })
 )
 
@@ -277,7 +234,6 @@ function mergeTokenUsage(
     },
   }
 }
-
 // Persona Store
 
 interface PersonaState {
