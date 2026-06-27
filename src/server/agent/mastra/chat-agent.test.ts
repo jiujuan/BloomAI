@@ -11,6 +11,10 @@ const createWebSearchToolMock = vi.hoisted(() => vi.fn((options: { sessionId?: s
   description: `Search the web for ${options.sessionId ?? 'unknown session'}`,
 })))
 
+const createSkillAdapterToolsMock = vi.hoisted(() => vi.fn((skills: Array<{ id: string; description: string }>) => Object.fromEntries(
+  skills.map((skill) => ['skill:' + skill.id, { id: 'skill:' + skill.id, description: skill.description }]),
+)))
+
 vi.mock('@mastra/core/agent', () => ({
   Agent: agentConstructor,
 }))
@@ -19,12 +23,17 @@ vi.mock('./web-search-adapter.tool', () => ({
   createWebSearchAdapterTool: createWebSearchToolMock,
 }))
 
+vi.mock('./skill-adapter.tool', () => ({
+  createSkillAdapterTools: createSkillAdapterToolsMock,
+}))
+
 import { CHAT_AGENT_V1_INSTRUCTIONS, createChatAgent } from './chat-agent'
 
 describe('createChatAgent', () => {
   beforeEach(() => {
     agentConstructor.mockClear()
     createWebSearchToolMock.mockClear()
+    createSkillAdapterToolsMock.mockClear()
   })
 
   it('creates a Mastra Agent with the runtime model argument', () => {
@@ -64,6 +73,32 @@ describe('createChatAgent', () => {
     expect(config.tools).toEqual({})
   })
 
+
+  it('mounts selected enabled skills as skill tools', () => {
+    const enabledSkill = {
+      kind: 'skill' as const,
+      id: 'summarizer',
+      name: 'Summarizer',
+      description: 'Summarize selected text',
+      type: 'prompt-template',
+      enabled: true,
+      paramsSchema: { type: 'object' },
+    }
+    const disabledSkill = { ...enabledSkill, id: 'disabled-skill', enabled: false }
+
+    createChatAgent('settings-selected-model', {
+      selectedTools: [],
+      selectedSkills: ['summarizer'],
+      enabledSkills: [enabledSkill, disabledSkill],
+    })
+
+    const config = agentConstructor.mock.calls[0][0] as { tools: Record<string, { id: string; description: string }> }
+    expect(createSkillAdapterToolsMock).toHaveBeenCalledWith([enabledSkill])
+    expect(config.tools['skill:summarizer']).toMatchObject({
+      id: 'skill:summarizer',
+      description: 'Summarize selected text',
+    })
+  })
   it('accepts organized prompt metadata in creation options without changing default instructions', () => {
     const prompt = {
       system: 'Persona prompt',

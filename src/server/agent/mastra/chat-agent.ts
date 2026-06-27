@@ -3,6 +3,7 @@ import type { MastraModelConfig } from '@mastra/core/llm'
 import type { ChatIntentDecision, SkillCapability, ToolCapability } from '../runtime/intent/types'
 import type { OrganizedChatPrompt } from '../../prompts/types'
 import { CHAT_AGENT_V1_ID, CHAT_AGENT_V1_NAME } from './constants'
+import { createSkillAdapterTools } from './skill-adapter.tool'
 import { createWebSearchAdapterTool } from './web-search-adapter.tool'
 
 export const CHAT_AGENT_V1_INSTRUCTIONS = `
@@ -29,11 +30,11 @@ export function createChatAgent(model: MastraModelConfig, options: CreateChatAge
     name: CHAT_AGENT_V1_NAME,
     instructions: CHAT_AGENT_V1_INSTRUCTIONS,
     model,
-    tools: createSelectedTools(options),
+    tools: createSelectedTools(options) as ConstructorParameters<typeof Agent>[0]['tools'],
   })
 }
 
-type ChatAgentTools = Partial<{ web_search: ReturnType<typeof createWebSearchAdapterTool> }>
+type ChatAgentTools = Partial<{ web_search: ReturnType<typeof createWebSearchAdapterTool> }> & Record<string, unknown>
 
 function createSelectedTools(options: CreateChatAgentOptions): ChatAgentTools {
   const tools: ChatAgentTools = {}
@@ -41,5 +42,12 @@ function createSelectedTools(options: CreateChatAgentOptions): ChatAgentTools {
   if (selectedTools.has('web_search')) {
     tools.web_search = createWebSearchAdapterTool({ sessionId: options.sessionId })
   }
+  // Mount only the skills selected by the intent router so Mastra sees the same capability surface the router chose.
+  Object.assign(tools, createSkillAdapterTools(getSelectedEnabledSkills(options)))
   return tools
+}
+
+function getSelectedEnabledSkills(options: CreateChatAgentOptions): SkillCapability[] {
+  const selectedSkills = new Set(options.selectedSkills ?? [])
+  return (options.enabledSkills ?? []).filter((skill) => skill.enabled && selectedSkills.has(skill.id))
 }
