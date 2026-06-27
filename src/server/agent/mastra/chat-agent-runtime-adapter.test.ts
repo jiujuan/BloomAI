@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OrganizedChatPrompt } from '../../prompts/types'
 import { DEFAULT_AGENT_MAX_STEPS } from './constants'
+import type { ChatAgentRuntimeEvent } from './types'
 import { runChatAgentV1 } from './chat-agent-runtime-adapter'
 
 const createChatAgentMock = vi.hoisted(() => vi.fn())
@@ -156,6 +157,241 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
       selectedSkills: [],
     }))
   })
+  it('emits the no-tool runtime path as answer deltas followed by done', async () => {
+    createChatAgentMock.mockReturnValue({
+      stream: vi.fn(async () => ({
+        fullStream: asyncGenerator([
+          { type: 'text-delta', textDelta: 'Direct answer.' },
+          { type: 'finish', usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 } },
+        ]),
+      })),
+    })
+
+    const events = await collectEvents(runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'hello',
+      prompt: createPrompt(),
+      model: 'gpt-4o',
+    }))
+
+    expect(events).toEqual([
+      { type: 'delta', text: 'Direct answer.' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [],
+          tokens: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+        },
+      },
+    ])
+  })
+
+  it('emits the web_search runtime path and records the completed tool trace', async () => {
+    resolveIntentMock.mockResolvedValue({
+      mode: 'tool',
+      source: 'programmatic',
+      confidence: 0.95,
+      reason: 'needs search',
+      selectedTools: ['web_search'],
+      selectedSkills: [],
+    })
+    createChatAgentMock.mockReturnValue({
+      stream: vi.fn(async () => ({
+        fullStream: asyncGenerator([
+          { type: 'tool-call', toolCallId: 'search-1', toolName: 'web_search', args: { query: 'Mastra' } },
+          { type: 'tool-result', toolCallId: 'search-1', toolName: 'web_search', result: { results: [{ title: 'Mastra docs' }] } },
+          { type: 'text-delta', textDelta: 'Search says Mastra has docs.' },
+        ]),
+      })),
+    })
+
+    const events = await collectEvents(runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'latest Mastra docs',
+      prompt: createPrompt('latest Mastra docs'),
+      model: 'gpt-4o',
+    }))
+
+    expect(events).toEqual([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'search-1',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'running',
+          input: { query: 'Mastra' },
+        },
+      },
+      { type: 'tool_call_result', callId: 'search-1', output: { results: [{ title: 'Mastra docs' }] } },
+      { type: 'delta', text: 'Search says Mastra has docs.' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [
+            {
+              callId: 'search-1',
+              toolId: 'web_search',
+              status: 'success',
+              input: { query: 'Mastra' },
+              outputSummary: '{"results":[{"title":"Mastra docs"}]}',
+            },
+          ],
+        },
+      },
+    ])
+  })
+
+  it('emits the skill runtime path as ordinary tool events with a skill tool id', async () => {
+    resolveCapabilitiesMock.mockReturnValue({
+      tools: [],
+      skills: [{
+        kind: 'skill',
+        id: 'summarizer',
+        name: 'Summarizer',
+        description: 'Summarize text',
+        type: 'prompt-template',
+        enabled: true,
+        paramsSchema: { type: 'object' },
+      }],
+    })
+    resolveIntentMock.mockResolvedValue({
+      mode: 'skill',
+      source: 'programmatic',
+      confidence: 0.95,
+      reason: 'explicit skill request',
+      selectedTools: [],
+      selectedSkills: ['summarizer'],
+    })
+    createChatAgentMock.mockReturnValue({
+      stream: vi.fn(async () => ({
+        fullStream: asyncGenerator([
+          { type: 'tool-call', toolCallId: 'skill-1', toolName: 'skill:summarizer', args: { text: 'Long note' } },
+          { type: 'tool-result', toolCallId: 'skill-1', toolName: 'skill:summarizer', result: { summary: 'Short note' } },
+          { type: 'text-delta', textDelta: 'Short note' },
+        ]),
+      })),
+    })
+
+    const events = await collectEvents(runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'run summarizer',
+      prompt: createPrompt('run summarizer'),
+      model: 'gpt-4o',
+    }))
+
+    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', expect.objectContaining({
+      selectedTools: [],
+      selectedSkills: ['summarizer'],
+    }))
+    expect(events).toEqual([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'skill-1',
+          toolId: 'skill:summarizer',
+          category: 'tool',
+          status: 'running',
+          input: { text: 'Long note' },
+        },
+      },
+      { type: 'tool_call_result', callId: 'skill-1', output: { summary: 'Short note' } },
+      { type: 'delta', text: 'Short note' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [
+            {
+              callId: 'skill-1',
+              toolId: 'skill:summarizer',
+              status: 'success',
+              input: { text: 'Long note' },
+              outputSummary: '{"summary":"Short note"}',
+            },
+          ],
+        },
+      },
+    ])
+  })
+
+  it('emits tool failure events and records an error tool trace without falling back', async () => {
+    resolveIntentMock.mockResolvedValue({
+      mode: 'tool',
+      source: 'programmatic',
+      confidence: 0.95,
+      reason: 'needs search',
+      selectedTools: ['web_search'],
+      selectedSkills: [],
+    })
+    createChatAgentMock.mockReturnValue({
+      stream: vi.fn(async () => ({
+        fullStream: asyncGenerator([
+          { type: 'tool-call', toolCallId: 'search-1', toolName: 'web_search', args: { query: 'Mastra' } },
+          { type: 'tool-error', toolCallId: 'search-1', toolName: 'web_search', error: new Error('search failed') },
+        ]),
+      })),
+    })
+
+    const events = await collectEvents(runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'latest Mastra docs',
+      prompt: createPrompt('latest Mastra docs'),
+      model: 'gpt-4o',
+    }))
+
+    expect(events).toEqual([
+      {
+        type: 'tool_call_start',
+        call: {
+          callId: 'search-1',
+          toolId: 'web_search',
+          category: 'search',
+          status: 'running',
+          input: { query: 'Mastra' },
+        },
+      },
+      { type: 'tool_call_error', callId: 'search-1', error: 'search failed' },
+      {
+        type: 'done',
+        trace: {
+          runtime: 'mastra-chat-agent-v1',
+          maxSteps: 10,
+          toolCalls: [
+            {
+              callId: 'search-1',
+              toolId: 'web_search',
+              status: 'error',
+              input: { query: 'Mastra' },
+              outputSummary: 'search failed',
+            },
+          ],
+        },
+      },
+    ])
+  })
+
+  it('emits a response failure event when agent startup fails', async () => {
+    createChatAgentMock.mockReturnValue({
+      stream: vi.fn(async () => {
+        throw new Error('agent failed to start')
+      }),
+    })
+
+    const events = await collectEvents(runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'hello',
+      prompt: createPrompt(),
+      model: 'gpt-4o',
+    }))
+
+    expect(events).toEqual([{ type: 'error', error: 'agent failed to start' }])
+  })
   it('emits an error event when the selected model is not configured', async () => {
     const events = []
     for await (const event of runChatAgentV1({
@@ -211,7 +447,15 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
         trace: {
           runtime: 'mastra-chat-agent-v1',
           maxSteps: 10,
-          toolCalls: [],
+          toolCalls: [
+            {
+              callId: 'call-1',
+              toolId: 'web_search',
+              status: 'success',
+              input: { query: 'Mastra' },
+              outputSummary: '{"query":"Mastra","results":[]}',
+            },
+          ],
         },
       },
     ])
@@ -263,6 +507,11 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
   })
 })
 
+async function collectEvents(stream: AsyncGenerator<ChatAgentRuntimeEvent>): Promise<ChatAgentRuntimeEvent[]> {
+  const events: ChatAgentRuntimeEvent[] = []
+  for await (const event of stream) events.push(event)
+  return events
+}
 async function* asyncGenerator(items: unknown[]): AsyncGenerator<unknown> {
   for (const item of items) yield item
 }

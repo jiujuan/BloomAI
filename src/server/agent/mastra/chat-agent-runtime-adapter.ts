@@ -9,7 +9,7 @@ import type { OpenAICompatibleConfig } from '@mastra/core/llm'
 import type { ResolvedLlmModel } from '../../llm/types'
 import type { OrganizedChatPrompt } from '../../prompts/types'
 import type { LlmMessage } from '../../llm/types'
-import type { ChatAgentRunInput, ChatAgentRuntimeEvent } from './types'
+import type { ChatAgentRunInput, ChatAgentRuntimeEvent, ChatToolCallTrace } from './types'
 
 type StreamOutputLike = {
   fullStream: unknown
@@ -33,44 +33,70 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
     availableTools: capabilities.tools,
     availableSkills: capabilities.skills,
   })
-  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), {
-    sessionId: input.sessionId,
-    prompt: input.prompt,
-    intent,
-    enabledTools: capabilities.tools,
-    enabledSkills: capabilities.skills,
-    selectedTools: intent.selectedTools,
-    selectedSkills: intent.selectedSkills,
-  })
+
+  let agent: unknown
+  try {
+    agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), {
+      sessionId: input.sessionId,
+      prompt: input.prompt,
+      intent,
+      enabledTools: capabilities.tools,
+      enabledSkills: capabilities.skills,
+      selectedTools: intent.selectedTools,
+      selectedSkills: intent.selectedSkills,
+    })
+  } catch (error) {
+    yield { type: 'error', error: getRuntimeErrorMessage(error) }
+    return
+  }
+
   const maxSteps = Math.min(input.maxSteps ?? DEFAULT_AGENT_MAX_STEPS, DEFAULT_AGENT_MAX_STEPS)
   const emittedCallIds = new Set<string>()
   const emittedResultIds = new Set<string>()
+  const toolTraceByCallId = new Map<string, ChatToolCallTrace>()
   let emittedDone = false
 
-  const streamOutput = await maybeStreamAgent(agent, input, maxSteps)
+  let streamOutput: StreamOutputLike | null
+  try {
+    streamOutput = await maybeStreamAgent(agent, input, maxSteps)
+  } catch (error) {
+    yield { type: 'error', error: getRuntimeErrorMessage(error) }
+    return
+  }
+
   if (streamOutput) {
     for await (const chunk of getAsyncIterable(streamOutput.fullStream)) {
       const event = mapMastraChunkToBloomEvent(chunk, { maxSteps })
       if (!event) continue
 
       trackEmittedToolEvent(event, emittedCallIds, emittedResultIds)
-      if (event.type === 'done') emittedDone = true
+      trackToolTrace(event, toolTraceByCallId)
+      if (event.type === 'done') {
+        emittedDone = true
+        yield withToolTrace(event, toolTraceByCallId)
+        continue
+      }
       yield event
     }
 
     for (const event of mapMastraFinalOutputToBloomEvents(streamOutput, { emittedCallIds, emittedResultIds })) {
       trackEmittedToolEvent(event, emittedCallIds, emittedResultIds)
-      if (event.type === 'done') emittedDone = true
+      trackToolTrace(event, toolTraceByCallId)
+      if (event.type === 'done') {
+        emittedDone = true
+        yield withToolTrace(event, toolTraceByCallId)
+        continue
+      }
       yield event
     }
 
     if (!emittedDone) {
-      yield createDoneEvent(maxSteps)
+      yield createDoneEvent(maxSteps, toolTraceByCallId)
     }
     return
   }
 
-  yield createDoneEvent(maxSteps)
+  yield createDoneEvent(maxSteps, toolTraceByCallId)
 }
 
 function toMastraOpenAICompatibleModelId(resolved: ResolvedLlmModel): `${string}/${string}` {
@@ -78,6 +104,7 @@ function toMastraOpenAICompatibleModelId(resolved: ResolvedLlmModel): `${string}
   if (!modelId.includes('/')) throw new Error(`Mastra model id must include provider and model: ${modelId}`)
   return modelId as `${string}/${string}`
 }
+
 function toMastraModelConfig(resolved: ResolvedLlmModel): string | OpenAICompatibleConfig {
   if (resolved.provider.kind === 'openai-compatible') {
     return {
@@ -89,6 +116,7 @@ function toMastraModelConfig(resolved: ResolvedLlmModel): string | OpenAICompati
 
   return toMastraModelId(resolved)
 }
+
 async function resolveAgentModel(model: string): Promise<{ ok: true; resolved: Awaited<ReturnType<typeof resolveRuntimeModel>>['resolved'] } | { ok: false; error: string }> {
   try {
     const modelResolution = await resolveRuntimeModel({
@@ -101,6 +129,7 @@ async function resolveAgentModel(model: string): Promise<{ ok: true; resolved: A
     return { ok: false, error: error instanceof Error ? error.message : 'Agent model resolution failed' }
   }
 }
+
 async function maybeStreamAgent(agent: unknown, input: ChatAgentRunInput, maxSteps: number): Promise<StreamOutputLike | null> {
   if (!hasStreamMethod(agent)) return null
   const output = await agent.stream(createAgentPromptInput(input.prompt, input.content), { maxSteps })
@@ -157,14 +186,68 @@ function trackEmittedToolEvent(
   if (event.type === 'tool_call_result' || event.type === 'tool_call_error') emittedResultIds.add(event.callId)
 }
 
+function trackToolTrace(
+  event: ChatAgentRuntimeEvent,
+  toolTraceByCallId: Map<string, ChatToolCallTrace>,
+): void {
+  // Trace is accumulated from emitted UI events so streamed and final-output tool events share one source of truth.
+  if (event.type === 'tool_call_start') {
+    toolTraceByCallId.set(event.call.callId, {
+      callId: event.call.callId,
+      toolId: event.call.toolId,
+      status: 'success',
+      input: event.call.input,
+    })
+    return
+  }
 
-function createDoneEvent(maxSteps: number): ChatAgentRuntimeEvent {
+  const existing = 'callId' in event ? toolTraceByCallId.get(event.callId) : undefined
+  if (!existing) return
+
+  if (event.type === 'tool_call_result') {
+    existing.status = 'success'
+    existing.outputSummary = summarizeToolOutput(event.output)
+  }
+
+  if (event.type === 'tool_call_error') {
+    existing.status = 'error'
+    existing.outputSummary = event.error
+  }
+}
+
+function withToolTrace(
+  event: Extract<ChatAgentRuntimeEvent, { type: 'done' }>,
+  toolTraceByCallId: Map<string, ChatToolCallTrace>,
+): ChatAgentRuntimeEvent {
+  return {
+    ...event,
+    trace: {
+      ...event.trace,
+      toolCalls: Array.from(toolTraceByCallId.values()),
+    },
+  }
+}
+
+function createDoneEvent(maxSteps: number, toolTraceByCallId: Map<string, ChatToolCallTrace>): ChatAgentRuntimeEvent {
   return {
     type: 'done',
     trace: {
       runtime: MASTRA_CHAT_AGENT_V1_RUNTIME,
       maxSteps,
-      toolCalls: [],
+      toolCalls: Array.from(toolTraceByCallId.values()),
     },
   }
+}
+
+function summarizeToolOutput(output: unknown): string {
+  if (typeof output === 'string') return output
+  try {
+    return JSON.stringify(output)
+  } catch {
+    return String(output)
+  }
+}
+
+function getRuntimeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Agent runtime failed'
 }
