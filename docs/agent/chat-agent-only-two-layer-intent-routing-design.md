@@ -11,35 +11,26 @@ Agent 是否调用 tools 或 skills，需要经过两层判断：
 
 最终无论是否调用 tools/skills，前端显示仍走现有 v1 `ResponseStreamEvent`、Timeline、group view 和错误展示样式，显示格式不变。其它不再需要的 direct LLM route、legacy stream normalizer、legacy streaming state 和兼容 UI 分支应逐步删除。
 
-## 当前代码现状
+## 当前实现现状
 
-当前代码还不是 agent-only 状态。
+截至 Task 18 closeout，chat runtime 已完成 agent-only 迁移。
 
-`src/server/routes/chat.route.ts` 仍同时依赖：
+`src/server/routes/chat.route.ts` 的 active chat stream path 现在统一调用 `streamChatAgentRoute`。Route 仍负责 HTTP/SSE、session/message persistence、organized prompt、model selection 和 max step 配置；agent runtime router 和 Mastra adapter 负责 intent routing、dynamic tools/skills 和 v1 runtime event 输出。
 
-- `streamChatCompletion`
-- `mapLlmStreamToResponseEvents`
-- `runChatAgentV1`
-- `streamLegacyChat`
-- `streamMastraChat`
-- `agent_runtime_enabled` / `agent_runtime_provider` 开关
-- agent 失败后 fallback direct LLM 的逻辑
+已移除的 active path：
 
-这意味着后端仍然存在两套 chat runtime：
+- backend route 不再维护 `streamLegacyChat`。
+- backend route 不再调用 direct LLM stream fallback。
+- renderer 不再使用 `createChatStreamNormalizer`。
+- renderer active stream state 以 `streamingResponsesBySession` 和 v1 `ResponseStreamEvent` blocks 为来源。
 
-- Direct LLM runtime。
-- Mastra agent runtime。
+保留的 compatibility path：
 
-Task 1 已经新增 Agent Runtime router contract：
+- Shared response schemas 继续接受旧 `runtime: 'direct-llm'` trace，用于读取历史消息。
+- New active responses default to `runtime: 'mastra-chat-agent-v1'` in `chat-response-stream.ts`.
+- Provider-level stream capability、`LlmMessage`、model/provider registry 仍保留；它们不是 chat route direct LLM fallback。
 
-- `src/server/agent/runtime/chat-agent-router.ts`
-- `DEFAULT_CHAT_AGENT_ID`
-- `ChatAgentRouteInput`
-- `streamChatAgentRoute`
-- `resolveChatAgentRoute`
-
-但是 `chat.route.ts` 还没有正式切换到 router。后续迁移应让 `chat.route.ts` 永远调用 `streamChatAgentRoute`，而不是直接调用 `runChatAgentV1` 或 fallback `streamChatCompletion`。
-
+Task 18 verification 记录见 `docs/agent/chat-agent-only-two-layer-intent-routing-verification.md`。
 ## 推荐架构
 
 ```text
