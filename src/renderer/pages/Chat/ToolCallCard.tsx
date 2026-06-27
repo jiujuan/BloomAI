@@ -1,21 +1,8 @@
 import React, { useState } from 'react'
 import { Check, ChevronDown, Copy, FileText, Folder, Image, Loader2, RefreshCw, Search, TerminalSquare, Video, X } from 'lucide-react'
 import { cn } from '@renderer/utils'
-import type { ResponseError, ToolCallBlock } from '@shared/schemas'
+import type { ToolCallBlock } from '@shared/schemas'
 import { isKnownResponseErrorCode, resolveErrorTimeline } from '@shared/llm-response-contract/error-timeline-registry'
-
-export interface LegacyToolCallData {
-  callId: string
-  toolId: string
-  category: string
-  status: 'running' | 'success' | 'error'
-  input: Record<string, any>
-  output?: any
-  error?: string
-  durationMs?: number
-}
-
-export type ToolCallData = ToolCallBlock | LegacyToolCallData
 
 type NormalizedToolCallData = {
   callId: string
@@ -48,7 +35,7 @@ function formatValue(v: any): string {
   return JSON.stringify(v)
 }
 
-export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: () => void }) {
+export function ToolCallCard({ data, onRetry }: { data: ToolCallBlock; onRetry?: () => void }) {
   const [open, setOpen] = useState(true)
   const [copied, setCopied] = useState(false)
   const normalized = normalizeToolCall(data)
@@ -124,7 +111,7 @@ export function ToolCallCard({ data, onRetry }: { data: ToolCallData; onRetry?: 
   )
 }
 
-function normalizeToolCall(data: ToolCallData): NormalizedToolCallData {
+function normalizeToolCall(data: ToolCallBlock): NormalizedToolCallData {
   return {
     callId: data.callId,
     toolId: data.toolId,
@@ -132,15 +119,15 @@ function normalizeToolCall(data: ToolCallData): NormalizedToolCallData {
     status: data.status,
     input: data.input,
     output: data.output,
-    outputSummary: 'outputSummary' in data ? data.outputSummary : undefined,
+    // Convert the v1 block into a compact view model without accepting legacy tool-call shapes.
+    outputSummary: data.outputSummary,
     errorMessage: getErrorMessage(data.error),
     durationMs: data.durationMs,
   }
 }
 
-function getErrorMessage(error: string | ResponseError | undefined): string | undefined {
+function getErrorMessage(error: ToolCallBlock['error']): string | undefined {
   if (!error) return undefined
-  if (typeof error === 'string') return error
   const definition = resolveErrorTimeline(error)
   if (isKnownResponseErrorCode(error.code)) {
     return `${error.code}: ${definition.timelineMessage} - ${error.message}`

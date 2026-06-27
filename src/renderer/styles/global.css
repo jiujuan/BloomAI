@@ -373,11 +373,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   display: flex; align-items: center; justify-content: center;
 }
 .msg-action-btn:hover { background: var(--bg-secondary); color: var(--text-secondary); }
-.stream-error {
-  background: var(--bg-danger); border: 0.5px solid var(--border-danger);
-  color: var(--text-danger); padding: 8px 12px; border-radius: var(--radius-md);
-  font-size: 12px; margin-bottom: 14px;
-}
 
 /* Streaming cursor */
 .streaming-cursor {
