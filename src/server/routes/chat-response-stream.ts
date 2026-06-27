@@ -69,6 +69,7 @@ export function createChatResponseStreamWriter(input: {
     }
   }
   function mergeTrace(nextTrace: ResponseTrace | undefined): void {
+    // Persisted assistant messages read this merged trace, so keep live tool drafts folded into runtime metadata.
     const toolCalls = currentToolCalls()
     trace = {
       schemaVersion: RESPONSE_SCHEMA_VERSION,

@@ -156,6 +156,72 @@ describe('createChatResponseStreamWriter', () => {
     })
   })
 
+  it('accumulates skill tool calls into the persisted agent trace', () => {
+    const { writer } = createWriter()
+
+    writer.send({
+      type: 'response_started',
+      responseId: 'response-skill',
+      sessionId: 'session-1',
+      runtime: 'mastra-chat-agent-v1',
+      model: 'gpt-4o',
+      createdAt: 1,
+    })
+    writer.send({
+      type: 'tool_call_started',
+      responseId: 'response-skill',
+      block: {
+        id: 'skill-block-1',
+        type: 'tool_call',
+        callId: 'skill-call-1',
+        toolId: 'skill:summarizer',
+        category: 'tool',
+        status: 'running',
+        input: { text: 'Long note' },
+        createdAt: 2,
+      },
+    })
+    writer.send({
+      type: 'tool_call_completed',
+      responseId: 'response-skill',
+      callId: 'skill-call-1',
+      output: { summary: 'Short note' },
+      outputSummary: 'Short note',
+      durationMs: 9,
+      completedAt: 3,
+    })
+    writer.send({
+      type: 'response_completed',
+      responseId: 'response-skill',
+      trace: {
+        schemaVersion: RESPONSE_SCHEMA_VERSION,
+        runtime: 'mastra-chat-agent-v1',
+        model: 'gpt-4o',
+        maxSteps: 10,
+        finishReason: 'stop',
+      },
+      finishReason: 'stop',
+      completedAt: 4,
+    })
+
+    expect(writer.state().trace).toEqual({
+      schemaVersion: RESPONSE_SCHEMA_VERSION,
+      runtime: 'mastra-chat-agent-v1',
+      model: 'gpt-4o',
+      maxSteps: 10,
+      finishReason: 'stop',
+      toolCalls: [
+        {
+          callId: 'skill-call-1',
+          toolId: 'skill:summarizer',
+          status: 'success',
+          input: { text: 'Long note' },
+          outputSummary: 'Short note',
+          durationMs: 9,
+        },
+      ],
+    })
+  })
   it('marks failed tool calls and keeps failed response partial state', () => {
     const { writer } = createWriter()
 

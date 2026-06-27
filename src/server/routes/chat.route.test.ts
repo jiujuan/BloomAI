@@ -281,6 +281,56 @@ describe('chat stream route', () => {
     })
   })
 
+  it('streams skill tool SSE events and persists the agent skill trace', async () => {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'tool_call_start', call: { callId: 'skill-call-1', toolId: 'skill:summarizer', category: 'tool', status: 'running', input: { text: 'Long note' } } },
+      { type: 'tool_call_result', callId: 'skill-call-1', output: { summary: 'Short note' }, durationMs: 9 },
+      { type: 'delta', text: 'Short note' },
+      { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [{ callId: 'skill-call-1', toolId: 'skill:summarizer', status: 'success', input: { text: 'Long note' }, outputSummary: 'Short note', durationMs: 9 }], tokens: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } } },
+    ]))
+
+    const { app, messageRepo, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'run summarizer skill' })
+    const events = parseSse(responseText)
+
+    expect(events.map((event) => event.type)).toEqual([
+      'response_started',
+      'tool_call_started',
+      'tool_call_completed',
+      'content_block_started',
+      'content_delta',
+      'content_block_completed',
+      'response_completed',
+    ])
+    expect(events[0]).toMatchObject({ type: 'response_started', runtime: 'mastra-chat-agent-v1', model: 'gpt-4o' })
+    expect(events[1]).toMatchObject({
+      type: 'tool_call_started',
+      block: { callId: 'skill-call-1', toolId: 'skill:summarizer', category: 'tool', status: 'running', input: { text: 'Long note' } },
+    })
+    expect(events[2]).toMatchObject({ type: 'tool_call_completed', callId: 'skill-call-1', outputSummary: 'Short note', durationMs: 9 })
+    expect(events[4]).toMatchObject({ type: 'content_delta', delta: 'Short note' })
+    expect(events[6]).toMatchObject({
+      type: 'response_completed',
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7, model: 'gpt-4o' },
+      trace: {
+        schemaVersion: 'bloom-response-v1',
+        runtime: 'mastra-chat-agent-v1',
+        model: 'gpt-4o',
+        maxSteps: 10,
+        finishReason: 'stop',
+        toolCalls: [{ callId: 'skill-call-1', toolId: 'skill:summarizer', status: 'success', input: { text: 'Long note' }, outputSummary: 'Short note', durationMs: 9 }],
+      },
+    })
+
+    const assistant = messageRepo.list(session.id).filter((message) => message.role === 'assistant').at(-1)
+    expect(assistant).toMatchObject({ content: 'Short note', tokens: 7 })
+    expect(JSON.parse(assistant?.tool_calls || '{}')).toMatchObject({
+      runtime: 'mastra-chat-agent-v1',
+      toolCalls: [{ callId: 'skill-call-1', toolId: 'skill:summarizer', status: 'success', input: { text: 'Long note' }, outputSummary: 'Short note', durationMs: 9 }],
+    })
+  })
   it('streams web search fallback status in the same tool call SSE group', async () => {
     agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
       { type: 'tool_call_start', call: { callId: 'call-fallback', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'Tavily fail DuckDuckGo success' } } },
