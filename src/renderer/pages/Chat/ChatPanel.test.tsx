@@ -81,12 +81,10 @@ describe('chat model dropdown data', () => {
     expect(resolveDisplayedChatModel('gpt-4o', 'agnes-2.0-flash')).toBe('gpt-4o')
   })
 
-  it('shows the streaming assistant bubble before the first response token arrives', async () => {
-    const { shouldShowStreamingBubble } = await import('./Timeline')
+  it('selects no active streaming response until the v1 response starts', async () => {
+    const { selectStreamingResponseForSession } = await import('./ChatPanel')
 
-    expect(shouldShowStreamingBubble(true, null)).toBe(true)
-    expect(shouldShowStreamingBubble(true, { responseId: 'r', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
-    expect(shouldShowStreamingBubble(false, null)).toBe(false)
+    expect(selectStreamingResponseForSession('s1', {})).toBeNull()
   })
 
   it('does not include clipboard content in chat context', async () => {

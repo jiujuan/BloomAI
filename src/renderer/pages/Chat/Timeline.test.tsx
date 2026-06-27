@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Timeline, groupStreamingBlocks, shouldShowStreamingBubble } from './Timeline'
+import { Timeline, groupStreamingBlocks } from './Timeline'
 
 describe('Timeline', () => {
-  it('hides fallback streaming bubble when a v1 streaming response exists', () => {
-    expect(shouldShowStreamingBubble(false, { responseId: 'r', sessionId: 's1', isComplete: false, blocks: [{ id: 'md', type: 'markdown', status: 'streaming', markdown: 'hello', createdAt: 1 }] } as any)).toBe(false)
+  it('does not render legacy streaming fallback without a v1 response', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming
+        streamingResponse={null}
+      />
+    )
+
+    expect(html).not.toContain('id=&quot;streaming&quot;')
+    expect(html).not.toContain('msg-waiting')
+    expect(html).not.toContain('tool-call-card')
   })
 
   it('renders streaming response blocks in their contract order', () => {
@@ -131,8 +141,6 @@ describe('Timeline', () => {
   })
 
   it('shows a lightweight wait state for response_started_no_block without an empty assistant bubble', () => {
-    expect(shouldShowStreamingBubble(true, { responseId: 'r-wait', sessionId: 's1', isComplete: false, blocks: [] } as any)).toBe(false)
-
     const html = renderToStaticMarkup(
       <Timeline
         messages={[] as any}

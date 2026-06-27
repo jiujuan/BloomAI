@@ -1,9 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
-import { ToolCallCard } from './ToolCallCard'
 import { ToolCallGroupCard, createToolCallGroupKey, type ToolCallGroup } from './ToolCallGroupCard'
-import { deriveStreamingText, deriveToolCalls } from '@renderer/store/chat-response-reducer'
 import type { StreamingResponseState } from '@renderer/store/chat-response-reducer'
 import { formatDate } from '@renderer/utils'
 import type { ErrorBlock, Message, ResponseContentBlock } from '@shared/schemas'
@@ -26,14 +24,6 @@ function DateDivider({ label }: { label: string }) {
   )
 }
 
-export function shouldShowStreamingBubble(
-  isStreaming: boolean,
-  streamingResponse: StreamingResponseState | null = null,
-): boolean {
-  if (streamingResponse) return false
-  return isStreaming
-}
-
 function SystemBadge({ text }: { text: string }) {
   return (
     <div className="timeline-system-badge">
@@ -49,12 +39,10 @@ export function Timeline({
 }: TimelineProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const activeBlocks = streamingResponse?.blocks ?? null
-  const activeStreamText = deriveStreamingText(streamingResponse)
-  const toolCalls = deriveToolCalls(streamingResponse)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, isStreaming, activeStreamText, toolCalls.length, activeBlocks?.length])
+  }, [messages.length, isStreaming, activeBlocks?.length])
 
   const grouped: Array<{ type: 'date'; label: string } | { type: 'message'; message: Message }> = []
   let lastDate = ''
@@ -66,10 +54,6 @@ export function Timeline({
     }
     grouped.push({ type: 'message', message: msg })
   }
-
-  const toolCallItems = toolCalls.map((call) => (
-    <ToolCallCard key={call.callId} data={call} />
-  ))
 
   return (
     <div className="timeline" role="log" aria-label="Conversation" aria-live="polite">
@@ -92,21 +76,7 @@ export function Timeline({
           : <MessageBubble key={item.message.id} message={item.message} />
       )}
 
-      {streamingResponse
-        ? renderStreamingResponse(streamingResponse)
-        : (
-          <>
-            {toolCallItems}
-
-            {shouldShowStreamingBubble(isStreaming, streamingResponse) && (
-              <MessageBubble
-                message={{ id: 'streaming', session_id: '', role: 'assistant', content: '', created_at: Date.now() }}
-                isStreaming
-                streamText={activeStreamText}
-              />
-            )}
-          </>
-        )}
+      {streamingResponse ? renderStreamingResponse(streamingResponse) : null}
 
       <div ref={bottomRef} />
     </div>
@@ -140,6 +110,7 @@ export function groupStreamingBlocks(blocks: ResponseContentBlock[]): StreamingR
       continue
     }
 
+    // Keep adjacent tool calls grouped so parallel/retried activity stays one readable timeline section.
     const key = createToolCallGroupKey(block)
     const previous = items[items.length - 1]
     if (previous && previous.type === 'tool_call_group' && previous.group.key === key) {
@@ -172,10 +143,6 @@ function renderStreamingBlock(block: ResponseContentBlock) {
         streamText={block.markdown}
       />
     )
-  }
-
-  if (block.type === 'tool_call') {
-    return <ToolCallCard key={block.id} data={block} />
   }
 
   if (block.type === 'error') {
