@@ -55,4 +55,17 @@ describe('createChatAgent', () => {
       description: expect.stringContaining('Search the web'),
     })
   })
+
+  it('accepts organized prompt metadata in creation options without changing default instructions', () => {
+    const prompt = {
+      system: 'Persona prompt',
+      messages: [{ role: 'user' as const, content: 'Hello' }],
+      maxTokens: 4096,
+    }
+
+    createChatAgent('settings-selected-model', { sessionId: 'session-1', prompt })
+
+    const config = agentConstructor.mock.calls[0][0] as { instructions: string }
+    expect(config.instructions).toBe(CHAT_AGENT_V1_INSTRUCTIONS)
+  })
 })

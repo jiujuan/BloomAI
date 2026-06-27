@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { OrganizedChatPrompt } from '../../prompts/types'
 import { DEFAULT_AGENT_MAX_STEPS } from './constants'
 import { runChatAgentV1 } from './chat-agent-runtime-adapter'
 
@@ -12,6 +13,18 @@ vi.mock('./chat-agent', () => ({
 }))
 
 let dataDir: string
+
+function createPrompt(content = 'hello'): OrganizedChatPrompt {
+  return {
+    system: 'Persona prompt\n\n---\nActive app: Editor\nClipboard:\nCopied context',
+    messages: [
+      { role: 'user', content: 'What did I ask earlier?' },
+      { role: 'assistant', content: 'You asked about agents.' },
+      { role: 'user', content },
+    ],
+    maxTokens: 4096,
+  }
+}
 
 describe('Mastra chat agent runtime adapter skeleton', () => {
   beforeEach(async () => {
@@ -37,12 +50,13 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     for await (const _event of runChatAgentV1({
       sessionId: 'session-1',
       content: 'hello',
+      prompt: createPrompt(),
       model: 'gpt-4o',
     })) {
       // consume stream
     }
 
-    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', { sessionId: 'session-1' })
+    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', { sessionId: 'session-1', prompt: createPrompt() })
   })
 
   it('passes Agnes to Mastra as an OpenAI-compatible custom endpoint config', async () => {
@@ -52,6 +66,7 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     for await (const _event of runChatAgentV1({
       sessionId: 'session-1',
       content: 'hello',
+      prompt: createPrompt(),
       model: 'agnes-2.0-flash',
     })) {
       // consume stream
@@ -61,13 +76,14 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
       id: 'agnes/agnes-2.0-flash',
       url: 'https://apihub.agnes-ai.com/v1',
       apiKey: 'test-agnes-key',
-    }, { sessionId: 'session-1' })
+    }, { sessionId: 'session-1', prompt: createPrompt() })
   })
   it('emits an error event when the selected model is not configured', async () => {
     const events = []
     for await (const event of runChatAgentV1({
       sessionId: 'session-1',
       content: 'hello',
+      prompt: createPrompt(),
       model: 'unknown-model',
     })) {
       events.push(event)
@@ -93,6 +109,7 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     for await (const event of runChatAgentV1({
       sessionId: 'session-1',
       content: 'hello',
+      prompt: createPrompt(),
       model: 'gpt-4o',
     })) {
       events.push(event)
@@ -122,11 +139,34 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     ])
   })
 
+  it('streams the organized prompt messages instead of only the latest content', async () => {
+    const streamMock = vi.fn(async () => ({ fullStream: asyncGenerator([]) }))
+    createChatAgentMock.mockReturnValue({ stream: streamMock })
+
+    for await (const _event of runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'Summarize it again.',
+      prompt: createPrompt('Summarize it again.'),
+      model: 'gpt-4o',
+      maxSteps: 4,
+    })) {
+      // consume stream
+    }
+
+    expect(streamMock).toHaveBeenCalledWith([
+      { role: 'system', content: 'Persona prompt\n\n---\nActive app: Editor\nClipboard:\nCopied context' },
+      { role: 'user', content: 'What did I ask earlier?' },
+      { role: 'assistant', content: 'You asked about agents.' },
+      { role: 'user', content: 'Summarize it again.' },
+    ], { maxSteps: 4 })
+  })
+
   it('returns a testable async event stream with a done trace', async () => {
     const events = []
     for await (const event of runChatAgentV1({
       sessionId: 'session-1',
       content: 'hello',
+      prompt: createPrompt(),
       model: 'gpt-4o',
     })) {
       events.push(event)

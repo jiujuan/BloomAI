@@ -6,7 +6,7 @@ export type ChatAgentRunInput = {
   content: string
   model: string
   maxSteps?: number
-  prompt?: OrganizedChatPrompt
+  prompt: OrganizedChatPrompt
 }
 
 export type ChatToolCallTrace = {

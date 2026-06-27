@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent'
 import type { MastraModelConfig } from '@mastra/core/llm'
+import type { OrganizedChatPrompt } from '../../prompts/types'
 import { CHAT_AGENT_V1_ID, CHAT_AGENT_V1_NAME } from './constants'
 import { createWebSearchAdapterTool } from './web-search-adapter.tool'
 
@@ -13,6 +14,7 @@ When search results are used, synthesize the answer clearly and mention useful s
 
 export type CreateChatAgentOptions = {
   sessionId?: string
+  prompt?: OrganizedChatPrompt
 }
 
 export function createChatAgent(model: MastraModelConfig, options: CreateChatAgentOptions = {}): Agent {

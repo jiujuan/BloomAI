@@ -5,6 +5,8 @@ import { resolveRuntimeModel, toMastraModelId } from '../../llm/model-selection'
 import { getProviderApiKey, getProviderBaseUrl } from '../../llm/settings'
 import type { OpenAICompatibleConfig } from '@mastra/core/llm'
 import type { ResolvedLlmModel } from '../../llm/types'
+import type { OrganizedChatPrompt } from '../../prompts/types'
+import type { LlmMessage } from '../../llm/types'
 import type { ChatAgentRunInput, ChatAgentRuntimeEvent } from './types'
 
 type StreamOutputLike = {
@@ -21,7 +23,7 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
     return
   }
 
-  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), { sessionId: input.sessionId })
+  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), { sessionId: input.sessionId, prompt: input.prompt })
   const maxSteps = Math.min(input.maxSteps ?? DEFAULT_AGENT_MAX_STEPS, DEFAULT_AGENT_MAX_STEPS)
   const emittedCallIds = new Set<string>()
   const emittedResultIds = new Set<string>()
@@ -83,11 +85,28 @@ async function resolveAgentModel(model: string): Promise<{ ok: true; resolved: A
 }
 async function maybeStreamAgent(agent: unknown, input: ChatAgentRunInput, maxSteps: number): Promise<StreamOutputLike | null> {
   if (!hasStreamMethod(agent)) return null
-  const output = await agent.stream(input.content, { maxSteps })
+  const output = await agent.stream(createAgentPromptInput(input.prompt, input.content), { maxSteps })
   return isStreamOutputLike(output) ? output : null
 }
 
-function hasStreamMethod(agent: unknown): agent is { stream: (content: string, options: { maxSteps: number }) => Promise<unknown> } {
+export function createAgentPromptInput(prompt: OrganizedChatPrompt, content: string): LlmMessage[] {
+  const messages: LlmMessage[] = []
+  if (prompt.system.trim()) {
+    messages.push({ role: 'system', content: prompt.system })
+  }
+
+  const promptMessages = prompt.messages.length > 0
+    ? prompt.messages
+    : [{ role: 'user' as const, content }]
+
+  for (const message of promptMessages) {
+    messages.push({ role: message.role, content: message.content })
+  }
+
+  return messages
+}
+
+function hasStreamMethod(agent: unknown): agent is { stream: (messages: LlmMessage[], options: { maxSteps: number }) => Promise<unknown> } {
   return !!agent && typeof agent === 'object' && typeof (agent as { stream?: unknown }).stream === 'function'
 }
 
