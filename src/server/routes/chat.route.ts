@@ -7,8 +7,6 @@ import { messageRepo } from '../db/repositories/message.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
 import { readConfigValue } from '../config/config'
 import { logError, sanitizeErrorMessage } from '../logger/logger'
-import { streamChatCompletion } from '../llm'
-import { mapLlmStreamToResponseEvents } from '../llm/response-event-mapper'
 import { selectRuntimeModel } from '../llm/model-selection'
 import { streamChatAgentRoute } from '../agent/runtime/chat-agent-router'
 import { createAgentResponseEventMapper } from '../agent/mastra/response-event-mapper'
@@ -57,15 +55,6 @@ function getEnvSettingValue(envKey: string, settingsKey: string): string {
   return getRuntimeSetting(envKey, settingsKey).value
 }
 
-function getAgentRuntimeEnabled(): boolean {
-  const value = getEnvSettingValue('AGENT_RUNTIME_ENABLED', 'agent_runtime_enabled')
-  return value === 'true' || value === '1'
-}
-
-function getAgentRuntimeProvider(): string {
-  return getEnvSettingValue('AGENT_RUNTIME_PROVIDER', 'agent_runtime_provider')
-}
-
 function getAgentRuntimeMaxSteps(): number {
   const rawValue = getEnvSettingValue('AGENT_RUNTIME_MAX_STEPS', 'agent_runtime_max_steps')
   const parsed = Number.parseInt(rawValue, 10)
@@ -74,17 +63,8 @@ function getAgentRuntimeMaxSteps(): number {
 }
 
 function getAgentRuntimeDebugConfig() {
-  const enabled = getRuntimeSetting('AGENT_RUNTIME_ENABLED', 'agent_runtime_enabled')
-  const provider = getRuntimeSetting('AGENT_RUNTIME_PROVIDER', 'agent_runtime_provider')
   const maxSteps = getRuntimeSetting('AGENT_RUNTIME_MAX_STEPS', 'agent_runtime_max_steps')
-  const parsedMaxSteps = getAgentRuntimeMaxSteps()
-  const useAgentRuntime = (enabled.value === 'true' || enabled.value === '1') && provider.value === 'mastra'
-
-  return { enabled, provider, maxSteps, parsedMaxSteps, useAgentRuntime }
-}
-
-function shouldUseAgentRuntime(): boolean {
-  return getAgentRuntimeEnabled() && getAgentRuntimeProvider() === 'mastra'
+  return { maxSteps, parsedMaxSteps: getAgentRuntimeMaxSteps() }
 }
 
 function logAgentRuntimeConfig(input: {
@@ -93,16 +73,14 @@ function logAgentRuntimeConfig(input: {
   content: string
   debugConfig: ReturnType<typeof getAgentRuntimeDebugConfig>
 }): void {
-  const { enabled, provider, maxSteps, parsedMaxSteps, useAgentRuntime } = input.debugConfig
+  const { maxSteps, parsedMaxSteps } = input.debugConfig
   console.log('[AgentRuntime config]', {
     sessionId: input.sessionId,
     model: input.model,
     contentPreview: input.content.slice(0, 120),
-    enabled: maskRuntimeSetting(enabled),
-    provider: maskRuntimeSetting(provider),
     maxSteps: maskRuntimeSetting(maxSteps),
     parsedMaxSteps,
-    useAgentRuntime,
+    runtime: 'mastra-chat-agent-v1',
     cwd: process.cwd(),
     dotenvPath: path.join(process.cwd(), '.env'),
     dotenvExists: fs.existsSync(path.join(process.cwd(), '.env')),
@@ -155,25 +133,17 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
   logAgentRuntimeConfig({ sessionId, content, model, debugConfig: agentRuntimeDebugConfig })
 
   try {
-    if (agentRuntimeDebugConfig.useAgentRuntime) {
-      console.log('[AgentRuntime mastra] starting', { sessionId, model, maxSteps: agentRuntimeDebugConfig.parsedMaxSteps })
-      const agentHandled = await streamMastraChat({
-        sessionId,
-        content,
-        model,
-        maxSteps: agentRuntimeDebugConfig.parsedMaxSteps,
-        prompt,
-        res,
-      })
-      console.log('[AgentRuntime mastra] completed', { sessionId, model, agentHandled })
-      if (!agentHandled) {
-        console.warn('[AgentRuntime mastra] falling back to direct LLM because agent produced no usable output', { sessionId, model })
-        await streamLegacyChat({ sessionId, prompt, model, res })
-      }
-    } else {
-      console.log('[AgentRuntime mastra] disabled; using direct LLM', { sessionId, model })
-      await streamLegacyChat({ sessionId, prompt, model, res })
-    }
+    // Chat streaming is agent-only now; agent failures are emitted as v1 failure events instead of direct LLM fallback.
+    console.log('[AgentRuntime mastra] starting', { sessionId, model, maxSteps: agentRuntimeDebugConfig.parsedMaxSteps })
+    await streamMastraChat({
+      sessionId,
+      content,
+      model,
+      maxSteps: agentRuntimeDebugConfig.parsedMaxSteps,
+      prompt,
+      res,
+    })
+    console.log('[AgentRuntime mastra] completed', { sessionId, model })
   } catch (err: any) {
     const message = sanitizeErrorMessage(err, 'AI request failed')
     console.error('[Chat stream]', message)
@@ -184,13 +154,6 @@ chatRouter.post('/stream', async (req: Request, res: Response) => {
   endSSE(res)
 })
 
-type LegacyChatInput = {
-  sessionId: string
-  prompt: ReturnType<typeof organizeChatPrompt>
-  model: string
-  res: Response
-}
-
 type AgentChatInput = {
   sessionId: string
   content: string
@@ -198,45 +161,6 @@ type AgentChatInput = {
   maxSteps: number
   prompt: ReturnType<typeof organizeChatPrompt>
   res: Response
-}
-
-async function* createLegacyChatSource(input: LegacyChatInput) {
-  yield* streamChatCompletion({
-    model: input.model,
-    maxTokens: input.prompt.maxTokens,
-    system: input.prompt.system,
-    messages: input.prompt.messages,
-  })
-}
-
-async function streamLegacyChat(input: LegacyChatInput): Promise<void> {
-  const writer = createChatResponseStreamWriter({
-    res: input.res,
-    sessionId: input.sessionId,
-    sendSSE,
-  })
-  let shouldPersist = false
-  let failureMessage = ''
-
-  const responseEvents = mapLlmStreamToResponseEvents(createLegacyChatSource(input), {
-    sessionId: input.sessionId,
-    model: input.model,
-  })
-
-  for await (const event of responseEvents) {
-    writer.send(event)
-    if (event.type === 'response_completed') {
-      shouldPersist = true
-    }
-    if (event.type === 'response_failed') {
-      shouldPersist = true
-      if (!writer.state().text) failureMessage = 'AI request failed: ' + event.error.message
-    }
-  }
-
-  if (shouldPersist) {
-    persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
-  }
 }
 
 async function* createAgentChatSource(input: AgentChatInput) {
@@ -249,7 +173,7 @@ async function* createAgentChatSource(input: AgentChatInput) {
   })
 }
 
-async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
+async function streamMastraChat(input: AgentChatInput): Promise<void> {
   console.log('[AgentRuntime mastra] stream begin', {
     sessionId: input.sessionId,
     model: input.model,
@@ -266,7 +190,6 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
     maxSteps: input.maxSteps,
   })
   let seenEvent = false
-  let seenNonErrorEvent = false
   let deltaEventCount = 0
   let deltaCharCount = 0
   let failureMessage = ''
@@ -274,63 +197,43 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
   try {
     for await (const event of createAgentChatSource(input)) {
       seenEvent = true
+      logAgentRuntimeEvent(input, event, deltaEventCount, deltaCharCount)
 
       if (event.type === 'delta') {
         deltaEventCount += 1
         deltaCharCount += event.text.length
-        if (deltaEventCount === 1 || deltaEventCount % 20 === 0) {
-          console.log('[AgentRuntime mastra] delta progress', {
-            sessionId: input.sessionId,
-            model: input.model,
-            deltaEvents: deltaEventCount,
-            deltaChars: deltaCharCount,
-          })
-        }
-      } else {
-        console.log('[AgentRuntime mastra] event', {
-          sessionId: input.sessionId,
-          model: input.model,
-          type: event.type,
-          toolId: event.type === 'tool_call_start' ? event.call.toolId : undefined,
-          error: event.type === 'error' ? event.error : undefined,
-          deltaEvents: deltaEventCount || undefined,
-          deltaChars: deltaCharCount || undefined,
-        })
       }
 
       if (event.type === 'error') {
         console.error('[AgentRuntime mastra] runtime error event', { sessionId: input.sessionId, model: input.model, error: event.error })
         const message = sanitizeErrorMessage(event.error, 'Agent request failed')
         logError('agent.runtime', { code: 'AGENT_RUNTIME_ERROR', message }, { sessionId: input.sessionId, model: input.model })
-        if (!seenNonErrorEvent) {
-          console.warn('[AgentRuntime mastra] error before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
-          return false
-        }
         sendMappedEvents(writer, mapper.map(event))
         if (!writer.state().text) failureMessage = 'AI request failed: ' + message
         persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
-        return true
+        return
       }
 
-      seenNonErrorEvent = true
       sendMappedEvents(writer, mapper.map(event))
 
       if (event.type === 'done') {
         console.log('[AgentRuntime mastra] done', { sessionId: input.sessionId, model: input.model })
         persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
-        return true
+        return
       }
     }
 
     if (!seenEvent) {
-      console.warn('[AgentRuntime mastra] no events emitted; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
-      return false
+      // Empty agent streams still produce a completed v1 response; the route no longer falls back to direct LLM.
+      console.warn('[AgentRuntime mastra] no events emitted; completing without direct LLM fallback', { sessionId: input.sessionId, model: input.model })
+      sendMappedEvents(writer, mapper.completeWithoutDone())
+      persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
+      return
     }
 
     console.warn('[AgentRuntime mastra] completed without done event', { sessionId: input.sessionId, model: input.model })
     sendMappedEvents(writer, mapper.completeWithoutDone())
     persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
-    return true
   } catch (err) {
     console.error('[AgentRuntime mastra] exception', {
       sessionId: input.sessionId,
@@ -339,15 +242,34 @@ async function streamMastraChat(input: AgentChatInput): Promise<boolean> {
     })
     const message = sanitizeErrorMessage(err, 'Agent request failed')
     logError('agent.runtime', { code: 'AGENT_RUNTIME_ERROR', message }, { sessionId: input.sessionId, model: input.model, rawError: err })
-    if (!seenNonErrorEvent) {
-      console.warn('[AgentRuntime mastra] exception before output; route will fall back to direct LLM', { sessionId: input.sessionId, model: input.model })
-      return false
-    }
     sendMappedEvents(writer, mapper.fail(err))
     if (!writer.state().text) failureMessage = 'AI request failed: ' + message
     persistAssistantFromWriter(input.sessionId, writer.state(), { persistEmpty: true, fallbackContent: failureMessage })
-    return true
   }
+}
+
+function logAgentRuntimeEvent(input: AgentChatInput, event: Awaited<ReturnType<typeof createAgentChatSource> extends AsyncGenerator<infer T> ? T : never>, deltaEventCount: number, deltaCharCount: number): void {
+  if (event.type === 'delta') {
+    if (deltaEventCount === 0 || (deltaEventCount + 1) % 20 === 0) {
+      console.log('[AgentRuntime mastra] delta progress', {
+        sessionId: input.sessionId,
+        model: input.model,
+        deltaEvents: deltaEventCount + 1,
+        deltaChars: deltaCharCount + event.text.length,
+      })
+    }
+    return
+  }
+
+  console.log('[AgentRuntime mastra] event', {
+    sessionId: input.sessionId,
+    model: input.model,
+    type: event.type,
+    toolId: event.type === 'tool_call_start' ? event.call.toolId : undefined,
+    error: event.type === 'error' ? event.error : undefined,
+    deltaEvents: deltaEventCount || undefined,
+    deltaChars: deltaCharCount || undefined,
+  })
 }
 
 function sendMappedEvents(writer: ChatResponseStreamWriter, events: ResponseStreamEvent[]): void {

@@ -4,18 +4,10 @@ import os from 'os'
 import path from 'path'
 import type { AddressInfo } from 'net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatStreamEvent, ChatStreamRequest } from '../llm'
-
-const llmMock = vi.hoisted(() => ({
-  streamChatCompletion: vi.fn(),
-}))
+import type { ChatAgentRuntimeEvent } from '../agent/mastra/types'
 
 const agentRouteMock = vi.hoisted(() => ({
   streamChatAgentRoute: vi.fn(),
-}))
-
-vi.mock('../llm', () => ({
-  streamChatCompletion: llmMock.streamChatCompletion,
 }))
 
 vi.mock('../agent/runtime/chat-agent-router', () => ({
@@ -26,20 +18,14 @@ let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
 let consoleErrorSpy: { mockRestore(): void }
 
-async function* events(items: ChatStreamEvent[]): AsyncGenerator<ChatStreamEvent> {
-  for (const item of items) {
-    yield item
-  }
+async function* agentEvents(items: ChatAgentRuntimeEvent[]): AsyncGenerator<ChatAgentRuntimeEvent> {
+  for (const item of items) yield item
 }
 
-async function* failingEvents(): AsyncGenerator<ChatStreamEvent> {
-  yield { type: 'delta', text: 'partial' }
-  throw new Error('stream failed')
+function doneEvent(maxSteps = 10): ChatAgentRuntimeEvent {
+  return { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps, toolCalls: [] } }
 }
 
-async function* failingBeforeOutput(): AsyncGenerator<ChatStreamEvent> {
-  throw new Error('provider offline')
-}
 async function loadApp() {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
@@ -89,8 +75,8 @@ describe('chat stream route', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-chat-route-'))
     originalEnv = { ...process.env }
-    llmMock.streamChatCompletion.mockReset()
     agentRouteMock.streamChatAgentRoute.mockReset()
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([doneEvent()]))
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
@@ -101,15 +87,11 @@ describe('chat stream route', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('forwards model, system, and messages to the LLM runtime and persists the response', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    llmMock.streamChatCompletion.mockReturnValue(
-      events([
-        { type: 'delta', text: 'Hello' },
-        { type: 'usage', input: 3, output: 5 },
-        { type: 'done' },
-      ])
-    )
+  it('forwards model, organized prompt, and messages to the agent runtime and persists the response', async () => {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'delta', text: 'Hello' },
+      { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [], tokens: { inputTokens: 3, outputTokens: 5, totalTokens: 8 } } },
+    ]))
     const { app, messageRepo, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
     messageRepo.save({ session_id: session.id, role: 'assistant', content: 'Earlier answer' })
@@ -120,29 +102,33 @@ describe('chat stream route', () => {
       contextOverride: { activeApp: 'Editor' },
     })
 
-    expect(llmMock.streamChatCompletion).toHaveBeenCalledWith({
+    expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith({
+      sessionId: session.id,
+      content: 'Hi there',
       model: 'gpt-4o',
-      system: expect.stringContaining('Active app: Editor'),
-      messages: [
-        { role: 'assistant', content: 'Earlier answer' },
-        { role: 'user', content: 'Hi there' },
-      ],
-      maxTokens: 4096,
-    } satisfies ChatStreamRequest)
+      maxSteps: 10,
+      prompt: {
+        system: expect.stringContaining('Active app: Editor'),
+        messages: [
+          { role: 'assistant', content: 'Earlier answer' },
+          { role: 'user', content: 'Hi there' },
+        ],
+        maxTokens: 4096,
+      },
+    })
 
     const sseEvents = parseSse(responseText)
     expect(sseEvents.map((event) => event.type)).toEqual([
       'response_started',
       'content_block_started',
       'content_delta',
-      'usage_updated',
       'content_block_completed',
       'response_completed',
     ])
     expect(sseEvents[0]).toMatchObject({
       type: 'response_started',
       sessionId: session.id,
-      runtime: 'direct-llm',
+      runtime: 'mastra-chat-agent-v1',
       model: 'gpt-4o',
     })
     expect(sseEvents[2]).toMatchObject({
@@ -151,18 +137,15 @@ describe('chat stream route', () => {
       blockId: sseEvents[1].block.id,
       delta: 'Hello',
     })
-    expect(sseEvents[3]).toMatchObject({
-      type: 'usage_updated',
-      usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8, model: 'gpt-4o' },
-    })
-    expect(sseEvents[5]).toMatchObject({
+    expect(sseEvents[4]).toMatchObject({
       type: 'response_completed',
       responseId: sseEvents[0].responseId,
       usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8, model: 'gpt-4o' },
       trace: {
         schemaVersion: 'bloom-response-v1',
-        runtime: 'direct-llm',
+        runtime: 'mastra-chat-agent-v1',
         model: 'gpt-4o',
+        maxSteps: 10,
         finishReason: 'stop',
       },
       finishReason: 'stop',
@@ -176,8 +159,6 @@ describe('chat stream route', () => {
   })
 
   it('uses persona model override before the session model', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
     const { app, personaRepo, sessionRepo } = await loadApp()
     const persona = personaRepo.create({
       name: 'GPT persona',
@@ -188,17 +169,13 @@ describe('chat stream route', () => {
 
     await postSse(app, { sessionId: session.id, content: 'Use override' })
 
-    expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: 'gpt-4o-mini',
-        system: 'Persona prompt',
-      })
-    )
+    expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-4o-mini',
+      prompt: expect.objectContaining({ system: 'Persona prompt' }),
+    }))
   })
 
   it('uses settings.model when the session has no model value', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
     const { app, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'claude-3-haiku-20240307' })
     settingsRepo.setMany({ model: 'gpt-4o' })
@@ -206,39 +183,31 @@ describe('chat stream route', () => {
 
     await postSse(app, { sessionId: session.id, content: 'Use setting' })
 
-    expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o' }))
+    expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o' }))
   })
 
   it('uses settings.model when the default built-in persona still has the legacy model override', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    llmMock.streamChatCompletion.mockReturnValue(events([{ type: 'done' }]))
     const { app, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ persona_id: 'developer', model: 'agnes-2.0-flash' })
     settingsRepo.setMany({ model: 'agnes-2.0-flash' })
 
     await postSse(app, { sessionId: session.id, content: 'Use Agnes with the default persona' })
 
-    expect(llmMock.streamChatCompletion).toHaveBeenCalledWith(expect.objectContaining({ model: 'agnes-2.0-flash' }))
+    expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith(expect.objectContaining({ model: 'agnes-2.0-flash' }))
   })
 
   it('streams Mastra tool call SSE events and persists assistant tool calls', async () => {
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'tool_call_start', call: { callId: 'call-1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'Mastra' } } }
-        yield { type: 'tool_call_result', callId: 'call-1', output: { query: 'Mastra', results: [{ title: 'Result 1', url: 'https://example.com', snippet: 'snippet' }] }, durationMs: 12 }
-        yield { type: 'delta', text: 'Hello from agent' }
-        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }], tokens: { inputTokens: 2, outputTokens: 4, totalTokens: 6 } } }
-      })()
-    )
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'tool_call_start', call: { callId: 'call-1', toolId: 'web_search', category: 'web', status: 'running', input: { query: 'Mastra' } } },
+      { type: 'tool_call_result', callId: 'call-1', output: { query: 'Mastra', results: [{ title: 'Result 1', url: 'https://example.com', snippet: 'snippet' }] }, durationMs: 12 },
+      { type: 'delta', text: 'Hello from agent' },
+      { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }], tokens: { inputTokens: 2, outputTokens: 4, totalTokens: 6 } } },
+    ]))
 
     const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
     messageRepo.save({ session_id: session.id, role: 'assistant', content: 'Earlier agent answer' })
-    settingsRepo.setMany({
-      agent_runtime_enabled: 'true',
-      agent_runtime_provider: 'mastra',
-      agent_runtime_max_steps: '25',
-    })
+    settingsRepo.setMany({ agent_runtime_max_steps: '25' })
 
     const responseText = await postSse(app, {
       sessionId: session.id,
@@ -272,22 +241,11 @@ describe('chat stream route', () => {
       'content_block_completed',
       'response_completed',
     ])
-    expect(events[0]).toMatchObject({
-      type: 'response_started',
-      sessionId: session.id,
-      runtime: 'mastra-chat-agent-v1',
-      model: 'gpt-4o',
-    })
+    expect(events[0]).toMatchObject({ type: 'response_started', sessionId: session.id, runtime: 'mastra-chat-agent-v1', model: 'gpt-4o' })
     expect(events[1]).toMatchObject({
       type: 'tool_call_started',
       responseId: events[0].responseId,
-      block: {
-        callId: 'call-1',
-        toolId: 'web_search',
-        category: 'search',
-        status: 'running',
-        input: { query: 'Mastra' },
-      },
+      block: { callId: 'call-1', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'Mastra' } },
     })
     expect(events[2]).toMatchObject({
       type: 'tool_call_delta',
@@ -295,19 +253,8 @@ describe('chat stream route', () => {
       callId: 'call-1',
       patch: { statusMessage: 'Searching Mastra with tavily', metadata: { query: 'Mastra', provider: 'tavily' } },
     })
-    expect(events[3]).toMatchObject({
-      type: 'tool_call_completed',
-      responseId: events[0].responseId,
-      callId: 'call-1',
-      outputSummary: '1 results',
-      durationMs: 12,
-    })
-    expect(events[5]).toMatchObject({
-      type: 'content_delta',
-      responseId: events[0].responseId,
-      blockId: events[4].block.id,
-      delta: 'Hello from agent',
-    })
+    expect(events[3]).toMatchObject({ type: 'tool_call_completed', responseId: events[0].responseId, callId: 'call-1', outputSummary: '1 results', durationMs: 12 })
+    expect(events[5]).toMatchObject({ type: 'content_delta', responseId: events[0].responseId, blockId: events[4].block.id, delta: 'Hello from agent' })
     expect(events[7]).toMatchObject({
       type: 'response_completed',
       responseId: events[0].responseId,
@@ -318,53 +265,43 @@ describe('chat stream route', () => {
         model: 'gpt-4o',
         maxSteps: 10,
         finishReason: 'stop',
-        toolCalls: [
-          { callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 },
-        ],
+        toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }],
       },
     })
 
     const assistant = messageRepo.list(session.id).filter((message) => message.role === 'assistant').at(-1)
-    expect(assistant).toMatchObject({
-      content: 'Hello from agent',
-      tokens: 6,
-    })
+    expect(assistant).toMatchObject({ content: 'Hello from agent', tokens: 6 })
     expect(JSON.parse(assistant?.tool_calls || '{}')).toEqual({
       schemaVersion: 'bloom-response-v1',
       runtime: 'mastra-chat-agent-v1',
       model: 'gpt-4o',
       maxSteps: 10,
       finishReason: 'stop',
-      toolCalls: [
-        { callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 },
-      ],
+      toolCalls: [{ callId: 'call-1', toolId: 'web_search', status: 'success', input: { query: 'Mastra' }, outputSummary: '1 results', durationMs: 12 }],
     })
   })
 
   it('streams web search fallback status in the same tool call SSE group', async () => {
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'tool_call_start', call: { callId: 'call-fallback', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'Tavily fail DuckDuckGo success' } } }
-        yield {
-          type: 'tool_call_result',
-          callId: 'call-fallback',
-          output: {
-            query: 'Tavily fail DuckDuckGo success',
-            provider: 'duckduckgo',
-            fallbackFrom: 'tavily',
-            fallbackReason: 'Tavily search failed with HTTP 429',
-            total: 2,
-            results: [{ title: 'Result', url: 'https://example.com', snippet: 'snippet' }],
-          },
-          durationMs: 42,
-        }
-        yield { type: 'delta', text: 'Answer with fallback search.' }
-        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [] } }
-      })()
-    )
-    const { app, sessionRepo, settingsRepo } = await loadApp()
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'tool_call_start', call: { callId: 'call-fallback', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'Tavily fail DuckDuckGo success' } } },
+      {
+        type: 'tool_call_result',
+        callId: 'call-fallback',
+        output: {
+          query: 'Tavily fail DuckDuckGo success',
+          provider: 'duckduckgo',
+          fallbackFrom: 'tavily',
+          fallbackReason: 'Tavily search failed with HTTP 429',
+          total: 2,
+          results: [{ title: 'Result', url: 'https://example.com', snippet: 'snippet' }],
+        },
+        durationMs: 42,
+      },
+      { type: 'delta', text: 'Answer with fallback search.' },
+      doneEvent(),
+    ]))
+    const { app, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
-    settingsRepo.setMany({ agent_runtime_enabled: 'true', agent_runtime_provider: 'mastra' })
 
     const responseText = await postSse(app, { sessionId: session.id, content: 'search fallback' })
     const events = parseSse(responseText)
@@ -390,28 +327,15 @@ describe('chat stream route', () => {
         metadata: { provider: 'duckduckgo', fallbackFrom: 'tavily', fallbackReason: 'Tavily search failed with HTTP 429', resultCount: 2 },
       },
     })
-    expect(events[4]).toMatchObject({
-      type: 'tool_call_completed',
-      callId: 'call-fallback',
-      outputSummary: '2 results from duckduckgo after tavily fallback',
-    })
+    expect(events[4]).toMatchObject({ type: 'tool_call_completed', callId: 'call-fallback', outputSummary: '2 results from duckduckgo after tavily fallback' })
   })
-  it('uses agent runtime environment variables before database settings', async () => {
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 7, toolCalls: [] } }
-      })()
-    )
-    process.env.AGENT_RUNTIME_ENABLED = 'true'
-    process.env.AGENT_RUNTIME_PROVIDER = 'mastra'
+
+  it('uses agent runtime max step environment variables before database settings', async () => {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([doneEvent(7)]))
     process.env.AGENT_RUNTIME_MAX_STEPS = '7'
     const { app, sessionRepo, settingsRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
-    settingsRepo.setMany({
-      agent_runtime_enabled: 'false',
-      agent_runtime_provider: 'direct',
-      agent_runtime_max_steps: '2',
-    })
+    settingsRepo.setMany({ agent_runtime_max_steps: '2' })
 
     const responseText = await postSse(app, { sessionId: session.id, content: 'search with env config' })
     const sseEvents = parseSse(responseText)
@@ -421,191 +345,65 @@ describe('chat stream route', () => {
       content: 'search with env config',
       model: 'gpt-4o',
       maxSteps: 7,
-      prompt: expect.objectContaining({
-        messages: [{ role: 'user', content: 'search with env config' }],
-      }),
+      prompt: expect.objectContaining({ messages: [{ role: 'user', content: 'search with env config' }] }),
     }))
-    expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
-    expect(sseEvents[0]).toMatchObject({
-      type: 'response_started',
-      runtime: 'mastra-chat-agent-v1',
-    })
+    expect(sseEvents[0]).toMatchObject({ type: 'response_started', runtime: 'mastra-chat-agent-v1' })
   })
-  it('uses agent runtime values from .env before database settings', async () => {
+
+  it('uses agent runtime max step values from .env before database settings', async () => {
     const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-chat-env-'))
     const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(envDir)
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 6, toolCalls: [] } }
-      })()
-    )
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([doneEvent(6)]))
 
     try {
-      fs.writeFileSync(
-        path.join(envDir, '.env'),
-        [
-          'AGENT_RUNTIME_ENABLED=true',
-          'AGENT_RUNTIME_PROVIDER=mastra',
-          'AGENT_RUNTIME_MAX_STEPS=6',
-        ].join('\n'),
-      )
+      fs.writeFileSync(path.join(envDir, '.env'), 'AGENT_RUNTIME_MAX_STEPS=6')
       const { app, sessionRepo, settingsRepo } = await loadApp()
       const session = sessionRepo.create({ model: 'gpt-4o' })
-      settingsRepo.setMany({
-        agent_runtime_enabled: 'false',
-        agent_runtime_provider: 'direct',
-        agent_runtime_max_steps: '2',
-      })
+      settingsRepo.setMany({ agent_runtime_max_steps: '2' })
 
       await postSse(app, { sessionId: session.id, content: 'search with dotenv config' })
 
-      expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith(expect.objectContaining({
-        content: 'search with dotenv config',
-        maxSteps: 6,
-      }))
-      expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
+      expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledWith(expect.objectContaining({ content: 'search with dotenv config', maxSteps: 6 }))
     } finally {
       cwdSpy.mockRestore()
       fs.rmSync(envDir, { recursive: true, force: true })
     }
   })
-  it('saves partial assistant text when streaming fails', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    llmMock.streamChatCompletion.mockReturnValue(failingEvents())
+
+  it('streams response_failed instead of falling back when the Mastra runtime first reports an error', async () => {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([{ type: 'error', error: 'agent unavailable' }]))
     const { app, messageRepo, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
-
-    const responseText = await postSse(app, { sessionId: session.id, content: 'Break please' })
-    const events = parseSse(responseText)
-
-    expect(events.map((event) => event.type)).toEqual([
-      'response_started',
-      'content_block_started',
-      'content_delta',
-      'response_failed',
-    ])
-    expect(events[2]).toMatchObject({
-      type: 'content_delta',
-      delta: 'partial',
-    })
-    expect(events[3]).toMatchObject({
-      type: 'response_failed',
-      error: { code: 'LLM_PROVIDER_ERROR', message: 'stream failed' },
-    })
-    expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
-      ['user', 'Break please'],
-      ['assistant', 'partial'],
-    ])
-  })
-
-  it('persists visible error text and writes a log when LLM fails before output', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
-    const logDir = path.join(dataDir, 'logs')
-    process.env.LOG_DATA_DIR = logDir
-    llmMock.streamChatCompletion.mockReturnValue(failingBeforeOutput())
-    const { app, messageRepo, sessionRepo } = await loadApp()
-    const session = sessionRepo.create({ model: 'gpt-4o' })
-
-    const responseText = await postSse(app, { sessionId: session.id, content: 'Break before output' })
-    const sseEvents = parseSse(responseText)
-
-    expect(sseEvents.map((event) => event.type)).toEqual([
-      'response_started',
-      'response_failed',
-    ])
-    expect(sseEvents[1]).toMatchObject({
-      type: 'response_failed',
-      error: { code: 'LLM_PROVIDER_ERROR', message: 'provider offline' },
-    })
-    expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
-      ['user', 'Break before output'],
-      ['assistant', 'AI request failed: provider offline'],
-    ])
-
-    const logFiles = fs.readdirSync(logDir)
-    expect(logFiles.length).toBeGreaterThan(0)
-    const logContent = fs.readFileSync(path.join(logDir, logFiles[0]), 'utf8')
-    expect(logContent).toContain('"scope":"llm.stream"')
-    expect(logContent).toContain('provider offline')
-  })
-  it('falls back to direct LLM when the Mastra runtime first reports an error', async () => {
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'error', error: 'agent unavailable' }
-      })()
-    )
-    llmMock.streamChatCompletion.mockReturnValue(events([
-      { type: 'delta', text: 'Fallback answer' },
-      { type: 'done' },
-    ]))
-    const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
-    const session = sessionRepo.create({ model: 'gpt-4o' })
-    settingsRepo.setMany({
-      agent_runtime_enabled: 'true',
-      agent_runtime_provider: 'mastra',
-    })
 
     const responseText = await postSse(app, { sessionId: session.id, content: 'please answer' })
     const sseEvents = parseSse(responseText)
 
     expect(agentRouteMock.streamChatAgentRoute).toHaveBeenCalledOnce()
-    expect(llmMock.streamChatCompletion).toHaveBeenCalledOnce()
-    expect(sseEvents.map((event) => event.type)).toEqual([
-      'response_started',
-      'content_block_started',
-      'content_delta',
-      'content_block_completed',
-      'response_completed',
-    ])
-    expect(sseEvents[0]).toMatchObject({ type: 'response_started', runtime: 'direct-llm' })
+    expect(sseEvents.map((event) => event.type)).toEqual(['response_started', 'response_failed'])
+    expect(sseEvents[0]).toMatchObject({ type: 'response_started', runtime: 'mastra-chat-agent-v1' })
+    expect(sseEvents[1]).toMatchObject({ type: 'response_failed', error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent unavailable' } })
     expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
       ['user', 'please answer'],
-      ['assistant', 'Fallback answer'],
+      ['assistant', 'AI request failed: agent unavailable'],
     ])
   })
 
   it('streams response_failed instead of falling back when Mastra errors after a visible tool event', async () => {
     process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'tool_call_start', call: { callId: 'call-fail', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'BloomAI' } } }
-        yield { type: 'error', error: 'agent failed after tool' }
-      })()
-    )
-    const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'tool_call_start', call: { callId: 'call-fail', toolId: 'web_search', category: 'search', status: 'running', input: { query: 'BloomAI' } } },
+      { type: 'error', error: 'agent failed after tool' },
+    ]))
+    const { app, messageRepo, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
-    settingsRepo.setMany({
-      agent_runtime_enabled: 'true',
-      agent_runtime_provider: 'mastra',
-    })
 
     const responseText = await postSse(app, { sessionId: session.id, content: 'agent tool then fail' })
     const sseEvents = parseSse(responseText)
 
-    expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
-    expect(sseEvents.map((event) => event.type)).toEqual([
-      'response_started',
-      'tool_call_started',
-      'tool_call_delta',
-      'response_failed',
-    ])
-    expect(sseEvents[1]).toMatchObject({
-      type: 'tool_call_started',
-      block: {
-        callId: 'call-fail',
-        toolId: 'web_search',
-        status: 'running',
-      },
-    })
-    expect(sseEvents[2]).toMatchObject({
-      type: 'tool_call_delta',
-      callId: 'call-fail',
-      patch: { statusMessage: 'Searching BloomAI with tavily' },
-    })
-    expect(sseEvents[3]).toMatchObject({
-      type: 'response_failed',
-      error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed after tool' },
-    })
+    expect(sseEvents.map((event) => event.type)).toEqual(['response_started', 'tool_call_started', 'tool_call_delta', 'response_failed'])
+    expect(sseEvents[1]).toMatchObject({ type: 'tool_call_started', block: { callId: 'call-fail', toolId: 'web_search', status: 'running' } })
+    expect(sseEvents[2]).toMatchObject({ type: 'tool_call_delta', callId: 'call-fail', patch: { statusMessage: 'Searching BloomAI with tavily' } })
+    expect(sseEvents[3]).toMatchObject({ type: 'response_failed', error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed after tool' } })
 
     const messages = messageRepo.list(session.id)
     expect(messages.map((message) => [message.role, message.content])).toEqual([
@@ -615,15 +413,7 @@ describe('chat stream route', () => {
     expect(JSON.parse(messages[1].tool_calls || '{}')).toMatchObject({
       runtime: 'mastra-chat-agent-v1',
       finishReason: 'error',
-      toolCalls: [
-        {
-          callId: 'call-fail',
-          toolId: 'web_search',
-          status: 'error',
-          input: { query: 'BloomAI' },
-          outputSummary: 'agent failed after tool',
-        },
-      ],
+      toolCalls: [{ callId: 'call-fail', toolId: 'web_search', status: 'error', input: { query: 'BloomAI' }, outputSummary: 'agent failed after tool' }],
     })
 
     const logFiles = fs.readdirSync(process.env.LOG_DATA_DIR)
@@ -631,44 +421,29 @@ describe('chat stream route', () => {
     const logContent = fs.readFileSync(path.join(process.env.LOG_DATA_DIR, logFiles[0]), 'utf8')
     expect(logContent).toContain('agent failed after tool')
   })
+
   it('streams response_failed and persists partial text when Mastra errors after output starts', async () => {
-    agentRouteMock.streamChatAgentRoute.mockReturnValue(
-      (async function* () {
-        yield { type: 'delta', text: 'agent partial' }
-        yield { type: 'error', error: 'agent failed' }
-      })()
-    )
-    const { app, messageRepo, sessionRepo, settingsRepo } = await loadApp()
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
+      { type: 'delta', text: 'agent partial' },
+      { type: 'error', error: 'agent failed' },
+    ]))
+    const { app, messageRepo, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
-    settingsRepo.setMany({
-      agent_runtime_enabled: 'true',
-      agent_runtime_provider: 'mastra',
-    })
 
     const responseText = await postSse(app, { sessionId: session.id, content: 'agent please' })
     const sseEvents = parseSse(responseText)
 
-    expect(llmMock.streamChatCompletion).not.toHaveBeenCalled()
-    expect(sseEvents.map((event) => event.type)).toEqual([
-      'response_started',
-      'content_block_started',
-      'content_delta',
-      'response_failed',
-    ])
-    expect(sseEvents[3]).toMatchObject({
-      type: 'response_failed',
-      error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed' },
-    })
+    expect(sseEvents.map((event) => event.type)).toEqual(['response_started', 'content_block_started', 'content_delta', 'response_failed'])
+    expect(sseEvents[3]).toMatchObject({ type: 'response_failed', error: { code: 'AGENT_RUNTIME_ERROR', message: 'agent failed' } })
     expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
       ['user', 'agent please'],
       ['assistant', 'agent partial'],
     ])
   })
 
-  it('sanitizes provider raw errors in SSE failures and log files', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
+  it('sanitizes agent raw errors in SSE failures and log files', async () => {
     process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
-    llmMock.streamChatCompletion.mockReturnValue((async function* () {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue((async function* (): AsyncGenerator<ChatAgentRuntimeEvent> {
       throw new Error('provider rejected api_key=sk-test-secret with bearer hidden-token')
     })())
     const { app, sessionRepo } = await loadApp()
@@ -677,10 +452,7 @@ describe('chat stream route', () => {
     const responseText = await postSse(app, { sessionId: session.id, content: 'sanitize please' })
     const sseEvents = parseSse(responseText)
 
-    expect(sseEvents[1]).toMatchObject({
-      type: 'response_failed',
-      error: { code: 'LLM_PROVIDER_ERROR' },
-    })
+    expect(sseEvents[1]).toMatchObject({ type: 'response_failed', error: { code: 'AGENT_RUNTIME_ERROR' } })
     expect(sseEvents[1].error.message).toContain('[REDACTED]')
     expect(sseEvents[1].error.message).not.toContain('sk-test-secret')
     expect(sseEvents[1].error.message).not.toContain('hidden-token')
@@ -688,18 +460,17 @@ describe('chat stream route', () => {
     const logFiles = fs.readdirSync(process.env.LOG_DATA_DIR)
     expect(logFiles.length).toBeGreaterThan(0)
     const logContent = fs.readFileSync(path.join(process.env.LOG_DATA_DIR, logFiles[0]), 'utf8')
-    expect(logContent).toContain('"scope":"llm.stream"')
+    expect(logContent).toContain('"scope":"agent.runtime"')
     expect(logContent).toContain('[REDACTED]')
     expect(logContent).not.toContain('sk-test-secret')
     expect(logContent).not.toContain('hidden-token')
   })
+
   it('logs assistant persistence failures after response_completed without sending another terminal event', async () => {
-    process.env.AGENT_RUNTIME_ENABLED = 'false'
     process.env.LOG_DATA_DIR = path.join(dataDir, 'logs')
-    llmMock.streamChatCompletion.mockReturnValue(events([
+    agentRouteMock.streamChatAgentRoute.mockReturnValue(agentEvents([
       { type: 'delta', text: 'Saved in the stream only' },
-      { type: 'usage', input: 4, output: 6 },
-      { type: 'done' },
+      { type: 'done', trace: { runtime: 'mastra-chat-agent-v1', maxSteps: 10, toolCalls: [], tokens: { inputTokens: 4, outputTokens: 6, totalTokens: 10 } } },
     ]))
     const { app, messageRepo, sessionRepo } = await loadApp()
     const session = sessionRepo.create({ model: 'gpt-4o' })
@@ -716,7 +487,6 @@ describe('chat stream route', () => {
       'response_started',
       'content_block_started',
       'content_delta',
-      'usage_updated',
       'content_block_completed',
       'response_completed',
     ])
@@ -731,5 +501,22 @@ describe('chat stream route', () => {
     expect(logContent).toContain(sseEvents[0].responseId)
     expect(logContent).toContain('"textLength":24')
     expect(logContent).toContain('"toolCallCount":0')
+  })
+
+  it('completes an empty agent stream without using direct LLM fallback', async () => {
+    agentRouteMock.streamChatAgentRoute.mockReturnValue((async function* (): AsyncGenerator<ChatAgentRuntimeEvent> {})())
+    const { app, messageRepo, sessionRepo } = await loadApp()
+    const session = sessionRepo.create({ model: 'gpt-4o' })
+
+    const responseText = await postSse(app, { sessionId: session.id, content: 'empty agent stream' })
+    const sseEvents = parseSse(responseText)
+
+    expect(sseEvents.map((event) => event.type)).toEqual(['response_started', 'response_completed'])
+    expect(sseEvents[0]).toMatchObject({ runtime: 'mastra-chat-agent-v1' })
+    expect(sseEvents[1]).toMatchObject({ trace: { runtime: 'mastra-chat-agent-v1', finishReason: 'unknown' } })
+    expect(messageRepo.list(session.id).map((message) => [message.role, message.content])).toEqual([
+      ['user', 'empty agent stream'],
+      ['assistant', ''],
+    ])
   })
 })
