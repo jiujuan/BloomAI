@@ -102,4 +102,34 @@ describe('ToolCallGroupCard', () => {
     expect(html).toContain('Interrupted')
     expect(html).toContain('data-tool-group-status="interrupted"')
   })
+
+  it('renders skill tool calls as ordinary grouped tool calls', () => {
+    const skillGroup = {
+      key: 'tool:skill:writer',
+      toolId: 'skill:writer',
+      category: 'tool' as const,
+      calls: [
+        {
+          id: 'tool-skill',
+          type: 'tool_call' as const,
+          callId: 'skill-call',
+          toolId: 'skill:writer',
+          category: 'tool' as const,
+          status: 'success' as const,
+          input: { topic: 'release notes' },
+          outputSummary: 'Skill completed',
+          createdAt: 1,
+          completedAt: 2,
+        },
+      ],
+    }
+
+    const html = renderToStaticMarkup(<ToolCallGroupCard group={skillGroup} />)
+
+    expect(html).toContain('data-tool-group-key="tool:skill:writer"')
+    expect(html).toContain('skill:writer')
+    expect(html).toContain('topic: release notes')
+    expect(html).toContain('Skill completed')
+    expect(html).toContain('data-call-id="skill-call"')
+  })
 })

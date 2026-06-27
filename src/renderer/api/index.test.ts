@@ -53,6 +53,43 @@ describe('platform.chatStream', () => {
     await expect(collectChatStream()).resolves.toEqual(events)
   })
 
+  it('yields v1 events across SSE chunk boundaries without normalizing them', async () => {
+    const events: ResponseStreamEvent[] = [
+      {
+        type: 'response_started',
+        responseId: 'response-chunked',
+        sessionId: 'session-1',
+        runtime: 'mastra-chat-agent-v1',
+        createdAt: 1,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-chunked',
+        block: {
+          id: 'tool-skill',
+          type: 'tool_call',
+          callId: 'call-skill',
+          toolId: 'skill:writer',
+          category: 'tool',
+          status: 'running',
+          input: { topic: 'release notes' },
+          createdAt: 2,
+        },
+      },
+      {
+        type: 'tool_call_completed',
+        responseId: 'response-chunked',
+        callId: 'call-skill',
+        outputSummary: 'Skill completed',
+        completedAt: 3,
+      },
+    ]
+    const sse = events.map((event) => 'data: ' + JSON.stringify(event) + '\n').join('')
+    mockFetchChunks([sse.slice(0, 17), sse.slice(17, 80), sse.slice(80)])
+
+    await expect(collectChatStream()).resolves.toEqual(events)
+  })
+
   it('stops without extra events when [DONE] is received', async () => {
     const event: ResponseStreamEvent = {
       type: 'response_started',
@@ -122,15 +159,20 @@ async function collectChatStream(): Promise<ResponseStreamEvent[]> {
 }
 
 function mockFetchStream(sse: string): void {
+  mockFetchChunks([sse])
+}
+
+function mockFetchChunks(chunks: string[]): void {
   const encoder = new TextEncoder()
-  let sent = false
+  let index = 0
   globalThis.fetch = vi.fn().mockResolvedValue({
     body: {
       getReader: () => ({
         read: vi.fn().mockImplementation(async () => {
-          if (sent) return { done: true, value: undefined }
-          sent = true
-          return { done: false, value: encoder.encode(sse) }
+          if (index >= chunks.length) return { done: true, value: undefined }
+          const chunk = chunks[index]
+          index += 1
+          return { done: false, value: encoder.encode(chunk) }
         }),
       }),
     },

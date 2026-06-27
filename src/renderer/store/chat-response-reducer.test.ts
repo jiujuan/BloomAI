@@ -287,7 +287,61 @@ describe('reduceStreamingResponse', () => {
     })
   })
 
-  it('preserves partial markdown and derives legacy streaming text after failure', () => {
+  it('reduces skill calls as ordinary tool blocks', () => {
+    const state = reduceAll([
+      {
+        type: 'response_started',
+        responseId: 'response-skill',
+        sessionId: 'session-1',
+        runtime: 'mastra-chat-agent-v1',
+        createdAt: 1,
+      },
+      {
+        type: 'tool_call_started',
+        responseId: 'response-skill',
+        block: {
+          id: 'skill-block-1',
+          type: 'tool_call',
+          callId: 'skill-call-1',
+          toolId: 'skill:writer',
+          category: 'tool',
+          status: 'running',
+          input: { topic: 'launch' },
+          createdAt: 2,
+        },
+      },
+      {
+        type: 'tool_call_completed',
+        responseId: 'response-skill',
+        callId: 'skill-call-1',
+        output: { draft: 'done' },
+        outputSummary: 'Skill completed',
+        durationMs: 9,
+        completedAt: 3,
+      },
+    ])
+
+    expect(state?.blocks).toEqual([
+      expect.objectContaining({
+        type: 'tool_call',
+        callId: 'skill-call-1',
+        toolId: 'skill:writer',
+        category: 'tool',
+        status: 'success',
+        outputSummary: 'Skill completed',
+      }),
+    ])
+    expect(deriveToolCalls(state)).toEqual([
+      expect.objectContaining({
+        callId: 'skill-call-1',
+        toolId: 'skill:writer',
+        category: 'tool',
+        status: 'success',
+      }),
+    ])
+  })
+
+  it('preserves partial markdown in response blocks after failure', () => {
     const state = reduceAll([
       {
         type: 'response_started',

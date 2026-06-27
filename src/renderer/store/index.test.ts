@@ -106,7 +106,7 @@ describe('chat store response events', () => {
     await waitForState(() => deriveStreamingText(useChatStore.getState().streamingResponsesBySession.s1) === 'Hi')
     const streamingState = useChatStore.getState()
 
-    expectLegacyStreamingMirrorFieldsRemoved(streamingState)
+    expectRemovedActiveStreamFieldsAbsent(streamingState)
     expect(streamingState.streamingResponsesBySession.s1).toMatchObject({
       responseId: 'response-1',
       sessionId: 's1',
@@ -123,7 +123,7 @@ describe('chat store response events', () => {
     await sendPromise
 
     const finalState = useChatStore.getState()
-    expectLegacyStreamingMirrorFieldsRemoved(finalState)
+    expectRemovedActiveStreamFieldsAbsent(finalState)
     expect(finalState.streamingResponsesBySession.s1).toBeNull()
     expect(finalState.tokenUsage.s1).toEqual({ input: 1, output: 2 })
   })
@@ -142,7 +142,7 @@ describe('chat store response events', () => {
     await useChatStore.getState().sendMessage('s1', 'hello')
 
     const finalState = useChatStore.getState()
-    expectLegacyStreamingMirrorFieldsRemoved(finalState)
+    expectRemovedActiveStreamFieldsAbsent(finalState)
     expect(finalState.streamingResponsesBySession.s1).toMatchObject({
       responseId: 'response-fail',
       isComplete: true,
@@ -181,7 +181,7 @@ describe('chat store response events', () => {
     await useChatStore.getState().sendMessage('s1', 'search news')
 
     const finalState = useChatStore.getState()
-    expectLegacyStreamingMirrorFieldsRemoved(finalState)
+    expectRemovedActiveStreamFieldsAbsent(finalState)
     expect(finalState.streamingResponsesBySession.s1?.blocks.map((block) => block.type)).toEqual(['tool_call', 'error'])
     expect(deriveToolCalls(finalState.streamingResponsesBySession.s1)).toEqual([
       expect.objectContaining({ callId: 'c1', status: 'success' }),
@@ -189,6 +189,53 @@ describe('chat store response events', () => {
     expect(platformMock.getMessages).not.toHaveBeenCalled()
   })
 
+  it('reduces skill response streams into v1 blocks without a special skill UI state', async () => {
+    const { useChatStore } = await import('./index')
+    platformMock.chatStream.mockImplementation(async function* () {
+      yield* streamEvents([
+        responseStarted('response-skill'),
+        {
+          type: 'tool_call_started',
+          responseId: 'response-skill',
+          block: {
+            id: 'skill-block-1',
+            type: 'tool_call',
+            callId: 'skill-call-1',
+            toolId: 'skill:writer',
+            category: 'tool',
+            status: 'running',
+            input: { topic: 'release notes' },
+            createdAt: 2,
+          },
+        },
+        {
+          type: 'tool_call_completed',
+          responseId: 'response-skill',
+          callId: 'skill-call-1',
+          outputSummary: 'Skill completed',
+          durationMs: 4,
+          completedAt: 3,
+        },
+        markdownStarted('response-skill', 'block-skill-answer'),
+        { type: 'content_delta', responseId: 'response-skill', blockId: 'block-skill-answer', delta: 'Draft ready.' },
+      ])
+      yield { type: 'content_block_completed', responseId: 'response-skill', blockId: 'block-skill-answer', completedAt: 5 }
+      yield { type: 'response_completed', responseId: 'response-skill', finishReason: 'stop', completedAt: 6 }
+    })
+
+    platformMock.getMessages.mockResolvedValueOnce([
+      { id: 'persisted-user', session_id: 's1', role: 'user', content: 'run writer skill', created_at: 1 },
+      { id: 'persisted-assistant', session_id: 's1', role: 'assistant', content: 'Draft ready.', created_at: 2 },
+    ])
+
+    await useChatStore.getState().sendMessage('s1', 'run writer skill')
+
+    const assistant = useChatStore.getState().messagesBySession.s1.find((message) => message.role === 'assistant')
+    expect(assistant?.content).toBe('Draft ready.')
+    expect(platformMock.getMessages).toHaveBeenCalledWith('s1')
+    expect(useChatStore.getState().streamingResponsesBySession.s1).toBeNull()
+    expectRemovedActiveStreamFieldsAbsent(useChatStore.getState())
+  })
   it('converts thrown stream errors into response_failed blocks without dropping running tools', async () => {
     const { useChatStore } = await import('./index')
     platformMock.chatStream.mockImplementation(async function* () {
@@ -215,7 +262,7 @@ describe('chat store response events', () => {
     await useChatStore.getState().sendMessage('s1', 'search news')
 
     const finalState = useChatStore.getState()
-    expectLegacyStreamingMirrorFieldsRemoved(finalState)
+    expectRemovedActiveStreamFieldsAbsent(finalState)
     expect(finalState.streamingResponsesBySession.s1).toMatchObject({
       responseId: 'response-throw',
       isComplete: true,
@@ -237,7 +284,7 @@ describe('chat store response events', () => {
     platformMock.chatStream.mockImplementation(emptyStream)
 
     const sendPromise = useChatStore.getState().sendMessage('s1', 'next')
-    expectLegacyStreamingMirrorFieldsRemoved(useChatStore.getState())
+    expectRemovedActiveStreamFieldsAbsent(useChatStore.getState())
     expect(useChatStore.getState().streamingResponsesBySession.s1).toBeNull()
     await sendPromise
   })
@@ -261,7 +308,7 @@ function markdownStarted(responseId: string, blockId: string): ResponseStreamEve
   }
 }
 
-function expectLegacyStreamingMirrorFieldsRemoved(state: object): void {
+function expectRemovedActiveStreamFieldsAbsent(state: object): void {
   const removedFields = [
     ['streaming', 'Text'].join(''),
     ['stream', 'Error'].join(''),

@@ -67,6 +67,121 @@ describe('Timeline', () => {
     expect(html).not.toContain('data-call-id="legacy"')
   })
 
+  it('renders a no-tool agent answer as one assistant bubble from markdown blocks', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingResponse={{
+          responseId: 'r-answer',
+          sessionId: 's1',
+          isComplete: true,
+          blocks: [
+            {
+              id: 'md-answer',
+              type: 'markdown',
+              status: 'completed',
+              role: 'answer',
+              markdown: '**Done** with no tools.',
+              createdAt: 1,
+              completedAt: 2,
+            },
+          ],
+        } as any}
+      />
+    )
+
+    expect((html.match(/msg-bubble/g) || []).length).toBe(1)
+    expect(html).toContain('Done')
+    expect(html).toContain('with no tools.')
+    expect(html).not.toContain('tool-call-group-card')
+  })
+
+  it('renders a web search answer as a tool group followed by an assistant bubble', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingResponse={{
+          responseId: 'r-search',
+          sessionId: 's1',
+          isComplete: true,
+          blocks: [
+            {
+              id: 'tool-search',
+              type: 'tool_call',
+              callId: 'call-search',
+              toolId: 'web_search',
+              category: 'web',
+              status: 'success',
+              input: { query: 'BloomAI news' },
+              outputSummary: '2 results',
+              createdAt: 1,
+              completedAt: 2,
+            },
+            {
+              id: 'md-search',
+              type: 'markdown',
+              status: 'completed',
+              role: 'answer',
+              markdown: 'Search-backed answer.',
+              createdAt: 3,
+              completedAt: 4,
+            },
+          ],
+        } as any}
+      />
+    )
+
+    expect(html).toContain('data-tool-group-key="web:web_search"')
+    expect(html).toContain('data-call-id="call-search"')
+    expect(html).toContain('Search-backed answer.')
+    expect(html.indexOf('data-tool-group-key="web:web_search"')).toBeLessThan(html.indexOf('Search-backed answer.'))
+  })
+
+  it('renders a skill call as a regular grouped tool call followed by an assistant bubble', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        messages={[] as any}
+        isStreaming={false}
+        streamingResponse={{
+          responseId: 'r-skill',
+          sessionId: 's1',
+          isComplete: true,
+          blocks: [
+            {
+              id: 'tool-skill',
+              type: 'tool_call',
+              callId: 'call-skill',
+              toolId: 'skill:writer',
+              category: 'tool',
+              status: 'success',
+              input: { topic: 'release notes' },
+              outputSummary: 'Skill completed',
+              createdAt: 1,
+              completedAt: 2,
+            },
+            {
+              id: 'md-skill',
+              type: 'markdown',
+              status: 'completed',
+              role: 'answer',
+              markdown: 'Skill answer.',
+              createdAt: 3,
+              completedAt: 4,
+            },
+          ],
+        } as any}
+      />
+    )
+
+    expect(html).toContain('tool-call-group-card')
+    expect(html).toContain('data-tool-group-key="tool:skill:writer"')
+    expect(html).toContain('skill:writer')
+    expect(html).toContain('Skill completed')
+    expect(html).toContain('Skill answer.')
+  })
+
   it('groups adjacent streaming tool calls with the same tool into one card', () => {
     const html = renderToStaticMarkup(
       <Timeline
