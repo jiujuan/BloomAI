@@ -1,8 +1,12 @@
+import type { OrganizedChatPrompt } from '../../prompts/types'
+
 export type ChatAgentRunInput = {
   sessionId: string
+  agentId?: string
   content: string
   model: string
   maxSteps?: number
+  prompt?: OrganizedChatPrompt
 }
 
 export type ChatToolCallTrace = {
