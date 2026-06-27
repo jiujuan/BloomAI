@@ -3,8 +3,13 @@
 // In future web: uses fetch + SSE directly
 
 import { API_BASE } from '@shared/constants'
-import type { ResponseStreamEvent } from '@shared/schemas/response'
-import { createChatStreamNormalizer } from './chat-stream-normalizer'
+import {
+  ResponseStreamEventSchema,
+  type ResponseError,
+  type ResponseStreamEvent,
+} from '@shared/schemas/response'
+
+const DEFAULT_ACTIVE_RESPONSE_RUNTIME = 'mastra-chat-agent-v1' as const
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!(window as any).bloomai
@@ -54,40 +59,6 @@ export type OllamaRemoteModel = {
   digest?: string
   details?: Record<string, unknown>
 }
-
-export type ChatToolCallView = {
-  callId: string
-  toolId: string
-  category: string
-  status: 'running'
-  input: Record<string, unknown>
-}
-
-export type ChatToolCallStartEvent = {
-  type: 'tool_call_start'
-  call: ChatToolCallView
-}
-
-export type ChatToolCallResultEvent = {
-  type: 'tool_call_result'
-  callId: string
-  output: unknown
-  durationMs?: number
-}
-
-export type ChatToolCallErrorEvent = {
-  type: 'tool_call_error'
-  callId: string
-  error: string
-}
-
-export type ChatStreamEvent =
-  | { type: 'delta'; text: string }
-  | ChatToolCallStartEvent
-  | ChatToolCallResultEvent
-  | ChatToolCallErrorEvent
-  | { type: 'done'; tokens?: { input: number; output: number } | null; trace?: unknown }
-  | { type: 'error'; error: string }
 
 // Platform API
 
@@ -167,7 +138,7 @@ export const platform = {
     return data
   },
 
-  // Chat streaming: returns an async generator of v1 SSE events.
+  // Chat streaming is v1-only; backend SSE payloads are validated and yielded without legacy normalization.
   async *chatStream(payload: { sessionId: string; content: string; contextOverride?: object }): AsyncGenerator<ResponseStreamEvent> {
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
@@ -176,46 +147,34 @@ export const platform = {
     })
     if (!res.body) throw new Error('No response body')
 
-    const normalizer = createChatStreamNormalizer({ sessionId: payload.sessionId })
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
+    const streamState: ChatStreamParseState = { responseStarted: false, responseId: createId() }
     let buffer = ''
 
     try {
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+        buffer = done ? '' : lines.pop() || ''
+
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const raw = line.slice(6).trim()
-            if (raw === '[DONE]') {
-              for (const event of normalizer.flush()) yield event
-              return
-            }
-            try {
-              const chunk = JSON.parse(raw)
-              for (const event of normalizer.normalize(chunk)) yield event
-            } catch (error) {
-              for (const event of normalizer.normalize({
-                type: 'error',
-                error: error instanceof Error ? error.message : 'Malformed chat stream event.',
-              })) yield event
-              return
-            }
+          const result = parseChatStreamLine(line, payload.sessionId, streamState)
+          if (result.kind === 'done') return
+          if (result.kind === 'failed') {
+            for (const event of result.events) yield event
+            return
           }
+          if (result.kind === 'event') yield result.event
         }
+
+        if (done) break
       }
     } catch (error) {
-      for (const event of normalizer.fail(error)) yield event
-      return
+      for (const event of createFailureEvents(payload.sessionId, streamState, createStreamFailure(error))) yield event
     }
-
-    for (const event of normalizer.flush()) yield event
   },
-
   // Clipboard (Electron only, graceful fallback)
   async readClipboard(): Promise<string> {
     if (isElectron()) return (window as any).bloomai.readClipboard()
@@ -235,6 +194,127 @@ export const platform = {
   },
 }
 
+type ChatStreamParseState = {
+  responseStarted: boolean
+  responseId: string
+}
+
+type ParsedChatStreamLine =
+  | { kind: 'skip' }
+  | { kind: 'done' }
+  | { kind: 'event'; event: ResponseStreamEvent }
+  | { kind: 'failed'; events: ResponseStreamEvent[] }
+
+function parseChatStreamLine(
+  line: string,
+  sessionId: string,
+  state: ChatStreamParseState,
+): ParsedChatStreamLine {
+  if (!line.startsWith('data: ')) return { kind: 'skip' }
+  const raw = line.slice(6).trim()
+  if (raw === '[DONE]') return { kind: 'done' }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    return {
+      kind: 'failed',
+      events: createFailureEvents(sessionId, state, {
+        code: 'MALFORMED_CHAT_STREAM_EVENT',
+        message: error instanceof Error ? error.message : 'Malformed chat stream event.',
+      }),
+    }
+  }
+
+  const event = ResponseStreamEventSchema.safeParse(parsed)
+  if (!event.success) {
+    return {
+      kind: 'failed',
+      events: createFailureEvents(sessionId, state, {
+        code: 'MALFORMED_CHAT_STREAM_EVENT',
+        message: 'Received a non-v1 chat stream event.',
+        details: event.error.flatten(),
+      }),
+    }
+  }
+
+  const responseEvent = event.data as ResponseStreamEvent
+
+  // response_started anchors failure synthesis to the backend response id for later malformed/abort handling.
+  if (responseEvent.type === 'response_started') {
+    state.responseStarted = true
+    state.responseId = responseEvent.responseId
+  }
+
+  return { kind: 'event', event: responseEvent }
+}
+
+function createFailureEvents(
+  sessionId: string,
+  state: ChatStreamParseState,
+  error: ResponseError,
+): ResponseStreamEvent[] {
+  const completedAt = Date.now()
+  const responseId = state.responseId
+  const events: ResponseStreamEvent[] = []
+  if (!state.responseStarted) {
+    events.push({
+      type: 'response_started',
+      responseId,
+      sessionId,
+      runtime: DEFAULT_ACTIVE_RESPONSE_RUNTIME,
+      createdAt: completedAt,
+    })
+    state.responseStarted = true
+  }
+  events.push({
+    type: 'response_failed',
+    responseId,
+    error,
+    completedAt,
+  })
+  return events
+}
+
+function createStreamFailure(error: unknown): ResponseError {
+  return {
+    code: isAbortOrDisconnect(error) ? 'STREAM_ABORTED' : 'CHAT_STREAM_ERROR',
+    message: getErrorMessage(error, 'Chat stream failed.'),
+  }
+}
+
+function isAbortOrDisconnect(error: unknown): boolean {
+  if (error instanceof Error) {
+    const name = error.name.toLowerCase()
+    const message = error.message.toLowerCase()
+    return name === 'aborterror'
+      || message.includes('abort')
+      || message.includes('cancel')
+      || message.includes('disconnect')
+      || message.includes('network')
+  }
+  if (typeof error === 'string') {
+    const message = error.toLowerCase()
+    return message.includes('abort')
+      || message.includes('cancel')
+      || message.includes('disconnect')
+      || message.includes('network')
+  }
+  return false
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error) return error
+  if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string') return error.message
+  return fallback
+}
+
+function createId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `response-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 export function applyTheme(theme: 'light' | 'dark' | 'system') {
   const root = document.documentElement
   if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {

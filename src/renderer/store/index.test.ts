@@ -403,28 +403,50 @@ describe('chat store response events', () => {
     expect(finalState.streamingResponsesBySession.s1?.blocks.map((block) => block.type)).toEqual(['error'])
   })
 
-  it('keeps legacy-normalized streams compatible with store derived fields', async () => {
-    const { createChatStreamNormalizer } = await import('@renderer/api/chat-stream-normalizer')
+  it('keeps v1 response streams compatible with store derived fields', async () => {
     const { useChatStore } = await import('./index')
     const gate = deferred()
     platformMock.chatStream.mockImplementation(async function* () {
-      const normalizer = createChatStreamNormalizer({
+      yield {
+        type: 'response_started',
+        responseId: 'v1-response',
         sessionId: 's1',
-        responseId: 'legacy-response',
-        now: createNow(100),
-        idFactory: createIds(['block-1']),
-      })
-      for (const event of normalizer.normalize({ type: 'delta', text: 'Hel' })) yield event
-      for (const event of normalizer.normalize({ type: 'delta', text: 'lo' })) yield event
+        runtime: 'mastra-chat-agent-v1',
+        createdAt: 100,
+      }
+      yield {
+        type: 'content_block_started',
+        responseId: 'v1-response',
+        block: {
+          id: 'block-1',
+          type: 'markdown',
+          status: 'streaming',
+          role: 'answer',
+          createdAt: 101,
+        },
+      }
+      yield { type: 'content_delta', responseId: 'v1-response', blockId: 'block-1', delta: 'Hel' }
+      yield { type: 'content_delta', responseId: 'v1-response', blockId: 'block-1', delta: 'lo' }
       await gate.promise
-      for (const event of normalizer.normalize({ type: 'done', tokens: { input: 2, output: 3 } })) yield event
+      yield {
+        type: 'usage_updated',
+        responseId: 'v1-response',
+        usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      }
+      yield { type: 'content_block_completed', responseId: 'v1-response', blockId: 'block-1', completedAt: 102 }
+      yield {
+        type: 'response_completed',
+        responseId: 'v1-response',
+        finishReason: 'stop',
+        completedAt: 103,
+      }
     })
 
     const sendPromise = useChatStore.getState().sendMessage('s1', 'hello')
     await waitForState(() => useChatStore.getState().streamingText === 'Hello')
 
     expect(useChatStore.getState().streamingResponsesBySession.s1).toMatchObject({
-      responseId: 'legacy-response',
+      responseId: 'v1-response',
       blocks: [expect.objectContaining({ type: 'markdown', markdown: 'Hello' })],
     })
 
@@ -443,15 +465,6 @@ function deferred() {
   return { promise, resolve }
 }
 
-function createNow(start: number): () => number {
-  let current = start
-  return () => current++
-}
-
-function createIds(ids: string[]): () => string {
-  let index = 0
-  return () => ids[index++] ?? `id-${index}`
-}
 
 async function waitForState(assertion: () => boolean): Promise<void> {
   for (let i = 0; i < 30; i += 1) {
