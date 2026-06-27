@@ -1,6 +1,8 @@
 import { DEFAULT_AGENT_MAX_STEPS, MASTRA_CHAT_AGENT_V1_RUNTIME } from './constants'
 import { createChatAgent } from './chat-agent'
 import { mapMastraChunkToBloomEvent, mapMastraFinalOutputToBloomEvents } from './mastra-event-mapper'
+import { resolveChatCapabilities } from '../runtime/capabilities'
+import { resolveChatIntent } from '../runtime/intent/chat-intent-router'
 import { resolveRuntimeModel, toMastraModelId } from '../../llm/model-selection'
 import { getProviderApiKey, getProviderBaseUrl } from '../../llm/settings'
 import type { OpenAICompatibleConfig } from '@mastra/core/llm'
@@ -23,7 +25,23 @@ export async function* runChatAgentV1(input: ChatAgentRunInput): AsyncGenerator<
     return
   }
 
-  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), { sessionId: input.sessionId, prompt: input.prompt })
+  const capabilities = resolveChatCapabilities()
+  const intent = await resolveChatIntent({
+    sessionId: input.sessionId,
+    content: input.content,
+    prompt: input.prompt,
+    availableTools: capabilities.tools,
+    availableSkills: capabilities.skills,
+  })
+  const agent = createChatAgent(toMastraModelConfig(modelResolution.resolved), {
+    sessionId: input.sessionId,
+    prompt: input.prompt,
+    intent,
+    enabledTools: capabilities.tools,
+    enabledSkills: capabilities.skills,
+    selectedTools: intent.selectedTools,
+    selectedSkills: intent.selectedSkills,
+  })
   const maxSteps = Math.min(input.maxSteps ?? DEFAULT_AGENT_MAX_STEPS, DEFAULT_AGENT_MAX_STEPS)
   const emittedCallIds = new Set<string>()
   const emittedResultIds = new Set<string>()

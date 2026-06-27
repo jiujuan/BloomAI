@@ -40,8 +40,8 @@ describe('createChatAgent', () => {
     )
   })
 
-  it('mounts the BloomAI web_search tool with the injected session id', () => {
-    createChatAgent('settings-selected-model', { sessionId: 'session-1' })
+  it('mounts the BloomAI web_search tool with the injected session id when selected', () => {
+    createChatAgent('settings-selected-model', { sessionId: 'session-1', selectedTools: ['web_search'] })
 
     const config = agentConstructor.mock.calls[0][0] as {
       instructions: string
@@ -54,6 +54,14 @@ describe('createChatAgent', () => {
       id: 'web_search',
       description: expect.stringContaining('Search the web'),
     })
+  })
+
+  it('does not mount tools for answer-only intent', () => {
+    createChatAgent('settings-selected-model', { sessionId: 'session-1', selectedTools: [] })
+
+    const config = agentConstructor.mock.calls[0][0] as { tools: Record<string, unknown> }
+    expect(createWebSearchToolMock).not.toHaveBeenCalled()
+    expect(config.tools).toEqual({})
   })
 
   it('accepts organized prompt metadata in creation options without changing default instructions', () => {

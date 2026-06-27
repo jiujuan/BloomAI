@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent'
 import type { MastraModelConfig } from '@mastra/core/llm'
+import type { ChatIntentDecision, SkillCapability, ToolCapability } from '../runtime/intent/types'
 import type { OrganizedChatPrompt } from '../../prompts/types'
 import { CHAT_AGENT_V1_ID, CHAT_AGENT_V1_NAME } from './constants'
 import { createWebSearchAdapterTool } from './web-search-adapter.tool'
@@ -15,6 +16,11 @@ When search results are used, synthesize the answer clearly and mention useful s
 export type CreateChatAgentOptions = {
   sessionId?: string
   prompt?: OrganizedChatPrompt
+  intent?: ChatIntentDecision
+  enabledTools?: ToolCapability[]
+  enabledSkills?: SkillCapability[]
+  selectedTools?: string[]
+  selectedSkills?: string[]
 }
 
 export function createChatAgent(model: MastraModelConfig, options: CreateChatAgentOptions = {}): Agent {
@@ -23,8 +29,17 @@ export function createChatAgent(model: MastraModelConfig, options: CreateChatAge
     name: CHAT_AGENT_V1_NAME,
     instructions: CHAT_AGENT_V1_INSTRUCTIONS,
     model,
-    tools: {
-      web_search: createWebSearchAdapterTool({ sessionId: options.sessionId }),
-    },
+    tools: createSelectedTools(options),
   })
+}
+
+type ChatAgentTools = Partial<{ web_search: ReturnType<typeof createWebSearchAdapterTool> }>
+
+function createSelectedTools(options: CreateChatAgentOptions): ChatAgentTools {
+  const tools: ChatAgentTools = {}
+  const selectedTools = new Set(options.selectedTools ?? ['web_search'])
+  if (selectedTools.has('web_search')) {
+    tools.web_search = createWebSearchAdapterTool({ sessionId: options.sessionId })
+  }
+  return tools
 }

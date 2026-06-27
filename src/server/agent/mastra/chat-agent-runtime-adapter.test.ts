@@ -7,9 +7,19 @@ import { DEFAULT_AGENT_MAX_STEPS } from './constants'
 import { runChatAgentV1 } from './chat-agent-runtime-adapter'
 
 const createChatAgentMock = vi.hoisted(() => vi.fn())
+const resolveCapabilitiesMock = vi.hoisted(() => vi.fn())
+const resolveIntentMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./chat-agent', () => ({
   createChatAgent: createChatAgentMock,
+}))
+
+vi.mock('../runtime/capabilities', () => ({
+  resolveChatCapabilities: resolveCapabilitiesMock,
+}))
+
+vi.mock('../runtime/intent/chat-intent-router', () => ({
+  resolveChatIntent: resolveIntentMock,
 }))
 
 let dataDir: string
@@ -34,6 +44,20 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
     await client.runMigrations()
     createChatAgentMock.mockReset()
     createChatAgentMock.mockReturnValue({})
+    resolveCapabilitiesMock.mockReset()
+    resolveCapabilitiesMock.mockReturnValue({
+      tools: [{ kind: 'tool', id: 'web_search', name: 'Web search', description: 'Search the web', enabled: true, paramsSchema: { type: 'object' } }],
+      skills: [],
+    })
+    resolveIntentMock.mockReset()
+    resolveIntentMock.mockResolvedValue({
+      mode: 'answer_only',
+      source: 'programmatic',
+      confidence: 0.95,
+      reason: 'plain answer',
+      selectedTools: [],
+      selectedSkills: [],
+    })
   })
 
   afterEach(() => {
@@ -56,7 +80,15 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
       // consume stream
     }
 
-    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', { sessionId: 'session-1', prompt: createPrompt() })
+    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', {
+      sessionId: 'session-1',
+      prompt: createPrompt(),
+      intent: expect.objectContaining({ mode: 'answer_only' }),
+      enabledTools: expect.any(Array),
+      enabledSkills: [],
+      selectedTools: [],
+      selectedSkills: [],
+    })
   })
 
   it('passes Agnes to Mastra as an OpenAI-compatible custom endpoint config', async () => {
@@ -76,7 +108,53 @@ describe('Mastra chat agent runtime adapter skeleton', () => {
       id: 'agnes/agnes-2.0-flash',
       url: 'https://apihub.agnes-ai.com/v1',
       apiKey: 'test-agnes-key',
-    }, { sessionId: 'session-1', prompt: createPrompt() })
+    }, expect.objectContaining({ sessionId: 'session-1', prompt: createPrompt(), selectedTools: [] }))
+  })
+
+  it('resolves capabilities and intent before creating the Mastra chat agent', async () => {
+    for await (const _event of runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'hello',
+      prompt: createPrompt(),
+      model: 'gpt-4o',
+    })) {
+      // consume stream
+    }
+
+    expect(resolveCapabilitiesMock).toHaveBeenCalledOnce()
+    expect(resolveIntentMock).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      content: 'hello',
+      prompt: createPrompt(),
+      availableTools: [{ kind: 'tool', id: 'web_search', name: 'Web search', description: 'Search the web', enabled: true, paramsSchema: { type: 'object' } }],
+      availableSkills: [],
+    })
+  })
+
+  it('passes selected tools from intent into createChatAgent', async () => {
+    resolveIntentMock.mockResolvedValue({
+      mode: 'tool',
+      source: 'programmatic',
+      confidence: 0.95,
+      reason: 'needs search',
+      selectedTools: ['web_search'],
+      selectedSkills: [],
+    })
+
+    for await (const _event of runChatAgentV1({
+      sessionId: 'session-1',
+      content: 'latest docs',
+      prompt: createPrompt('latest docs'),
+      model: 'gpt-4o',
+    })) {
+      // consume stream
+    }
+
+    expect(createChatAgentMock).toHaveBeenCalledWith('openai/gpt-4o', expect.objectContaining({
+      intent: expect.objectContaining({ mode: 'tool' }),
+      selectedTools: ['web_search'],
+      selectedSkills: [],
+    }))
   })
   it('emits an error event when the selected model is not configured', async () => {
     const events = []
