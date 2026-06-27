@@ -177,8 +177,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
         }
 
         const finalResponse = get().streamingResponsesBySession[sessionId] ?? null
+        const responseFailed = Boolean(finalResponse?.error)
         const assistantText = deriveStreamingText(finalResponse)
-        if (assistantText) {
+        if (!responseFailed && assistantText) {
           const assistantMsg: Message = {
             id: `tmp-ai-${Date.now()}`,
             session_id: sessionId,
@@ -197,11 +198,18 @@ export const useChatStore = create<ChatState & ChatActions>()(
         set(s => ({
           isStreaming: false,
           streamingText: '',
+          streamError: finalResponse?.error?.message ?? s.streamError,
           streamingResponsesBySession: {
             ...s.streamingResponsesBySession,
-            [sessionId]: null,
+            [sessionId]: responseFailed ? finalResponse : null,
+          },
+          toolCallsBySession: {
+            ...s.toolCallsBySession,
+            [sessionId]: responseFailed ? deriveToolCalls(finalResponse) : [],
           },
         }))
+        if (responseFailed) return
+
         // Reload messages from server to get real IDs
         const messages = await platform.getMessages(sessionId)
         set(s => ({ messagesBySession: { ...s.messagesBySession, [sessionId]: messages } }))
@@ -209,13 +217,27 @@ export const useChatStore = create<ChatState & ChatActions>()(
         const sessions = await platform.getSessions()
         useSessionStore.setState({ sessions })
       } catch (err: any) {
+        const message = err instanceof Error ? err.message : 'Stream failed'
+        const current = get().streamingResponsesBySession[sessionId] ?? null
+        const failedResponse = current && !current.isComplete
+          ? reduceStreamingResponse(current, {
+              type: 'response_failed',
+              responseId: current.responseId,
+              error: { code: 'UNKNOWN_ERROR', message },
+              completedAt: Date.now(),
+            }, sessionId)
+          : current
         set(s => ({
-          streamError: err.message,
+          streamError: message,
           isStreaming: false,
           streamingText: '',
           streamingResponsesBySession: {
             ...s.streamingResponsesBySession,
-            [sessionId]: null,
+            [sessionId]: failedResponse,
+          },
+          toolCallsBySession: {
+            ...s.toolCallsBySession,
+            [sessionId]: deriveToolCalls(failedResponse),
           },
         }))
       }
