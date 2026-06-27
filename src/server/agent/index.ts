@@ -1,6 +1,7 @@
 export * from './mastra'
 export * from './runtime/chat-agent-router'
 export * from './runtime/capabilities'
+export * from './runtime/intent/chat-intent-router'
 export * from './runtime/intent/llm-intent-classifier'
 export * from './runtime/intent/programmatic-intent-detector'
 export * from './runtime/intent/types'
