@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent'
-import { createWebSearchAdapterTool } from '../agent/mastra/web-search-adapter.tool'
 import { resolveMastraModel } from './model-resolver'
+import { buildAgentTools } from './tools'
 
 /**
  * Per-request values injected by server middleware (from headers/body) and read
@@ -38,5 +38,8 @@ export const chatAgent = new Agent({
     instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined),
   model: ({ requestContext }) =>
     resolveMastraModel(requestContext?.get('model') as string | undefined),
-  tools: { web_search: createWebSearchAdapterTool() },
+  // Every enabled tool + installed skill is mounted; the LLM chooses what to call.
+  // Rebuilt per request so newly enabled tools / installed skills appear next turn.
+  tools: ({ requestContext }) =>
+    buildAgentTools(requestContext?.get('sessionId') as string | undefined),
 })

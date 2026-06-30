@@ -464,3 +464,24 @@ const { messages, sendMessage, status, stop, error } = useChat({
 - 测试：257 passed / 1 failed，**该 failed 为 main 既有**（断言旧 `chat.route.ts` 含 `from '../llm'`，与本次无关，P5 会删该文件）。
 
 **下一步：** P1 把全部 `server/tools/*` 与 `skills` 桥成 Mastra tools 挂到 agent、删除两层意图路由；P2 富 UX；P3 模式/模型动态化；P4 落库（useChat `onFinish` → message.repo）；P5 删旧链路。
+
+---
+
+## 15. P1 完成：工具/技能桥接 + 删除两层意图路由（已验证 ✅）
+
+**桥接（LLM 自主决定调用，无意图路由）：**
+- 新增 `src/server/mastra/tools.ts` `buildAgentTools(sessionId)`：把**所有启用的内置工具**（`toolRepo` 中 `is_enabled=1`，22 个）+ **所有已安装技能**（`skillRepo`）逐个包成 Mastra `createTool`，分别包装 `executeTool` / `runSkill`。每请求重建，故新启用工具/新装技能下一轮即生效。
+- 新增 `src/server/mastra/json-schema.ts`：BloomAI params schema → zod。**修了一个真 bug**：内置工具的 `params_schema` 是**扁平属性表**（`{query:{type:string},...}`），不是 `{type:'object',properties}`；旧转换器据此返回 `z.object({})` 会把 `query` 等参数**剥光**，导致工具执行 `Cannot read properties of undefined`。现同时支持扁平表与包裹式，并 `.passthrough()` 兜底。
+- `chat-agent.ts`：`tools: ({requestContext}) => buildAgentTools(sessionId)`，去掉 web_search 专用适配器。
+
+**删除（旧链路一并清掉）：**
+- 整个 `src/server/agent/`（两层意图路由 `runtime/intent/*`、`runtime/capabilities`、`chat-agent-router`、legacy `chat-agent-runtime-adapter`、`mastra-event-mapper`、`response-event-mapper`、旧 `chat-agent`、`web-search-adapter.tool`、`skill-adapter.tool`、`constants`、`types`、barrel `index.ts` + 全部对应 test）。
+- 旧 Express 聊天：`routes/chat.route.ts` + `chat-response-stream.ts` + 两个 test。
+- `app.ts`（遗留 Express，仅留给 LLM 路由集成测试）移除 chat 挂载。
+- 修订 `llm-runtime.integration.test.ts`：删除已失效的 “vendor-neutral chat.route.ts” 用例（该文件已删）。
+
+**验证：**
+- `tsc --noEmit` 全绿；`vitest` **160 passed / 0 failed**（删除遗留后从 258 降到 160，无失败；含此前那条既有失败用例已随文件移除）。
+- 实测：23 个工具挂载（含 `skill_web-search-skill`）；agent 自主调用 `web_search` → `tool-output-available` → 带链接答案。
+
+**安全门控（已实现）：** 暴露所有启用工具，但 `buildBuiltinTools` 用 `tools.requires_permission` 门控：`write/shell/sandbox` 级（`fs_write/fs_edit/bash/shell/node_runner/python_runner`）需 `tool_permissions.granted=1` 才执行，否则返回**软错误**让 agent 转告用户去授权；`network/fs`（读类）直接放行。手动 `/run`（用户主动）不受影响。实测：`shell` 未授权→权限软错误；`fs_read`/`web_search`→正常执行。

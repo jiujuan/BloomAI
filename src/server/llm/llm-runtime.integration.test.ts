@@ -237,12 +237,4 @@ describe('LLM runtime end-to-end regression', () => {
       expect(videoQuery.body.data).toMatchObject({ status: 'completed', url: 'https://cdn.example/video.mp4' })
     })
   })
-
-  it('keeps chat.route.ts vendor-neutral', () => {
-    const source = fs.readFileSync(path.join(process.cwd(), 'src/server/routes/chat.route.ts'), 'utf-8')
-
-    expect(source).toContain("from '../llm'")
-    expect(source).not.toContain('@anthropic-ai/sdk')
-    expect(source).not.toContain('new Anthropic')
-  })
 })
