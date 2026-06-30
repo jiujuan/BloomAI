@@ -578,3 +578,16 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 - 视化 `WorkflowSteps.tsx`:新步骤标签(拆解子问题/并行检索/抓取正文/撰写报告)+ meta(plan 显示"N 个子问题"、fetch 显示"N 来源")。
 
 **实测(curl,mode=deep)**:4 步全部 running→success;planner 拆出 3 个子问题;并行搜索+抓正文;633 个 text-delta 流式报告;落库成功。`tsc`/`vitest`(75)/`vite build` 全绿。
+
+---
+
+## 23. P6d-1 完成：specialist agent team + 输入框下 tab 路由（已实测 ✅）
+
+- `mastra/agents/team.ts`:3 个专长 agent —— `research`(web 工具)、`writer`(无工具)、`coder`(文件/shell/执行工具)。各自 dynamic model + 角色 instructions。`TEAM_AGENT_BY_TAB` 把 tab 映射到 agent id。
+- `mastra/tools.ts`:`buildToolsForRole(role)` —— research=web 子集、writing=空、coding=fs/bash/shell/runner/doc 子集、chat=全部+技能。`buildBuiltinTools` 支持 `filter` 与(P6d-2 用的)`approvalLevels`。
+- `http/routes/chat.ts`:读 `x-bloom-agent` header → 选中 tab(研究/写作/编码)路由到对应 agent,**优先于** deep 模式;无 tab 走原通用 chat(deep→workflow)。
+- 前端 `ChatPanelMastra`:输入框下加 `通用/研究/写作/编码` tab(`team-tabs`),选择经 `x-bloom-agent` 透传。
+
+**实测(curl)**:写作 tab→writer 出俳句(无工具);研究 tab→research 调 `web_search`;编码 tab→coder 列出 fs/doc/exec 工具集。`tsc`/`vitest`(75)/`vite build` 全绿。
+
+> P6d-1 中 coder 危险工具仍走 P1 软权限门;P6d-2 改为**交互式审批**(requireApproval + 快照存储 + UI 询问卡)。

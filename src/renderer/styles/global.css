@@ -1126,3 +1126,9 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .workflow-step-icon.running { color: var(--text-info, var(--text-secondary)); }
 .workflow-step-label { flex: 0 0 auto; }
 .workflow-step-meta { color: var(--text-tertiary); font-size: 11px; }
+
+/* ── P6d: agent team tabs (below composer) ── */
+.team-tabs { display: flex; gap: 4px; margin-top: 6px; padding-left: 2px; }
+.team-tab { padding: 3px 12px; font-size: 11px; color: var(--text-secondary); background: var(--bg-tertiary); border: 1px solid transparent; border-radius: 999px; cursor: pointer; transition: all .12s; }
+.team-tab:hover { color: var(--text-primary); }
+.team-tab.active { color: var(--text-primary); background: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08)); }

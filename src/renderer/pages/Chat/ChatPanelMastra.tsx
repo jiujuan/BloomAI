@@ -13,8 +13,15 @@ import { WorkflowSteps } from './parts/WorkflowSteps'
 import { isToolPart, toToolCallView, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
+type TeamTab = '' | 'research' | 'writing' | 'coding'
 const DEFAULT_MODEL = 'agnes-2.0-flash'
 const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', deep: '深思' }
+const TEAM_TABS: { id: TeamTab; label: string }[] = [
+  { id: '', label: '通用' },
+  { id: 'research', label: '研究' },
+  { id: 'writing', label: '写作' },
+  { id: 'coding', label: '编码' },
+]
 
 /**
  * Chat panel on Mastra + AI SDK UI. Renders message.parts (text / reasoning / tool-*)
@@ -27,13 +34,16 @@ export function ChatPanelMastra() {
   const session = sessions.find((s) => s.id === activeSessionId)
 
   const [mode, setMode] = useState<ChatMode>('chat')
+  const [team, setTeam] = useState<TeamTab>('')
   const [input, setInput] = useState('')
   const [modelOverride, setModelOverride] = useState<string | null>(null)
   const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
+  const teamRef = useRef(team)
   modeRef.current = mode
   modelRef.current = model
+  teamRef.current = team
 
   useEffect(() => {
     loadTextModels()
@@ -59,6 +69,7 @@ export function ChatPanelMastra() {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
             'x-bloom-session': activeSessionId || '',
+            'x-bloom-agent': teamRef.current,
           },
         }),
       }),
@@ -189,6 +200,20 @@ export function ChatPanelMastra() {
                 <Send size={16} />
               </button>
             )}
+          </div>
+          <div className="team-tabs" role="tablist" aria-label="Agent">
+            {TEAM_TABS.map((t) => (
+              <button
+                key={t.id || 'general'}
+                role="tab"
+                aria-selected={team === t.id}
+                className={cn('team-tab', team === t.id && 'active')}
+                onClick={() => setTeam(t.id)}
+                title={t.id === 'coding' ? '编码：可读写文件/执行命令，危险操作需你确认' : undefined}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>

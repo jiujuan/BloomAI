@@ -31,17 +31,53 @@ export function buildAgentTools(sessionId?: string): Record<string, MastraTool> 
   return { ...buildBuiltinTools(sessionId), ...buildSkillTools(sessionId) }
 }
 
-export function buildBuiltinTools(sessionId?: string): Record<string, MastraTool> {
+// Curated built-in tool sets per specialist agent (P6d). `null` = all enabled tools.
+export const ROLE_TOOL_IDS: Record<string, string[] | null> = {
+  research: ['web_search', 'web_fetch', 'web_extract', 'web_screenshot'],
+  writing: [],
+  coding: ['fs_read', 'fs_grep', 'fs_glob', 'fs_write', 'fs_edit', 'bash', 'shell', 'node_runner', 'python_runner', 'doc_markdown', 'doc_pdf', 'doc_txt', 'doc_csv', 'doc_docx'],
+}
+
+export type BuildToolsOptions = {
+  filter?: (toolId: string) => boolean
+  // Tool permission levels that should require interactive approval (P6d-2) instead of
+  // the soft permission gate. When a tool's level is here, requireApproval is set and the
+  // soft gate is skipped.
+  approvalLevels?: Set<string>
+}
+
+/**
+ * Builds the tool surface for a specialist agent role. `chat` gets every enabled tool
+ * plus skills; research/writing/coding get a curated allowlist (writing gets none).
+ */
+export function buildToolsForRole(role: string, sessionId?: string): Record<string, MastraTool> {
+  const allow = ROLE_TOOL_IDS[role]
+  if (allow === undefined || allow === null) return buildAgentTools(sessionId)
+  if (allow.length === 0) return {}
+  const allowSet = new Set(allow)
+  const options: BuildToolsOptions = { filter: (id) => allowSet.has(id) }
+  // P6d-2 activates interactive approval for the coding role's dangerous tools:
+  //   if (role === 'coding') options.approvalLevels = GATED_PERMISSION_LEVELS
+  return buildBuiltinTools(sessionId, options)
+}
+
+export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions = {}): Record<string, MastraTool> {
   const tools: Record<string, MastraTool> = {}
   for (const tool of toolRepo.list()) {
     if (tool.is_enabled !== 1) continue
+    if (options.filter && !options.filter(tool.id)) continue
+    const needsApproval = !!(tool.requires_permission && options.approvalLevels?.has(tool.requires_permission))
     tools[tool.id] = createTool({
       id: tool.id,
       description: tool.description || `Run BloomAI tool ${tool.name}`,
       inputSchema: jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
+      ...(needsApproval ? { requireApproval: true } : {}),
       execute: async (input) => {
-        const denial = checkToolPermission(tool.id, tool.requires_permission)
-        if (denial) return denial
+        // Approval-gated tools rely on interactive approval; others use the soft permission gate.
+        if (!needsApproval) {
+          const denial = checkToolPermission(tool.id, tool.requires_permission)
+          if (denial) return denial
+        }
         return executeTool(tool.id, (input ?? {}) as object, sessionId)
       },
     })

@@ -3,6 +3,7 @@ import { RequestContext } from '@mastra/core/request-context'
 import { handleChatStream, toAISdkStream } from '@mastra/ai-sdk'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { mastra } from '../../mastra'
+import { TEAM_AGENT_BY_TAB } from '../../mastra/agents/team'
 import { messageRepo } from '../../db/repositories/message.repo'
 import { sessionRepo } from '../../db/repositories/session.repo'
 import { logError, sanitizeErrorMessage } from '../../logger/logger'
@@ -30,10 +31,14 @@ chatRoutes.post('/', async (c) => {
 
   persistUserMessage(sessionId, body.messages)
 
+  // P6d: a selected team tab (研究/写作/编码) routes to that specialist agent and takes
+  // precedence over deep mode. No tab → general chat agent (deep mode runs the workflow).
+  const teamAgentId = TEAM_AGENT_BY_TAB[c.req.header('x-bloom-agent') || '']
+
   // Deep mode (P6a): run the deterministic deep-research workflow instead of the
   // single agent. The workflow gathers web sources, then a writer agent synthesizes
   // a cited report — streamed to the same useChat UI as an AI SDK message stream.
-  if (mode === 'deep') {
+  if (!teamAgentId && mode === 'deep') {
     const query = lastUserText(body.messages)
     if (query) {
       const run = await mastra.getWorkflow('deep-research').createRun()
@@ -54,7 +59,7 @@ chatRoutes.post('/', async (c) => {
 
   const stream = await handleChatStream({
     mastra,
-    agentId: 'chat',
+    agentId: teamAgentId || 'chat',
     version: 'v6',
     sendReasoning: true,
     params: {
