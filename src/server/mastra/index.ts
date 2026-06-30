@@ -1,11 +1,19 @@
 import { Mastra } from '@mastra/core/mastra'
 import { chatAgent } from './chat-agent'
+import { researchWriterAgent } from './agents/research-writer-agent'
+import { deepResearchWorkflow } from './workflows/deep-research'
 
 /**
- * Single Mastra instance for BloomAI chat. Agents are registered here and served
- * via `handleChatStream` on a Hono server (see chat-server.ts) — no `mastra` CLI
- * or generated server is required. Future agents/workflows register here too.
+ * Single Mastra instance for BloomAI chat. Agents + workflows are registered here
+ * and served via @mastra/ai-sdk on the Hono server — no `mastra` CLI or generated
+ * server is required.
  */
 export const mastra = new Mastra({
-  agents: { chat: chatAgent },
+  agents: {
+    chat: chatAgent,
+    'research-writer': researchWriterAgent,
+  },
+  workflows: {
+    'deep-research': deepResearchWorkflow,
+  },
 })

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { RequestContext } from '@mastra/core/request-context'
-import { handleChatStream } from '@mastra/ai-sdk'
-import { createUIMessageStreamResponse } from 'ai'
+import { handleChatStream, toAISdkStream } from '@mastra/ai-sdk'
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { mastra } from '../../mastra'
 import { messageRepo } from '../../db/repositories/message.repo'
 import { sessionRepo } from '../../db/repositories/session.repo'
@@ -29,6 +29,28 @@ chatRoutes.post('/', async (c) => {
   requestContext.set('sessionId', sessionId)
 
   persistUserMessage(sessionId, body.messages)
+
+  // Deep mode (P6a): run the deterministic deep-research workflow instead of the
+  // single agent. The workflow gathers web sources, then a writer agent synthesizes
+  // a cited report — streamed to the same useChat UI as an AI SDK message stream.
+  if (mode === 'deep') {
+    const query = lastUserText(body.messages)
+    if (query) {
+      const run = await mastra.getWorkflow('deep-research').createRun()
+      const workflowStream = await run.stream({ inputData: { query }, requestContext })
+      const uiStream = createUIMessageStream({
+        execute: async ({ writer }) => {
+          let text = ''
+          for await (const part of toAISdkStream(workflowStream as any, { from: 'workflow' }) as any) {
+            if (part?.type === 'text-delta' && typeof part.delta === 'string') text += part.delta
+            await writer.write(part)
+          }
+          persistAssistantMessage(sessionId, model, { text })
+        },
+      })
+      return createUIMessageStreamResponse({ stream: uiStream })
+    }
+  }
 
   const stream = await handleChatStream({
     mastra,

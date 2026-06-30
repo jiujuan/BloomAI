@@ -536,3 +536,19 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 **验证：** `tsc` 全绿；`vitest` **75 passed / 0 failed**；`vite build` 全绿（1938 模块）；Hono 运行时 smoke：health ok + chat 流 `P5 ok.`→`[DONE]`。
 
 至此：3 套事件模型 / 2 次映射 / 2 层意图路由 / 自研 SSE 契约 / Express **全部移除**；后端仅 Hono+Mastra，前端仅 useChat+parts。
+
+---
+
+## 20. P6a 完成：最小可用 deep-research workflow（已实测 ✅）
+
+第一个真正的 Mastra workflow,挂到 chat 的 **deep 模式**:
+- `mastra/workflows/deep-research.ts`:确定性两步 pipeline ——`gatherSources`(createStep,跑 `web_search`,limit 6)→ `.map()` 拼 prompt → `createStep(researchWriterAgent)`(流式写带引用的报告)。`.commit()`。
+- `mastra/agents/research-writer-agent.ts`:无工具的写作 agent,model 从 RequestContext 解析(与 chat 同模型)。
+- `mastra/index.ts`:`new Mastra({ agents:{chat, research-writer}, workflows:{'deep-research'} })`。
+- `http/routes/chat.ts`:`mode==='deep'` 分支 → `run.stream({inputData:{query}, requestContext})` → `toAISdkStream({from:'workflow'})` → `createUIMessageStream` → 流到 useChat;execute 内累计文本并 `persistAssistantMessage` 落库。chat/plan 模式仍走 `handleChatStream`,不受影响。
+
+**控制权**:流程写死在 workflow(代码),不是模型临场决定——这正是 workflow 相对 supervisor 的特点(可预测/可调试)。
+
+**实测(curl,mode=deep)**:流事件含 `data-workflow`/`data-workflow-step`(步骤进度)+ **558 个 text-delta**(报告增量流式)+ `finish`;`GET /messages` 显示 user + assistant(报告)均已落库。`tsc`/`vitest`(75)/`vite build` 全绿。
+
+> 前端 `data-workflow*` 自定义 part 暂被忽略(只渲染最终报告文本);把步骤进度做成可视化时间线属于 **P6b**。
