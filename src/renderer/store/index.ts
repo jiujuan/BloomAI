@@ -3,11 +3,6 @@ import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
 import type { LlmModelSummary } from '@renderer/api'
 import type { Message, Persona, Session } from '@shared/schemas'
-import {
-  deriveStreamingText,
-  reduceStreamingResponse,
-  type StreamingResponseState,
-} from './chat-response-reducer'
 
 // Session Store
 
@@ -80,25 +75,20 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 )
 
 // Chat Store
+// Message streaming moved to useChat (AI SDK UI) in ChatPanelMastra. This store now
+// only caches persisted message history for sidebar prefetch.
 
 interface ChatState {
   messagesBySession: Record<string, Message[]>
-  isStreaming: boolean
-  tokenUsage: Record<string, { input: number; output: number }>
-  streamingResponsesBySession: Record<string, StreamingResponseState | null>
 }
 interface ChatActions {
   loadMessages: (sessionId: string) => Promise<void>
-  sendMessage: (sessionId: string, content: string, contextOverride?: object) => Promise<void>
   clearMessages: (sessionId: string) => void
 }
 
 export const useChatStore = create<ChatState & ChatActions>()(
   devtools((set, get) => ({
     messagesBySession: {},
-    isStreaming: false,
-    tokenUsage: {},
-    streamingResponsesBySession: {},
 
     loadMessages: async (sessionId: string) => {
       if (get().messagesBySession[sessionId]) return
@@ -110,130 +100,15 @@ export const useChatStore = create<ChatState & ChatActions>()(
       }
     },
 
-    sendMessage: async (sessionId: string, content: string, contextOverride?: object) => {
-      if (get().isStreaming) return
-      set(s => ({
-        streamingResponsesBySession: { ...s.streamingResponsesBySession, [sessionId]: null },
-      }))
-      const userMsg: Message = {
-        id: `tmp-${Date.now()}`,
-        session_id: sessionId,
-        role: 'user',
-        content,
-        created_at: Date.now(),
-      }
-      set(s => ({
-        messagesBySession: {
-          ...s.messagesBySession,
-          [sessionId]: [...(s.messagesBySession[sessionId] || []), userMsg],
-        },
-        isStreaming: true,
-      }))
-
-      useSessionStore.setState(s => ({
-        sessions: s.sessions.map(sess =>
-          sess.id === sessionId ? { ...sess, updated_at: Date.now() } : sess
-        ).sort((a, b) => b.updated_at - a.updated_at)
-      }))
-
-      try {
-        for await (const event of platform.chatStream({ sessionId, content, contextOverride })) {
-          set((state) => {
-            const current = state.streamingResponsesBySession[sessionId] ?? null
-            const next = reduceStreamingResponse(current, event, sessionId)
-            const nextUsage = event.type === 'usage_updated' || event.type === 'response_completed'
-              ? mergeTokenUsage(state.tokenUsage, sessionId, next?.usage)
-              : state.tokenUsage
-            return {
-              streamingResponsesBySession: {
-                ...state.streamingResponsesBySession,
-                [sessionId]: next,
-              },
-              tokenUsage: nextUsage,
-            }
-          })
-        }
-
-        const finalResponse = get().streamingResponsesBySession[sessionId] ?? null
-        const responseFailed = Boolean(finalResponse?.error)
-        const assistantText = deriveStreamingText(finalResponse)
-        if (!responseFailed && assistantText) {
-          const assistantMsg: Message = {
-            id: `tmp-ai-${Date.now()}`,
-            session_id: sessionId,
-            role: 'assistant',
-            content: assistantText,
-            created_at: Date.now(),
-          }
-          set(s => ({
-            messagesBySession: {
-              ...s.messagesBySession,
-              [sessionId]: [...(s.messagesBySession[sessionId] || []), assistantMsg],
-            },
-          }))
-        }
-
-        set(s => ({
-          isStreaming: false,
-          streamingResponsesBySession: {
-            ...s.streamingResponsesBySession,
-            [sessionId]: responseFailed ? finalResponse : null,
-          },
-        }))
-        if (responseFailed) return
-
-        // Persisted messages replace temporary rows only after the v1 response stream completes successfully.
-        const messages = await platform.getMessages(sessionId)
-        set(s => ({ messagesBySession: { ...s.messagesBySession, [sessionId]: messages } }))
-        const sessions = await platform.getSessions()
-        useSessionStore.setState({ sessions })
-      } catch (err: any) {
-        const message = err instanceof Error ? err.message : 'Stream failed'
-        const current = get().streamingResponsesBySession[sessionId] ?? null
-        const failedResponse = current && !current.isComplete
-          ? reduceStreamingResponse(current, {
-              type: 'response_failed',
-              responseId: current.responseId,
-              error: { code: 'UNKNOWN_ERROR', message },
-              completedAt: Date.now(),
-            }, sessionId)
-          : current
-        set(s => ({
-          isStreaming: false,
-          streamingResponsesBySession: {
-            ...s.streamingResponsesBySession,
-            [sessionId]: failedResponse,
-          },
-        }))
-      }
-    },
-
     clearMessages: (sessionId: string) => {
       set(s => {
         const next = { ...s.messagesBySession }
         delete next[sessionId]
-        const nextStreamingResponses = { ...s.streamingResponsesBySession }
-        delete nextStreamingResponses[sessionId]
-        return { messagesBySession: next, streamingResponsesBySession: nextStreamingResponses }
+        return { messagesBySession: next }
       })
     },
   }), { name: 'bloomai-chat' })
 )
-
-function mergeTokenUsage(
-  current: Record<string, { input: number; output: number }>,
-  sessionId: string,
-  usage: StreamingResponseState['usage'],
-): Record<string, { input: number; output: number }> {
-  if (!usage) return current
-  return {
-    ...current,
-    [sessionId]: {
-      input: usage.inputTokens ?? 0,
-      output: usage.outputTokens ?? 0,
-    },
-  }
-}
 // Persona Store
 
 interface PersonaState {

@@ -520,3 +520,19 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 - `ChatPanelMastra.tsx`：新增 `ModelMenu` 下拉（读 `useLlmStore.textModels`，复用既有 model-dropdown 样式），选择即 `setModelOverride` 并持久化到 session；切会话重置 override。模型经 `x-bloom-model` 透传。
 
 **验证：** `tsc`/`vite build` 全绿；deep 模式实测正常出答案。
+
+---
+
+## 19. P5 完成：删除旧链路（Express + v1 契约 + 旧渲染层，已验证 ✅）
+
+**P5a — Express 全量退场（commit e256562）：** 见 §18 上文同义；迁移 LLM 集成测试到 Hono，删除 app.ts/旧 routers/middleware/死的 llm response-event-mapper，移除 express/cors 依赖。
+
+**P5b — 渲染层 + bloom-response-v1 契约：**
+- 删除旧渲染：`ChatPanel`、`Timeline`、`ToolCallCard`、旧 `ToolCallGroupCard`、`MessageBubble`、`InputBar`、`ContextPills`（+各自 test）、`store/chat-response-reducer`(+test)。
+- `store/index.ts`：`useChatStore` 瘦身——只留 `loadMessages/clearMessages`（侧栏预取用），删掉 streaming/sendMessage/reducer/tokenUsage。
+- `api/index.ts`：删掉 `chatStream` 生成器 + 全部 SSE 解析 helper + v1 类型导入（保留 CRUD 与 applyTheme）。删除 `store/index.test`、`api/index.test`（全为已删功能）。
+- shared 契约：删除 `event-registry`、`timeline-state-registry`、`registry.test`、`schemas/response`(+test)、`schemas/message-trace`(+test)；`schemas/index` 去掉相关 re-export。**保留** `error-timeline-registry`（logger 在用），将 `ResponseError` 内联其中以自包含；`logger.ts` 改从契约导入 `ResponseError`。
+
+**验证：** `tsc` 全绿；`vitest` **75 passed / 0 failed**；`vite build` 全绿（1938 模块）；Hono 运行时 smoke：health ok + chat 流 `P5 ok.`→`[DONE]`。
+
+至此：3 套事件模型 / 2 次映射 / 2 层意图路由 / 自研 SSE 契约 / Express **全部移除**；后端仅 Hono+Mastra，前端仅 useChat+parts。
