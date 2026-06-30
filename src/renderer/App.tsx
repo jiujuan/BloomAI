@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { SessionList } from '@renderer/pages/Chat/SessionList'
-import { ChatPanel } from '@renderer/pages/Chat/ChatPanel'
+import { ChatPanel } from '@renderer/pages/Chat'
 import { NavSidebar } from '@renderer/components/layout/NavSidebar'
 import { SettingsPage } from '@renderer/pages/Settings'
 import { PersonasPage } from '@renderer/pages/Personas'

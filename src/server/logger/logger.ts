@@ -1,8 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resolveErrorTimeline } from '@shared/llm-response-contract/error-timeline-registry'
-import type { ResponseError } from '@shared/schemas/response'
+import { resolveErrorTimeline, type ResponseError } from '@shared/llm-response-contract/error-timeline-registry'
 import { readConfigValue } from '../config/config'
 
 export type LogEntry = {

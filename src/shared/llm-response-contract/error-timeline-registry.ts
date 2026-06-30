@@ -1,4 +1,12 @@
-import type { ResponseError } from '../schemas/response'
+// Self-contained error-code → timeline presentation map. This is the only part of
+// the former bloom-response-v1 contract still in use (by the server logger and,
+// optionally, the chat UI). ResponseError is defined here to avoid depending on the
+// removed response stream schema.
+export type ResponseError = {
+  code: string
+  message: string
+  details?: unknown
+}
 
 export type KnownResponseErrorCode =
   | 'VALIDATION_ERROR'
