@@ -224,7 +224,7 @@ export function ChatPanelMastra() {
           <div className="msg-group">
             <div className="msg-avatar">AI</div>
             <div className="msg-col">
-              <div className="msg-bubble streaming">
+              <div className="msg-bubble streaming waiting">
                 <WaitingIndicator />
               </div>
             </div>
@@ -408,7 +408,7 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
     <div className="msg-group">
       <div className="msg-avatar">AI</div>
       <div className="msg-col">
-        <div className={cn('msg-bubble', streaming && 'streaming')}>
+        <div className={cn('msg-bubble', streaming && 'streaming', showWaiting && 'waiting')}>
           {showWaiting ? <WaitingIndicator /> : renderAssistantParts(parts, { decidedApprovals, onDecide })}
         </div>
       </div>

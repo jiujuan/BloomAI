@@ -324,7 +324,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 /* ── Timeline ─────────────────────────────────────────────── */
 .timeline {
-  flex: 1; overflow-y: auto; padding: 16px 14px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 16px 14px;
   display: flex; flex-direction: column; gap: 0;
   scroll-behavior: smooth;
 }
@@ -373,8 +373,11 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   border: 0.5px solid var(--border-tertiary);
 }
 .msg-avatar.user { background: #EEEDFE; color: #534AB7; border-color: #AFA9EC; }
-.msg-col { display: flex; flex-direction: column; gap: 3px; max-width: 82%; min-width: 0; }
-.msg-group.user .msg-col { align-items: flex-end; }
+.msg-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* Assistant: fixed at 70% of the panel width (bubble stretches to fill the column). */
+.msg-group:not(.user) .msg-col { width: 70%; }
+/* User: width follows the question length, capped at 50% of the panel width. */
+.msg-group.user .msg-col { align-items: flex-end; max-width: 50%; }
 .msg-bubble {
   padding: 9px 12px; border-radius: 10px;
   font-size: 13px; line-height: 1.6; word-break: break-word;
@@ -382,6 +385,8 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   color: var(--text-primary); border-radius: 3px 10px 10px 10px;
 }
 .msg-bubble.user { background: var(--bg-info); color: var(--text-info); border-color: var(--border-info); border-radius: 10px 3px 10px 10px; }
+/* Waiting indicator bubble: shrink to the spinner, don't stretch to the 70% column. */
+.msg-bubble.waiting { align-self: flex-start; width: auto; }
 .msg-waiting {
   display: flex; align-items: center; justify-content: center;
   width: 20px; height: 20px;
