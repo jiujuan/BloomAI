@@ -552,3 +552,14 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 **实测(curl,mode=deep)**:流事件含 `data-workflow`/`data-workflow-step`(步骤进度)+ **558 个 text-delta**(报告增量流式)+ `finish`;`GET /messages` 显示 user + assistant(报告)均已落库。`tsc`/`vitest`(75)/`vite build` 全绿。
 
 > 前端 `data-workflow*` 自定义 part 暂被忽略(只渲染最终报告文本);把步骤进度做成可视化时间线属于 **P6b**。
+
+---
+
+## 21. P6b 完成：workflow 步骤可视化（编译/打包验证 ✅）
+
+把 deep-research 的 `data-workflow` 自定义 part 渲染成步骤时间线卡:
+- `parts/WorkflowSteps.tsx`:消费 `data-workflow` part 的 `data.steps`(`{stepId:{name,status,input,output}}`),渲染卡片——工作流名(深度研究)+ 整体状态 + 步骤列表(检索资料/撰写报告 + running/✓/✗ 图标);`gather-sources` 成功时显示"N 来源"(从 output.sources 统计)。过滤 Mastra 内部 mapping 步骤。
+- `ChatPanelMastra` renderAssistantParts 增加 `data-workflow` 分支;AI SDK 按 run id 归并该 part,故只渲染一张随进度更新的卡。
+- `global.css` 追加 workflow-card/step 样式。
+
+**数据形状**来自实测抓包:`{type:'data-workflow', id:<runId>, data:{name,status,steps:{...},output}}`。`tsc`/`vite build` 全绿;后端测试 75 仍通过(纯前端改动)。可视化点击验证需 `npm run dev`。

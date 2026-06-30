@@ -9,6 +9,7 @@ import { cn } from '@renderer/utils'
 import { AssistantMarkdown } from './parts/AssistantMarkdown'
 import { ReasoningPart } from './parts/ReasoningPart'
 import { ToolGroupCard } from './parts/ToolGroupCard'
+import { WorkflowSteps } from './parts/WorkflowSteps'
 import { isToolPart, toToolCallView, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -285,6 +286,8 @@ function renderAssistantParts(parts: any[]): React.ReactNode[] {
       items.push(<ReasoningPart key={`r-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
     } else if (part.type === 'text') {
       items.push(<AssistantMarkdown key={`t-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
+    } else if (part.type === 'data-workflow' && part.data) {
+      items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
     }
     i++
   }

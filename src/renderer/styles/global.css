@@ -1107,3 +1107,22 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .tcg-call-link { font-size: 11px; color: var(--text-link, #2563eb); text-decoration: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tcg-call-link:hover { text-decoration: underline; }
 .tcg-call-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+
+/* ── P6b: deep-research workflow step timeline ── */
+.workflow-card { margin: 6px 0; border: 1px solid var(--border-secondary); border-radius: var(--radius-md); background: var(--bg-secondary); overflow: hidden; }
+.workflow-card.success { border-color: var(--border-success, var(--border-secondary)); }
+.workflow-card.error { border-color: var(--border-danger); }
+.workflow-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid var(--border-secondary); }
+.workflow-name { font-weight: 600; color: var(--text-primary); }
+.workflow-status { margin-left: auto; display: inline-flex; }
+.workflow-status.success { color: var(--text-success); }
+.workflow-status.error { color: var(--text-danger); }
+.workflow-steps { list-style: none; margin: 0; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; }
+.workflow-step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.workflow-step.success { color: var(--text-primary); }
+.workflow-step-icon { display: inline-flex; width: 14px; justify-content: center; }
+.workflow-step-icon.success { color: var(--text-success); }
+.workflow-step-icon.error { color: var(--text-danger); }
+.workflow-step-icon.running { color: var(--text-info, var(--text-secondary)); }
+.workflow-step-label { flex: 0 0 auto; }
+.workflow-step-meta { color: var(--text-tertiary); font-size: 11px; }
