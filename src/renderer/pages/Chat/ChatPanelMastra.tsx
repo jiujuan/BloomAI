@@ -10,6 +10,7 @@ import { AssistantMarkdown } from './parts/AssistantMarkdown'
 import { ReasoningPart } from './parts/ReasoningPart'
 import { ToolGroupCard } from './parts/ToolGroupCard'
 import { WorkflowSteps } from './parts/WorkflowSteps'
+import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
 import { isToolPart, toToolCallView, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -76,12 +77,19 @@ export function ChatPanelMastra() {
     [activeSessionId],
   )
 
-  const { messages, sendMessage, setMessages, status, stop, error } = useChat({
+  const { messages, sendMessage, setMessages, status, stop, error, addToolApprovalResponse } = useChat({
     id: activeSessionId || undefined,
     transport,
   })
   const isStreaming = status === 'submitted' || status === 'streaming'
   const waitingForAssistant = isStreaming && messages[messages.length - 1]?.role === 'user'
+
+  // Tracks decided approvals (id -> approved) so the card shows the outcome after a click.
+  const [decidedApprovals, setDecidedApprovals] = useState<Record<string, boolean>>({})
+  const handleDecide = (approvalId: string, approved: boolean) => {
+    setDecidedApprovals((prev) => ({ ...prev, [approvalId]: approved }))
+    addToolApprovalResponse({ id: approvalId, approved })
+  }
 
   // Load persisted history when the active session changes (assistant text is restored;
   // historical tool cards are not reconstructed). New turns are saved server-side in onFinish.
@@ -148,7 +156,13 @@ export function ChatPanelMastra() {
         )}
 
         {messages.map((m) => (
-          <MessageView key={m.id} role={m.role} parts={(m as any).parts || []} />
+          <MessageView
+            key={m.id}
+            role={m.role}
+            parts={(m as any).parts || []}
+            decidedApprovals={decidedApprovals}
+            onDecide={handleDecide}
+          />
         ))}
 
         {waitingForAssistant && (
@@ -264,7 +278,12 @@ function ModelMenu({ model, models, onSelect }: { model: string; models: { id: s
   )
 }
 
-function MessageView({ role, parts }: { role: string; parts: any[] }) {
+type ApprovalProps = {
+  decidedApprovals: Record<string, boolean>
+  onDecide: (approvalId: string, approved: boolean) => void
+}
+
+function MessageView({ role, parts, decidedApprovals, onDecide }: { role: string; parts: any[] } & ApprovalProps) {
   if (role === 'user') {
     const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
     return (
@@ -281,14 +300,14 @@ function MessageView({ role, parts }: { role: string; parts: any[] }) {
     <div className="msg-group">
       <div className="msg-avatar">AI</div>
       <div className="msg-col">
-        <div className="msg-bubble">{renderAssistantParts(parts)}</div>
+        <div className="msg-bubble">{renderAssistantParts(parts, { decidedApprovals, onDecide })}</div>
       </div>
     </div>
   )
 }
 
 // Render assistant parts in order, collapsing consecutive same-tool calls into one group card.
-function renderAssistantParts(parts: any[]): React.ReactNode[] {
+function renderAssistantParts(parts: any[], approval: ApprovalProps): React.ReactNode[] {
   const items: React.ReactNode[] = []
   let i = 0
   while (i < parts.length) {
@@ -313,6 +332,18 @@ function renderAssistantParts(parts: any[]): React.ReactNode[] {
       items.push(<AssistantMarkdown key={`t-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
     } else if (part.type === 'data-workflow' && part.data) {
       items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
+    } else if (part.type === 'data-tool-call-approval') {
+      const req = toApprovalRequest(part)
+      if (req) {
+        items.push(
+          <ApprovalCard
+            key={`ap-${i}`}
+            request={req}
+            decided={approval.decidedApprovals[req.approvalId]}
+            onDecide={approval.onDecide}
+          />,
+        )
+      }
     }
     i++
   }

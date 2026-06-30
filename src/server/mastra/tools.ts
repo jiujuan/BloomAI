@@ -56,8 +56,8 @@ export function buildToolsForRole(role: string, sessionId?: string): Record<stri
   if (allow.length === 0) return {}
   const allowSet = new Set(allow)
   const options: BuildToolsOptions = { filter: (id) => allowSet.has(id) }
-  // P6d-2 activates interactive approval for the coding role's dangerous tools:
-  //   if (role === 'coding') options.approvalLevels = GATED_PERMISSION_LEVELS
+  // Coding agent: mutating/code-exec tools require interactive user approval (P6d-2).
+  if (role === 'coding') options.approvalLevels = GATED_PERMISSION_LEVELS
   return buildBuiltinTools(sessionId, options)
 }
 

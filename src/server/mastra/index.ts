@@ -1,4 +1,5 @@
 import { Mastra } from '@mastra/core/mastra'
+import { InMemoryStore } from '@mastra/core/storage'
 import { chatAgent } from './chat-agent'
 import { researchWriterAgent } from './agents/research-writer-agent'
 import { researchPlannerAgent } from './agents/research-planner-agent'
@@ -11,6 +12,10 @@ import { deepResearchWorkflow } from './workflows/deep-research'
  * server is required.
  */
 export const mastra = new Mastra({
+  // In-process snapshot store — required for tool approval (suspend/resume) across the
+  // two HTTP requests of an approval round-trip. Lives in the server process; not durable
+  // across restarts, which is fine for the short approval window.
+  storage: new InMemoryStore(),
   agents: {
     chat: chatAgent,
     'research-writer': researchWriterAgent,

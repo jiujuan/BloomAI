@@ -591,3 +591,19 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 **实测(curl)**:写作 tab→writer 出俳句(无工具);研究 tab→research 调 `web_search`;编码 tab→coder 列出 fs/doc/exec 工具集。`tsc`/`vitest`(75)/`vite build` 全绿。
 
 > P6d-1 中 coder 危险工具仍走 P1 软权限门;P6d-2 改为**交互式审批**(requireApproval + 快照存储 + UI 询问卡)。
+
+---
+
+## 24. P6d-2 完成：人在环工具审批（已端到端实测 ✅）
+
+CoderAgent 的危险工具(write/shell/sandbox 级)改为**交互式审批**:
+- `mastra/index.ts`:`new Mastra({ storage: new InMemoryStore() })` —— 审批 suspend/resume 需要快照存储(进程内,够用)。
+- `mastra/tools.ts`:coding 角色 `approvalLevels = {write,shell,sandbox}` → 这些工具 `requireApproval: true`(跳过软门,改走审批)。
+- 前端 `parts/ApprovalCard.tsx`:消费 `data-tool-call-approval` part(`runId/toolCallId/toolName/args`),显示「需要你确认」+ 工具名 + 参数(path/command…)+ **通过并执行 / 拒绝** 按钮 → `useChat.addToolApprovalResponse({ id: \`runId::toolCallId\`, approved })`。决定后显示「已通过，执行中…」或「已拒绝，未执行」。
+- `ChatPanelMastra` 渲染 `data-tool-call-approval` part,本地记录已决定的审批。
+
+**端到端实测(脚本，同一进程两次请求)**:
+1. coder 请求 `fs_write /tmp/...` → 流出 `data-tool-call-approval`(含 runId/args),**文件未创建**(未执行)。
+2. 带 `approval-responded`(approved:true)再请求 → `@mastra/ai-sdk` 的 `extractV6NativeApproval` 按 `runId::toolCallId` resume → 流出 `tool-output-available` → **文件已写入** `hello`。
+
+即:**询问前不执行;通过才执行;拒绝则不执行后续**(coder instructions 也要求被拒后不重试)。`tsc`/`vitest`(75)/`vite build` 全绿。前端按钮点击产生的 approval-responded 与实测的 wire 形状一致;真实点击需 `npm run dev` 走一遍。
