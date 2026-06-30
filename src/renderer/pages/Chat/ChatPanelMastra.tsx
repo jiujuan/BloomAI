@@ -1,10 +1,10 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Loader2, Send } from 'lucide-react'
+import { Loader2, Send, ChevronDown, Check } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
-import { useSessionStore, useSettingsStore } from '@renderer/store'
+import { useSessionStore, useSettingsStore, useLlmStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { AssistantMarkdown } from './parts/AssistantMarkdown'
 import { ReasoningPart } from './parts/ReasoningPart'
@@ -22,15 +22,31 @@ const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', d
 export function ChatPanelMastra() {
   const { sessions, activeSessionId } = useSessionStore()
   const { settings } = useSettingsStore()
+  const { textModels, loadTextModels } = useLlmStore()
   const session = sessions.find((s) => s.id === activeSessionId)
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [input, setInput] = useState('')
-  const model = session?.model || settings.model || DEFAULT_MODEL
+  const [modelOverride, setModelOverride] = useState<string | null>(null)
+  const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   modeRef.current = mode
   modelRef.current = model
+
+  useEffect(() => {
+    loadTextModels()
+  }, [loadTextModels])
+
+  // Reset per-session model override when switching sessions.
+  useEffect(() => {
+    setModelOverride(null)
+  }, [activeSessionId])
+
+  const handleModelChange = (next: string) => {
+    setModelOverride(next)
+    if (activeSessionId) void platform.updateSession(activeSessionId, { model: next }).catch(() => {})
+  }
 
   const transport = useMemo(
     () =>
@@ -95,7 +111,7 @@ export function ChatPanelMastra() {
     <div className="chat-panel">
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
-        <span className="model-pill"><span className="model-dot green" />{model}</span>
+        <ModelMenu model={model} models={textModels} onSelect={handleModelChange} />
         <div className="mode-switch" role="tablist" aria-label="Chat mode">
           {(['chat', 'plan', 'deep'] as ChatMode[]).map((m) => (
             <button
@@ -175,6 +191,49 @@ export function ChatPanelMastra() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ModelMenu({ model, models, onSelect }: { model: string; models: { id: string; label: string; providerId: string }[]; onSelect: (m: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const label = models.find((m) => m.id === model)?.label || model
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+  return (
+    <div className="model-dropdown-wrap" ref={ref}>
+      <button className="model-pill" onClick={() => setOpen(!open)} aria-haspopup="listbox">
+        <span className="model-dot green" />
+        <span>{label}</span>
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="model-dropdown" role="listbox" aria-label="Select model">
+          {models.length === 0 && <div className="model-dropdown-header">No models</div>}
+          {models.map((m) => (
+            <button
+              key={m.id}
+              role="option"
+              aria-selected={model === m.id}
+              className={cn('model-option', model === m.id && 'selected')}
+              onClick={() => { onSelect(m.id); setOpen(false) }}
+            >
+              <span className="model-dot green" />
+              <div className="model-option-info">
+                <span className="model-option-name">{m.label}</span>
+                <span className="model-option-sub">{m.providerId}</span>
+              </div>
+              {model === m.id && <Check size={12} className="model-check" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

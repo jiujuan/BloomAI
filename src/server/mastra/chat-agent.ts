@@ -27,8 +27,18 @@ PLAN MODE: Before doing the work, first lay out a short numbered plan of the ste
 Then execute the plan, calling tools as needed, and finish with the result.
 `.trim()
 
+const DEEP_INSTRUCTIONS = `
+${BASE_INSTRUCTIONS}
+
+DEEP THINKING MODE: Reason carefully and thoroughly before answering.
+Work through the problem step by step, consider edge cases and alternatives, verify your logic,
+and gather evidence with tools when it strengthens the answer. Prefer correctness and depth over speed.
+`.trim()
+
 function instructionsFor(mode: ChatRequestContext['mode'] | undefined): string {
-  return mode === 'plan' ? PLAN_INSTRUCTIONS : BASE_INSTRUCTIONS
+  if (mode === 'plan') return PLAN_INSTRUCTIONS
+  if (mode === 'deep') return DEEP_INSTRUCTIONS
+  return BASE_INSTRUCTIONS
 }
 
 export const chatAgent = new Agent({

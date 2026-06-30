@@ -510,3 +510,13 @@ const { messages, sendMessage, status, stop, error } = useChat({
 - 前端 `ChatPanelMastra`：`useChat({ id: activeSessionId })` 让每会话独立；切换会话时 `platform.getMessages` → `setMessages` 还原历史（assistant 文本恢复；历史工具卡不重建）。
 
 **实测（curl 全链路）：** 建会话 → POST /chat（Agnes）消费完流 → `GET /sessions/:id/messages` 返回 **user + assistant** 两行，assistant `content="persisted ok."`、`tokens=1797`、`tool_calls` trace 已写、会话标题已设。`tsc`/`vitest`(160)/`vite build` 全绿。
+
+---
+
+## 18. P3 完成：模式与模型（已验证 ✅）
+
+mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/model）。本阶段补齐：
+- `chat-agent.ts`：三档模式都有独立 instructions——`chat`（默认）、`plan`（先列编号计划再执行）、`deep`（深度思考：逐步推理、考虑边界与替代、必要时取证，重正确性与深度）。`sendReasoning:true` 已开，若选用 reasoning 模型则前端 ReasoningPart 自动展示思考。
+- `ChatPanelMastra.tsx`：新增 `ModelMenu` 下拉（读 `useLlmStore.textModels`，复用既有 model-dropdown 样式），选择即 `setModelOverride` 并持久化到 session；切会话重置 override。模型经 `x-bloom-model` 透传。
+
+**验证：** `tsc`/`vite build` 全绿；deep 模式实测正常出答案。
