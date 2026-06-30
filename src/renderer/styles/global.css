@@ -1086,3 +1086,24 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .tcg-call-summary { color: var(--text-secondary); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .tcg-call-error { color: var(--text-danger); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .tcg-call-time { color: var(--text-tertiary); font-size: 10px; font-family: var(--font-mono); white-space: nowrap; }
+
+/* ── P2: Mastra/AI-SDK chat — mode switch, reasoning, tool permission/links ── */
+.mode-switch { display: inline-flex; gap: 2px; margin-left: 8px; padding: 2px; background: var(--bg-tertiary); border-radius: var(--radius-md); }
+.mode-tab { padding: 3px 10px; font-size: 11px; color: var(--text-secondary); background: transparent; border: none; border-radius: var(--radius-sm, 6px); cursor: pointer; transition: all .12s; }
+.mode-tab:hover { color: var(--text-primary); }
+.mode-tab.active { color: var(--text-primary); background: var(--bg-primary); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08)); }
+
+.reasoning-block { margin: 6px 0; border: 1px solid var(--border-secondary); border-left: 2px solid var(--border-info, var(--border-secondary)); border-radius: var(--radius-md); background: var(--bg-secondary); overflow: hidden; }
+.reasoning-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 10px; font-size: 11px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer; }
+.reasoning-head .reasoning-chevron { margin-left: auto; transition: transform .15s; }
+.reasoning-head .reasoning-chevron.open { transform: rotate(180deg); }
+.reasoning-text { padding: 0 10px 8px 10px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; }
+.reasoning-block.streaming { border-left-color: var(--text-info, var(--text-secondary)); }
+
+.tool-call-group-card.permission { border-color: var(--border-warning, var(--border-danger)); }
+.tcg-status.permission { color: var(--text-warning, var(--text-danger)); }
+.tcg-call-permission { display: inline-flex; align-items: center; gap: 4px; color: var(--text-warning, var(--text-danger)); font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcg-call-links { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; }
+.tcg-call-link { font-size: 11px; color: var(--text-link, #2563eb); text-decoration: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcg-call-link:hover { text-decoration: underline; }
+.tcg-call-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

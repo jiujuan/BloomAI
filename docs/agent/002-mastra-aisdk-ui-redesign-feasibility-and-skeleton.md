@@ -485,3 +485,17 @@ const { messages, sendMessage, status, stop, error } = useChat({
 - 实测：23 个工具挂载（含 `skill_web-search-skill`）；agent 自主调用 `web_search` → `tool-output-available` → 带链接答案。
 
 **安全门控（已实现）：** 暴露所有启用工具，但 `buildBuiltinTools` 用 `tools.requires_permission` 门控：`write/shell/sandbox` 级（`fs_write/fs_edit/bash/shell/node_runner/python_runner`）需 `tool_permissions.granted=1` 才执行，否则返回**软错误**让 agent 转告用户去授权；`network/fs`（读类）直接放行。手动 `/run`（用户主动）不受影响。实测：`shell` 未授权→权限软错误；`fs_read`/`web_search`→正常执行。
+
+---
+
+## 16. P2 完成：富 UX 重建到 AI SDK parts（编译/打包验证 ✅）
+
+把工具卡/降级提示/错误/思考重新绑定到 `message.parts`，复用既有 `msg-*`/`tcg-*` 设计语言：
+- `parts/tool-part.ts`：归一化 AI SDK v6 工具 part（`tool-<name>` 与 `dynamic-tool`）→ `ToolCallView`；状态判定 running/success/error/**permission**；`summarizeInput/Output`（web_search 显示 provider、`fallbackFrom → provider`、结果数）、`extractResultLinks`（Top 链接）。
+- `parts/ToolGroupCard.tsx`：把**相邻同名工具调用**合并为一张分组卡（tcg-* 样式），每行显示输入、运行中/结果摘要、权限软错误（黄）、错误（红）、结果链接；组头聚合状态 running>error>permission>success。
+- `parts/ReasoningPart.tsx`：可折叠“思考”块（深思模式 reasoning part）。
+- `parts/AssistantMarkdown.tsx`：复用旧 markdown 渲染（code-block/链接等）。
+- `ChatPanelMastra.tsx` 重写为 `msg-group/msg-bubble` 结构 + `input-area/input-row/input-box` 输入区；按顺序渲染 parts（连续同名工具合并）、等待态 spinner、顶层错误卡、模式条（对话/计划/深思）。
+- `global.css` 追加：mode-switch/mode-tab、reasoning-block、tcg permission/links 样式（用既有设计变量 + 安全回退）。
+
+**验证：** `tsc` 全绿；`vite build` 全绿（1940 模块）。后端流此前已 curl 实测（text/reasoning/tool parts）。可视化点击验证需 `npm run dev` 跑 Electron。
