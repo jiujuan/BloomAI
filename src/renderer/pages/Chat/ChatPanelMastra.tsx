@@ -43,6 +43,29 @@ function restoreParts(m: { content?: string; parts?: string | null }): any[] {
   return [{ type: 'text', text: m.content || '' }]
 }
 
+// True if the assistant parts contain anything worth showing. The AI SDK appends an empty
+// assistant message the instant the stream opens (often with only a `step-start` part), so we
+// can't rely on role alone to decide whether the model has actually started answering.
+function hasRenderableContent(parts: any[]): boolean {
+  return parts.some((p) => {
+    if (!p) return false
+    if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
+    if (p.type === 'data-workflow') return !!p.data
+    if (p.type === 'data-tool-call-approval') return true
+    return isToolPart(p)
+  })
+}
+
+// Animated "thinking" indicator shown while waiting for the assistant's first content.
+function WaitingIndicator() {
+  return (
+    <div className="msg-waiting" role="status" aria-live="polite">
+      <Loader2 size={15} className="msg-waiting-spinner" aria-hidden="true" />
+      <span className="sr-only">正在思考</span>
+    </div>
+  )
+}
+
 /**
  * Chat panel on Mastra + AI SDK UI. Renders message.parts (text / reasoning / tool-*)
  * with rich tool cards; no bloom-response-v1 contract. mode/model travel as headers.
@@ -186,11 +209,12 @@ export function ChatPanelMastra() {
           </div>
         )}
 
-        {messages.map((m) => (
+        {messages.map((m, idx) => (
           <MessageView
             key={m.id}
             role={m.role}
             parts={(m as any).parts || []}
+            streaming={isStreaming && idx === messages.length - 1}
             decidedApprovals={decidedApprovals}
             onDecide={handleDecide}
           />
@@ -201,10 +225,7 @@ export function ChatPanelMastra() {
             <div className="msg-avatar">AI</div>
             <div className="msg-col">
               <div className="msg-bubble streaming">
-                <div className="msg-waiting" role="status" aria-live="polite">
-                  <Loader2 size={15} className="msg-waiting-spinner" aria-hidden="true" />
-                  <span className="sr-only">正在思考</span>
-                </div>
+                <WaitingIndicator />
               </div>
             </div>
           </div>
@@ -367,7 +388,7 @@ type ApprovalProps = {
   onDecide: (approvalId: string, approved: boolean) => void
 }
 
-function MessageView({ role, parts, decidedApprovals, onDecide }: { role: string; parts: any[] } & ApprovalProps) {
+function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { role: string; parts: any[]; streaming?: boolean } & ApprovalProps) {
   if (role === 'user') {
     const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
     return (
@@ -380,11 +401,16 @@ function MessageView({ role, parts, decidedApprovals, onDecide }: { role: string
     )
   }
 
+  // While streaming, the assistant message can exist before any real content arrives — show the
+  // animated indicator inside its bubble instead of an empty bubble until the first part lands.
+  const showWaiting = streaming && !hasRenderableContent(parts)
   return (
     <div className="msg-group">
       <div className="msg-avatar">AI</div>
       <div className="msg-col">
-        <div className="msg-bubble">{renderAssistantParts(parts, { decidedApprovals, onDecide })}</div>
+        <div className={cn('msg-bubble', streaming && 'streaming')}>
+          {showWaiting ? <WaitingIndicator /> : renderAssistantParts(parts, { decidedApprovals, onDecide })}
+        </div>
       </div>
     </div>
   )
