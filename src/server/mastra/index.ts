@@ -1,6 +1,7 @@
 import { Mastra } from '@mastra/core/mastra'
 import { chatAgent } from './chat-agent'
 import { researchWriterAgent } from './agents/research-writer-agent'
+import { researchPlannerAgent } from './agents/research-planner-agent'
 import { deepResearchWorkflow } from './workflows/deep-research'
 
 /**
@@ -12,6 +13,7 @@ export const mastra = new Mastra({
   agents: {
     chat: chatAgent,
     'research-writer': researchWriterAgent,
+    'research-planner': researchPlannerAgent,
   },
   workflows: {
     'deep-research': deepResearchWorkflow,

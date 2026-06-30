@@ -563,3 +563,18 @@ mode/model 链路在 P0b 已通（header→RequestContext→动态 instructions/
 - `global.css` 追加 workflow-card/step 样式。
 
 **数据形状**来自实测抓包:`{type:'data-workflow', id:<runId>, data:{name,status,steps:{...},output}}`。`tsc`/`vite build` 全绿;后端测试 75 仍通过(纯前端改动)。可视化点击验证需 `npm run dev`。
+
+---
+
+## 22. P6c 完成：更丰富的 deep-research（已实测 ✅）
+
+把 deep-research 从 2 步扩到 **4 步确定性流水线**:
+- `agents/research-planner-agent.ts`:planner agent(无工具,模型随 RequestContext),把问题拆成 2-3 个 JSON 子问题。
+- `workflows/deep-research.ts`:
+  1. `plan-questions`:planner.generate → 解析 JSON 子问题(失败回退原问题)。
+  2. `search-web`:对每个子问题 **并行 `web_search`**(Promise.all)→ 按 URL 去重 → 取前 8。
+  3. `fetch-content`:对前 3 条 **`web_fetch` 抓正文**(并行,各截断 800 字),拼进 sources。
+  4. `.map()` → prompt → `research-writer` 流式综合成带引用报告。
+- 视化 `WorkflowSteps.tsx`:新步骤标签(拆解子问题/并行检索/抓取正文/撰写报告)+ meta(plan 显示"N 个子问题"、fetch 显示"N 来源")。
+
+**实测(curl,mode=deep)**:4 步全部 running→success;planner 拆出 3 个子问题;并行搜索+抓正文;633 个 text-delta 流式报告;落库成功。`tsc`/`vitest`(75)/`vite build` 全绿。
