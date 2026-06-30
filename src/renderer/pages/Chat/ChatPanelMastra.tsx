@@ -3,6 +3,7 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Loader2, Send } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
+import { platform } from '@renderer/api'
 import { useSessionStore, useSettingsStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { AssistantMarkdown } from './parts/AssistantMarkdown'
@@ -47,9 +48,36 @@ export function ChatPanelMastra() {
     [activeSessionId],
   )
 
-  const { messages, sendMessage, status, stop, error } = useChat({ transport })
+  const { messages, sendMessage, setMessages, status, stop, error } = useChat({
+    id: activeSessionId || undefined,
+    transport,
+  })
   const isStreaming = status === 'submitted' || status === 'streaming'
   const waitingForAssistant = isStreaming && messages[messages.length - 1]?.role === 'user'
+
+  // Load persisted history when the active session changes (assistant text is restored;
+  // historical tool cards are not reconstructed). New turns are saved server-side in onFinish.
+  useEffect(() => {
+    let cancelled = false
+    if (!activeSessionId) {
+      setMessages([])
+      return
+    }
+    platform
+      .getMessages(activeSessionId)
+      .then((rows: any[]) => {
+        if (cancelled) return
+        setMessages(
+          (rows || [])
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .map((m) => ({ id: m.id, role: m.role, parts: [{ type: 'text', text: m.content || '' }] })) as any,
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId, setMessages])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => {

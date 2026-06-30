@@ -499,3 +499,14 @@ const { messages, sendMessage, status, stop, error } = useChat({
 - `global.css` 追加：mode-switch/mode-tab、reasoning-block、tcg permission/links 样式（用既有设计变量 + 安全回退）。
 
 **验证：** `tsc` 全绿；`vite build` 全绿（1940 模块）。后端流此前已 curl 实测（text/reasoning/tool parts）。可视化点击验证需 `npm run dev` 跑 Electron。
+
+---
+
+## 17. P4 完成：落库与历史（SQLite repos，已实测 ✅）
+
+服务端落库（沿用既有 `message.repo`/`session.repo`，不引入 Mastra Memory）：
+- `http/routes/chat.ts`：流式前保存 **user** 消息（+ `sessionRepo.touch`，首条设标题）；`handleChatStream` 的 `params.onFinish` 里保存 **assistant** 消息（最终 `text` + `usage` tokens + 极简 trace `{runtime,model,toolCalls[]}`）。落库失败仅记日志（`PERSISTENCE_ERROR`），不影响已推送内容。
+- maxSteps 也经 `params` 传入（10）。
+- 前端 `ChatPanelMastra`：`useChat({ id: activeSessionId })` 让每会话独立；切换会话时 `platform.getMessages` → `setMessages` 还原历史（assistant 文本恢复；历史工具卡不重建）。
+
+**实测（curl 全链路）：** 建会话 → POST /chat（Agnes）消费完流 → `GET /sessions/:id/messages` 返回 **user + assistant** 两行，assistant `content="persisted ok."`、`tokens=1797`、`tool_calls` trace 已写、会话标题已设。`tsc`/`vitest`(160)/`vite build` 全绿。
