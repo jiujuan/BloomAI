@@ -16,8 +16,9 @@ const MAX_STEPS = 10
 export const chatRoutes = new Hono()
 
 // POST /api/v1/chat — AI SDK v6 UI message stream, consumed by the renderer's useChat().
-// Persistence (P4): the user message is saved before streaming; the assistant message is
-// saved in onFinish (final text + usage + tool trace) so history survives reloads.
+// Persistence (P4): the user message is saved before streaming. The assistant message is
+// persisted by the client from useChat's onFinish (POST /chat/assistant) so the full UI
+// parts — tool cards, reasoning, workflow steps — survive reloads, not just the final text.
 chatRoutes.post('/', async (c) => {
   const body = await readJson<any>(c)
   const mode = c.req.header('x-bloom-mode') || 'chat'
@@ -45,12 +46,9 @@ chatRoutes.post('/', async (c) => {
       const workflowStream = await run.stream({ inputData: { query }, requestContext })
       const uiStream = createUIMessageStream({
         execute: async ({ writer }) => {
-          let text = ''
           for await (const part of toAISdkStream(workflowStream as any, { from: 'workflow' }) as any) {
-            if (part?.type === 'text-delta' && typeof part.delta === 'string') text += part.delta
             await writer.write(part)
           }
-          persistAssistantMessage(sessionId, model, { text })
         },
       })
       return createUIMessageStreamResponse({ stream: uiStream })
@@ -67,11 +65,39 @@ chatRoutes.post('/', async (c) => {
       requestContext,
       abortSignal: c.req.raw.signal,
       maxSteps: MAX_STEPS,
-      onFinish: (event: any) => persistAssistantMessage(sessionId, model, event),
     } as any,
   })
 
   return createUIMessageStreamResponse({ stream })
+})
+
+// POST /api/v1/chat/assistant — persist a finished assistant message with its full UI parts.
+// Called by the renderer from useChat's onFinish; `parts` is the slimmed UIMessage parts JSON
+// so tool/reasoning/workflow cards can be rebuilt on reload.
+chatRoutes.post('/assistant', async (c) => {
+  const body = await readJson<any>(c)
+  const sessionId = String(body?.sessionId || '')
+  if (!sessionId) return c.json({ error: 'sessionId required' }, 400)
+
+  const content = typeof body?.content === 'string' ? body.content : ''
+  const parts = Array.isArray(body?.parts) ? body.parts : null
+  if (!content && !parts) return c.json({ data: null })
+
+  try {
+    messageRepo.save({
+      session_id: sessionId,
+      role: 'assistant',
+      content,
+      parts: parts ? JSON.stringify(parts) : null,
+      tool_calls: JSON.stringify({ runtime: 'mastra-chat-agent-v1', model: String(body?.model || '') }),
+      tokens: typeof body?.tokens === 'number' ? body.tokens : tokenCount(body?.usage),
+    })
+    sessionRepo.touch(sessionId)
+    return c.json({ data: { ok: true } })
+  } catch (error) {
+    logError('chat.persistAssistant', { code: 'PERSISTENCE_ERROR', message: sanitizeErrorMessage(error, 'persist assistant failed') }, { sessionId })
+    return c.json({ error: 'persist failed' }, 500)
+  }
 })
 
 function persistUserMessage(sessionId: string, messages: unknown): void {
@@ -88,24 +114,6 @@ function persistUserMessage(sessionId: string, messages: unknown): void {
   }
 }
 
-function persistAssistantMessage(sessionId: string, model: string, event: any): void {
-  if (!sessionId) return
-  const content = typeof event?.text === 'string' ? event.text : ''
-  if (!content) return
-  try {
-    messageRepo.save({
-      session_id: sessionId,
-      role: 'assistant',
-      content,
-      tool_calls: buildTrace(model, event),
-      tokens: tokenCount(event?.usage),
-    })
-    sessionRepo.touch(sessionId)
-  } catch (error) {
-    logError('chat.persistAssistant', { code: 'PERSISTENCE_ERROR', message: sanitizeErrorMessage(error, 'persist assistant failed') }, { sessionId })
-  }
-}
-
 function lastUserText(messages: unknown): string {
   if (!Array.isArray(messages)) return ''
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -117,14 +125,6 @@ function lastUserText(messages: unknown): string {
     }
   }
   return ''
-}
-
-function buildTrace(model: string, event: any): string | null {
-  const toolCalls = Array.isArray(event?.toolCalls)
-    ? event.toolCalls.map((tc: any) => ({ toolId: tc?.toolName ?? tc?.toolId ?? 'tool' })).filter((tc: any) => tc.toolId)
-    : []
-  if (!toolCalls.length) return JSON.stringify({ runtime: 'mastra-chat-agent-v1', model })
-  return JSON.stringify({ runtime: 'mastra-chat-agent-v1', model, toolCalls })
 }
 
 function tokenCount(usage: any): number | undefined {

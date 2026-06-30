@@ -76,6 +76,11 @@ export const platform = {
     const { data } = await apiFetch(`/sessions/${sessionId}/messages`)
     return data
   },
+  // Persist a finished assistant message with its full UI parts (tool/reasoning/workflow cards)
+  // so they survive reloads. Fire-and-forget from useChat's onFinish.
+  async saveAssistantMessage(payload: { sessionId: string; content: string; parts: unknown[]; model?: string; tokens?: number }) {
+    await apiFetch('/chat/assistant', { method: 'POST', body: JSON.stringify(payload) })
+  },
 
   // Personas
   async getPersonas() {

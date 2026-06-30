@@ -87,3 +87,50 @@ export function extractResultLinks(output: any, limit = 3): ResultLink[] {
 function truncate(value: string, max: number): string {
   return value.length > max ? value.slice(0, max - 1) + '…' : value
 }
+
+// ── Persistence: slim a finished assistant message's UI parts before storing in SQLite ──
+// The cards only consume summarizeInput / summarizeOutput / extractResultLinks(top 3), so we
+// can drop heavy raw fields (full result bodies, large blobs) without changing what renders.
+
+const MAX_RESULTS = 10
+const MAX_STR = 500
+const MAX_REASONING = 4000
+
+function slimString(value: unknown, max = MAX_STR): unknown {
+  return typeof value === 'string' ? truncate(value, max) : value
+}
+
+/** Slim a tool output to the fields the cards render (results→title/url/snippet, summaries). */
+function slimToolOutput(output: any): any {
+  if (output == null || typeof output !== 'object') return slimString(output)
+  const slim: Record<string, unknown> = {}
+  if (Array.isArray(output.results)) {
+    slim.results = output.results.slice(0, MAX_RESULTS).map((r: any) => ({
+      ...(r?.title ? { title: truncate(String(r.title), 200) } : {}),
+      ...(r?.url ? { url: String(r.url) } : {}),
+      ...(typeof r?.snippet === 'string' ? { snippet: truncate(r.snippet, 200) } : {}),
+    }))
+  }
+  for (const key of ['total', 'provider', 'fallbackFrom', 'outputPath', 'permissionRequired', 'error']) {
+    if (output[key] !== undefined) slim[key] = slimString(output[key])
+  }
+  for (const key of ['summary', 'text']) {
+    if (typeof output[key] === 'string') slim[key] = truncate(output[key], MAX_STR)
+  }
+  return slim
+}
+
+/** Bound the size of assistant UI parts for storage; lossless for what the cards display. */
+export function slimParts(parts: any[]): any[] {
+  if (!Array.isArray(parts)) return []
+  return parts.map((part) => {
+    if (!part || typeof part.type !== 'string') return part
+    if (part.type === 'reasoning') {
+      return { ...part, text: typeof part.text === 'string' ? truncate(part.text, MAX_REASONING) : part.text }
+    }
+    if (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) {
+      return { ...part, output: part.output !== undefined ? slimToolOutput(part.output) : part.output }
+    }
+    return part
+  })
+}

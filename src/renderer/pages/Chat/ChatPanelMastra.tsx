@@ -11,7 +11,7 @@ import { ReasoningPart } from './parts/ReasoningPart'
 import { ToolGroupCard } from './parts/ToolGroupCard'
 import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
-import { isToolPart, toToolCallView, type ToolCallView } from './parts/tool-part'
+import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
 type TeamTab = '' | 'research' | 'writing' | 'coding'
@@ -28,6 +28,20 @@ const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'writing', label: '写作' },
   { id: 'coding', label: '编码' },
 ]
+
+// Rebuild a stored message's UI parts. Assistant rows persist their full parts JSON; user rows
+// and legacy/pre-parts rows fall back to a single text part. Never throws — bad JSON → text.
+function restoreParts(m: { content?: string; parts?: string | null }): any[] {
+  if (m.parts) {
+    try {
+      const parsed = JSON.parse(m.parts)
+      if (Array.isArray(parsed) && parsed.length) return parsed
+    } catch {
+      /* fall through to text */
+    }
+  }
+  return [{ type: 'text', text: m.content || '' }]
+}
 
 /**
  * Chat panel on Mastra + AI SDK UI. Renders message.parts (text / reasoning / tool-*)
@@ -65,6 +79,20 @@ export function ChatPanelMastra() {
     if (activeSessionId) void platform.updateSession(activeSessionId, { model: next }).catch(() => {})
   }
 
+  // Mode and team are mutually exclusive on the server (a team tab overrides mode).
+  // Keep the UI honest: picking plan/deep clears the team tab; picking a team tab
+  // resets mode to the neutral 对话.
+  const handleModeChange = (next: ChatMode) => {
+    setMode(next)
+    if (next !== 'chat') setTeam('')
+  }
+
+  const handleTeamToggle = (id: Exclude<TeamTab, ''>) => {
+    const next: TeamTab = team === id ? '' : id
+    setTeam(next)
+    if (next) setMode('chat')
+  }
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -85,6 +113,18 @@ export function ChatPanelMastra() {
   const { messages, sendMessage, setMessages, status, stop, error, addToolApprovalResponse } = useChat({
     id: activeSessionId || undefined,
     transport,
+    // Persist the finished assistant message with its full UI parts so tool/reasoning/workflow
+    // cards survive reloads. Read live state to avoid stale closures across renders.
+    onFinish: ({ message }) => {
+      if (message.role !== 'assistant') return
+      const sid = useSessionStore.getState().activeSessionId
+      if (!sid) return
+      const parts = ((message as any).parts || []) as any[]
+      const content = parts.filter((p) => p?.type === 'text').map((p) => p.text || '').join('')
+      void platform
+        .saveAssistantMessage({ sessionId: sid, content, parts: slimParts(parts), model: modelRef.current })
+        .catch(() => {})
+    },
   })
   const isStreaming = status === 'submitted' || status === 'streaming'
   const waitingForAssistant = isStreaming && messages[messages.length - 1]?.role === 'user'
@@ -96,8 +136,8 @@ export function ChatPanelMastra() {
     addToolApprovalResponse({ id: approvalId, approved })
   }
 
-  // Load persisted history when the active session changes (assistant text is restored;
-  // historical tool cards are not reconstructed). New turns are saved server-side in onFinish.
+  // Load persisted history when the active session changes. Assistant rows restore their stored
+  // UI parts (tool cards, reasoning, workflow steps); user rows and legacy rows fall back to text.
   useEffect(() => {
     let cancelled = false
     if (!activeSessionId) {
@@ -111,7 +151,7 @@ export function ChatPanelMastra() {
         setMessages(
           (rows || [])
             .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({ id: m.id, role: m.role, parts: [{ type: 'text', text: m.content || '' }] })) as any,
+            .map((m) => ({ id: m.id, role: m.role, parts: restoreParts(m) })) as any,
         )
       })
       .catch(() => {})
@@ -201,7 +241,7 @@ export function ChatPanelMastra() {
                 <button className="input-icon-btn" title="附件（暂未开放）" aria-label="附件" disabled>
                   <Plus size={17} />
                 </button>
-                <ModeMenu mode={mode} onSelect={setMode} />
+                <ModeMenu mode={mode} onSelect={handleModeChange} />
                 <ModelMenu model={model} models={textModels} onSelect={handleModelChange} up />
                 <div className="team-tabs" role="tablist" aria-label="Agent">
                   {TEAM_TABS.map((t) => (
@@ -210,7 +250,7 @@ export function ChatPanelMastra() {
                       role="tab"
                       aria-selected={team === t.id}
                       className={cn('team-tab', team === t.id && 'active')}
-                      onClick={() => setTeam((prev) => (prev === t.id ? '' : t.id))}
+                      onClick={() => handleTeamToggle(t.id)}
                       title={t.id === 'coding' ? '编码：可读写文件/执行命令，危险操作需你确认' : undefined}
                     >
                       {t.label}
