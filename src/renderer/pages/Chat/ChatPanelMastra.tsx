@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Loader2, Send, ChevronDown, Check } from 'lucide-react'
+import { Loader2, Send, ChevronDown, Check, Plus, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
 import { useSessionStore, useSettingsStore, useLlmStore } from '@renderer/store'
@@ -16,9 +16,14 @@ import { isToolPart, toToolCallView, type ToolCallView } from './parts/tool-part
 type ChatMode = 'chat' | 'plan' | 'deep'
 type TeamTab = '' | 'research' | 'writing' | 'coding'
 const DEFAULT_MODEL = 'agnes-2.0-flash'
-const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', deep: '深思' }
-const TEAM_TABS: { id: TeamTab; label: string }[] = [
-  { id: '', label: '通用' },
+const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', deep: '深度思考' }
+const MODE_ICON: Record<ChatMode, LucideIcon> = {
+  chat: MessageCircle,
+  plan: ListTodo,
+  deep: Brain,
+}
+const MODE_ORDER: ChatMode[] = ['chat', 'plan', 'deep']
+const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'research', label: '研究' },
   { id: 'writing', label: '写作' },
   { id: 'coding', label: '编码' },
@@ -131,20 +136,6 @@ export function ChatPanelMastra() {
     <div className="chat-panel">
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
-        <ModelMenu model={model} models={textModels} onSelect={handleModelChange} />
-        <div className="mode-switch" role="tablist" aria-label="Chat mode">
-          {(['chat', 'plan', 'deep'] as ChatMode[]).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              className={cn('mode-tab', mode === m && 'active')}
-              onClick={() => setMode(m)}
-            >
-              {MODE_LABEL[m]}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="timeline" role="log" aria-live="polite">
@@ -191,7 +182,7 @@ export function ChatPanelMastra() {
 
       <div className="chat-footer">
         <div className="input-area">
-          <div className="input-row">
+          <div className="input-shell">
             <textarea
               className="input-box"
               value={input}
@@ -205,29 +196,40 @@ export function ChatPanelMastra() {
                 }
               }}
             />
-            {isStreaming ? (
-              <button className="send-btn" onClick={() => stop()} title="停止">
-                <Loader2 size={16} className="spin" />
-              </button>
-            ) : (
-              <button className={cn('send-btn', !input.trim() && 'disabled')} onClick={handleSend} disabled={!input.trim()} title="发送">
-                <Send size={16} />
-              </button>
-            )}
-          </div>
-          <div className="team-tabs" role="tablist" aria-label="Agent">
-            {TEAM_TABS.map((t) => (
-              <button
-                key={t.id || 'general'}
-                role="tab"
-                aria-selected={team === t.id}
-                className={cn('team-tab', team === t.id && 'active')}
-                onClick={() => setTeam(t.id)}
-                title={t.id === 'coding' ? '编码：可读写文件/执行命令，危险操作需你确认' : undefined}
-              >
-                {t.label}
-              </button>
-            ))}
+            <div className="input-toolbar">
+              <div className="input-toolbar-left">
+                <button className="input-icon-btn" title="附件（暂未开放）" aria-label="附件" disabled>
+                  <Plus size={17} />
+                </button>
+                <ModeMenu mode={mode} onSelect={setMode} />
+                <ModelMenu model={model} models={textModels} onSelect={handleModelChange} up />
+                <div className="team-tabs" role="tablist" aria-label="Agent">
+                  {TEAM_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      role="tab"
+                      aria-selected={team === t.id}
+                      className={cn('team-tab', team === t.id && 'active')}
+                      onClick={() => setTeam((prev) => (prev === t.id ? '' : t.id))}
+                      title={t.id === 'coding' ? '编码：可读写文件/执行命令，危险操作需你确认' : undefined}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="input-toolbar-right">
+                {isStreaming ? (
+                  <button className="send-btn" onClick={() => stop()} title="停止">
+                    <Loader2 size={16} className="spin" />
+                  </button>
+                ) : (
+                  <button className={cn('send-btn', !input.trim() && 'disabled')} onClick={handleSend} disabled={!input.trim()} title="发送">
+                    <Send size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -235,7 +237,7 @@ export function ChatPanelMastra() {
   )
 }
 
-function ModelMenu({ model, models, onSelect }: { model: string; models: { id: string; label: string; providerId: string }[]; onSelect: (m: string) => void }) {
+function ModelMenu({ model, models, onSelect, up = false }: { model: string; models: { id: string; label: string; providerId: string }[]; onSelect: (m: string) => void; up?: boolean }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const label = models.find((m) => m.id === model)?.label || model
@@ -254,7 +256,7 @@ function ModelMenu({ model, models, onSelect }: { model: string; models: { id: s
         <ChevronDown size={11} />
       </button>
       {open && (
-        <div className="model-dropdown" role="listbox" aria-label="Select model">
+        <div className={cn('model-dropdown', up && 'up')} role="listbox" aria-label="Select model">
           {models.length === 0 && <div className="model-dropdown-header">No models</div>}
           {models.map((m) => (
             <button
@@ -272,6 +274,48 @@ function ModelMenu({ model, models, onSelect }: { model: string; models: { id: s
               {model === m.id && <Check size={12} className="model-check" />}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ModeMenu({ mode, onSelect }: { mode: ChatMode; onSelect: (m: ChatMode) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const ActiveIcon = MODE_ICON[mode]
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+  return (
+    <div className="mode-dropdown-wrap" ref={ref}>
+      <button className="mode-pill" onClick={() => setOpen(!open)} aria-haspopup="listbox">
+        <ActiveIcon size={14} />
+        <span>{MODE_LABEL[mode]}</span>
+        <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="mode-dropdown up" role="listbox" aria-label="Select mode">
+          {MODE_ORDER.map((m) => {
+            const Icon = MODE_ICON[m]
+            return (
+              <button
+                key={m}
+                role="option"
+                aria-selected={mode === m}
+                className={cn('mode-option', mode === m && 'selected')}
+                onClick={() => { onSelect(m); setOpen(false) }}
+              >
+                <Icon size={16} className="mode-option-icon" />
+                <span className="mode-option-name">{MODE_LABEL[m]}</span>
+                {mode === m && <Check size={12} className="model-check" />}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

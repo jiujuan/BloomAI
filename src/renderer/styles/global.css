@@ -269,6 +269,36 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 }
 .persona-option-name { font-size: 12px; font-weight: 500; flex: 1; }
 
+/* Mode pill (对话 / 计划 / 深度思考) — lives in the input toolbar */
+.mode-dropdown-wrap { position: relative; }
+.mode-pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border: 0.5px solid var(--border-secondary);
+  border-radius: 99px; background: transparent; color: var(--text-secondary);
+  font-size: 11px; white-space: nowrap;
+}
+.mode-pill:hover { background: var(--bg-secondary); }
+.mode-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 100;
+  background: var(--bg-primary); border: 0.5px solid var(--border-secondary);
+  border-radius: var(--radius-lg); overflow: hidden; min-width: 180px;
+  box-shadow: var(--shadow-md); padding: 4px;
+}
+.mode-option {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 9px; border: none; background: transparent;
+  width: 100%; text-align: left; color: var(--text-primary);
+  border-radius: var(--radius-md);
+}
+.mode-option:hover, .mode-option.selected { background: var(--bg-secondary); }
+.mode-option-icon { color: var(--text-secondary); flex-shrink: 0; }
+.mode-option-name { font-size: 12px; font-weight: 500; flex: 1; }
+
+/* Upward-opening variant for dropdowns anchored at the bottom toolbar */
+.model-dropdown.up, .mode-dropdown.up {
+  top: auto; bottom: calc(100% + 6px); left: 0; right: auto;
+}
+
 /* ── Context pills ────────────────────────────────────────── */
 .context-bar {
   display: flex; align-items: center; gap: 5px;
@@ -431,8 +461,15 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 /* ── Input area ───────────────────────────────────────────── */
 .chat-footer { flex-shrink: 0; border-top: 0.5px solid var(--border-tertiary); }
-.input-area { padding: 8px 12px; }
-.input-row { display: flex; align-items: flex-end; gap: 7px; }
+.input-area { padding: 10px 12px; }
+.input-shell {
+  display: flex; flex-direction: column;
+  border: 0.5px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  transition: border-color 0.15s;
+}
+.input-shell:focus-within { border-color: var(--border-primary); }
 .input-icon-btn {
   width: 30px; height: 30px; border-radius: var(--radius-md);
   border: none; background: transparent; color: var(--text-tertiary);
@@ -441,15 +478,21 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .input-icon-btn:hover:not(:disabled) { background: var(--bg-secondary); color: var(--text-secondary); }
 .input-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .input-box {
-  flex: 1; border: 0.5px solid var(--border-secondary);
-  border-radius: var(--radius-md); padding: 7px 10px;
+  flex: 1; border: none; background: transparent;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 12px 12px 6px;
   font-size: 13px; resize: none; outline: none;
-  line-height: 1.5; min-height: 34px; max-height: 160px;
-  background: var(--bg-primary); color: var(--text-primary);
-  transition: border-color 0.15s;
+  line-height: 1.5; min-height: 64px; max-height: 220px;
+  color: var(--text-primary);
 }
-.input-box:focus { border-color: var(--border-primary); }
 .input-box:disabled { opacity: 0.6; cursor: not-allowed; }
+.input-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 8px 7px;
+}
+.input-toolbar-left, .input-toolbar-right { display: flex; align-items: center; gap: 6px; }
+.input-toolbar-left { flex-wrap: wrap; min-width: 0; }
+.input-toolbar .team-tabs { margin-top: 0; }
 .send-btn {
   width: 32px; height: 32px; border-radius: var(--radius-md);
   background: var(--bg-info); border: none; color: var(--text-info);
@@ -1087,11 +1130,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .tcg-call-error { color: var(--text-danger); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .tcg-call-time { color: var(--text-tertiary); font-size: 10px; font-family: var(--font-mono); white-space: nowrap; }
 
-/* ── P2: Mastra/AI-SDK chat — mode switch, reasoning, tool permission/links ── */
-.mode-switch { display: inline-flex; gap: 2px; margin-left: 8px; padding: 2px; background: var(--bg-tertiary); border-radius: var(--radius-md); }
-.mode-tab { padding: 3px 10px; font-size: 11px; color: var(--text-secondary); background: transparent; border: none; border-radius: var(--radius-sm, 6px); cursor: pointer; transition: all .12s; }
-.mode-tab:hover { color: var(--text-primary); }
-.mode-tab.active { color: var(--text-primary); background: var(--bg-primary); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.08)); }
+/* ── P2: Mastra/AI-SDK chat — reasoning, tool permission/links ── */
 
 .reasoning-block { margin: 6px 0; border: 1px solid var(--border-secondary); border-left: 2px solid var(--border-info, var(--border-secondary)); border-radius: var(--radius-md); background: var(--bg-secondary); overflow: hidden; }
 .reasoning-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 10px; font-size: 11px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer; }
