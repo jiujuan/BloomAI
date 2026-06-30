@@ -23,11 +23,12 @@ async function loadApp() {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
 
-  const { createApp } = await import('../app')
+  const { createHonoApp } = await import('../http/app')
   const { sessionRepo } = await import('../db/repositories/session.repo')
   const { llmRepo } = await import('../db/repositories/llm.repo')
   const client = await import('../db/client')
-  const app = await createApp()
+  await client.runMigrations()
+  const app = createHonoApp()
 
   return { app, db: client.db, sessionRepo, llmRepo }
 }
@@ -48,9 +49,11 @@ async function withServer<T>(
   app: Awaited<ReturnType<typeof loadApp>>['app'],
   fn: (baseUrl: string) => Promise<T>
 ): Promise<T> {
-  const server = await new Promise<http.Server>((resolve) => {
-    const listening = app.listen(0, () => resolve(listening))
-  })
+  const { serve } = await import('@hono/node-server')
+  const server = serve({ fetch: app.fetch, port: 0 }) as unknown as http.Server
+  if (!server.address()) {
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+  }
   const address = server.address() as AddressInfo
 
   try {
