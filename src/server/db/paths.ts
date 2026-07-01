@@ -1,16 +1,11 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-
-function expandHome(p: string): string {
-  if (p === '~') return os.homedir()
-  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2))
-  return path.isAbsolute(p) ? p : path.resolve(p)
-}
+import { expandPath, readConfigValue } from '../config/config'
 
 export function getDataDir(): string {
-  const configured = process.env.DATA_DIR?.trim()
-  return configured ? expandHome(configured) : path.join(os.homedir(), '.bloomai')
+  const configured = readConfigValue('DATA_DIR').value
+  return configured ? expandPath(configured) : path.join(os.homedir(), '.bloomai')
 }
 
 export function getDbPath(): string {

@@ -1,5 +1,14 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+
+/** Expand leading ~ to the user home directory, resolve relative paths to absolute. */
+export function expandPath(p: string): string {
+  if (!p) return p
+  if (p === '~') return os.homedir()
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2))
+  return path.isAbsolute(p) ? p : path.resolve(p)
+}
 
 export type ConfigValue = {
   value: string

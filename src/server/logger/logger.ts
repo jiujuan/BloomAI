@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveErrorTimeline, type ResponseError } from '@shared/llm-response-contract/error-timeline-registry'
-import { readConfigValue } from '../config/config'
+import { expandPath, readConfigValue } from '../config/config'
 
 export type LogEntry = {
   timestamp: string
@@ -21,9 +21,9 @@ const SENSITIVE_VALUE_PATTERNS = [
 
 export function getLogDir(): string {
   const configured = readConfigValue('LOG_DATA_DIR').value
-  if (configured) return resolvePath(configured)
+  if (configured) return expandPath(configured)
   const dataDir = readConfigValue('DATA_DIR', path.join(os.homedir(), '.bloomai')).value
-  return path.join(resolvePath(dataDir), 'logs')
+  return path.join(expandPath(dataDir), 'logs')
 }
 
 export function appendLog(entry: Omit<LogEntry, 'timestamp'> & { timestamp?: string }): LogEntry {
@@ -150,10 +150,4 @@ function redactString(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
-}
-
-function resolvePath(value: string): string {
-  if (value === '~') return os.homedir()
-  if (value.startsWith('~/') || value.startsWith('~\\')) return path.join(os.homedir(), value.slice(2))
-  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value)
 }
