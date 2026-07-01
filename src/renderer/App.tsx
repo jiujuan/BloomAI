@@ -10,7 +10,7 @@ import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
 import { SkillsMarket } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { useSessionStore, usePersonaStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
-import { applyTheme } from '@renderer/api'
+import { applyTheme, applyFont } from '@renderer/api'
 
 export function App() {
   const { loadSessions, createSession } = useSessionStore()
@@ -37,6 +37,10 @@ export function App() {
   useEffect(() => {
     applyTheme((settings.theme as 'light' | 'dark' | 'system') || theme || 'system')
   }, [settings.theme, theme])
+
+  useEffect(() => {
+    applyFont(settings.font_family || '', settings.font_size || '')
+  }, [settings.font_family, settings.font_size])
 
   // Global keyboard shortcuts
   useEffect(() => {

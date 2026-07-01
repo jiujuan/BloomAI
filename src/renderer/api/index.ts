@@ -260,3 +260,24 @@ export function applyTheme(theme: 'light' | 'dark' | 'system') {
     root.setAttribute('data-theme', 'light')
   }
 }
+
+const FONT_FAMILIES: Record<string, string> = {
+  system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  segoe: "'Segoe UI', sans-serif",
+  arial: 'Arial, Helvetica, sans-serif',
+  georgia: "Georgia, 'Times New Roman', serif",
+}
+
+export function applyFont(family: string, size: string) {
+  const root = document.documentElement
+  if (family && FONT_FAMILIES[family]) {
+    root.style.setProperty('--font-ui', FONT_FAMILIES[family])
+  } else {
+    root.style.removeProperty('--font-ui')
+  }
+  if (size) {
+    root.style.setProperty('--font-size-base', size)
+  } else {
+    root.style.removeProperty('--font-size-base')
+  }
+}

@@ -253,9 +253,10 @@ export function ChatPanelMastra() {
     }
   }, [activeSessionId, setMessages])
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const timelineRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const tl = timelineRef.current
+    if (tl) tl.scrollTo({ top: tl.scrollHeight, behavior: 'smooth' })
   }, [messages.length, status, plans.length])
 
   const handleSend = () => {
@@ -329,7 +330,7 @@ export function ChatPanelMastra() {
         <span className="chat-title">{session?.title || 'Chat'}</span>
       </div>
 
-      <div className="timeline" role="log" aria-live="polite">
+      <div className="timeline" ref={timelineRef} role="log" aria-live="polite">
         {messages.length === 0 && !isStreaming && plans.length === 0 && (
           <div className="timeline-empty">
             <h2 className="timeline-empty-title">BloomAI</h2>
@@ -390,7 +391,6 @@ export function ChatPanelMastra() {
           </div>
         )}
 
-        <div ref={bottomRef} />
       </div>
 
       <div className="chat-footer">
