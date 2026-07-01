@@ -82,8 +82,7 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
     <div className="img-gen">
       <div className="img-gen-prompt">
         <span className="img-gen-bubble">{gen.prompt}</span>
-        {badges.length > 0 && <span className="img-gen-badges">{badges.join(' · ')}</span>}
-        <div className="img-prompt-actions">
+        <div className="img-gen-meta">
           <button
             className="img-prompt-copy"
             title="复制提示词"
@@ -94,6 +93,7 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
           >
             <Copy size={12} />
           </button>
+          {badges.length > 0 && <span className="img-gen-badges">{badges.join(' · ')}</span>}
         </div>
       </div>
 
