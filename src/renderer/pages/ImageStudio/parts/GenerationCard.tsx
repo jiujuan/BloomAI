@@ -88,7 +88,12 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
         {gen.status === 'in_progress' && (
           <div className="img-gen-skeleton" role="status" aria-label="生成中">
             <div className="img-gen-shimmer" />
-            <span className="img-gen-status-text">正在生成…</span>
+            <span className="img-gen-status-text">
+              正在生成
+              <span className="img-gen-dot" style={{ animationDelay: '0ms' }}>.</span>
+              <span className="img-gen-dot" style={{ animationDelay: '160ms' }}>.</span>
+              <span className="img-gen-dot" style={{ animationDelay: '320ms' }}>.</span>
+            </span>
           </div>
         )}
 

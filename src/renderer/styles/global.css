@@ -1286,6 +1286,8 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .img-gen-shimmer { position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent); transform: translateX(-100%); animation: img-shimmer 1.4s infinite; }
 @keyframes img-shimmer { 100% { transform: translateX(100%); } }
 .img-gen-status-text { font-size: 12px; color: var(--text-tertiary); z-index: 1; }
+.img-gen-dot { display: inline-block; animation: img-dot-bounce 1s ease-in-out infinite; }
+@keyframes img-dot-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-4px); opacity: 1; } }
 .img-gen-error { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg-danger); border: 0.5px solid var(--border-danger); color: var(--text-danger); font-size: 13px; }
 .btn-xs { padding: 2px 8px; font-size: 12px; }
 
