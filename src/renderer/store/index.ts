@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
-import type { LlmModelSummary } from '@renderer/api'
+import type { ImageGenerationRecord, ImageSessionSummary, LlmModelSummary } from '@renderer/api'
 import type { Message, Persona, Session } from '@shared/schemas'
+import { DEFAULT_ASPECT_RATIO } from '@shared/image-gen'
+import type { ImageTemplateDef } from '@shared/image-templates'
 
 // Session Store
 
@@ -245,7 +247,7 @@ export const useLlmStore = create<LlmState & LlmActions>()(
 
 interface UIState {
   sidebarOpen: boolean
-  activePage: 'chat' | 'settings' | 'personas' | 'tools' | 'skills'
+  activePage: 'chat' | 'settings' | 'personas' | 'tools' | 'skills' | 'image'
   theme: 'light' | 'dark' | 'system'
   showOnboarding: boolean
 }
@@ -271,5 +273,175 @@ export const useUIStore = create<UIState & UIActions>()(
     },
     setShowOnboarding: (showOnboarding) => set({ showOnboarding }),
   }), { name: 'bloomai-ui' })
+)
+
+// Image Studio Store (AI 画图)
+
+export interface ImageComposerState {
+  prompt: string
+  model: string
+  aspectRatioId: string
+  styleId: string | null
+  referenceImages: string[]
+  optimize: boolean
+}
+
+function initialComposer(): ImageComposerState {
+  return { prompt: '', model: '', aspectRatioId: DEFAULT_ASPECT_RATIO, styleId: null, referenceImages: [], optimize: true }
+}
+
+interface ImageState {
+  sessions: ImageSessionSummary[]
+  activeSessionId: string | null
+  generationsBySession: Record<string, ImageGenerationRecord[]>
+  composer: ImageComposerState
+  generating: boolean
+  loading: boolean
+}
+interface ImageActions {
+  loadSessions: () => Promise<void>
+  createSession: () => Promise<ImageSessionSummary>
+  setActiveSession: (id: string) => Promise<void>
+  deleteSession: (id: string) => Promise<void>
+  renameSession: (id: string, title: string) => Promise<void>
+  loadGenerations: (sessionId: string) => Promise<void>
+  setComposer: (patch: Partial<ImageComposerState>) => void
+  applyTemplate: (t: ImageTemplateDef) => void
+  generate: () => Promise<void>
+}
+
+export const useImageStore = create<ImageState & ImageActions>()(
+  devtools((set, get) => ({
+    sessions: [],
+    activeSessionId: null,
+    generationsBySession: {},
+    composer: initialComposer(),
+    generating: false,
+    loading: false,
+
+    loadSessions: async () => {
+      set({ loading: true })
+      try {
+        const sessions = await platform.image.listSessions()
+        set({ sessions, loading: false })
+        if (!get().activeSessionId && sessions[0]) await get().setActiveSession(sessions[0].id)
+      } catch (e) {
+        console.error('image.loadSessions', e)
+        set({ loading: false })
+      }
+    },
+
+    createSession: async () => {
+      const session = await platform.image.createSession()
+      set(s => ({
+        sessions: [session, ...s.sessions],
+        activeSessionId: session.id,
+        generationsBySession: { ...s.generationsBySession, [session.id]: [] },
+        composer: { ...s.composer, prompt: '', referenceImages: [] },
+      }))
+      return session
+    },
+
+    setActiveSession: async (id) => {
+      set({ activeSessionId: id })
+      await get().loadGenerations(id)
+      const session = get().sessions.find(s => s.id === id)
+      if (session?.default_model && !get().composer.model) {
+        set(s => ({ composer: { ...s.composer, model: session.default_model as string } }))
+      }
+    },
+
+    deleteSession: async (id) => {
+      await platform.image.deleteSession(id)
+      set(s => {
+        const sessions = s.sessions.filter(x => x.id !== id)
+        const activeSessionId = s.activeSessionId === id ? (sessions[0]?.id || null) : s.activeSessionId
+        return { sessions, activeSessionId }
+      })
+      const next = get().activeSessionId
+      if (next) await get().loadGenerations(next)
+    },
+
+    renameSession: async (id, title) => {
+      set(s => ({ sessions: s.sessions.map(x => x.id === id ? { ...x, title } : x) }))
+      await platform.image.renameSession(id, title)
+    },
+
+    loadGenerations: async (sessionId) => {
+      try {
+        const gens = await platform.image.listGenerations(sessionId)
+        set(s => ({ generationsBySession: { ...s.generationsBySession, [sessionId]: gens } }))
+      } catch (e) {
+        console.error('image.loadGenerations', e)
+      }
+    },
+
+    setComposer: (patch) => set(s => ({ composer: { ...s.composer, ...patch } })),
+
+    applyTemplate: (t) => set(s => ({
+      composer: {
+        ...s.composer,
+        prompt: t.prompt,
+        model: t.recommend?.model || s.composer.model,
+        aspectRatioId: t.recommend?.ratioId || s.composer.aspectRatioId,
+        styleId: t.recommend?.styleId ?? s.composer.styleId,
+      },
+    })),
+
+    generate: async () => {
+      const { activeSessionId, composer, generating } = get()
+      if (generating || !composer.prompt.trim() || !composer.model) return
+      let sessionId = activeSessionId
+      if (!sessionId) sessionId = (await get().createSession()).id
+
+      // Optimistic placeholder while the provider works (generation can take 10-60s).
+      const tempId = `temp-${Date.now()}`
+      const placeholder: ImageGenerationRecord = {
+        id: tempId, session_id: sessionId, message_id: null,
+        prompt: composer.prompt, resolved_prompt: null, provider_id: '', model: composer.model,
+        aspect_ratio: composer.aspectRatioId, style: composer.styleId, size: null, seed: null,
+        reference_images: null, status: 'in_progress', provider_task_id: null, progress: null,
+        url: null, local_path: null, error_msg: null, duration_ms: null,
+        created_at: Date.now(), updated_at: Date.now(),
+      }
+      const sid = sessionId
+      set(s => ({
+        generating: true,
+        generationsBySession: { ...s.generationsBySession, [sid]: [...(s.generationsBySession[sid] || []), placeholder] },
+      }))
+
+      try {
+        const record = await platform.image.generate({
+          sessionId: sid,
+          prompt: composer.prompt,
+          model: composer.model,
+          aspectRatioId: composer.aspectRatioId,
+          styleId: composer.styleId,
+          referenceImages: composer.referenceImages.length ? composer.referenceImages : undefined,
+          optimize: composer.optimize,
+        })
+        set(s => ({
+          generating: false,
+          composer: { ...s.composer, prompt: '' },
+          generationsBySession: {
+            ...s.generationsBySession,
+            [sid]: (s.generationsBySession[sid] || []).map(g => g.id === tempId ? record : g),
+          },
+        }))
+        // Refresh session list so an auto-titled session shows its new name and ordering.
+        await get().loadSessions()
+        set({ activeSessionId: sid })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Image generation failed'
+        set(s => ({
+          generating: false,
+          generationsBySession: {
+            ...s.generationsBySession,
+            [sid]: (s.generationsBySession[sid] || []).map(g => g.id === tempId ? { ...g, status: 'failed' as const, error_msg: message } : g),
+          },
+        }))
+      }
+    },
+  }), { name: 'bloomai-image' })
 )
 

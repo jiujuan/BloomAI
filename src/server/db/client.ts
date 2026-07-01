@@ -159,6 +159,18 @@ function runBootstrapSql() {
       id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, input_json TEXT NOT NULL,
       output_json TEXT, status TEXT NOT NULL, duration_ms INTEGER, created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS image_sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新画图', default_model TEXT,
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS image_generations (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT,
+      prompt TEXT NOT NULL, resolved_prompt TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+      aspect_ratio TEXT, style TEXT, size TEXT, seed INTEGER, reference_images TEXT,
+      status TEXT NOT NULL, provider_task_id TEXT, progress INTEGER, url TEXT, local_path TEXT,
+      error_msg TEXT, duration_ms INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_image_gen_session ON image_generations(session_id, created_at);
   `)
 }
 
@@ -190,6 +202,7 @@ function seedSettings() {
     ['openai_api_key', ''], ['agnes_api_key', ''], ['deepseek_api_key', ''],
     ['ollama_base_url', 'http://127.0.0.1:11434'],
     ['default_image_model', 'agnes-image-2.1-flash'], ['default_video_model', 'agnes-video-v2.0'],
+    ['image_output_dir', ''],
     ['clipboard_monitoring', 'true'], ['context_awareness', 'true'],
   ] as const
 

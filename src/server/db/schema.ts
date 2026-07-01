@@ -138,5 +138,42 @@ export const skill_runs = sqliteTable('skill_runs', {
   created_at: integer('created_at').notNull(),
 })
 
+// AI 画图 (Image Studio) — independent feature. Sessions are decoupled from chat `sessions`
+// (Plan A); the conversation itself reuses the `messages` table (session_id points here).
+export const image_sessions = sqliteTable('image_sessions', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull().default('新画图'),
+  default_model: text('default_model'),
+  status: text('status').notNull().default('active'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+})
+
+export const image_generations = sqliteTable('image_generations', {
+  id: text('id').primaryKey(),
+  session_id: text('session_id').notNull(),
+  message_id: text('message_id'),
+  prompt: text('prompt').notNull(),
+  resolved_prompt: text('resolved_prompt'),
+  provider_id: text('provider_id').notNull(),
+  model: text('model').notNull(),
+  aspect_ratio: text('aspect_ratio'),
+  style: text('style'),
+  size: text('size'),
+  seed: integer('seed'),
+  reference_images: text('reference_images'),
+  status: text('status').notNull(),
+  provider_task_id: text('provider_task_id'),
+  progress: integer('progress'),
+  url: text('url'),
+  local_path: text('local_path'),
+  error_msg: text('error_msg'),
+  duration_ms: integer('duration_ms'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  sessionIdx: index('idx_image_gen_session').on(table.session_id, table.created_at),
+}))
+
 export type Setting = typeof settings.$inferSelect
 export type NewSetting = typeof settings.$inferInsert

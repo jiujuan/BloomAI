@@ -8,6 +8,7 @@ import { Onboarding } from '@renderer/pages/Onboarding'
 import { ToolManagePage } from '@renderer/pages/Tools'
 import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
 import { SkillsMarket } from '@renderer/pages/Skills'
+import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { useSessionStore, usePersonaStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme } from '@renderer/api'
 
@@ -76,6 +77,7 @@ export function App() {
             <ChatPanel />
           </>
         )}
+        {activePage === 'image' && <ImageStudioPage />}
         {activePage === 'personas' && (
           <div className="page-full">
             <PersonasPage />
