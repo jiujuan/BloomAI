@@ -3,6 +3,7 @@ import { Copy, Download, ImagePlus, Maximize2, RefreshCw, Wand2, AlertCircle } f
 import { imageMediaUrl, type ImageGenerationRecord } from '@renderer/api'
 import { useImageStore } from '@renderer/store'
 import { getAspectRatio, getImageStyle } from '@shared/image-gen'
+import { emitCopied } from '../../Chat/MessageActions'
 import { Lightbox } from './Lightbox'
 
 /** One generated image: prompt bubble + result card (loading / completed / failed). */
@@ -82,6 +83,18 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
       <div className="img-gen-prompt">
         <span className="img-gen-bubble">{gen.prompt}</span>
         {badges.length > 0 && <span className="img-gen-badges">{badges.join(' · ')}</span>}
+        <div className="img-prompt-actions">
+          <button
+            className="img-prompt-copy"
+            title="复制提示词"
+            onClick={async () => {
+              await navigator.clipboard.writeText(gen.prompt)
+              emitCopied()
+            }}
+          >
+            <Copy size={12} />
+          </button>
+        </div>
       </div>
 
       <div className="img-gen-result">
@@ -93,6 +106,9 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
               <span className="img-gen-dot" style={{ animationDelay: '0ms' }}>.</span>
               <span className="img-gen-dot" style={{ animationDelay: '160ms' }}>.</span>
               <span className="img-gen-dot" style={{ animationDelay: '320ms' }}>.</span>
+			  <span className="img-gen-dot" style={{ animationDelay: '480ms' }}>.</span>
+              <span className="img-gen-dot" style={{ animationDelay: '640ms' }}>.</span>
+              <span className="img-gen-dot" style={{ animationDelay: '800ms' }}>.</span>
             </span>
           </div>
         )}

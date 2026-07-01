@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { Sparkles } from 'lucide-react'
 import { useImageStore } from '@renderer/store'
+import { CopyToast } from '../Chat/MessageActions'
 import { ImageComposer } from './ImageComposer'
 import { GenerationCard } from './parts/GenerationCard'
 
@@ -30,6 +31,7 @@ export function ImageChatPanel() {
         )}
       </div>
       <ImageComposer />
+      <CopyToast />
     </div>
   )
 }
