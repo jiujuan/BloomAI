@@ -1,6 +1,8 @@
 import { Agent } from '@mastra/core/agent'
 import { resolveMastraModel } from '../model-resolver'
 import { buildToolsForRole } from '../tools'
+import { buildWriterInstructions } from './writer-prompt'
+import type { WritingConfig } from '@shared/writing'
 
 /**
  * Specialist agent team (P6d). The chat UI tabs (研究/写作/编码) route a message to one
@@ -28,11 +30,10 @@ sources. If you cannot verify something, say so.
 export const writerAgent = new Agent({
   id: 'writer',
   name: 'BloomAI Writer',
-  instructions: `
-You are a writing specialist. Produce polished, well-structured prose tailored to the user's
-intent (tone, length, audience). You have no tools — work from the conversation and the user's
-material. Ask a brief clarifying question only when the request is ambiguous.
-`.trim(),
+  // Instructions are built from the UI's typed writing parameters (type/platform/style/words)
+  // carried on the RequestContext. Falls back to a generic writer prompt when none are supplied.
+  instructions: ({ requestContext }) =>
+    buildWriterInstructions(requestContext?.get('writing') as WritingConfig | undefined),
   model: dynamicModel,
   tools: () => ({}),
 })

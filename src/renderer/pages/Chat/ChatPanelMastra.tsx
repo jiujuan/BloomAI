@@ -3,6 +3,7 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { Loader2, Send, ChevronDown, Check, Plus, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
+import type { WritingConfig } from '@shared/writing'
 import { platform } from '@renderer/api'
 import { useSessionStore, useSettingsStore, useLlmStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
@@ -12,6 +13,7 @@ import { ToolGroupCard } from './parts/ToolGroupCard'
 import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
 import { PlanCard, type PlanStatus } from './parts/PlanCard'
+import { WriterParams, defaultWritingConfig } from './WriterParams'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -28,7 +30,7 @@ const MODE_ICON: Record<ChatMode, LucideIcon> = {
 const MODE_ORDER: ChatMode[] = ['chat', 'plan', 'deep']
 const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'research', label: '研究' },
-  { id: 'writing', label: '写作' },
+  { id: 'writing', label: 'AI写作' },
   { id: 'coding', label: '编码' },
 ]
 
@@ -105,6 +107,9 @@ export function ChatPanelMastra() {
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
+  // AI Writer parameters (type + dropdowns). Kept in memory so toggling the 写作 tab off and
+  // back on restores the last selection (same lifetime as `team`/`mode` — component-scoped).
+  const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
   const [input, setInput] = useState('')
   const [modelOverride, setModelOverride] = useState<string | null>(null)
   // Plan mode proposals for the current turn, in chronological order. Each entry keeps a stable
@@ -122,9 +127,11 @@ export function ChatPanelMastra() {
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   const teamRef = useRef(team)
+  const writingRef = useRef(writing)
   modeRef.current = mode
   modelRef.current = model
   teamRef.current = team
+  writingRef.current = writing
 
   useEffect(() => {
     loadTextModels()
@@ -163,8 +170,14 @@ export function ChatPanelMastra() {
         api: `${API_BASE}/chat`,
         prepareSendMessagesRequest: ({ messages }) => ({
           // Confirmed plan tasks travel in the body (not a header) because they may contain
-          // non-ASCII text, which HTTP header values can't safely carry.
-          body: { messages, sessionId: activeSessionId, plan: planRef.current || undefined },
+          // non-ASCII text, which HTTP header values can't safely carry. Same for the writer
+          // config, whose values are Chinese — only sent when the 写作 tab is active.
+          body: {
+            messages,
+            sessionId: activeSessionId,
+            plan: planRef.current || undefined,
+            writing: teamRef.current === 'writing' ? writingRef.current : undefined,
+          },
           headers: {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
@@ -394,6 +407,9 @@ export function ChatPanelMastra() {
                 }
               }}
             />
+            {team === 'writing' && (
+              <WriterParams value={writing} onChange={setWriting} disabled={isStreaming} />
+            )}
             <div className="input-toolbar">
               <div className="input-toolbar-left">
                 <button className="input-icon-btn" title="附件（暂未开放）" aria-label="附件" disabled>
