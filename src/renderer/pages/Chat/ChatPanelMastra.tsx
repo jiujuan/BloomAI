@@ -14,6 +14,7 @@ import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
 import { PlanCard, type PlanStatus } from './parts/PlanCard'
 import { WriterParams, defaultWritingConfig } from './WriterParams'
+import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, type SelectionMenuState } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -323,6 +324,7 @@ export function ChatPanelMastra() {
 
   return (
     <div className="chat-panel">
+      <CopyToast />
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
       </div>
@@ -560,11 +562,36 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
   // The confirmed plan card streams in before the model starts answering; keep the thinking
   // indicator visible below it until real answer content (text/tool/reasoning) shows up.
   const waitingAfterParts = streaming && !showWaiting && !hasAnswerContent(parts)
+
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const [menu, setMenu] = useState<SelectionMenuState | null>(null)
+  const [liked, setLiked] = useState(false)
+  const fullText = assistantPlainText(parts)
+  const canCopy = !streaming && !showWaiting && !!fullText
+
+  // Right-click over a selection inside this bubble → custom 复制/点赞 menu. With no selection we
+  // don't preventDefault, so the native menu still works elsewhere. The range is captured so the
+  // menu can restore the highlight (the right-click can otherwise move the native selection).
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const sel = window.getSelection()
+    const text = sel?.toString().trim() || ''
+    if (!text || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (bubbleRef.current && bubbleRef.current.contains(range.commonAncestorContainer)) {
+      e.preventDefault()
+      setMenu({ x: e.clientX, y: e.clientY, text, range: range.cloneRange() })
+    }
+  }
+
   return (
     <div className="msg-group">
       <div className="msg-avatar">AI</div>
       <div className="msg-col">
-        <div className={cn('msg-bubble', streaming && 'streaming', showWaiting && 'waiting')}>
+        <div
+          ref={bubbleRef}
+          onContextMenu={handleContextMenu}
+          className={cn('msg-bubble', streaming && 'streaming', showWaiting && 'waiting')}
+        >
           {showWaiting ? (
             <WaitingIndicator />
           ) : (
@@ -574,6 +601,13 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
             </>
           )}
         </div>
+        {(canCopy || liked) && (
+          <div className={cn('msg-actions', liked && 'has-liked')}>
+            {canCopy && <CopyButton getText={() => fullText} />}
+            {liked && <LikedBadge />}
+          </div>
+        )}
+        <SelectionMenu state={menu} onClose={() => setMenu(null)} onLike={() => setLiked(true)} />
       </div>
     </div>
   )
