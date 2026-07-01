@@ -7,6 +7,7 @@ import { TEAM_AGENT_BY_TAB } from '../../mastra/agents/team'
 import { messageRepo } from '../../db/repositories/message.repo'
 import { sessionRepo } from '../../db/repositories/session.repo'
 import { logError, sanitizeErrorMessage } from '../../logger/logger'
+import { streamOnError } from '../stream-error'
 import { readJson } from '../util'
 
 /** Default chat model: Agnes (openai-compatible relay reachable from this network). */
@@ -45,63 +46,79 @@ chatRoutes.post('/', async (c) => {
   // precedence over deep mode. No tab → general chat agent (deep mode runs the workflow).
   const teamAgentId = TEAM_AGENT_BY_TAB[c.req.header('x-bloom-agent') || '']
 
-  // Deep mode (P6a): run the deterministic deep-research workflow instead of the
-  // single agent. The workflow gathers web sources, then a writer agent synthesizes
-  // a cited report — streamed to the same useChat UI as an AI SDK message stream.
-  if (!teamAgentId && mode === 'deep') {
-    const query = lastUserText(body.messages)
-    if (query) {
-      const run = await mastra.getWorkflow('deep-research').createRun()
-      const workflowStream = await run.stream({ inputData: { query }, requestContext })
-      const uiStream = createUIMessageStream({
-        execute: async ({ writer }) => {
-          for await (const part of toAISdkStream(workflowStream as any, { from: 'workflow' }) as any) {
-            await writer.write(part)
-          }
-        },
-      })
-      return createUIMessageStreamResponse({ stream: uiStream })
+  try {
+    // Deep mode (P6a): run the deterministic deep-research workflow instead of the
+    // single agent. The workflow gathers web sources, then a writer agent synthesizes
+    // a cited report — streamed to the same useChat UI as an AI SDK message stream.
+    if (!teamAgentId && mode === 'deep') {
+      const query = lastUserText(body.messages)
+      if (query) {
+        const run = await mastra.getWorkflow('deep-research').createRun()
+        const workflowStream = await run.stream({ inputData: { query }, requestContext })
+        const uiStream = createUIMessageStream({
+          execute: async ({ writer }) => {
+            for await (const part of toAISdkStream(workflowStream as any, { from: 'workflow' }) as any) {
+              await writer.write(part)
+            }
+          },
+          onError: streamOnError('chat.deep', { sessionId }),
+        })
+        return createUIMessageStreamResponse({ stream: uiStream })
+      }
     }
-  }
 
-  const stream = await handleChatStream({
-    mastra,
-    agentId: teamAgentId || 'chat',
-    version: 'v6',
-    sendReasoning: true,
-    params: {
-      ...body,
-      // Plan execution: feed the agent a user message that embeds the confirmed plan, so the
-      // plan anchors the actual prompt (not just the system instructions) and the model can't
-      // drift off-topic. The clean original query was already persisted above for the UI.
-      messages: planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages,
-      requestContext,
-      abortSignal: c.req.raw.signal,
-      maxSteps: MAX_STEPS,
-    } as any,
-  })
-
-  // Plan execution: inject the confirmed task list as a real `data-plan` stream part
-  // (right after the stream's start) so it renders at the top of the answer and is owned
-  // by useChat — surviving tool-call stream churn and persisting via the normal parts path.
-  if (planTasks.length) {
-    const withPlan = createUIMessageStream({
-      execute: async ({ writer }) => {
-        let injected = false
-        for await (const chunk of stream as any) {
-          await writer.write(chunk)
-          if (!injected && (chunk?.type === 'start' || chunk?.type === 'start-step')) {
-            await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
-            injected = true
-          }
-        }
-        if (!injected) await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
-      },
+    const stream = await handleChatStream({
+      mastra,
+      agentId: teamAgentId || 'chat',
+      version: 'v6',
+      sendReasoning: true,
+      onError: streamOnError('chat.stream', { sessionId, agentId: teamAgentId || 'chat' }),
+      params: {
+        ...body,
+        // Plan execution: feed the agent a user message that embeds the confirmed plan, so the
+        // plan anchors the actual prompt (not just the system instructions) and the model can't
+        // drift off-topic. The clean original query was already persisted above for the UI.
+        messages: planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages,
+        requestContext,
+        abortSignal: c.req.raw.signal,
+        maxSteps: MAX_STEPS,
+      } as any,
     })
-    return createUIMessageStreamResponse({ stream: withPlan })
-  }
 
-  return createUIMessageStreamResponse({ stream })
+    // Plan execution: inject the confirmed task list as a real `data-plan` stream part
+    // (right after the stream's start) so it renders at the top of the answer and is owned
+    // by useChat — surviving tool-call stream churn and persisting via the normal parts path.
+    if (planTasks.length) {
+      const withPlan = createUIMessageStream({
+        execute: async ({ writer }) => {
+          let injected = false
+          for await (const chunk of stream as any) {
+            await writer.write(chunk)
+            if (!injected && (chunk?.type === 'start' || chunk?.type === 'start-step')) {
+              await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
+              injected = true
+            }
+          }
+          if (!injected) await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
+        },
+        onError: streamOnError('chat.plan-exec', { sessionId }),
+      })
+      return createUIMessageStreamResponse({ stream: withPlan })
+    }
+
+    return createUIMessageStreamResponse({ stream })
+  } catch (error) {
+    // Pre-stream failure (agent build, model resolution, workflow start). Surface it through an
+    // error-only message stream: createUIMessageStream routes the throw to onError, which logs
+    // with stack and returns the friendly one-liner the UI shows.
+    const errStream = createUIMessageStream({
+      execute: async () => {
+        throw error
+      },
+      onError: streamOnError('chat.route', { sessionId, mode }),
+    })
+    return createUIMessageStreamResponse({ stream: errStream })
+  }
 })
 
 // POST /api/v1/chat/plan — plan mode step 1: propose a short task list for the user to
