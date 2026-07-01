@@ -83,6 +83,16 @@ function WaitingIndicator() {
   )
 }
 
+// The server already maps failures to short, friendly messages (see stream-error.ts). This is a
+// last-resort guard for transport-level errors that bypass it: never show a stack / long dump.
+function friendlyError(error: { message?: string }): string {
+  const msg = (error?.message || '').trim()
+  if (!msg || msg.length > 120 || /\n\s*at\s|Error:|\{|\}|stack/i.test(msg)) {
+    return '请求出错了，请稍后重试。'
+  }
+  return msg
+}
+
 /**
  * Chat panel on Mastra + AI SDK UI. Renders message.parts (text / reasoning / tool-*)
  * with rich tool cards; no bloom-response-v1 contract. mode/model travel as headers.
@@ -105,6 +115,9 @@ export function ChatPanelMastra() {
   // Holds the confirmed tasks between 是 and the stream's onFinish, so the transport can send
   // them (in the request body) and onFinish can attach a persisted data-plan part to the answer.
   const planRef = useRef<string[] | null>(null)
+  // Snapshot of the plan cards taken at confirm time (they're cleared from view on 是). If the
+  // execution request fails, we restore them so nothing is lost — see useChat onError below.
+  const lastPlanTurnRef = useRef<PlanEntry[] | null>(null)
   const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
@@ -122,6 +135,7 @@ export function ChatPanelMastra() {
     setModelOverride(null)
     setPlans([])
     planRef.current = null
+    lastPlanTurnRef.current = null
   }, [activeSessionId])
 
   const handleModelChange = (next: string) => {
@@ -172,13 +186,23 @@ export function ChatPanelMastra() {
       const sid = useSessionStore.getState().activeSessionId
       if (!sid) return
       // Plan execution finished: the confirmed plan streamed in as a data-plan part (server
-      // side), so it's already in message.parts — just release the ref for the next turn.
+      // side), so it's already in message.parts — just release the refs for the next turn.
       if (planRef.current) planRef.current = null
+      lastPlanTurnRef.current = null
       const parts = ((message as any).parts || []) as any[]
       const content = parts.filter((p) => p?.type === 'text').map((p) => p.text || '').join('')
       void platform
         .saveAssistantMessage({ sessionId: sid, content, parts: slimParts(parts), model: modelRef.current })
         .catch(() => {})
+    },
+    // Execution failed (e.g. model API error). Restore the plan cards that were cleared on 是 so
+    // the full turn — both drafts and the confirmed plan — stays visible above the error message.
+    onError: () => {
+      planRef.current = null
+      if (lastPlanTurnRef.current) {
+        setPlans(lastPlanTurnRef.current)
+        lastPlanTurnRef.current = null
+      }
     },
   })
   const isStreaming = status === 'submitted' || status === 'streaming'
@@ -275,10 +299,11 @@ export function ChatPanelMastra() {
 
   // 是: execute the confirmed tasks. planRef feeds the transport (request body) and onFinish.
   // Clear all plan cards (the chosen one becomes a real answer with its own data-plan card; any
-  // discarded drafts are done with) so nothing lingers below the streamed answer.
+  // discarded drafts are done with) but snapshot them first so onError can restore them on failure.
   const handleConfirm = (entry: PlanEntry) => {
     if (entry.status !== 'ready') return
     planRef.current = entry.tasks
+    lastPlanTurnRef.current = plans.map((p) => (p.id === entry.id ? { ...p, status: 'done' as PlanStatus } : p))
     setPlans([])
     void sendMessage({ text: entry.query })
   }
@@ -346,7 +371,7 @@ export function ChatPanelMastra() {
         {error && (
           <div className="timeline-error-block" role="alert">
             <div className="timeline-error-title">请求失败</div>
-            <div className="timeline-error-message">{error.message}</div>
+            <div className="timeline-error-message">{friendlyError(error)}</div>
           </div>
         )}
 
