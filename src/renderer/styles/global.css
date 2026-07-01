@@ -1306,7 +1306,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 /* Chips */
 .img-chip-wrap { position: relative; }
-.img-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 0.5px solid var(--border-tertiary); border-radius: 999px; background: var(--bg-primary); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.img-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 0.5px solid var(--border-tertiary); border-radius: 999px; background: var(--bg-primary); color: var(--text-secondary); font-size: 12px; cursor: pointer; flex-shrink: 0; min-width: max-content; }
 .img-chip:hover { background: var(--bg-secondary); }
 .img-chip.active { border-color: var(--border-info); color: var(--text-info); }
 .img-chip.static { cursor: default; color: var(--text-info); border-color: var(--border-info); background: var(--bg-info); }
