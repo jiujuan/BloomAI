@@ -84,6 +84,10 @@ function ModelDetailPanel({
   const defaultSettingKey = DEFAULT_SETTING_KEY[model.modality]
   const isOllama = model.providerId === 'ollama'
 
+  // For custom providers not in PROVIDER_INFO, fall back to provider.apiKeySettingKey
+  const apiKeyKey = info?.apiKeyKey || provider?.apiKeySettingKey || null
+  const providerLabel = info?.label || provider?.name || model.providerId
+
   useEffect(() => {
     setLocalValues({})
     setSaved(false)
@@ -92,8 +96,8 @@ function ModelDetailPanel({
 
   const isDefault = defaultSettingKey ? settings[defaultSettingKey] === model.id : false
 
-  const apiKeyValue = info?.apiKeyKey ? (localValues[info.apiKeyKey] ?? '') : ''
-  const apiKeySaved = info?.apiKeyKey ? settings[info.apiKeyKey] === '***masked***' : false
+  const apiKeyValue = apiKeyKey ? (localValues[apiKeyKey] ?? '') : ''
+  const apiKeySaved = apiKeyKey ? settings[apiKeyKey] === '***masked***' : false
 
   const baseUrlDefault = info?.baseUrlDefault || ''
   const currentBaseUrl = isOllama
@@ -103,8 +107,8 @@ function ModelDetailPanel({
 
   const save = async () => {
     const settingsUpdates: Record<string, string> = {}
-    if (info?.apiKeyKey && localValues[info.apiKeyKey]?.trim()) {
-      settingsUpdates[info.apiKeyKey] = localValues[info.apiKeyKey].trim()
+    if (apiKeyKey && localValues[apiKeyKey]?.trim()) {
+      settingsUpdates[apiKeyKey] = localValues[apiKeyKey].trim()
     }
     if (Object.keys(settingsUpdates).length) await updateSettings(settingsUpdates)
 
@@ -134,7 +138,7 @@ function ModelDetailPanel({
     if (defaultSettingKey) await updateSetting(defaultSettingKey, model.id)
   }
 
-  const hasApiKeyChange = info?.apiKeyKey ? !!localValues[info.apiKeyKey]?.trim() : false
+  const hasApiKeyChange = apiKeyKey ? !!localValues[apiKeyKey]?.trim() : false
   const hasBaseUrlChange = localValues['__base_url__'] !== undefined
   const canSave = hasApiKeyChange || hasBaseUrlChange
 
@@ -143,7 +147,7 @@ function ModelDetailPanel({
       <div className="smd-header">
         <div className="smd-title">{model.label}</div>
         <div className="smd-meta">
-          <span>{info?.label || model.providerId}</span>
+          <span>{providerLabel}</span>
           <span className={cn('smd-badge', `smd-badge-${model.modality}`)}>
             {MODALITY_LABEL[model.modality] || model.modality}
           </span>
@@ -154,7 +158,7 @@ function ModelDetailPanel({
       </div>
 
       <div className="smd-body">
-        {info?.apiKeyKey && (
+        {apiKeyKey && (
           <div className="smd-field">
             <label className="smd-label">API Key</label>
             <div className="api-key-input-wrap">
@@ -162,8 +166,8 @@ function ModelDetailPanel({
                 type={showKey ? 'text' : 'password'}
                 className="api-key-input"
                 value={apiKeyValue}
-                onChange={e => setLocalValues(v => ({ ...v, [info.apiKeyKey!]: e.target.value }))}
-                placeholder={apiKeySaved ? 'Saved' : (info.apiKeyPlaceholder || 'API key')}
+                onChange={e => setLocalValues(v => ({ ...v, [apiKeyKey]: e.target.value }))}
+                placeholder={apiKeySaved ? 'Saved' : (info?.apiKeyPlaceholder || 'API key')}
               />
               <button className="api-key-toggle" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Hide' : 'Show'}>
                 {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -468,6 +472,7 @@ function ModelList({
   allModels,
   selectedId,
   settings,
+  providers,
   onSelect,
   onAddProvider,
   onAddModel,
@@ -475,6 +480,7 @@ function ModelList({
   allModels: LlmModelSummary[]
   selectedId: string | null
   settings: Record<string, string>
+  providers: LlmProviderSummary[]
   onSelect: (id: string) => void
   onAddProvider: () => void
   onAddModel: () => void
@@ -499,6 +505,11 @@ function ModelList({
     return key ? settings[key] === m.id : false
   }
 
+  const providerName = useMemo(() => {
+    const map = new Map(providers.map(p => [p.id, p.name]))
+    return (id: string) => PROVIDER_INFO[id]?.label || map.get(id) || id
+  }, [providers])
+
   return (
     <div className="settings-model-list">
       <div className="sml-toolbar">
@@ -521,10 +532,9 @@ function ModelList({
       <div className="sml-scroll">
         {providerOrder.map(providerId => {
           const models = grouped.get(providerId)!
-          const info = PROVIDER_INFO[providerId]
           return (
             <div key={providerId} className="sml-group">
-              <div className="sml-group-header">{info?.label || providerId}</div>
+              <div className="sml-group-header">{providerName(providerId)}</div>
               {models.map(m => (
                 <button
                   key={m.id}
@@ -665,6 +675,7 @@ export function SettingsPage() {
                   allModels={allModels}
                   selectedId={selectedModelId}
                   settings={settings}
+                  providers={providers}
                   onSelect={handleSelectModel}
                   onAddProvider={() => setRightPanelMode('add-provider')}
                   onAddModel={() => { setNewProviderId(undefined); setRightPanelMode('add-model') }}

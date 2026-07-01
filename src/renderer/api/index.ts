@@ -28,6 +28,7 @@ export type LlmProviderSummary = {
   name: string
   kind: 'anthropic' | 'openai' | 'openai-compatible' | 'ollama'
   baseUrl: string | null
+  apiKeySettingKey: string | null
   isEnabled: boolean
   config: Record<string, unknown>
   hasApiKey: boolean

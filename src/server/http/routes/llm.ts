@@ -32,6 +32,7 @@ function providerSummary(provider: LlmProviderRecord) {
     name: provider.name,
     kind: provider.kind,
     baseUrl: provider.base_url,
+    apiKeySettingKey: provider.api_key_setting_key,
     isEnabled: provider.is_enabled === 1,
     config: parseJsonObject(provider.config_json),
     hasApiKey: hasApiKey(provider),
