@@ -1,15 +1,18 @@
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
 import { ImageIcon, Sparkles } from 'lucide-react'
 import { useImageStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { ModelPicker } from './parts/ModelPicker'
 import { AspectRatioPicker } from './parts/AspectRatioPicker'
 import { StylePicker } from './parts/StylePicker'
+import { ReferenceImageInput } from './parts/ReferenceImageInput'
+import { filesToDataUris, imagesFromDataTransfer } from './parts/image-file'
 
-/** Prompt input + toolbar chips (model / ratio / style / optimize) + generate button. */
+/** Prompt input + toolbar chips (model / ratio / style / reference / optimize) + generate. */
 export function ImageComposer() {
-  const { composer, setComposer, generate, generating } = useImageStore()
+  const { composer, setComposer, addReferenceImages, generate, generating } = useImageStore()
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const [dragOver, setDragOver] = useState(false)
 
   const canGenerate = composer.prompt.trim().length > 0 && !!composer.model && !generating
 
@@ -20,15 +23,36 @@ export function ImageComposer() {
     }
   }
 
+  const onPaste = async (e: React.ClipboardEvent) => {
+    const files = imagesFromDataTransfer(e.clipboardData)
+    if (files.length) {
+      e.preventDefault()
+      addReferenceImages(await filesToDataUris(files))
+    }
+  }
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const files = imagesFromDataTransfer(e.dataTransfer)
+    if (files.length) addReferenceImages(await filesToDataUris(files))
+  }
+
   return (
-    <div className="img-composer">
+    <div
+      className={cn('img-composer', dragOver && 'drag-over')}
+      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
       <textarea
         ref={taRef}
         className="img-composer-input"
-        placeholder="描述你想要的图片（Enter 生成，Shift+Enter 换行）"
+        placeholder="描述你想要的图片（Enter 生成，Shift+Enter 换行，可粘贴/拖拽参考图）"
         value={composer.prompt}
         onChange={e => setComposer({ prompt: e.target.value })}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         rows={2}
       />
       <div className="img-composer-toolbar">
@@ -40,6 +64,7 @@ export function ImageComposer() {
           <ModelPicker />
           <AspectRatioPicker />
           <StylePicker />
+          <ReferenceImageInput />
           <button
             type="button"
             className={cn('img-chip toggle', composer.optimize && 'on')}

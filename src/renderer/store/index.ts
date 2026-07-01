@@ -306,6 +306,8 @@ interface ImageActions {
   renameSession: (id: string, title: string) => Promise<void>
   loadGenerations: (sessionId: string) => Promise<void>
   setComposer: (patch: Partial<ImageComposerState>) => void
+  addReferenceImages: (uris: string[]) => void
+  removeReferenceImage: (index: number) => void
   applyTemplate: (t: ImageTemplateDef) => void
   generate: () => Promise<void>
 }
@@ -377,6 +379,19 @@ export const useImageStore = create<ImageState & ImageActions>()(
     },
 
     setComposer: (patch) => set(s => ({ composer: { ...s.composer, ...patch } })),
+
+    // Reference images (图生图). Capped at 4; duplicates ignored.
+    addReferenceImages: (uris) => set(s => {
+      const merged = [...s.composer.referenceImages]
+      for (const u of uris) {
+        if (u && !merged.includes(u) && merged.length < 4) merged.push(u)
+      }
+      return { composer: { ...s.composer, referenceImages: merged } }
+    }),
+
+    removeReferenceImage: (index) => set(s => ({
+      composer: { ...s.composer, referenceImages: s.composer.referenceImages.filter((_, i) => i !== index) },
+    })),
 
     applyTemplate: (t) => set(s => ({
       composer: {

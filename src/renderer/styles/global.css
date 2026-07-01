@@ -1295,6 +1295,14 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .img-composer-input:focus { border-color: var(--border-info); }
 .img-composer-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .img-composer-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; }
+.img-composer.drag-over { outline: 2px dashed var(--border-info); outline-offset: -4px; border-radius: var(--radius-lg); }
+
+/* Reference-image thumbnails */
+.img-ref-thumbs { display: flex; gap: 6px; flex-basis: 100%; margin-top: 4px; }
+.img-ref-thumb { position: relative; width: 48px; height: 48px; border-radius: var(--radius-md); overflow: hidden; border: 0.5px solid var(--border-tertiary); }
+.img-ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.img-ref-remove { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; border-radius: 50%; border: none; background: rgba(0,0,0,0.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.img-ref-remove:hover { background: rgba(0,0,0,0.75); }
 
 /* Chips */
 .img-chip-wrap { position: relative; }
@@ -1303,6 +1311,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .img-chip.active { border-color: var(--border-info); color: var(--text-info); }
 .img-chip.static { cursor: default; color: var(--text-info); border-color: var(--border-info); background: var(--bg-info); }
 .img-chip.toggle.on { color: var(--text-info); border-color: var(--border-info); }
+.img-chip.on { color: var(--text-info); border-color: var(--border-info); background: var(--bg-info); }
 .img-chip-label { white-space: nowrap; }
 .img-chip-caret { transition: transform 0.15s; }
 .img-chip-caret.up { transform: rotate(180deg); }

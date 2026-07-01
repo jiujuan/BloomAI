@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { generateImage, resolveModel, streamChatCompletion } from '../llm'
-import { getAspectRatio, getImageStyle } from '../../shared/image-gen'
+import { getAspectRatio, getImageStyle, IMAGE_MODEL_CAPS } from '../../shared/image-gen'
 import type { AspectRatioDef } from '../../shared/image-gen'
 import { getImagesDir } from '../db/paths'
 import { imageGenerationRepo, type ImageGeneration } from '../db/repositories/image-generation.repo'
@@ -29,6 +29,19 @@ function resolveSize(providerId: string, ratio: AspectRatioDef | undefined): str
     return '1024x1024'
   }
   return ratio.size
+}
+
+/**
+ * Keep only well-formed reference images (data: or http(s) URLs), cap at 4, and drop them
+ * entirely when the model can't do img2img — so an unsupported model never gets an image[]
+ * it would reject.
+ */
+export function sanitizeReferenceImages(model: string, images: unknown): string[] {
+  if (IMAGE_MODEL_CAPS[model]?.supportsImg2Img === false) return []
+  if (!Array.isArray(images)) return []
+  return images
+    .filter((x): x is string => typeof x === 'string' && /^(data:image\/|https?:\/\/)/.test(x))
+    .slice(0, 4)
 }
 
 /**
@@ -83,7 +96,7 @@ export async function generateForSession(input: GenerateForSessionInput): Promis
   const basePrompt = optimize ? await optimizePrompt(input.prompt) : input.prompt
   const resolvedPrompt = style ? `${basePrompt}${style.promptSuffix}` : basePrompt
 
-  const reference = (input.referenceImages || []).filter(Boolean)
+  const reference = sanitizeReferenceImages(input.model, input.referenceImages)
 
   const record = imageGenerationRepo.create({
     session_id: input.sessionId,

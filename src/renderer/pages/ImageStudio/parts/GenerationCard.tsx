@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Copy, Download, Maximize2, RefreshCw, Wand2, AlertCircle } from 'lucide-react'
+import { Copy, Download, ImagePlus, Maximize2, RefreshCw, Wand2, AlertCircle } from 'lucide-react'
 import { imageMediaUrl, type ImageGenerationRecord } from '@renderer/api'
 import { useImageStore } from '@renderer/store'
 import { getAspectRatio, getImageStyle } from '@shared/image-gen'
@@ -7,7 +7,7 @@ import { Lightbox } from './Lightbox'
 
 /** One generated image: prompt bubble + result card (loading / completed / failed). */
 export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
-  const { setComposer, generate, composer } = useImageStore()
+  const { setComposer, addReferenceImages, generate, composer } = useImageStore()
   const [lightbox, setLightbox] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -59,6 +59,24 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
     generate()
   }
 
+  // Convert the saved image (served from localhost, which providers can't reach) into a Data
+  // URI so it can be sent directly as an img2img reference on the next generation.
+  const setAsReference = async () => {
+    if (!src) return
+    try {
+      const blob = await (await fetch(src)).blob()
+      const dataUri: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(blob)
+      })
+      addReferenceImages([dataUri])
+    } catch (e) {
+      console.error('set as reference', e)
+    }
+  }
+
   return (
     <div className="img-gen">
       <div className="img-gen-prompt">
@@ -91,6 +109,7 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
               <button className="img-action" onClick={() => setLightbox(true)} title="查看大图"><Maximize2 size={15} /></button>
               <button className="img-action" onClick={redraw} title="重绘"><RefreshCw size={15} /></button>
               <button className="img-action" onClick={applySame} title="做同款"><Wand2 size={15} /></button>
+              <button className="img-action" onClick={setAsReference} title="设为参考图"><ImagePlus size={15} /></button>
             </div>
           </div>
         )}
