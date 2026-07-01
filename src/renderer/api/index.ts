@@ -53,6 +53,58 @@ export type OllamaRemoteModel = {
   details?: Record<string, unknown>
 }
 
+// AI 画图 (Image Studio) types — snake_case to match server rows (like Message/Session).
+
+export type ImageSessionSummary = {
+  id: string
+  title: string
+  default_model: string | null
+  status: string
+  created_at: number
+  updated_at: number
+}
+
+export type ImageGenerationRecord = {
+  id: string
+  session_id: string
+  message_id: string | null
+  prompt: string
+  resolved_prompt: string | null
+  provider_id: string
+  model: string
+  aspect_ratio: string | null
+  style: string | null
+  size: string | null
+  seed: number | null
+  reference_images: string | null
+  status: 'queued' | 'in_progress' | 'completed' | 'failed'
+  provider_task_id: string | null
+  progress: number | null
+  url: string | null
+  local_path: string | null
+  error_msg: string | null
+  duration_ms: number | null
+  created_at: number
+  updated_at: number
+}
+
+export type ImageGeneratePayload = {
+  sessionId: string
+  prompt: string
+  model: string
+  aspectRatioId?: string
+  styleId?: string | null
+  referenceImages?: string[]
+  negativePrompt?: string
+  seed?: number
+  optimize?: boolean
+}
+
+/** URL the renderer uses to display a locally-saved generated image. */
+export function imageMediaUrl(genId: string): string {
+  return `${API_BASE}/media/image/${genId}`
+}
+
 // Platform API
 
 export const platform = {
@@ -150,9 +202,40 @@ export const platform = {
     return data
   },
 
+  // AI 画图 (Image Studio)
+  image: {
+    async listSessions(): Promise<ImageSessionSummary[]> {
+      const { data } = await apiFetch('/image-sessions')
+      return data
+    },
+    async createSession(opts: { title?: string; default_model?: string } = {}): Promise<ImageSessionSummary> {
+      const { data } = await apiFetch('/image-sessions', { method: 'POST', body: JSON.stringify(opts) })
+      return data
+    },
+    async renameSession(id: string, title: string): Promise<ImageSessionSummary> {
+      const { data } = await apiFetch(`/image-sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) })
+      return data
+    },
+    async deleteSession(id: string): Promise<void> {
+      await apiFetch(`/image-sessions/${id}`, { method: 'DELETE' })
+    },
+    async listGenerations(sessionId: string): Promise<ImageGenerationRecord[]> {
+      const { data } = await apiFetch(`/image-sessions/${sessionId}/generations`)
+      return data
+    },
+    async listTemplates(category?: string) {
+      const suffix = category && category !== '全部' ? `?category=${encodeURIComponent(category)}` : ''
+      const { data } = await apiFetch(`/image-templates${suffix}`)
+      return data
+    },
+    async generate(payload: ImageGeneratePayload): Promise<ImageGenerationRecord> {
+      const { data } = await apiFetch('/images', { method: 'POST', body: JSON.stringify(payload) })
+      return data
+    },
+  },
+
   // Clipboard (Electron only, graceful fallback)
-  async readClipboard(): Promise<string> {
-    if (isElectron()) return (window as any).bloomai.readClipboard()
+  async readClipboard(): Promise<string> {    if (isElectron()) return (window as any).bloomai.readClipboard()
     try { return await navigator.clipboard.readText() } catch { return '' }
   },
 

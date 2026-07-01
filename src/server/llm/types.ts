@@ -65,6 +65,13 @@ export type ImageGenerationRequest = {
   image?: string | string[]
   responseFormat?: 'url' | 'b64_json'
   saveTo?: string
+  negativePrompt?: string
+  seed?: number
+  n?: number
+  // Structured params resolved server-side (aspectRatioId -> size, styleId -> prompt suffix)
+  // via @shared/image-gen. A caller may still pass size directly to override.
+  aspectRatioId?: string
+  styleId?: string
 }
 
 export type ResolvedImageGenerationRequest = ImageGenerationRequest & {

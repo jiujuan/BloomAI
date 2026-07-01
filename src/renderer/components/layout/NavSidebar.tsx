@@ -1,5 +1,5 @@
 import React from 'react'
-import { MessageCircle, Settings, User, Wrench, Puzzle } from 'lucide-react'
+import { MessageCircle, Settings, User, Wrench, Puzzle, Image } from 'lucide-react'
 import { useUIStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 
@@ -8,6 +8,7 @@ export function NavSidebar() {
 
   const items = [
     { id: 'chat' as const, icon: MessageCircle, label: 'Chat' },
+    { id: 'image' as const, icon: Image, label: 'AI 画图' },
     { id: 'tools' as const, icon: Wrench, label: 'Tools' },
     { id: 'skills' as const, icon: Puzzle, label: 'Skills' },
     { id: 'personas' as const, icon: User, label: 'Personas' },
