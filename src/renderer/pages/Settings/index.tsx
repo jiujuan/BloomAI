@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Eye, EyeOff, Check, Sun, Moon, Monitor, Search, Star, CircleDot, Circle } from 'lucide-react'
+import { Eye, EyeOff, Check, Sun, Moon, Monitor, Search, Star, CircleDot, Circle, Plus } from 'lucide-react'
 import type { LlmModelSummary, LlmProviderSummary } from '@renderer/api'
 import { platform } from '@renderer/api'
 import { useLlmStore, useSettingsStore, useUIStore } from '@renderer/store'
@@ -7,6 +7,7 @@ import { cn } from '@renderer/utils'
 import { AVAILABLE_MODELS } from '@shared/constants'
 
 type Tab = 'models' | 'shortcuts' | 'appearance' | 'privacy'
+type RightPanelMode = 'detail' | 'add-provider' | 'add-model'
 
 const FONT_FAMILY_OPTIONS = [
   { value: 'system', label: '系统默认' },
@@ -124,7 +125,6 @@ function ModelDetailPanel({
 
   const cancel = () => setLocalValues({})
 
-  // FIX: server expects isEnabled as boolean, not is_enabled as 0/1
   const toggleEnabled = async () => {
     await platform.updateLlmModel(model.id, { isEnabled: !model.isEnabled })
     onRefresh()
@@ -229,6 +229,239 @@ function ModelDetailPanel({
   )
 }
 
+// ------ Add Provider panel ------
+
+function AddProviderPanel({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void
+  onCreated: (provider: LlmProviderSummary) => void
+}) {
+  const [id, setId] = useState('')
+  const [name, setName] = useState('')
+  const [kind, setKind] = useState<'openai-compatible' | 'openai' | 'anthropic' | 'ollama'>('openai-compatible')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [apiKeySettingKey, setApiKeySettingKey] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleIdChange = (val: string) => {
+    const cleaned = val.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    setId(cleaned)
+    setApiKeySettingKey(cleaned ? `${cleaned}_api_key` : '')
+  }
+
+  const submit = async () => {
+    if (!id.trim() || !name.trim()) {
+      setError('厂商 ID 和名称为必填项')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const provider = await platform.createLlmProvider({
+        id: id.trim(),
+        name: name.trim(),
+        kind,
+        baseUrl: baseUrl.trim() || undefined,
+        apiKeySettingKey: apiKeySettingKey.trim() || undefined,
+      })
+      onCreated(provider)
+    } catch (err: any) {
+      setError(err.message || '创建失败')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="settings-model-detail">
+      <div className="smd-header">
+        <div className="smd-title">添加厂商</div>
+        <div className="smd-meta">新增 AI 模型厂商及其配置</div>
+      </div>
+      <div className="smd-body">
+        <div className="smd-field">
+          <label className="smd-label">厂商 ID（唯一标识，小写英文/数字/-）</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={id}
+              onChange={e => handleIdChange(e.target.value)}
+              placeholder="例如：zhipu"
+            />
+          </div>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">显示名称</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="例如：智谱 ZhipuAI"
+            />
+          </div>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">类型</label>
+          <select
+            className="appearance-select"
+            value={kind}
+            onChange={e => setKind(e.target.value as typeof kind)}
+          >
+            <option value="openai-compatible">OpenAI-Compatible（兼容 OpenAI 接口）</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+          </select>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">Base URL（可选）</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={baseUrl}
+              onChange={e => setBaseUrl(e.target.value)}
+              placeholder="例如：https://open.bigmodel.cn/api/paas/v4"
+            />
+          </div>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">API Key 设置键</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={apiKeySettingKey}
+              onChange={e => setApiKeySettingKey(e.target.value)}
+              placeholder="例如：zhipu_api_key"
+            />
+          </div>
+          <span className="smd-note">用于存储该厂商的 API Key，自动根据 ID 生成</span>
+        </div>
+        {error && <p className="smd-note" style={{ color: 'var(--text-danger, #dc2626)' }}>{error}</p>}
+        <div className="smd-save-row">
+          <button className="btn-primary btn-sm" onClick={submit} disabled={saving}>
+            {saving ? '创建中...' : '创建厂商'}
+          </button>
+          <button className="btn-secondary btn-sm" onClick={onCancel}>取消</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ------ Add Model panel ------
+
+function AddModelPanel({
+  providers,
+  initialProviderId,
+  onCancel,
+  onCreated,
+}: {
+  providers: LlmProviderSummary[]
+  initialProviderId?: string
+  onCancel: () => void
+  onCreated: (model: LlmModelSummary) => void
+}) {
+  const [providerId, setProviderId] = useState(initialProviderId || providers[0]?.id || '')
+  const [modelId, setModelId] = useState('')
+  const [label, setLabel] = useState('')
+  const [modality, setModality] = useState<'text' | 'image' | 'video'>('text')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (initialProviderId) setProviderId(initialProviderId)
+  }, [initialProviderId])
+
+  const submit = async () => {
+    if (!providerId || !modelId.trim() || !label.trim()) {
+      setError('厂商、模型 ID 和名称为必填项')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const model = await platform.createLlmModel({
+        providerId,
+        modelId: modelId.trim(),
+        label: label.trim(),
+        modality,
+        isBuiltin: false,
+      })
+      onCreated(model)
+    } catch (err: any) {
+      setError(err.message || '创建失败')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="settings-model-detail">
+      <div className="smd-header">
+        <div className="smd-title">添加模型</div>
+        <div className="smd-meta">为已有厂商添加新的模型</div>
+      </div>
+      <div className="smd-body">
+        <div className="smd-field">
+          <label className="smd-label">厂商</label>
+          <select
+            className="appearance-select"
+            value={providerId}
+            onChange={e => setProviderId(e.target.value)}
+          >
+            {providers.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">模型 ID（API 调用时使用）</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={modelId}
+              onChange={e => setModelId(e.target.value)}
+              placeholder="例如：glm-4v-flash"
+            />
+          </div>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">显示名称</label>
+          <div className="api-key-input-wrap">
+            <input
+              className="api-key-input"
+              value={label}
+              onChange={e => setLabel(e.target.value)}
+              placeholder="例如：GLM-4V Flash"
+            />
+          </div>
+        </div>
+        <div className="smd-field">
+          <label className="smd-label">模态</label>
+          <select
+            className="appearance-select"
+            value={modality}
+            onChange={e => setModality(e.target.value as typeof modality)}
+          >
+            <option value="text">文本对话（text）</option>
+            <option value="image">图像生成（image）</option>
+            <option value="video">视频生成（video）</option>
+          </select>
+        </div>
+        {error && <p className="smd-note" style={{ color: 'var(--text-danger, #dc2626)' }}>{error}</p>}
+        <div className="smd-save-row">
+          <button className="btn-primary btn-sm" onClick={submit} disabled={saving}>
+            {saving ? '创建中...' : '创建模型'}
+          </button>
+          <button className="btn-secondary btn-sm" onClick={onCancel}>取消</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ------ Left model list ------
 
 function ModelList({
@@ -236,11 +469,15 @@ function ModelList({
   selectedId,
   settings,
   onSelect,
+  onAddProvider,
+  onAddModel,
 }: {
   allModels: LlmModelSummary[]
   selectedId: string | null
   settings: Record<string, string>
   onSelect: (id: string) => void
+  onAddProvider: () => void
+  onAddModel: () => void
 }) {
   const [search, setSearch] = useState('')
 
@@ -264,6 +501,14 @@ function ModelList({
 
   return (
     <div className="settings-model-list">
+      <div className="sml-toolbar">
+        <button className="sml-add-btn" onClick={onAddProvider}>
+          <Plus size={11} /> 添加厂商
+        </button>
+        <button className="sml-add-btn" onClick={onAddModel}>
+          <Plus size={11} /> 添加模型
+        </button>
+      </div>
       <div className="sml-search">
         <Search size={14} className="sml-search-icon" />
         <input
@@ -316,6 +561,8 @@ export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('models')
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [providers, setProviders] = useState<LlmProviderSummary[]>([])
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('detail')
+  const [newProviderId, setNewProviderId] = useState<string | undefined>(undefined)
   const { settings, updateSetting, updateSettings } = useSettingsStore()
   const {
     textModels: backendTextModels,
@@ -364,6 +611,23 @@ export function SettingsPage() {
     platform.getLlmProviders().then(setProviders).catch(() => {})
   }
 
+  const handleSelectModel = (id: string) => {
+    setSelectedModelId(id)
+    setRightPanelMode('detail')
+  }
+
+  const handleProviderCreated = (provider: LlmProviderSummary) => {
+    handleRefresh()
+    setNewProviderId(provider.id)
+    setRightPanelMode('add-model')
+  }
+
+  const handleModelCreated = (model: LlmModelSummary) => {
+    handleRefresh()
+    setSelectedModelId(model.id)
+    setRightPanelMode('detail')
+  }
+
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'models', label: 'Models' },
     { id: 'appearance', label: 'Appearance' },
@@ -401,21 +665,39 @@ export function SettingsPage() {
                   allModels={allModels}
                   selectedId={selectedModelId}
                   settings={settings}
-                  onSelect={setSelectedModelId}
+                  onSelect={handleSelectModel}
+                  onAddProvider={() => setRightPanelMode('add-provider')}
+                  onAddModel={() => { setNewProviderId(undefined); setRightPanelMode('add-model') }}
                 />
                 <div className="settings-model-detail-wrap">
-                  {selectedModel ? (
-                    <ModelDetailPanel
-                      key={selectedModel.id}
-                      model={selectedModel}
-                      provider={selectedProvider}
-                      settings={settings}
-                      updateSettings={updateSettings}
-                      updateSetting={updateSetting}
-                      onRefresh={handleRefresh}
+                  {rightPanelMode === 'add-provider' && (
+                    <AddProviderPanel
+                      onCancel={() => setRightPanelMode('detail')}
+                      onCreated={handleProviderCreated}
                     />
-                  ) : (
-                    <div className="smd-placeholder">选择左侧模型查看详情</div>
+                  )}
+                  {rightPanelMode === 'add-model' && (
+                    <AddModelPanel
+                      providers={providers}
+                      initialProviderId={newProviderId}
+                      onCancel={() => setRightPanelMode('detail')}
+                      onCreated={handleModelCreated}
+                    />
+                  )}
+                  {rightPanelMode === 'detail' && (
+                    selectedModel ? (
+                      <ModelDetailPanel
+                        key={selectedModel.id}
+                        model={selectedModel}
+                        provider={selectedProvider}
+                        settings={settings}
+                        updateSettings={updateSettings}
+                        updateSetting={updateSetting}
+                        onRefresh={handleRefresh}
+                      />
+                    ) : (
+                      <div className="smd-placeholder">选择左侧模型查看详情</div>
+                    )
                   )}
                 </div>
               </>

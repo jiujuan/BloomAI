@@ -180,6 +180,10 @@ export const platform = {
     const { data } = await apiFetch('/llm/providers')
     return data
   },
+  async createLlmProvider(input: { id: string; name: string; kind: string; baseUrl?: string; apiKeySettingKey?: string }): Promise<LlmProviderSummary> {
+    const { data } = await apiFetch('/llm/providers', { method: 'POST', body: JSON.stringify(input) })
+    return data
+  },
   async updateLlmProvider(id: string, updates: object): Promise<LlmProviderSummary> {
     const { data } = await apiFetch(`/llm/providers/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
     return data

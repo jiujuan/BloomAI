@@ -59,6 +59,28 @@ function readModality(value: unknown): LlmModality | undefined | 'invalid' {
 
 llmRoutes.get('/providers', (c) => c.json({ data: llmRepo.listProviders().map(providerSummary) }))
 
+llmRoutes.post('/providers', async (c) => {
+  const body = await readJson<any>(c)
+  if (!body.id || !body.name || !body.kind) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'id, name, and kind are required' } }, 400)
+  }
+  if (llmRepo.getProvider(body.id)) {
+    return c.json({ error: { code: 'CONFLICT', message: `Provider "${body.id}" already exists` } }, 409)
+  }
+  const KINDS = new Set(['anthropic', 'openai', 'openai-compatible', 'ollama'])
+  if (!KINDS.has(body.kind)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid kind' } }, 400)
+  }
+  const provider = llmRepo.createProvider({
+    id: body.id,
+    name: body.name,
+    kind: body.kind,
+    baseUrl: typeof body.baseUrl === 'string' ? body.baseUrl : null,
+    apiKeySettingKey: typeof body.apiKeySettingKey === 'string' ? body.apiKeySettingKey : null,
+  })
+  return c.json({ data: providerSummary(provider) }, 201)
+})
+
 llmRoutes.patch('/providers/:id', async (c) => {
   const provider = llmRepo.getProvider(c.req.param('id'))
   if (!provider) return c.json({ error: { code: 'NOT_FOUND', message: 'Provider not found' } }, 404)

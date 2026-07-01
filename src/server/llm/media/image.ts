@@ -19,7 +19,10 @@ registerImageAdapter('ollama', ollamaImageAdapter)
 
 export async function generateImage(input: ImageGenerationRequest): Promise<ImageGenerationResult> {
   const resolved = await resolveModel(input.model, 'image')
-  const adapter = getImageAdapter(resolved.provider.id)
+  let adapter = getImageAdapter(resolved.provider.id)
+  // Kind-based fallback for dynamically added providers not in the registry.
+  if (!adapter && resolved.provider.kind === 'openai-compatible') adapter = openaiCompatibleImageAdapter
+  if (!adapter && resolved.provider.kind === 'ollama') adapter = ollamaImageAdapter
   if (!adapter) {
     throw new LlmUnsupportedModelError(
       `Image generation is not implemented for provider "${resolved.provider.id}" (model "${input.model}")`

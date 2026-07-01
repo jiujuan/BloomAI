@@ -120,6 +120,22 @@ export const llmRepo = {
     return getOrmDb().select().from(llm_providers).where(eq(llm_providers.id, id)).get() as LlmProviderRecord | undefined
   },
 
+  createProvider(input: { id: string; name: string; kind: LlmProviderRecord['kind']; baseUrl?: string | null; apiKeySettingKey?: string | null }): LlmProviderRecord {
+    const now = Date.now()
+    getOrmDb().insert(llm_providers).values({
+      id: input.id,
+      name: input.name,
+      kind: input.kind,
+      base_url: input.baseUrl ?? null,
+      api_key_setting_key: input.apiKeySettingKey ?? null,
+      is_enabled: 1,
+      config_json: '{}',
+      created_at: now,
+      updated_at: now,
+    }).run()
+    return this.getProvider(input.id)!
+  },
+
   updateProvider(id: string, data: Partial<LlmProviderUpdate>): LlmProviderRecord | undefined {
     const updates: Partial<typeof llm_providers.$inferInsert> = { updated_at: Date.now() }
     if (data.name !== undefined) updates.name = data.name

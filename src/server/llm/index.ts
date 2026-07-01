@@ -5,6 +5,7 @@ import { createAgnesTextProvider } from './providers/agnes'
 import { createAnthropicProvider } from './providers/anthropic'
 import { createDeepSeekProvider } from './providers/deepseek'
 import { createOllamaProvider } from './providers/ollama'
+import { createOpenAICompatibleProvider } from './providers/openai-compatible'
 import { createOpenAIProvider } from './providers/openai'
 import { listModels, listProviders, resolveModel } from './registry'
 import { parseOllamaNdjsonLine, parseOpenAICompatibleSseLine } from './stream'
@@ -26,6 +27,10 @@ export async function* streamChatCompletion(input: ChatStreamRequest): AsyncGene
   }
   if (resolved.provider.id === 'deepseek') {
     yield* createDeepSeekProvider(resolved).streamChat(input)
+    return
+  }
+  if (resolved.provider.kind === 'openai-compatible') {
+    yield* createOpenAICompatibleProvider(resolved).streamChat(input)
     return
   }
   if (resolved.provider.kind === 'ollama') {
