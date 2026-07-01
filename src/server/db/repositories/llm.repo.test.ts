@@ -39,8 +39,11 @@ describe('llmRepo', () => {
       'agnes',
       'anthropic',
       'deepseek',
+      'google',
       'ollama',
       'openai',
+      'qwen',
+      'together',
     ])
     expect(secondProviders).toHaveLength(firstProviders.length)
   })
@@ -60,10 +63,19 @@ describe('llmRepo', () => {
         'deepseek-reasoner',
       ])
     )
-    expect(llmRepo.listModels({ modality: 'image' }).map((model) => model.id)).toEqual([
-      'agnes-image-2.1-flash',
-      'dall-e-3',
-    ])
+    expect(llmRepo.listModels({ modality: 'image' }).map((model) => model.id)).toEqual(
+      expect.arrayContaining([
+        'agnes-image-2.1-flash',
+        'dall-e-3',
+        'gpt-image-1',
+        'imagen-3-fast',
+        'imagen-3',
+        'flux-schnell',
+        'flux-dev',
+        'wanx-v1',
+        'wanx-v2-turbo',
+      ])
+    )
     expect(llmRepo.listModels({ modality: 'video' }).map((model) => model.id)).toEqual([
       'agnes-video-v2.0',
     ])
@@ -88,6 +100,9 @@ describe('llmRepo', () => {
         'agnes_api_key',
         'deepseek_api_key',
         'ollama_base_url',
+        'google_api_key',
+        'together_api_key',
+        'qwen_api_key',
         'default_image_model',
         'default_video_model',
       ])

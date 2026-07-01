@@ -201,6 +201,7 @@ function seedSettings() {
     ['shortcut_overlay', 'Alt+Space'], ['anthropic_api_key', ''],
     ['openai_api_key', ''], ['agnes_api_key', ''], ['deepseek_api_key', ''],
     ['ollama_base_url', 'http://127.0.0.1:11434'],
+    ['google_api_key', ''], ['together_api_key', ''], ['qwen_api_key', ''],
     ['default_image_model', 'agnes-image-2.1-flash'], ['default_video_model', 'agnes-video-v2.0'],
     ['image_output_dir', ''],
     ['clipboard_monitoring', 'true'], ['context_awareness', 'true'],
@@ -220,6 +221,9 @@ function seedLlm() {
     ['agnes', 'Agnes', 'openai-compatible', 'https://apihub.agnes-ai.com/v1', 'agnes_api_key'],
     ['deepseek', 'DeepSeek', 'openai-compatible', 'https://api.deepseek.com/v1', 'deepseek_api_key'],
     ['ollama', 'Ollama', 'ollama', 'http://127.0.0.1:11434', null],
+    ['google', 'Google AI', 'openai-compatible', 'https://generativelanguage.googleapis.com/v1beta/openai', 'google_api_key'],
+    ['together', 'Together.ai', 'openai-compatible', 'https://api.together.xyz/v1', 'together_api_key'],
+    ['qwen', 'Qwen (DashScope)', 'openai-compatible', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen_api_key'],
   ] as const
 
   for (const [id, name, kind, base_url, api_key_setting_key] of providers) {
@@ -243,11 +247,18 @@ function seedLlm() {
     ['gpt-4o', 'openai', 'gpt-4o', 'GPT-4o', 'text', 40],
     ['gpt-4o-mini', 'openai', 'gpt-4o-mini', 'GPT-4o mini', 'text', 50],
     ['dall-e-3', 'openai', 'dall-e-3', 'DALL-E 3', 'image', 20],
+    ['gpt-image-1', 'openai', 'gpt-image-1', 'GPT-Image 1', 'image', 15],
     ['agnes-2.0-flash', 'agnes', 'agnes-2.0-flash', 'Agnes 2.0 Flash', 'text', 60],
     ['agnes-image-2.1-flash', 'agnes', 'agnes-image-2.1-flash', 'Agnes Image 2.1 Flash', 'image', 10],
     ['agnes-video-v2.0', 'agnes', 'agnes-video-v2.0', 'Agnes Video V2.0', 'video', 10],
     ['deepseek-chat', 'deepseek', 'deepseek-chat', 'DeepSeek Chat', 'text', 70],
     ['deepseek-reasoner', 'deepseek', 'deepseek-reasoner', 'DeepSeek Reasoner', 'text', 80],
+    ['imagen-3-fast', 'google', 'imagen-3.0-fast-generate-001', 'Imagen 3 Fast', 'image', 10],
+    ['imagen-3', 'google', 'imagen-3.0-generate-001', 'Imagen 3', 'image', 20],
+    ['flux-schnell', 'together', 'black-forest-labs/FLUX.1-schnell', 'FLUX.1 Schnell', 'image', 10],
+    ['flux-dev', 'together', 'black-forest-labs/FLUX.1-dev', 'FLUX.1 Dev', 'image', 20],
+    ['wanx-v1', 'qwen', 'wanx-v1', 'Qwen Wanx v1', 'image', 10],
+    ['wanx-v2-turbo', 'qwen', 'wanx-v2.1-t2i-turbo', 'Qwen Wanx v2 Turbo', 'image', 20],
   ] as const
 
   for (const [id, provider_id, model_id, label, modality, sort_order] of models) {

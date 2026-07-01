@@ -60,6 +60,13 @@ export const IMAGE_MODEL_CAPS: Record<string, Partial<ImageModelCap>> = {
   'dall-e-3': { supportsImg2Img: false },
   'gpt-image-1': { supportsImg2Img: true },
   midjourney: { supportsImg2Img: true, async: true },
+  'imagen-3.0-generate-001': { supportsImg2Img: false },
+  'imagen-3.0-fast-generate-001': { supportsImg2Img: false },
+  'black-forest-labs/FLUX.1-schnell': { supportsImg2Img: false },
+  'black-forest-labs/FLUX.1-dev': { supportsImg2Img: true },
+  'wanx-v1': { supportsImg2Img: false },
+  'wanx-v2.1-t2i-turbo': { supportsImg2Img: false },
+  'sd3.5': { supportsImg2Img: true, local: true },
 }
 
 export function getAspectRatio(id: string | null | undefined): AspectRatioDef | undefined {
