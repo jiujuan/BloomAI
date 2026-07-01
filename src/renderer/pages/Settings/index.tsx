@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Eye, EyeOff, Check, Sun, Moon, Monitor, Search } from 'lucide-react'
-import type { LlmModelSummary } from '@renderer/api'
+import { Eye, EyeOff, Check, Sun, Moon, Monitor, Search, Star, CircleDot, Circle } from 'lucide-react'
+import type { LlmModelSummary, LlmProviderSummary } from '@renderer/api'
 import { platform } from '@renderer/api'
 import { useLlmStore, useSettingsStore, useUIStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
@@ -27,20 +27,18 @@ interface ProviderInfo {
   label: string
   apiKeyKey?: string
   apiKeyPlaceholder?: string
-  baseUrlKey?: string
   baseUrlDefault: string
-  baseUrlLabel?: string
 }
 
 const PROVIDER_INFO: Record<string, ProviderInfo> = {
-  anthropic: { label: 'Anthropic', apiKeyKey: 'anthropic_api_key', apiKeyPlaceholder: 'sk-ant-...', baseUrlDefault: 'https://api.anthropic.com' },
-  openai:    { label: 'OpenAI',    apiKeyKey: 'openai_api_key',    apiKeyPlaceholder: 'sk-...',     baseUrlDefault: 'https://api.openai.com/v1' },
-  agnes:     { label: 'Agnes',     apiKeyKey: 'agnes_api_key',     apiKeyPlaceholder: 'Agnes API key', baseUrlDefault: 'https://apihub.agnes-ai.com/v1' },
-  deepseek:  { label: 'DeepSeek', apiKeyKey: 'deepseek_api_key',  apiKeyPlaceholder: 'DeepSeek API key', baseUrlDefault: 'https://api.deepseek.com/v1' },
-  ollama:    { label: 'Ollama',    baseUrlKey: 'ollama_base_url',  baseUrlDefault: 'http://127.0.0.1:11434', baseUrlLabel: 'Base URL' },
-  google:    { label: 'Google AI', apiKeyKey: 'google_api_key',   apiKeyPlaceholder: 'AIzaSy...', baseUrlDefault: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  together:  { label: 'Together.ai', apiKeyKey: 'together_api_key', apiKeyPlaceholder: 'Together.ai API key', baseUrlDefault: 'https://api.together.xyz/v1' },
-  qwen:      { label: 'Qwen (DashScope)', apiKeyKey: 'qwen_api_key', apiKeyPlaceholder: 'DashScope API key', baseUrlDefault: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  anthropic: { label: 'Anthropic',       apiKeyKey: 'anthropic_api_key', apiKeyPlaceholder: 'sk-ant-...', baseUrlDefault: 'https://api.anthropic.com' },
+  openai:    { label: 'OpenAI',          apiKeyKey: 'openai_api_key',    apiKeyPlaceholder: 'sk-...',     baseUrlDefault: 'https://api.openai.com/v1' },
+  agnes:     { label: 'Agnes',           apiKeyKey: 'agnes_api_key',     apiKeyPlaceholder: 'Agnes API key', baseUrlDefault: 'https://apihub.agnes-ai.com/v1' },
+  deepseek:  { label: 'DeepSeek',        apiKeyKey: 'deepseek_api_key',  apiKeyPlaceholder: 'DeepSeek API key', baseUrlDefault: 'https://api.deepseek.com/v1' },
+  ollama:    { label: 'Ollama',          baseUrlDefault: 'http://127.0.0.1:11434' },
+  google:    { label: 'Google AI',       apiKeyKey: 'google_api_key',    apiKeyPlaceholder: 'AIzaSy...', baseUrlDefault: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  together:  { label: 'Together.ai',     apiKeyKey: 'together_api_key',  apiKeyPlaceholder: 'Together.ai API key', baseUrlDefault: 'https://api.together.xyz/v1' },
+  qwen:      { label: 'Qwen (DashScope)', apiKeyKey: 'qwen_api_key',     apiKeyPlaceholder: 'DashScope API key', baseUrlDefault: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
 }
 
 const MODALITY_LABEL: Record<string, string> = { text: 'Text', image: 'Image', video: 'Video' }
@@ -61,16 +59,18 @@ function groupBy<T>(arr: T[], key: (item: T) => string): Map<string, T[]> {
   return map
 }
 
-// ------ Two-column Models panel ------
+// ------ Right detail panel ------
 
 function ModelDetailPanel({
   model,
+  provider,
   settings,
   updateSettings,
   updateSetting,
   onRefresh,
 }: {
   model: LlmModelSummary
+  provider: LlmProviderSummary | undefined
   settings: Record<string, string>
   updateSettings: (updates: Record<string, string>) => Promise<void>
   updateSetting: (key: string, value: string) => Promise<void>
@@ -81,8 +81,8 @@ function ModelDetailPanel({
   const [saved, setSaved] = useState(false)
   const info = PROVIDER_INFO[model.providerId]
   const defaultSettingKey = DEFAULT_SETTING_KEY[model.modality]
+  const isOllama = model.providerId === 'ollama'
 
-  // Reset local state when model changes
   useEffect(() => {
     setLocalValues({})
     setSaved(false)
@@ -94,25 +94,39 @@ function ModelDetailPanel({
   const apiKeyValue = info?.apiKeyKey ? (localValues[info.apiKeyKey] ?? '') : ''
   const apiKeySaved = info?.apiKeyKey ? settings[info.apiKeyKey] === '***masked***' : false
 
-  const baseUrlValue = info?.baseUrlKey ? (localValues[info.baseUrlKey] ?? '') : ''
-  const baseUrlSaved = info?.baseUrlKey ? !!settings[info.baseUrlKey] : false
+  const baseUrlDefault = info?.baseUrlDefault || ''
+  const currentBaseUrl = isOllama
+    ? (settings['ollama_base_url'] || baseUrlDefault)
+    : (provider?.baseUrl || baseUrlDefault)
+  const baseUrlValue = localValues['__base_url__'] ?? ''
 
   const save = async () => {
-    const updates: Record<string, string> = {}
+    const settingsUpdates: Record<string, string> = {}
     if (info?.apiKeyKey && localValues[info.apiKeyKey]?.trim()) {
-      updates[info.apiKeyKey] = localValues[info.apiKeyKey].trim()
+      settingsUpdates[info.apiKeyKey] = localValues[info.apiKeyKey].trim()
     }
-    if (info?.baseUrlKey && localValues[info.baseUrlKey]?.trim()) {
-      updates[info.baseUrlKey] = localValues[info.baseUrlKey].trim()
+    if (Object.keys(settingsUpdates).length) await updateSettings(settingsUpdates)
+
+    if (localValues['__base_url__'] !== undefined) {
+      const newBaseUrl = localValues['__base_url__'].trim()
+      if (isOllama) {
+        await updateSettings({ ollama_base_url: newBaseUrl })
+      } else {
+        await platform.updateLlmProvider(model.providerId, { baseUrl: newBaseUrl || null })
+      }
     }
-    if (Object.keys(updates).length) await updateSettings(updates)
+
     setLocalValues({})
     setSaved(true)
+    onRefresh()
     setTimeout(() => setSaved(false), 2000)
   }
 
+  const cancel = () => setLocalValues({})
+
+  // FIX: server expects isEnabled as boolean, not is_enabled as 0/1
   const toggleEnabled = async () => {
-    await platform.updateLlmModel(model.id, { is_enabled: model.isEnabled ? 0 : 1 })
+    await platform.updateLlmModel(model.id, { isEnabled: !model.isEnabled })
     onRefresh()
   }
 
@@ -120,8 +134,9 @@ function ModelDetailPanel({
     if (defaultSettingKey) await updateSetting(defaultSettingKey, model.id)
   }
 
-  const canSave = (info?.apiKeyKey ? !!localValues[info.apiKeyKey]?.trim() : false)
-               || (info?.baseUrlKey ? !!localValues[info.baseUrlKey]?.trim() : false)
+  const hasApiKeyChange = info?.apiKeyKey ? !!localValues[info.apiKeyKey]?.trim() : false
+  const hasBaseUrlChange = localValues['__base_url__'] !== undefined
+  const canSave = hasApiKeyChange || hasBaseUrlChange
 
   return (
     <div className="settings-model-detail">
@@ -133,6 +148,7 @@ function ModelDetailPanel({
             {MODALITY_LABEL[model.modality] || model.modality}
           </span>
           {!model.isEnabled && <span className="smd-badge smd-badge-disabled">已禁用</span>}
+          {isDefault && <span className="smd-badge smd-badge-default">默认</span>}
         </div>
         <div className="smd-model-id">{model.modelId}</div>
       </div>
@@ -156,24 +172,31 @@ function ModelDetailPanel({
           </div>
         )}
 
-        {info?.baseUrlKey && (
-          <div className="smd-field">
-            <label className="smd-label">{info.baseUrlLabel || 'Base URL'}</label>
+        <div className="smd-field">
+          <label className="smd-label">Base URL</label>
+          <div className="api-key-input-wrap">
             <input
               type="text"
               className="api-key-input"
               value={baseUrlValue}
-              onChange={e => setLocalValues(v => ({ ...v, [info.baseUrlKey!]: e.target.value }))}
-              placeholder={baseUrlSaved ? settings[info.baseUrlKey!] || info.baseUrlDefault : info.baseUrlDefault}
+              onChange={e => setLocalValues(v => ({ ...v, '__base_url__': e.target.value }))}
+              placeholder={currentBaseUrl || baseUrlDefault}
             />
           </div>
-        )}
+        </div>
 
-        {!info?.apiKeyKey && !info?.baseUrlKey && (
-          <p className="smd-note">
-            Provider base URL: <code>{info?.baseUrlDefault}</code>
-          </p>
-        )}
+        <div className="smd-save-row">
+          <button className={cn('btn-primary btn-sm', saved && 'saved')} onClick={save}>
+            {saved ? <><Check size={13} /> 已保存</> : '保存'}
+          </button>
+          {canSave && (
+            <button className="btn-secondary btn-sm" onClick={cancel}>
+              取消
+            </button>
+          )}
+        </div>
+
+        <div className="smd-divider" />
 
         <div className="smd-actions">
           <div className="smd-toggles">
@@ -195,16 +218,12 @@ function ModelDetailPanel({
               onClick={setDefault}
               disabled={isDefault}
             >
-              {isDefault ? <><Check size={13} /> 默认{MODALITY_LABEL[model.modality]}模型</> : `设为默认${MODALITY_LABEL[model.modality]}模型`}
+              {isDefault
+                ? <><Star size={12} fill="currentColor" /> 已是默认</>
+                : `设为默认${MODALITY_LABEL[model.modality]}`}
             </button>
           )}
         </div>
-
-        {canSave && (
-          <button className={cn('btn-primary', saved && 'saved')} onClick={save}>
-            {saved ? <><Check size={14} /> 已保存</> : '保存'}
-          </button>
-        )}
       </div>
     </div>
   )
@@ -215,10 +234,12 @@ function ModelDetailPanel({
 function ModelList({
   allModels,
   selectedId,
+  settings,
   onSelect,
 }: {
   allModels: LlmModelSummary[]
   selectedId: string | null
+  settings: Record<string, string>
   onSelect: (id: string) => void
 }) {
   const [search, setSearch] = useState('')
@@ -235,6 +256,11 @@ function ModelList({
     const extra = [...grouped.keys()].filter(k => !order.includes(k))
     return [...order.filter(k => grouped.has(k)), ...extra]
   }, [grouped])
+
+  const isDefault = (m: LlmModelSummary) => {
+    const key = DEFAULT_SETTING_KEY[m.modality]
+    return key ? settings[key] === m.id : false
+  }
 
   return (
     <div className="settings-model-list">
@@ -261,6 +287,15 @@ function ModelList({
                   onClick={() => onSelect(m.id)}
                 >
                   <span className="sml-item-label">{m.label}</span>
+                  <span className="sml-item-icons">
+                    {isDefault(m) && (
+                      <Star size={11} className="sml-icon-default" fill="currentColor" />
+                    )}
+                    {m.isEnabled
+                      ? <CircleDot size={11} className="sml-icon-enabled" />
+                      : <Circle size={11} className="sml-icon-disabled" />
+                    }
+                  </span>
                   <span className={cn('sml-badge', `sml-badge-${m.modality}`)}>
                     {MODALITY_LABEL[m.modality] || m.modality}
                   </span>
@@ -280,6 +315,7 @@ function ModelList({
 export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('models')
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
+  const [providers, setProviders] = useState<LlmProviderSummary[]>([])
   const { settings, updateSetting, updateSettings } = useSettingsStore()
   const {
     textModels: backendTextModels,
@@ -290,9 +326,11 @@ export function SettingsPage() {
   } = useLlmStore()
   const { theme, setTheme } = useUIStore()
 
+  useEffect(() => { loadModels() }, [loadModels])
+
   useEffect(() => {
-    loadModels()
-  }, [loadModels])
+    platform.getLlmProviders().then(setProviders).catch(() => {})
+  }, [])
 
   const textModels = useMemo<LlmModelSummary[]>(() => {
     if (backendTextModels.length) return backendTextModels
@@ -315,11 +353,16 @@ export function SettingsPage() {
   )
 
   const selectedModel = selectedModelId ? allModels.find(m => m.id === selectedModelId) || null : null
+  const selectedProvider = selectedModel ? providers.find(p => p.id === selectedModel.providerId) : undefined
 
-  // Auto-select first model once loaded
   useEffect(() => {
     if (!selectedModelId && allModels.length > 0) setSelectedModelId(allModels[0].id)
   }, [allModels, selectedModelId])
+
+  const handleRefresh = () => {
+    loadModels()
+    platform.getLlmProviders().then(setProviders).catch(() => {})
+  }
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'models', label: 'Models' },
@@ -357,6 +400,7 @@ export function SettingsPage() {
                 <ModelList
                   allModels={allModels}
                   selectedId={selectedModelId}
+                  settings={settings}
                   onSelect={setSelectedModelId}
                 />
                 <div className="settings-model-detail-wrap">
@@ -364,10 +408,11 @@ export function SettingsPage() {
                     <ModelDetailPanel
                       key={selectedModel.id}
                       model={selectedModel}
+                      provider={selectedProvider}
                       settings={settings}
                       updateSettings={updateSettings}
                       updateSetting={updateSetting}
-                      onRefresh={loadModels}
+                      onRefresh={handleRefresh}
                     />
                   ) : (
                     <div className="smd-placeholder">选择左侧模型查看详情</div>

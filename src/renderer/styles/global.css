@@ -1431,15 +1431,23 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .smd-badge-image   { background: rgba(99,102,241,0.15); color: #4f46e5; }
 .smd-badge-video   { background: rgba(245,158,11,0.15); color: #b45309; }
 .smd-badge-disabled { background: var(--bg-tertiary); color: var(--text-tertiary); }
+.smd-badge-default  { background: rgba(245,158,11,0.15); color: #b45309; }
 .smd-model-id { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
 .smd-body { display: flex; flex-direction: column; gap: 16px; }
 .smd-field { display: flex; flex-direction: column; gap: 6px; }
 .smd-label { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
 .smd-note { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; }
 .smd-note code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-tertiary); padding: 1px 4px; border-radius: 3px; }
+.smd-divider { height: 1px; background: var(--border-secondary); margin: 0 -2px; }
 .smd-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .smd-toggles { display: flex; align-items: center; gap: 8px; }
 .smd-toggle-label { font-size: 13px; color: var(--text-secondary); }
+.smd-save-row { display: flex; align-items: center; gap: 8px; }
 .btn-sm { padding: 5px 12px; font-size: 12px; }
 .btn-secondary.active { background: var(--bg-info-subtle, rgba(99,102,241,0.1)); border-color: var(--border-info); color: var(--text-info); }
+/* Left list icons */
+.sml-item-icons { display: flex; align-items: center; gap: 3px; padding-right: 2px; }
+.sml-icon-default  { color: #b45309; flex-shrink: 0; }
+.sml-icon-enabled  { color: #16a34a; flex-shrink: 0; }
+.sml-icon-disabled { color: var(--text-tertiary); flex-shrink: 0; }
 

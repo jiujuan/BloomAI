@@ -76,7 +76,7 @@ llmRoutes.patch('/providers/:id', async (c) => {
 llmRoutes.get('/models', (c) => {
   const modality = readModality(c.req.query('modality'))
   if (modality === 'invalid') return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid modality' } }, 400)
-  return c.json({ data: llmRepo.listModels({ modality, enabledOnly: true }).map(modelSummary) })
+  return c.json({ data: llmRepo.listModels({ modality }).map(modelSummary) })
 })
 
 llmRoutes.post('/models', async (c) => {
