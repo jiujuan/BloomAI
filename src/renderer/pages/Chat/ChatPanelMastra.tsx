@@ -14,7 +14,7 @@ import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
 import { PlanCard, type PlanStatus } from './parts/PlanCard'
 import { WriterParams, defaultWritingConfig } from './WriterParams'
-import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, type SelectionMenuState } from './MessageActions'
+import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, type SelectionMenuState } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -324,6 +324,7 @@ export function ChatPanelMastra() {
 
   return (
     <div className="chat-panel">
+      <CopyToast />
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
       </div>
@@ -569,14 +570,16 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
   const canCopy = !streaming && !showWaiting && !!fullText
 
   // Right-click over a selection inside this bubble → custom 复制/点赞 menu. With no selection we
-  // don't preventDefault, so the native menu still works elsewhere.
+  // don't preventDefault, so the native menu still works elsewhere. The range is captured so the
+  // menu can restore the highlight (the right-click can otherwise move the native selection).
   const handleContextMenu = (e: React.MouseEvent) => {
     const sel = window.getSelection()
     const text = sel?.toString().trim() || ''
-    if (!text || !sel) return
-    if (bubbleRef.current && sel.anchorNode && bubbleRef.current.contains(sel.anchorNode)) {
+    if (!text || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (bubbleRef.current && bubbleRef.current.contains(range.commonAncestorContainer)) {
       e.preventDefault()
-      setMenu({ x: e.clientX, y: e.clientY, text })
+      setMenu({ x: e.clientX, y: e.clientY, text, range: range.cloneRange() })
     }
   }
 

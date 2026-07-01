@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
-import { Copy, Check, ThumbsUp } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Copy, ThumbsUp } from 'lucide-react'
 
 // Content-copy actions for assistant answers:
 //  - CopyButton: shown below the bubble on hover, copies the whole answer.
 //  - SelectionMenu: a right-click menu over selected text, with 复制 / 点赞.
+//  - CopyToast: a brief centered "已复制" confirmation, mounted once per panel.
 // Self-contained and reusable — the parent only wires a bubble ref + contextmenu handler.
 
 /** Concatenate an assistant message's text parts into one plain-text (markdown source) string. */
@@ -26,18 +27,21 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
+const COPIED_EVENT = 'bloom:copied'
+
+/** Fire the centered "已复制" toast (see CopyToast). */
+export function emitCopied(message = '已复制') {
+  window.dispatchEvent(new CustomEvent(COPIED_EVENT, { detail: message }))
+}
+
 /** Copy-the-whole-answer button. Lives in the hover-revealed .msg-actions row below the bubble. */
 export function CopyButton({ getText }: { getText: () => string }) {
-  const [copied, setCopied] = useState(false)
   const onClick = async () => {
-    if (await writeClipboard(getText())) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    }
+    if (await writeClipboard(getText())) emitCopied()
   }
   return (
     <button className="msg-action-btn" onClick={onClick} title="复制全部" aria-label="复制回答">
-      {copied ? <Check size={14} /> : <Copy size={14} />}
+      <Copy size={14} />
     </button>
   )
 }
@@ -46,12 +50,17 @@ export interface SelectionMenuState {
   x: number
   y: number
   text: string
+  /** The selection at right-click time, restored so the highlight survives the menu opening. */
+  range: Range
 }
 
 /**
  * Context menu for a text selection inside an assistant bubble. Positioned at the cursor
- * (fixed, viewport coords). Closes on outside click / scroll / resize / Escape. 复制 copies the
- * selected text; 点赞 signals a like back to the parent.
+ * (fixed, viewport coords). Closes on outside click / scroll / resize / Escape.
+ *
+ * The right-button mousedown (and the menu appearing under the cursor) can move the native
+ * selection, so on open we re-apply the captured range to keep the original text highlighted.
+ * 复制 copies the captured text, clears the selection, and shows the toast; 点赞 signals a like.
  */
 export function SelectionMenu({
   state,
@@ -64,17 +73,25 @@ export function SelectionMenu({
 }) {
   useEffect(() => {
     if (!state) return
+    // Re-apply the selection after paint: the mouse events around the right-click may have
+    // collapsed or moved it, so this restores the exact text the user highlighted.
+    const raf = requestAnimationFrame(() => {
+      const sel = window.getSelection()
+      if (sel) {
+        sel.removeAllRanges()
+        sel.addRange(state.range)
+      }
+    })
     const close = () => onClose()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
-    // The opening right-click already fired its mousedown before these attach, so the menu
-    // won't self-close; clicks inside the menu stopPropagation (see below).
     document.addEventListener('mousedown', close)
     document.addEventListener('scroll', close, true)
     window.addEventListener('resize', close)
     document.addEventListener('keydown', onKey)
     return () => {
+      cancelAnimationFrame(raf)
       document.removeEventListener('mousedown', close)
       document.removeEventListener('scroll', close, true)
       window.removeEventListener('resize', close)
@@ -85,8 +102,10 @@ export function SelectionMenu({
   if (!state) return null
 
   const copy = async () => {
-    await writeClipboard(state.text)
+    const ok = await writeClipboard(state.text)
+    window.getSelection()?.removeAllRanges() // clear the highlight once copied
     onClose()
+    if (ok) emitCopied()
   }
   const like = () => {
     onLike()
@@ -98,7 +117,12 @@ export function SelectionMenu({
       className="selection-menu"
       style={{ top: state.y, left: state.x }}
       role="menu"
-      onMouseDown={(e) => e.stopPropagation()}
+      // preventDefault keeps the mousedown from stealing focus / collapsing the selection;
+      // stopPropagation keeps the outside-click listener from closing us before onClick runs.
+      onMouseDown={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button className="selection-menu-item" role="menuitem" onClick={copy}>
@@ -119,5 +143,35 @@ export function LikedBadge() {
     <span className="msg-action-btn liked" title="已点赞" aria-label="已点赞">
       <ThumbsUp size={14} fill="currentColor" />
     </span>
+  )
+}
+
+/**
+ * Brief centered "已复制" confirmation. Mount once inside the chat panel; any copy action
+ * (hover button or selection menu) fires the toast via emitCopied(). Auto-dismisses.
+ */
+export function CopyToast() {
+  const [toast, setToast] = useState<{ id: number; msg: string } | null>(null)
+  const idRef = useRef(0)
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    const onCopied = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      setToast({ id: ++idRef.current, msg: typeof detail === 'string' && detail ? detail : '已复制' })
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => setToast(null), 1200)
+    }
+    window.addEventListener(COPIED_EVENT, onCopied as EventListener)
+    return () => {
+      window.removeEventListener(COPIED_EVENT, onCopied as EventListener)
+      clearTimeout(timer.current)
+    }
+  }, [])
+  if (!toast) return null
+  // key restarts the fade animation on each successive copy.
+  return (
+    <div key={toast.id} className="copy-toast" role="status" aria-live="polite">
+      {toast.msg}
+    </div>
   )
 }
