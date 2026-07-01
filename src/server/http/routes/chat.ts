@@ -4,6 +4,7 @@ import { handleChatStream, toAISdkStream } from '@mastra/ai-sdk'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { mastra } from '../../mastra'
 import { TEAM_AGENT_BY_TAB } from '../../mastra/agents/team'
+import { normalizeWriting } from '../../mastra/agents/writer-prompt'
 import { messageRepo } from '../../db/repositories/message.repo'
 import { sessionRepo } from '../../db/repositories/session.repo'
 import { logError, sanitizeErrorMessage } from '../../logger/logger'
@@ -39,6 +40,12 @@ chatRoutes.post('/', async (c) => {
   // interactive/persisted plan card is handled client-side (a `data-plan` UI part).
   const planTasks = normalizeTasks(body?.plan)
   if (planTasks.length) requestContext.set('planTasks', planTasks)
+
+  // AI Writer tab: typed parameters (type + platform/style/word-count) chosen in the UI.
+  // Sent in the body (Chinese values can't ride in headers) and whitelist-validated before
+  // they shape the writer agent's system instructions (see writer-prompt.ts).
+  const writing = normalizeWriting(body?.writing)
+  if (writing) requestContext.set('writing', writing)
 
   persistUserMessage(sessionId, body.messages)
 
