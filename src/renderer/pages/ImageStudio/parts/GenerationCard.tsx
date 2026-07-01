@@ -19,14 +19,21 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
 
   const badges = [gen.model, ratio?.label, style?.label].filter(Boolean) as string[]
 
-  const download = () => {
+  const defaultFileName = `bloomai-${gen.id}.png`
+
+  const download = async () => {
     if (!src) return
-    const a = document.createElement('a')
-    a.href = src
-    a.download = `bloomai-${gen.id}.png`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+    const w = window as any
+    if (w.bloomai?.saveImage) {
+      await w.bloomai.saveImage(src, defaultFileName)
+    } else {
+      const a = document.createElement('a')
+      a.href = src
+      a.download = defaultFileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }
   }
 
   const copy = async () => {
@@ -136,7 +143,7 @@ export function GenerationCard({ gen }: { gen: ImageGenerationRecord }) {
         )}
       </div>
 
-      {lightbox && src && <Lightbox src={src} alt={gen.prompt} onClose={() => setLightbox(false)} />}
+      {lightbox && src && <Lightbox src={src} alt={gen.prompt} onClose={() => setLightbox(false)} onDownload={download} />}
     </div>
   )
 }

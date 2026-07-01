@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, clipboard, shell } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, clipboard, shell, dialog } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { fork } from 'child_process'
 import type { ChildProcess } from 'child_process'
@@ -136,6 +137,19 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.windowOpenMain, () => { mainWindow?.show(); mainWindow?.focus() })
   ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
   ipcMain.handle(IPC_CHANNELS.shellOpenExternal, (_e, url: string) => shell.openExternal(url))
+
+  ipcMain.handle(IPC_CHANNELS.saveImage, async (_e, srcUrl: string, defaultName: string) => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showSaveDialog(win!, {
+      defaultPath: defaultName,
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    })
+    if (result.canceled || !result.filePath) return false
+    const res = await fetch(srcUrl)
+    if (!res.ok) return false
+    fs.writeFileSync(result.filePath, Buffer.from(await res.arrayBuffer()))
+    return true
+  })
 }
 
 // ── App lifecycle ────────────────────────────────────────────────────────────

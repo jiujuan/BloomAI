@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('bloomai', {
 
   // Shell
   openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.shellOpenExternal, url),
+
+  // Dialog
+  saveImage: (srcUrl: string, defaultName: string) => ipcRenderer.invoke(IPC_CHANNELS.saveImage, srcUrl, defaultName),
 })

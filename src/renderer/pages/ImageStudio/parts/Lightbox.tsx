@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
-import { X } from 'lucide-react'
+import { Download, X } from 'lucide-react'
 
-export function Lightbox({ src, alt, onClose }: { src: string; alt?: string; onClose: () => void }) {
+export function Lightbox({ src, alt, onClose, onDownload }: { src: string; alt?: string; onClose: () => void; onDownload?: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     document.addEventListener('keydown', onKey)
@@ -10,7 +10,16 @@ export function Lightbox({ src, alt, onClose }: { src: string; alt?: string; onC
 
   return (
     <div className="img-lightbox" onClick={onClose} role="dialog" aria-modal="true">
-      <button className="img-lightbox-close" onClick={onClose} aria-label="关闭"><X size={20} /></button>
+      <div className="img-lightbox-toolbar" onClick={e => e.stopPropagation()}>
+        {onDownload && (
+          <button className="img-lightbox-btn" onClick={onDownload} title="下载">
+            <Download size={18} />
+          </button>
+        )}
+        <button className="img-lightbox-btn" onClick={onClose} aria-label="关闭">
+          <X size={18} />
+        </button>
+      </div>
       <img className="img-lightbox-img" src={src} alt={alt || ''} onClick={e => e.stopPropagation()} />
     </div>
   )

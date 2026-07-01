@@ -6,4 +6,5 @@ export const IPC_CHANNELS = {
   windowOpenMain: 'window:open-main',
   appVersion: 'app:version',
   shellOpenExternal: 'shell:open-external',
+  saveImage: 'dialog:save-image',
 } as const
