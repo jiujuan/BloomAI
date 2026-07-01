@@ -10,6 +10,9 @@ export type ChatRequestContext = {
   mode: 'chat' | 'plan' | 'deep'
   model: string
   sessionId: string
+  /** Confirmed plan tasks (chat "plan" mode, after the user clicks 是). When present,
+   *  the agent executes these numbered tasks instead of proposing a plan. */
+  planTasks?: string[]
 }
 
 const BASE_INSTRUCTIONS = `
@@ -41,11 +44,35 @@ function instructionsFor(mode: ChatRequestContext['mode'] | undefined): string {
   return BASE_INSTRUCTIONS
 }
 
+// Plan EXECUTION mode: the user already reviewed and confirmed a task list in the UI,
+// so skip proposing and just carry it out, organizing the answer by task number.
+function planExecuteInstructions(tasks: string[]): string {
+  const list = tasks.map((t, i) => `${i + 1}. ${t}`).join('\n')
+  return `
+${BASE_INSTRUCTIONS}
+
+PLAN EXECUTION MODE: The user has reviewed and confirmed the following numbered task plan.
+Your entire response MUST carry out this exact plan for the user's original request — do not
+drift to a different topic, do not re-propose or re-plan, and do not skip tasks.
+Work through the tasks in order (calling tools such as web_search when a task needs external
+info), then produce ONE cohesive answer with a section per task, each headed by its number.
+
+Confirmed tasks:
+${list}
+`.trim()
+}
+
+/** Instructions from the request context: confirmed plan tasks win over mode. */
+function resolveInstructions(requestContext: any): string {
+  const tasks = requestContext?.get('planTasks') as string[] | undefined
+  if (Array.isArray(tasks) && tasks.length) return planExecuteInstructions(tasks)
+  return instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined)
+}
+
 export const chatAgent = new Agent({
   id: 'chat',
   name: 'BloomAI Chat',
-  instructions: ({ requestContext }) =>
-    instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined),
+  instructions: ({ requestContext }) => resolveInstructions(requestContext),
   model: ({ requestContext }) =>
     resolveMastraModel(requestContext?.get('model') as string | undefined),
   // Every enabled tool + installed skill is mounted; the LLM chooses what to call.

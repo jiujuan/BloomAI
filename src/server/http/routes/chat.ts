@@ -12,6 +12,8 @@ import { readJson } from '../util'
 /** Default chat model: Agnes (openai-compatible relay reachable from this network). */
 const DEFAULT_CHAT_MODEL = 'agnes-2.0-flash'
 const MAX_STEPS = 10
+/** Plan mode: proposal task-count bounds (ideal 3-5, hard cap 10). */
+const MAX_PLAN_TASKS = 10
 
 export const chatRoutes = new Hono()
 
@@ -29,6 +31,13 @@ chatRoutes.post('/', async (c) => {
   requestContext.set('mode', mode)
   requestContext.set('model', model)
   requestContext.set('sessionId', sessionId)
+
+  // Plan mode (confirmed): the client sends the user-approved task list in `body.plan`
+  // (in the body, not a header, since tasks may contain non-ASCII text). When present,
+  // the chat agent executes those numbered tasks (see chat-agent instructions). The
+  // interactive/persisted plan card is handled client-side (a `data-plan` UI part).
+  const planTasks = normalizeTasks(body?.plan)
+  if (planTasks.length) requestContext.set('planTasks', planTasks)
 
   persistUserMessage(sessionId, body.messages)
 
@@ -62,13 +71,73 @@ chatRoutes.post('/', async (c) => {
     sendReasoning: true,
     params: {
       ...body,
+      // Plan execution: feed the agent a user message that embeds the confirmed plan, so the
+      // plan anchors the actual prompt (not just the system instructions) and the model can't
+      // drift off-topic. The clean original query was already persisted above for the UI.
+      messages: planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages,
       requestContext,
       abortSignal: c.req.raw.signal,
       maxSteps: MAX_STEPS,
     } as any,
   })
 
+  // Plan execution: inject the confirmed task list as a real `data-plan` stream part
+  // (right after the stream's start) so it renders at the top of the answer and is owned
+  // by useChat — surviving tool-call stream churn and persisting via the normal parts path.
+  if (planTasks.length) {
+    const withPlan = createUIMessageStream({
+      execute: async ({ writer }) => {
+        let injected = false
+        for await (const chunk of stream as any) {
+          await writer.write(chunk)
+          if (!injected && (chunk?.type === 'start' || chunk?.type === 'start-step')) {
+            await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
+            injected = true
+          }
+        }
+        if (!injected) await writer.write({ type: 'data-plan', data: { tasks: planTasks } } as any)
+      },
+    })
+    return createUIMessageStreamResponse({ stream: withPlan })
+  }
+
   return createUIMessageStreamResponse({ stream })
+})
+
+// POST /api/v1/chat/plan — plan mode step 1: propose a short task list for the user to
+// confirm. Non-streaming; returns { data: { tasks } }. No message is persisted here — the
+// turn is only persisted once the user confirms and the execution request runs through POST /.
+chatRoutes.post('/plan', async (c) => {
+  const body = await readJson<any>(c)
+  const model = c.req.header('x-bloom-model') || DEFAULT_CHAT_MODEL
+  const sessionId = c.req.header('x-bloom-session') || body?.sessionId || ''
+  const query = typeof body?.query === 'string' ? body.query.trim() : ''
+  if (!query) return c.json({ data: { tasks: [] } })
+
+  const avoid = Array.isArray(body?.avoid)
+    ? body.avoid.filter((t: unknown): t is string => typeof t === 'string' && !!t.trim())
+    : []
+
+  const requestContext = new RequestContext()
+  requestContext.set('model', model)
+  requestContext.set('sessionId', sessionId)
+
+  const prompt = [
+    `User request: ${query}`,
+    avoid.length ? `\nPropose a DIFFERENT plan; avoid repeating these tasks:\n- ${avoid.join('\n- ')}` : '',
+    `\nReturn a JSON array of 3-5 concrete tasks (at most ${MAX_PLAN_TASKS}).`,
+  ].join('')
+
+  let tasks: string[] = []
+  try {
+    const planner = mastra.getAgent('plan-planner')
+    const res = await planner.generate(prompt, { requestContext })
+    tasks = parsePlanTasks(res.text)
+  } catch (error) {
+    logError('chat.proposePlan', { code: 'PLAN_ERROR', message: sanitizeErrorMessage(error, 'propose plan failed') }, { sessionId })
+  }
+  if (tasks.length === 0) tasks = [query]
+  return c.json({ data: { tasks } })
 })
 
 // POST /api/v1/chat/assistant — persist a finished assistant message with its full UI parts.
@@ -127,10 +196,62 @@ function lastUserText(messages: unknown): string {
   return ''
 }
 
+// Rewrite the last user message to embed the confirmed plan, so the plan is part of the
+// prompt the model actually reads. Returns a NEW array (original body.messages untouched, so
+// the clean query is what gets persisted/shown). Both `parts` and `content` are set because
+// downstream conversion may read either.
+function augmentLastUserMessage(messages: any, planTasks: string[]): any {
+  if (!Array.isArray(messages)) return messages
+  let idx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') { idx = i; break }
+  }
+  if (idx < 0) return messages
+  const original = lastUserText([messages[idx]])
+  const list = planTasks.map((t, i) => `${i + 1}. ${t}`).join('\n')
+  const wrapped = [
+    `请严格按照以下已确认的计划来完成我的请求，逐条执行、不要偏离主题，最后按任务编号分段给出答案。`,
+    ``,
+    `我的原始请求：${original}`,
+    ``,
+    `已确认的计划：`,
+    list,
+  ].join('\n')
+  const copy = messages.slice()
+  copy[idx] = { ...messages[idx], parts: [{ type: 'text', text: wrapped }], content: wrapped }
+  return copy
+}
+
 function tokenCount(usage: any): number | undefined {
   if (!usage || typeof usage !== 'object') return undefined
   if (typeof usage.totalTokens === 'number') return usage.totalTokens
   const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0
   const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0
   return input || output ? input + output : undefined
+}
+
+/** Parse a planner LLM response into a task list (JSON array of strings), tolerant of prose/fences. */
+function parsePlanTasks(text: string): string[] {
+  try {
+    const match = text.match(/\[[\s\S]*\]/)
+    return normalizeTasks(JSON.parse(match ? match[0] : text))
+  } catch {
+    return []
+  }
+}
+
+/** Coerce an unknown value into a clean, deduped, capped task-string array. */
+function normalizeTasks(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const tasks: string[] = []
+  for (const item of value) {
+    const t = typeof item === 'string' ? item.trim() : ''
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      tasks.push(t)
+      if (tasks.length >= MAX_PLAN_TASKS) break
+    }
+  }
+  return tasks
 }

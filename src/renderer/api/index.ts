@@ -81,6 +81,20 @@ export const platform = {
   async saveAssistantMessage(payload: { sessionId: string; content: string; parts: unknown[]; model?: string; tokens?: number }) {
     await apiFetch('/chat/assistant', { method: 'POST', body: JSON.stringify(payload) })
   },
+  // Plan mode step 1: propose a short task list for the user to confirm. `avoid` lets
+  // "重新计划" ask for a different plan than the one just shown.
+  async proposePlan(p: { sessionId: string; query: string; model?: string; avoid?: string[] }): Promise<{ tasks: string[] }> {
+    const { data } = await apiFetch('/chat/plan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-bloom-model': p.model || '',
+        'x-bloom-session': p.sessionId || '',
+      },
+      body: JSON.stringify({ query: p.query, avoid: p.avoid || [] }),
+    })
+    return { tasks: Array.isArray(data?.tasks) ? data.tasks : [] }
+  },
 
   // Personas
   async getPersonas() {
