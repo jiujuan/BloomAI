@@ -1,6 +1,7 @@
 import { Mastra } from '@mastra/core/mastra'
 import { InMemoryStore } from '@mastra/core/storage'
 import { chatAgent } from './chat-agent'
+import { planAgent } from './plan-agent'
 import { researchWriterAgent } from './agents/research-writer-agent'
 import { researchPlannerAgent } from './agents/research-planner-agent'
 import { researchAgent, writerAgent, coderAgent } from './agents/team'
@@ -18,6 +19,7 @@ export const mastra = new Mastra({
   storage: new InMemoryStore(),
   agents: {
     chat: chatAgent,
+    'plan-planner': planAgent,
     'research-writer': researchWriterAgent,
     'research-planner': researchPlannerAgent,
     research: researchAgent,

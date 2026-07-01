@@ -11,10 +11,13 @@ import { ReasoningPart } from './parts/ReasoningPart'
 import { ToolGroupCard } from './parts/ToolGroupCard'
 import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
+import { PlanCard, type PlanStatus } from './parts/PlanCard'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
 type TeamTab = '' | 'research' | 'writing' | 'coding'
+// One plan proposal in the current turn. Stable `id` keeps its card in a fixed position.
+type PlanEntry = { id: number; query: string; tasks: string[]; status: PlanStatus }
 const DEFAULT_MODEL = 'agnes-2.0-flash'
 const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', deep: '深度思考' }
 const MODE_ICON: Record<ChatMode, LucideIcon> = {
@@ -51,6 +54,20 @@ function hasRenderableContent(parts: any[]): boolean {
     if (!p) return false
     if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
     if (p.type === 'data-workflow') return !!p.data
+    if (p.type === 'data-plan') return true
+    if (p.type === 'data-tool-call-approval') return true
+    return isToolPart(p)
+  })
+}
+
+// True if the assistant has produced actual answer content (text / reasoning / tool / approval).
+// Excludes data-plan: the confirmed plan card streams in first, before the model does any real
+// work, so on its own it must NOT suppress the "thinking" indicator.
+function hasAnswerContent(parts: any[]): boolean {
+  return parts.some((p) => {
+    if (!p) return false
+    if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
+    if (p.type === 'data-workflow') return !!p.data
     if (p.type === 'data-tool-call-approval') return true
     return isToolPart(p)
   })
@@ -80,6 +97,14 @@ export function ChatPanelMastra() {
   const [team, setTeam] = useState<TeamTab>('')
   const [input, setInput] = useState('')
   const [modelOverride, setModelOverride] = useState<string | null>(null)
+  // Plan mode proposals for the current turn, in chronological order. Each entry keeps a stable
+  // id so a card never changes DOM position when its status flips (ready → discarded); the newest
+  // active plan is always the last non-discarded entry. Only that one is executable.
+  const [plans, setPlans] = useState<PlanEntry[]>([])
+  const planIdRef = useRef(0)
+  // Holds the confirmed tasks between 是 and the stream's onFinish, so the transport can send
+  // them (in the request body) and onFinish can attach a persisted data-plan part to the answer.
+  const planRef = useRef<string[] | null>(null)
   const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
@@ -95,6 +120,8 @@ export function ChatPanelMastra() {
   // Reset per-session model override when switching sessions.
   useEffect(() => {
     setModelOverride(null)
+    setPlans([])
+    planRef.current = null
   }, [activeSessionId])
 
   const handleModelChange = (next: string) => {
@@ -121,7 +148,9 @@ export function ChatPanelMastra() {
       new DefaultChatTransport({
         api: `${API_BASE}/chat`,
         prepareSendMessagesRequest: ({ messages }) => ({
-          body: { messages, sessionId: activeSessionId },
+          // Confirmed plan tasks travel in the body (not a header) because they may contain
+          // non-ASCII text, which HTTP header values can't safely carry.
+          body: { messages, sessionId: activeSessionId, plan: planRef.current || undefined },
           headers: {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
@@ -142,6 +171,9 @@ export function ChatPanelMastra() {
       if (message.role !== 'assistant') return
       const sid = useSessionStore.getState().activeSessionId
       if (!sid) return
+      // Plan execution finished: the confirmed plan streamed in as a data-plan part (server
+      // side), so it's already in message.parts — just release the ref for the next turn.
+      if (planRef.current) planRef.current = null
       const parts = ((message as any).parts || []) as any[]
       const content = parts.filter((p) => p?.type === 'text').map((p) => p.text || '').join('')
       void platform
@@ -186,13 +218,69 @@ export function ChatPanelMastra() {
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length, status])
+  }, [messages.length, status, plans.length])
 
   const handleSend = () => {
     const text = input.trim()
     if (!text || isStreaming) return
+    // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
+    // If a proposal is already pending, a new question discards it in place (kept visible as
+    // "已丢弃", position unchanged) and proposes afresh below — only the latest plan is executable.
+    if (mode === 'plan') {
+      const active = plans.find((p) => p.status === 'proposing' || p.status === 'ready')
+      if (active && active.status !== 'ready') return // still generating; let it finish first
+      setInput('')
+      maybeSetTitleFromFirstMessage(text)
+      const id = ++planIdRef.current
+      setPlans((prev) => [
+        ...prev.map((p) => (p.status === 'ready' ? { ...p, status: 'discarded' as PlanStatus } : p)),
+        { id, query: text, tasks: [], status: 'proposing' },
+      ])
+      void runProposal(id, text)
+      return
+    }
     setInput('')
     void sendMessage({ text })
+  }
+
+  // Reflect the first question in the sidebar title immediately. In normal mode the server sets
+  // the title on the first persisted user message, but a plan proposal persists nothing until the
+  // user confirms — so set it optimistically here (updates the store live and persists to DB).
+  const maybeSetTitleFromFirstMessage = (text: string) => {
+    if (!activeSessionId || messages.length > 0) return
+    const store = useSessionStore.getState()
+    const current = store.sessions.find((x) => x.id === activeSessionId)
+    if (current && (!current.title || current.title === 'New Chat')) {
+      void store.updateSessionTitle(activeSessionId, text.slice(0, 60).trim()).catch(() => {})
+    }
+  }
+
+  // Fill a plan entry's tasks from the server (in place, keeping its id/position). `avoid` is set
+  // on 重新计划 to steer toward a different plan.
+  const runProposal = async (id: number, query: string, avoid?: string[]) => {
+    let tasks: string[]
+    try {
+      const res = await platform.proposePlan({ sessionId: activeSessionId || '', query, model, avoid })
+      tasks = res.tasks.length ? res.tasks : [query]
+    } catch {
+      tasks = [query] // fall back to a single task so the user can still proceed
+    }
+    setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, tasks, status: 'ready' } : p)))
+  }
+
+  const handleReplan = (entry: PlanEntry) => {
+    setPlans((prev) => prev.map((p) => (p.id === entry.id ? { ...p, tasks: [], status: 'proposing' } : p)))
+    void runProposal(entry.id, entry.query, entry.tasks)
+  }
+
+  // 是: execute the confirmed tasks. planRef feeds the transport (request body) and onFinish.
+  // Clear all plan cards (the chosen one becomes a real answer with its own data-plan card; any
+  // discarded drafts are done with) so nothing lingers below the streamed answer.
+  const handleConfirm = (entry: PlanEntry) => {
+    if (entry.status !== 'ready') return
+    planRef.current = entry.tasks
+    setPlans([])
+    void sendMessage({ text: entry.query })
   }
 
   return (
@@ -202,7 +290,7 @@ export function ChatPanelMastra() {
       </div>
 
       <div className="timeline" role="log" aria-live="polite">
-        {messages.length === 0 && !isStreaming && (
+        {messages.length === 0 && !isStreaming && plans.length === 0 && (
           <div className="timeline-empty">
             <h2 className="timeline-empty-title">BloomAI</h2>
             <p className="timeline-empty-desc">Ask anything — streamed directly from the Mastra agent.</p>
@@ -230,6 +318,30 @@ export function ChatPanelMastra() {
             </div>
           </div>
         )}
+
+        {plans.map((p) => (
+          <React.Fragment key={p.id}>
+            <div className="msg-group user">
+              <div className="msg-avatar user">You</div>
+              <div className="msg-col">
+                <div className="msg-bubble user"><p className="msg-text">{p.query}</p></div>
+              </div>
+            </div>
+            <div className="msg-group">
+              <div className="msg-avatar">AI</div>
+              <div className="msg-col">
+                <div className="msg-bubble">
+                  <PlanCard
+                    tasks={p.tasks}
+                    status={p.status}
+                    onConfirm={p.status === 'ready' ? () => handleConfirm(p) : undefined}
+                    onReplan={p.status === 'ready' ? () => handleReplan(p) : undefined}
+                  />
+                </div>
+              </div>
+            </div>
+          </React.Fragment>
+        ))}
 
         {error && (
           <div className="timeline-error-block" role="alert">
@@ -404,12 +516,22 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
   // While streaming, the assistant message can exist before any real content arrives — show the
   // animated indicator inside its bubble instead of an empty bubble until the first part lands.
   const showWaiting = streaming && !hasRenderableContent(parts)
+  // The confirmed plan card streams in before the model starts answering; keep the thinking
+  // indicator visible below it until real answer content (text/tool/reasoning) shows up.
+  const waitingAfterParts = streaming && !showWaiting && !hasAnswerContent(parts)
   return (
     <div className="msg-group">
       <div className="msg-avatar">AI</div>
       <div className="msg-col">
         <div className={cn('msg-bubble', streaming && 'streaming', showWaiting && 'waiting')}>
-          {showWaiting ? <WaitingIndicator /> : renderAssistantParts(parts, { decidedApprovals, onDecide })}
+          {showWaiting ? (
+            <WaitingIndicator />
+          ) : (
+            <>
+              {renderAssistantParts(parts, { decidedApprovals, onDecide })}
+              {waitingAfterParts && <WaitingIndicator />}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -442,6 +564,9 @@ function renderAssistantParts(parts: any[], approval: ApprovalProps): React.Reac
       items.push(<AssistantMarkdown key={`t-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
     } else if (part.type === 'data-workflow' && part.data) {
       items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
+    } else if (part.type === 'data-plan' && part.data) {
+      const tasks = Array.isArray(part.data.tasks) ? part.data.tasks : []
+      items.push(<PlanCard key={`plan-${i}`} tasks={tasks} status="done" />)
     } else if (part.type === 'data-tool-call-approval') {
       const req = toApprovalRequest(part)
       if (req) {
