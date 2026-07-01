@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { useImageStore } from '@renderer/store'
+import { useImageStore, useLlmStore } from '@renderer/store'
 import { ImageSessionList } from './ImageSessionList'
 import { ImageChatPanel } from './ImageChatPanel'
 import { TemplateGallery } from './TemplateGallery'
@@ -7,9 +7,11 @@ import { TemplateGallery } from './TemplateGallery'
 /** AI 画图 (Image Studio) — independent three-column page: sessions | chat+images | templates. */
 export function ImageStudioPage() {
   const loadSessions = useImageStore(s => s.loadSessions)
+  const { loadModels } = useLlmStore()
 
   useEffect(() => {
     loadSessions()
+    loadModels()
   }, [])
 
   return (

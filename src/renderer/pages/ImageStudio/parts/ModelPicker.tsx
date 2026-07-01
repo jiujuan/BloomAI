@@ -4,21 +4,25 @@ import { useImageStore, useLlmStore } from '@renderer/store'
 import { IMAGE_MODEL_CAPS } from '@shared/image-gen'
 import { ChipMenu } from './ChipMenu'
 
-/** Model selector chip (参考图 1). Lists enabled image models from the LLM registry. */
+/** Model selector chip. Lists only enabled image models from the LLM registry. */
 export function ModelPicker() {
   const { imageModels, loadModels } = useLlmStore()
   const { composer, setComposer } = useImageStore()
 
+  // Always refresh on mount so Settings changes take effect immediately on return.
   useEffect(() => {
-    if (imageModels.length === 0) loadModels()
+    loadModels()
   }, [])
 
-  // Default to the first available image model once loaded.
-  useEffect(() => {
-    if (!composer.model && imageModels[0]) setComposer({ model: imageModels[0].modelId })
-  }, [imageModels, composer.model])
+  const enabledModels = imageModels.filter(m => m.isEnabled)
 
-  const current = imageModels.find(m => m.modelId === composer.model)
+  // Default to the first enabled model once loaded.
+  useEffect(() => {
+    if (!composer.model && enabledModels[0]) setComposer({ model: enabledModels[0].modelId })
+  }, [enabledModels, composer.model])
+
+  const current = enabledModels.find(m => m.modelId === composer.model)
+    ?? imageModels.find(m => m.modelId === composer.model)
   const label = current?.label || composer.model || '选择模型'
 
   return (
@@ -26,8 +30,8 @@ export function ModelPicker() {
       {(close) => (
         <>
           <div className="img-menu-header">画图模型</div>
-          {imageModels.length === 0 && <div className="img-menu-empty">暂无可用模型</div>}
-          {imageModels.map(m => {
+          {enabledModels.length === 0 && <div className="img-menu-empty">暂无可用模型</div>}
+          {enabledModels.map(m => {
             const caps = IMAGE_MODEL_CAPS[m.modelId] || {}
             return (
               <button

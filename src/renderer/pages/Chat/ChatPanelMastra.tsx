@@ -418,7 +418,7 @@ export function ChatPanelMastra() {
                   <Plus size={17} />
                 </button>
                 <ModeMenu mode={mode} onSelect={handleModeChange} />
-                <ModelMenu model={model} models={textModels} onSelect={handleModelChange} up />
+                <ModelMenu model={model} models={textModels.filter(m => m.isEnabled)} onSelect={handleModelChange} up />
                 <div className="team-tabs" role="tablist" aria-label="Agent">
                   {TEAM_TABS.map((t) => (
                     <button
