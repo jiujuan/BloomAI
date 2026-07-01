@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react'
-import { ImageIcon, Sparkles } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { ImageIcon, Sparkles, ClipboardPaste } from 'lucide-react'
 import { useImageStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { ModelPicker } from './parts/ModelPicker'
@@ -12,7 +12,9 @@ import { filesToDataUris, imagesFromDataTransfer } from './parts/image-file'
 export function ImageComposer() {
   const { composer, setComposer, addReferenceImages, generate, generating } = useImageStore()
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
   const canGenerate = composer.prompt.trim().length > 0 && !!composer.model && !generating
 
@@ -38,6 +40,55 @@ export function ImageComposer() {
     if (files.length) addReferenceImages(await filesToDataUris(files))
   }
 
+  const onContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    e.preventDefault()
+    setCtxMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  const closeMenu = () => setCtxMenu(null)
+
+  // Close on outside click or Escape
+  useEffect(() => {
+    if (!ctxMenu) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu()
+    }
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu() }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keyup', onKeyUp)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keyup', onKeyUp)
+    }
+  }, [ctxMenu])
+
+  const pasteText = async () => {
+    closeMenu()
+    let text = ''
+    try { text = await navigator.clipboard.readText() } catch { return }
+    if (!text) return
+    const ta = taRef.current
+    if (!ta) {
+      setComposer({ prompt: composer.prompt + text })
+      return
+    }
+    const start = ta.selectionStart ?? composer.prompt.length
+    const end = ta.selectionEnd ?? composer.prompt.length
+    const next = composer.prompt.slice(0, start) + text + composer.prompt.slice(end)
+    setComposer({ prompt: next })
+    // Restore cursor after React re-render
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(start + text.length, start + text.length)
+    })
+  }
+
+  // Clamp menu position so it doesn't overflow the viewport
+  const menuStyle = ctxMenu ? {
+    left: Math.min(ctxMenu.x, window.innerWidth - 140),
+    top: Math.min(ctxMenu.y, window.innerHeight - 60),
+  } : {}
+
   return (
     <div
       className={cn('img-composer', dragOver && 'drag-over')}
@@ -53,8 +104,19 @@ export function ImageComposer() {
         onChange={e => setComposer({ prompt: e.target.value })}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
+        onContextMenu={onContextMenu}
         rows={2}
       />
+
+      {ctxMenu && (
+        <div ref={menuRef} className="selection-menu" style={{ position: 'fixed', zIndex: 1000, ...menuStyle }}>
+          <button className="selection-menu-item" onClick={pasteText}>
+            <ClipboardPaste size={13} />
+            粘贴
+          </button>
+        </div>
+      )}
+
       <div className="img-composer-toolbar">
         <div className="img-composer-left">
           <span className="img-chip static" title="当前模式：图像生成">
