@@ -286,9 +286,9 @@ function seedTools() {
   if (Number(count) === 0) {
     const tools = [
       ['web_search', 'web', 'Web Search', 'Search the web and return relevant results with titles, URLs and snippets.', '{"query":{"type":"string"},"limit":{"type":"number","default":8}}', '{"results":{"type":"array"}}', null],
-      ['web_fetch', 'web', 'Web Fetch', 'Fetch and extract the main text content from a webpage URL.', '{"url":{"type":"string"},"mode":{"type":"string","enum":["text","html"],"default":"text"}}', '{"title":{"type":"string"},"content":{"type":"string"}}', 'network'],
+      ['web_fetch', 'web', 'Web Fetch', 'Fetch a webpage and return its readable main text. Handles non-UTF-8 encodings and, for JS-heavy/SPA pages, can render with a headless browser.', '{"url":{"type":"string"},"mode":{"type":"string","enum":["text","html","full"],"default":"text"},"maxChars":{"type":"number","default":20000},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto (renders only when the static page has little text, e.g. SPAs)."}}', '{"title":{"type":"string"},"content":{"type":"string"},"finalUrl":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
       ['web_screenshot', 'web', 'Web Screenshot', 'Capture a full-page screenshot of any URL as PNG.', '{"url":{"type":"string"}}', '{"imagePath":{"type":"string"}}', 'network'],
-      ['web_extract', 'web', 'Web Extract', 'Extract structured data (links, headings, tables) from a webpage.', '{"url":{"type":"string"},"selector":{"type":"string"}}', '{"headings":{"type":"array"},"links":{"type":"array"}}', 'network'],
+      ['web_extract', 'web', 'Web Extract', 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.', '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."}}', '{"title":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
       ['fs_read', 'fs', 'File Read', 'Read the contents of a local file with optional line range.', '{"path":{"type":"string"},"offset":{"type":"number"},"limit":{"type":"number"}}', '{"content":{"type":"string"},"totalLines":{"type":"number"}}', 'fs'],
       ['fs_write', 'fs', 'File Write', 'Write or append content to a local file.', '{"path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["write","append"],"default":"write"}}', '{"bytesWritten":{"type":"number"}}', 'write'],
       ['fs_edit', 'fs', 'File Edit', 'Replace an exact unique string in a file.', '{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}}', '{"success":{"type":"boolean"},"linesChanged":{"type":"number"}}', 'write'],
@@ -318,6 +318,20 @@ function seedTools() {
     params_schema: '{"prompt":{"type":"string"},"model":{"type":"string"},"size":{"type":"string","default":"1024x1024"},"quality":{"type":"string","default":"standard"},"image":{"type":"array"},"responseFormat":{"type":"string","enum":["url","b64_json"]},"saveTo":{"type":"string"}}',
     result_schema: '{"providerId":{"type":"string"},"model":{"type":"string"},"url":{"type":"string"},"b64_json":{"type":"string"},"localPath":{"type":"string"}}',
   }).where(eq(schema.tools.id, 'image_gen')).run()
+
+  // Keep the web tool schemas/descriptions current on existing DBs (the seed
+  // block above only runs on a fresh install).
+  database.update(schema.tools).set({
+    description: 'Fetch a webpage and return its readable main text. Handles non-UTF-8 encodings and, for JS-heavy/SPA pages, can render with a headless browser.',
+    params_schema: '{"url":{"type":"string"},"mode":{"type":"string","enum":["text","html","full"],"default":"text"},"maxChars":{"type":"number","default":20000},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto (renders only when the static page has little text, e.g. SPAs)."}}',
+    result_schema: '{"title":{"type":"string"},"content":{"type":"string"},"finalUrl":{"type":"string"},"rendered":{"type":"boolean"}}',
+  }).where(eq(schema.tools.id, 'web_fetch')).run()
+
+  database.update(schema.tools).set({
+    description: 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.',
+    params_schema: '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."}}',
+    result_schema: '{"title":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}',
+  }).where(eq(schema.tools.id, 'web_extract')).run()
 }
 
 function seedSkills() {
