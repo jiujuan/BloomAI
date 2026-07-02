@@ -26,11 +26,20 @@ function iconFor(ext: string): LucideIcon {
 /**
  * Attachment chips. Editable in the composer (pass `onRemove`); read-only inside a sent user
  * message bubble (omit it). Uploading chips show a spinner; failed ones show the error inline.
+ * `compact` (used on the sent bubble) drops the size and shrinks the chip to an icon + name.
  */
-export function AttachmentChips({ items, onRemove }: { items: ChipItem[]; onRemove?: (id: string) => void }) {
+export function AttachmentChips({
+  items,
+  onRemove,
+  compact = false,
+}: {
+  items: ChipItem[]
+  onRemove?: (id: string) => void
+  compact?: boolean
+}) {
   if (!items.length) return null
   return (
-    <div className="attachment-chips">
+    <div className={cn('attachment-chips', compact && 'attachment-chips-compact')}>
       {items.map((it) => {
         const Icon = iconFor(it.ext)
         return (
@@ -41,9 +50,11 @@ export function AttachmentChips({ items, onRemove }: { items: ChipItem[]; onRemo
           >
             {it.status === 'uploading' ? <Loader2 size={14} className="spin" /> : <Icon size={14} />}
             <span className="attachment-chip-name">{it.name}</span>
-            <span className="attachment-chip-size">
-              {it.status === 'error' ? it.error || '失败' : formatAttachmentSize(it.size)}
-            </span>
+            {!compact && (
+              <span className="attachment-chip-size">
+                {it.status === 'error' ? it.error || '失败' : formatAttachmentSize(it.size)}
+              </span>
+            )}
             {onRemove && (
               <button
                 type="button"
