@@ -540,6 +540,13 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   padding: 8px 8px 0;
 }
 .msg-bubble .attachment-chips { padding: 0 0 6px; }
+/* Compact chips shown above a sent user bubble (right-aligned, icon + name, no size). */
+.attachment-chips-compact { padding: 0 0 4px; justify-content: flex-end; }
+.attachment-chips-compact .attachment-chip { max-width: 180px; padding: 3px 8px; }
+/* Red validation / upload error line inside the composer. */
+.attachment-error { padding: 8px 10px 0; color: var(--danger, #e5484d); font-size: 12px; line-height: 1.4; }
+/* Muted fallback text shown when an assistant turn ends with no content. */
+.msg-fallback { color: var(--text-tertiary); font-style: italic; }
 .attachment-chip {
   display: inline-flex; align-items: center; gap: 6px;
   max-width: 220px;

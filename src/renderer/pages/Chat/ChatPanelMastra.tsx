@@ -124,6 +124,8 @@ export function ChatPanelMastra() {
   const attachmentsRef = useRef<ComposerAttachment[]>([])
   attachmentsRef.current = attachments
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Latest attachment validation / upload error, shown as a red line in the composer.
+  const [attachError, setAttachError] = useState<string | null>(null)
   // Custom right-click "粘贴" menu for the input (position in viewport coords, or null when closed).
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null)
   const [modelOverride, setModelOverride] = useState<string | null>(null)
@@ -309,21 +311,21 @@ export function ChatPanelMastra() {
     })
   }
 
-  // Client-side validate + upload each chosen file. Adds a chip immediately (uploading spinner),
-  // then fills in the resolved server metadata on success or marks it failed. Rejects unsupported
-  // types / oversize files up front without hitting the network.
+  // Client-side validate + upload each chosen file. Rejections (type / oversize) surface as a red
+  // line via setAttachError; valid files show an uploading chip that resolves to server metadata.
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     e.target.value = '' // allow re-selecting the same file later
+    setAttachError(null)
     for (const file of files) {
       const ext = extOf(file.name)
       const localId = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`
       if (!isAllowedExt(ext)) {
-        setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'error', error: '不支持的类型' }])
+        setAttachError(`「${file.name}」类型不支持（仅支持 MD/DOCX/PDF/TXT/CSV）`)
         continue
       }
       if (file.size > ATTACHMENT_MAX_SIZE) {
-        setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'error', error: '超过 5MB' }])
+        setAttachError(`「${file.name}」超过 5MB 上传限制`)
         continue
       }
       setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'uploading' }])
@@ -333,12 +335,26 @@ export function ChatPanelMastra() {
           setAttachments((prev) => prev.map((a) => (a.id === localId ? { ...a, status: undefined, error: undefined, att: saved } : a)))
         })
         .catch((err) => {
-          setAttachments((prev) => prev.map((a) => (a.id === localId ? { ...a, status: 'error', error: err?.message || '上传失败' } : a)))
+          // Drop the failed chip and report the reason as a red line rather than a stuck chip.
+          setAttachments((prev) => prev.filter((a) => a.id !== localId))
+          setAttachError(`「${file.name}」上传失败：${err?.message || '未知错误'}`)
         })
     }
   }
 
   const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id))
+
+  // Build the user message's UI parts: the typed text plus a `data-attachments` part carrying the
+  // ready attachments, so the chips render on the sent bubble immediately (not only after reload).
+  const buildUserParts = (text: string): any[] => {
+    const files = attachmentsRef.current
+      .filter((a) => a.att)
+      .map((a) => ({ id: a.att!.id, name: a.att!.name, ext: a.att!.ext, size: a.att!.size }))
+    const parts: any[] = []
+    if (text) parts.push({ type: 'text', text })
+    if (files.length) parts.push({ type: 'data-attachments', data: { files } })
+    return parts
+  }
 
   const uploading = attachments.some((a) => a.status === 'uploading')
   const readyAttachments = attachments.filter((a) => a.att)
@@ -367,8 +383,10 @@ export function ChatPanelMastra() {
       return
     }
     setInput('')
+    const parts = buildUserParts(text)
     setAttachments([]) // attachmentsRef still holds them for this synchronous send; cleared for next turn
-    void sendMessage({ text })
+    setAttachError(null)
+    void sendMessage({ parts } as any)
   }
 
   // Reflect the first question in the sidebar title immediately. In normal mode the server sets
@@ -408,9 +426,11 @@ export function ChatPanelMastra() {
     if (entry.status !== 'ready') return
     planRef.current = entry.tasks
     lastPlanTurnRef.current = plans.map((p) => (p.id === entry.id ? { ...p, status: 'done' as PlanStatus } : p))
+    const parts = buildUserParts(entry.query)
     setPlans([])
     setAttachments([]) // attachments (if any) are sent with this execution turn; clear for the next
-    void sendMessage({ text: entry.query })
+    setAttachError(null)
+    void sendMessage({ parts } as any)
   }
 
   return (
@@ -487,6 +507,7 @@ export function ChatPanelMastra() {
       <div className="chat-footer">
         <div className="input-area">
           <div className="input-shell">
+            {attachError && <div className="attachment-error" role="alert">{attachError}</div>}
             <AttachmentChips items={attachments} onRemove={removeAttachment} />
             <textarea
               ref={inputRef}
@@ -661,6 +682,9 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
   // The confirmed plan card streams in before the model starts answering; keep the thinking
   // indicator visible below it until real answer content (text/tool/reasoning) shows up.
   const waitingAfterParts = streaming && !showWaiting && !hasAnswerContent(parts)
+  // The stream ended with no content (e.g. the model / attachment parse failed). Show a short
+  // prompt in the bubble instead of leaving it empty; the full error rides in the timeline block.
+  const showEmptyFallback = !streaming && !hasRenderableContent(parts)
 
   const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
   const [liked, setLiked] = useState(false)
@@ -678,6 +702,8 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
         >
           {showWaiting ? (
             <WaitingIndicator />
+          ) : showEmptyFallback ? (
+            <p className="msg-text msg-fallback">本次未能生成回答，请稍后重试。</p>
           ) : (
             <>
               {renderAssistantParts(parts, { decidedApprovals, onDecide })}
@@ -711,10 +737,12 @@ function UserMessageView({ parts }: { parts: any[] }) {
     <div className="msg-group user">
       <div className="msg-avatar user">You</div>
       <div className="msg-col">
-        <div ref={bubbleRef} onContextMenu={handleContextMenu} className="msg-bubble user">
-          <AttachmentChips items={files} />
-          {text && <p className="msg-text">{text}</p>}
-        </div>
+        {files.length > 0 && <AttachmentChips items={files} compact />}
+        {text && (
+          <div ref={bubbleRef} onContextMenu={handleContextMenu} className="msg-bubble user">
+            <p className="msg-text">{text}</p>
+          </div>
+        )}
         <SelectionMenu state={menu} onClose={closeMenu} />
       </div>
     </div>
