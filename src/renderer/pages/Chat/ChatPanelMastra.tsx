@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Loader2, Send, ChevronDown, Check, Plus, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
+import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
 import { platform } from '@renderer/api'
@@ -507,7 +507,20 @@ export function ChatPanelMastra() {
       <div className="chat-footer">
         <div className="input-area">
           <div className="input-shell">
-            {attachError && <div className="attachment-error" role="alert">{attachError}</div>}
+            {attachError && (
+              <div className="attachment-error" role="alert">
+                <span className="attachment-error-text">{attachError}</span>
+                <button
+                  type="button"
+                  className="attachment-error-close"
+                  onClick={() => setAttachError(null)}
+                  title="清除提示"
+                  aria-label="清除提示"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
             <AttachmentChips items={attachments} onRemove={removeAttachment} />
             <textarea
               ref={inputRef}
