@@ -10,12 +10,16 @@ import { sessionRepo } from '../../db/repositories/session.repo'
 import { logError, sanitizeErrorMessage } from '../../logger/logger'
 import { streamOnError } from '../stream-error'
 import { readJson } from '../util'
+import { extractAttachmentText } from '../../attachments/attachment-service'
+import { toClientAttachment, type Attachment } from '../../../shared/attachments'
 
 /** Default chat model: Agnes (openai-compatible relay reachable from this network). */
 const DEFAULT_CHAT_MODEL = 'agnes-2.0-flash'
 const MAX_STEPS = 10
 /** Plan mode: proposal task-count bounds (ideal 3-5, hard cap 10). */
 const MAX_PLAN_TASKS = 10
+/** Total character budget for all attachment excerpts injected into one turn's prompt. */
+const ATTACHMENT_TOTAL_BUDGET = 24000
 
 export const chatRoutes = new Hono()
 
@@ -47,7 +51,12 @@ chatRoutes.post('/', async (c) => {
   const writing = normalizeWriting(body?.writing)
   if (writing) requestContext.set('writing', writing)
 
-  persistUserMessage(sessionId, body.messages)
+  // Chat attachments (方案1): extract a bounded text excerpt from each uploaded file and inject
+  // it into the message the agent reads, so the model has the content in-context this turn. The
+  // files stay on disk, so the agent can still deep-read them via doc_* tools on demand.
+  const attachments = normalizeAttachments(body?.attachments)
+
+  persistUserMessage(sessionId, body.messages, attachments)
 
   // P6d: a selected team tab (研究/写作/编码) routes to that specialist agent and takes
   // precedence over deep mode. No tab → general chat agent (deep mode runs the workflow).
@@ -74,6 +83,13 @@ chatRoutes.post('/', async (c) => {
       }
     }
 
+    const attachmentBlock = attachments.length ? await buildAttachmentBlock(attachments) : ''
+    // Compose the messages the agent reads: plan wrapping first (if any), then attachment
+    // excerpts appended to the last user message. Both operate on copies — body.messages (the
+    // clean query already persisted for the UI) is never mutated.
+    const withPlan = planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages
+    const agentMessages = attachmentBlock ? appendToLastUserMessage(withPlan, attachmentBlock) : withPlan
+
     const stream = await handleChatStream({
       mastra,
       agentId: teamAgentId || 'chat',
@@ -85,7 +101,7 @@ chatRoutes.post('/', async (c) => {
         // Plan execution: feed the agent a user message that embeds the confirmed plan, so the
         // plan anchors the actual prompt (not just the system instructions) and the model can't
         // drift off-topic. The clean original query was already persisted above for the UI.
-        messages: planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages,
+        messages: agentMessages,
         requestContext,
         abortSignal: c.req.raw.signal,
         maxSteps: MAX_STEPS,
@@ -193,15 +209,26 @@ chatRoutes.post('/assistant', async (c) => {
   }
 })
 
-function persistUserMessage(sessionId: string, messages: unknown): void {
+function persistUserMessage(sessionId: string, messages: unknown, attachments: Attachment[] = []): void {
   if (!sessionId) return
   const text = lastUserText(messages)
-  if (!text) return
+  if (!text && attachments.length === 0) return
+  // When the turn carries attachments, persist a `data-attachments` UI part alongside the text so
+  // the chips reappear on reload (paths stripped — only name/ext/size are stored).
+  const parts = attachments.length
+    ? JSON.stringify([
+        { type: 'text', text },
+        { type: 'data-attachments', data: { files: attachments.map(toClientAttachment) } },
+      ])
+    : null
   try {
     const isFirst = messageRepo.count(sessionId) === 0
-    messageRepo.save({ session_id: sessionId, role: 'user', content: text })
+    messageRepo.save({ session_id: sessionId, role: 'user', content: text, parts })
     sessionRepo.touch(sessionId)
-    if (isFirst) sessionRepo.update(sessionId, { title: text.slice(0, 60).trim() })
+    if (isFirst) {
+      const title = (text || attachments[0]?.name || 'New Chat').slice(0, 60).trim()
+      sessionRepo.update(sessionId, { title })
+    }
   } catch (error) {
     logError('chat.persistUser', { code: 'PERSISTENCE_ERROR', message: sanitizeErrorMessage(error, 'persist user failed') }, { sessionId })
   }
@@ -243,6 +270,48 @@ function augmentLastUserMessage(messages: any, planTasks: string[]): any {
   ].join('\n')
   const copy = messages.slice()
   copy[idx] = { ...messages[idx], parts: [{ type: 'text', text: wrapped }], content: wrapped }
+  return copy
+}
+
+/** Keep only well-formed attachment objects (need name/ext/path to extract text later). */
+function normalizeAttachments(value: unknown): Attachment[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (a): a is Attachment =>
+      !!a && typeof a.name === 'string' && typeof a.ext === 'string' && typeof a.path === 'string',
+  )
+}
+
+/** Extract each attachment's text (bounded per-file and by a shared total budget) into one block. */
+async function buildAttachmentBlock(attachments: Attachment[]): Promise<string> {
+  const blocks: string[] = []
+  let used = 0
+  for (const att of attachments) {
+    if (used >= ATTACHMENT_TOTAL_BUDGET) {
+      blocks.push(`【附件：${att.name}】（超出上下文预算，未展开；可用 doc_${att.ext} 工具按路径读取）`)
+      continue
+    }
+    const text = await extractAttachmentText(att)
+    const remaining = ATTACHMENT_TOTAL_BUDGET - used
+    const clipped = text.length > remaining ? `${text.slice(0, remaining)}\n…（截断）` : text
+    used += clipped.length
+    blocks.push(`【附件：${att.name}】\n${clipped}`)
+  }
+  return ['以下是用户上传的附件内容，请结合它们回答用户的问题：', ...blocks].join('\n\n')
+}
+
+/** Append an extra block after the last user message's text (on a copy). */
+function appendToLastUserMessage(messages: any, extra: string): any {
+  if (!Array.isArray(messages) || !extra) return messages
+  let idx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') { idx = i; break }
+  }
+  if (idx < 0) return messages
+  const base = lastUserText([messages[idx]])
+  const combined = base ? `${base}\n\n${extra}` : extra
+  const copy = messages.slice()
+  copy[idx] = { ...messages[idx], parts: [{ type: 'text', text: combined }], content: combined }
   return copy
 }
 

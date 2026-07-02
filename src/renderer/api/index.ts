@@ -3,6 +3,7 @@
 // In future web: uses fetch + SSE directly
 
 import { API_BASE } from '@shared/constants'
+import type { Attachment } from '@shared/attachments'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!(window as any).bloomai
@@ -147,6 +148,20 @@ export const platform = {
       body: JSON.stringify({ query: p.query, avoid: p.avoid || [] }),
     })
     return { tasks: Array.isArray(data?.tasks) ? data.tasks : [] }
+  },
+
+  // Chat attachments: upload one or more files as multipart/form-data (not JSON, so this
+  // bypasses apiFetch's forced Content-Type). Returns stored metadata used on the next send.
+  async uploadAttachments(files: File[]): Promise<Attachment[]> {
+    const form = new FormData()
+    for (const f of files) form.append('file', f)
+    const res = await fetch(`${API_BASE}/attachments`, { method: 'POST', body: form })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }))
+      throw new Error(err.error?.message || `HTTP ${res.status}`)
+    }
+    const { data } = await res.json()
+    return (data || []) as Attachment[]
   },
 
   // Personas

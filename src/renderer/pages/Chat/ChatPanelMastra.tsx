@@ -16,6 +16,11 @@ import { PlanCard, type PlanStatus } from './parts/PlanCard'
 import { WriterParams, defaultWritingConfig } from './WriterParams'
 import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, PasteMenu, useSelectionMenu } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
+import { AttachmentChips, type ChipItem } from './parts/AttachmentChips'
+import { ATTACHMENT_ACCEPT, ATTACHMENT_MAX_SIZE, extOf, isAllowedExt, type Attachment } from '@shared/attachments'
+
+// A composer chip plus the resolved server metadata once its upload finishes (`att`).
+type ComposerAttachment = ChipItem & { att?: Attachment }
 
 type ChatMode = 'chat' | 'plan' | 'deep'
 type TeamTab = '' | 'research' | 'writing' | 'coding'
@@ -113,6 +118,12 @@ export function ChatPanelMastra() {
   const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // Composer attachments (chips shown above the textarea). Each holds its resolved server
+  // metadata once uploaded; a ref mirrors them so the transport can read the latest at send time.
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
+  const attachmentsRef = useRef<ComposerAttachment[]>([])
+  attachmentsRef.current = attachments
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // Custom right-click "粘贴" menu for the input (position in viewport coords, or null when closed).
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null)
   const [modelOverride, setModelOverride] = useState<string | null>(null)
@@ -145,6 +156,7 @@ export function ChatPanelMastra() {
   useEffect(() => {
     setModelOverride(null)
     setPlans([])
+    setAttachments([])
     planRef.current = null
     lastPlanTurnRef.current = null
   }, [activeSessionId])
@@ -181,6 +193,9 @@ export function ChatPanelMastra() {
             sessionId: activeSessionId,
             plan: planRef.current || undefined,
             writing: teamRef.current === 'writing' ? writingRef.current : undefined,
+            // Resolved attachments (with server path) for this turn; read from the ref so the
+            // latest set is sent even though the transport is memoized on activeSessionId only.
+            attachments: attachmentsRef.current.filter((a) => a.att).map((a) => a.att),
           },
           headers: {
             'x-bloom-mode': modeRef.current,
@@ -294,13 +309,51 @@ export function ChatPanelMastra() {
     })
   }
 
+  // Client-side validate + upload each chosen file. Adds a chip immediately (uploading spinner),
+  // then fills in the resolved server metadata on success or marks it failed. Rejects unsupported
+  // types / oversize files up front without hitting the network.
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // allow re-selecting the same file later
+    for (const file of files) {
+      const ext = extOf(file.name)
+      const localId = `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`
+      if (!isAllowedExt(ext)) {
+        setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'error', error: '不支持的类型' }])
+        continue
+      }
+      if (file.size > ATTACHMENT_MAX_SIZE) {
+        setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'error', error: '超过 5MB' }])
+        continue
+      }
+      setAttachments((prev) => [...prev, { id: localId, name: file.name, ext, size: file.size, status: 'uploading' }])
+      platform
+        .uploadAttachments([file])
+        .then(([saved]) => {
+          setAttachments((prev) => prev.map((a) => (a.id === localId ? { ...a, status: undefined, error: undefined, att: saved } : a)))
+        })
+        .catch((err) => {
+          setAttachments((prev) => prev.map((a) => (a.id === localId ? { ...a, status: 'error', error: err?.message || '上传失败' } : a)))
+        })
+    }
+  }
+
+  const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id))
+
+  const uploading = attachments.some((a) => a.status === 'uploading')
+  const readyAttachments = attachments.filter((a) => a.att)
+  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading
+
   const handleSend = () => {
     const text = input.trim()
-    if (!text || isStreaming) return
+    if (isStreaming || uploading) return
+    if (!text && readyAttachments.length === 0) return
     // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
     // If a proposal is already pending, a new question discards it in place (kept visible as
     // "已丢弃", position unchanged) and proposes afresh below — only the latest plan is executable.
+    // A plan needs a question; attachments (if any) ride along when the plan is executed.
     if (mode === 'plan') {
+      if (!text) return
       const active = plans.find((p) => p.status === 'proposing' || p.status === 'ready')
       if (active && active.status !== 'ready') return // still generating; let it finish first
       setInput('')
@@ -314,6 +367,7 @@ export function ChatPanelMastra() {
       return
     }
     setInput('')
+    setAttachments([]) // attachmentsRef still holds them for this synchronous send; cleared for next turn
     void sendMessage({ text })
   }
 
@@ -355,6 +409,7 @@ export function ChatPanelMastra() {
     planRef.current = entry.tasks
     lastPlanTurnRef.current = plans.map((p) => (p.id === entry.id ? { ...p, status: 'done' as PlanStatus } : p))
     setPlans([])
+    setAttachments([]) // attachments (if any) are sent with this execution turn; clear for the next
     void sendMessage({ text: entry.query })
   }
 
@@ -432,6 +487,7 @@ export function ChatPanelMastra() {
       <div className="chat-footer">
         <div className="input-area">
           <div className="input-shell">
+            <AttachmentChips items={attachments} onRemove={removeAttachment} />
             <textarea
               ref={inputRef}
               className="input-box"
@@ -452,7 +508,20 @@ export function ChatPanelMastra() {
             )}
             <div className="input-toolbar">
               <div className="input-toolbar-left">
-                <button className="input-icon-btn" title="附件（暂未开放）" aria-label="附件" disabled>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept={ATTACHMENT_ACCEPT}
+                  style={{ display: 'none' }}
+                  onChange={handleFilesSelected}
+                />
+                <button
+                  className="input-icon-btn"
+                  title="上传附件（MD/DOCX/PDF/TXT/CSV，单个 ≤5MB）"
+                  aria-label="上传附件"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   <Plus size={17} />
                 </button>
                 <ModeMenu mode={mode} onSelect={handleModeChange} />
@@ -478,7 +547,7 @@ export function ChatPanelMastra() {
                     <Loader2 size={16} className="spin" />
                   </button>
                 ) : (
-                  <button className={cn('send-btn', !input.trim() && 'disabled')} onClick={handleSend} disabled={!input.trim()} title="发送">
+                  <button className={cn('send-btn', !canSend && 'disabled')} onClick={handleSend} disabled={!canSend} title={uploading ? '附件上传中…' : '发送'}>
                     <Send size={16} />
                   </button>
                 )}
@@ -632,13 +701,19 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
 function UserMessageView({ parts }: { parts: any[] }) {
   const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
   const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
+  // Attachments sent with this turn (persisted as a data-attachments part) render as read-only chips.
+  const attachmentPart = parts.find((p) => p?.type === 'data-attachments')
+  const files: ChipItem[] = Array.isArray(attachmentPart?.data?.files)
+    ? attachmentPart.data.files.map((f: any) => ({ id: f.id, name: f.name, ext: f.ext, size: f.size }))
+    : []
 
   return (
     <div className="msg-group user">
       <div className="msg-avatar user">You</div>
       <div className="msg-col">
         <div ref={bubbleRef} onContextMenu={handleContextMenu} className="msg-bubble user">
-          <p className="msg-text">{text}</p>
+          <AttachmentChips items={files} />
+          {text && <p className="msg-text">{text}</p>}
         </div>
         <SelectionMenu state={menu} onClose={closeMenu} />
       </div>
