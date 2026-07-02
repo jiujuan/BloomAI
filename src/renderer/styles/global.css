@@ -532,6 +532,37 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   gap: 8px; padding: 4px 8px 7px;
 }
 .input-toolbar-left, .input-toolbar-right { display: flex; align-items: center; gap: 6px; }
+
+/* Attachment chips — shown at the top inside the input shell (composer) and read-only inside a
+   sent user bubble. */
+.attachment-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 8px 0;
+}
+.msg-bubble .attachment-chips { padding: 0 0 6px; }
+.attachment-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px; line-height: 1;
+}
+.attachment-chip.error { border-color: var(--danger, #e5484d); color: var(--danger, #e5484d); }
+.attachment-chip-name {
+  max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary);
+}
+.attachment-chip-size { color: var(--text-tertiary); flex-shrink: 0; }
+.attachment-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; margin-left: 2px;
+  border: none; border-radius: 4px; background: transparent;
+  color: var(--text-tertiary); cursor: pointer; flex-shrink: 0;
+}
+.attachment-chip-remove:hover { background: var(--bg-primary); color: var(--text-primary); }
 .input-toolbar-left { flex-wrap: wrap; min-width: 0; }
 .input-toolbar .team-tabs { margin-top: 0; }
 .send-btn {
