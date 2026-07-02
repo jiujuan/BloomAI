@@ -10,7 +10,8 @@ export async function parsePdf(filePath: string): Promise<{ text: string; numPag
   const data = new Uint8Array(fs.readFileSync(filePath))
   const parser = new PDFParse({ data })
   try {
-    const res = await parser.getText()
+    // pageJoiner: '' suppresses the default per-page "-- N of M --" marker so extracted text is clean.
+    const res = await parser.getText({ pageJoiner: '' })
     return { text: res.text || '', numPages: res.total || 0 }
   } finally {
     await parser.destroy().catch(() => {})

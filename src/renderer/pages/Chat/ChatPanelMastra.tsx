@@ -123,6 +123,10 @@ export function ChatPanelMastra() {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const attachmentsRef = useRef<ComposerAttachment[]>([])
   attachmentsRef.current = attachments
+  // Attachments for the CURRENT in-flight send. Set synchronously right before sendMessage and
+  // read by the transport when it builds the request — decoupled from `attachments` state, whose
+  // clear-on-send re-render would otherwise empty attachmentsRef before the async fetch fires.
+  const sendAttachmentsRef = useRef<Attachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Latest attachment validation / upload error, shown as a red line in the composer.
   const [attachError, setAttachError] = useState<string | null>(null)
@@ -195,9 +199,9 @@ export function ChatPanelMastra() {
             sessionId: activeSessionId,
             plan: planRef.current || undefined,
             writing: teamRef.current === 'writing' ? writingRef.current : undefined,
-            // Resolved attachments (with server path) for this turn; read from the ref so the
-            // latest set is sent even though the transport is memoized on activeSessionId only.
-            attachments: attachmentsRef.current.filter((a) => a.att).map((a) => a.att),
+            // Resolved attachments (with server path) for this turn. Read from a dedicated ref set
+            // at send time so a clear-on-send re-render can't empty it before the request is built.
+            attachments: sendAttachmentsRef.current,
           },
           headers: {
             'x-bloom-mode': modeRef.current,
@@ -384,7 +388,8 @@ export function ChatPanelMastra() {
     }
     setInput('')
     const parts = buildUserParts(text)
-    setAttachments([]) // attachmentsRef still holds them for this synchronous send; cleared for next turn
+    sendAttachmentsRef.current = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
+    setAttachments([]) // display cleared for next turn; sendAttachmentsRef carries this turn's files
     setAttachError(null)
     void sendMessage({ parts } as any)
   }
@@ -427,8 +432,9 @@ export function ChatPanelMastra() {
     planRef.current = entry.tasks
     lastPlanTurnRef.current = plans.map((p) => (p.id === entry.id ? { ...p, status: 'done' as PlanStatus } : p))
     const parts = buildUserParts(entry.query)
+    sendAttachmentsRef.current = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
     setPlans([])
-    setAttachments([]) // attachments (if any) are sent with this execution turn; clear for the next
+    setAttachments([]) // display cleared; sendAttachmentsRef carries this execution turn's files
     setAttachError(null)
     void sendMessage({ parts } as any)
   }
