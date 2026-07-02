@@ -19,6 +19,8 @@ async function apiFetch(path: string, options?: RequestInit) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }))
     throw new Error(err.error?.message || `HTTP ${res.status}`)
   }
+  // 204 No Content (e.g. DELETE) carries no body — calling res.json() would throw.
+  if (res.status === 204) return null
   return res.json()
 }
 

@@ -387,6 +387,10 @@ export function ChatPanelMastra() {
       return
     }
     setInput('')
+    // Reflect the first question in the sidebar title immediately (matches the server, which
+    // titles the session from its first persisted user message). Without this the sidebar keeps
+    // showing "New Chat" until a reload.
+    maybeSetTitleFromFirstMessage(text)
     const parts = buildUserParts(text)
     sendAttachmentsRef.current = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
     setAttachments([]) // display cleared for next turn; sendAttachmentsRef carries this turn's files
@@ -398,11 +402,12 @@ export function ChatPanelMastra() {
   // the title on the first persisted user message, but a plan proposal persists nothing until the
   // user confirms — so set it optimistically here (updates the store live and persists to DB).
   const maybeSetTitleFromFirstMessage = (text: string) => {
-    if (!activeSessionId || messages.length > 0) return
+    const title = text.slice(0, 60).trim()
+    if (!title || !activeSessionId || messages.length > 0) return
     const store = useSessionStore.getState()
     const current = store.sessions.find((x) => x.id === activeSessionId)
     if (current && (!current.title || current.title === 'New Chat')) {
-      void store.updateSessionTitle(activeSessionId, text.slice(0, 60).trim()).catch(() => {})
+      void store.updateSessionTitle(activeSessionId, title).catch(() => {})
     }
   }
 
