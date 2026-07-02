@@ -10,6 +10,8 @@ type WebFetchInput = {
   maxChars?: number
   /** true = force JS rendering, false = static only, omitted = auto (render if thin). */
   render?: boolean
+  /** Network timeout per attempt in ms (default 20000). */
+  timeoutMs?: number
 }
 
 type WebFetchOutput = {
@@ -25,11 +27,12 @@ type WebFetchOutput = {
 }
 
 const DEFAULT_MAX_CHARS = 20000
+const DEFAULT_TIMEOUT_MS = 20000
 
 export const webFetchTool: ToolExecutor<WebFetchInput, WebFetchOutput> = async (input) => {
-  const { url, mode = 'text', maxChars = DEFAULT_MAX_CHARS, render } = input
+  const { url, mode = 'text', maxChars = DEFAULT_MAX_CHARS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPage(url, { render })
+  const page = await loadPage(url, { render, timeoutMs })
   const title = extractTitle(page.html) || page.finalUrl
   const description = extractMetaDescription(page.html)
 

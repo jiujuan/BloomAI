@@ -8,7 +8,7 @@
  * period of inactivity (cold launch is ~several seconds; reuse is fast).
  */
 import type { Browser } from 'playwright-core'
-import { extractMainHtml, htmlToText, fetchPage } from './html'
+import { extractMainHtml, htmlToText, fetchPage, getProxyUrl } from './html'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -78,9 +78,29 @@ export interface RenderOptions {
 
 /** Render a page with a real browser and return the post-JS HTML. */
 export async function renderPage(url: string, opts: RenderOptions = {}): Promise<RenderedPage> {
-  const { timeoutMs = RENDER_TIMEOUT_MS, waitUntil = 'domcontentloaded', waitSelector } = opts
   const browser = await getBrowser()
-  const context = await browser.newContext({ userAgent: DEFAULT_UA, locale: 'zh-CN' })
+  try {
+    return await navigate(browser, url, opts)
+  } catch (err) {
+    // Direct navigation failed — retry through the local proxy if configured.
+    const proxyServer = getProxyUrl()
+    if (!proxyServer) throw err
+    return await navigate(browser, url, opts, proxyServer)
+  }
+}
+
+async function navigate(
+  browser: Browser,
+  url: string,
+  opts: RenderOptions,
+  proxyServer?: string,
+): Promise<RenderedPage> {
+  const { timeoutMs = RENDER_TIMEOUT_MS, waitUntil = 'domcontentloaded', waitSelector } = opts
+  const context = await browser.newContext({
+    userAgent: DEFAULT_UA,
+    locale: 'zh-CN',
+    ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
+  })
   try {
     const page = await context.newPage()
     const response = await page.goto(url, { waitUntil, timeout: timeoutMs })

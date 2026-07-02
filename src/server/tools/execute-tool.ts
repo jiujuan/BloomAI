@@ -2,11 +2,12 @@ import { toolRepo } from '../db/repositories/tool.repo'
 import { toolRegistry } from './registry'
 
 const DEFAULT_TOOL_TIMEOUT_MS = 15000
-// Web tools may drive a headless browser for JS rendering, which needs longer.
+// Web tools may drive a headless browser and/or retry through a proxy (direct
+// + proxy attempts can stack), so they need a longer ceiling.
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
-  web_fetch: 35000,
-  web_extract: 35000,
-  web_screenshot: 35000,
+  web_fetch: 60000,
+  web_extract: 60000,
+  web_screenshot: 60000,
 }
 
 export async function executeTool(toolId: string, input: object, sessionId?: string): Promise<object> {

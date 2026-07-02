@@ -1,19 +1,41 @@
 /**
  * Shared HTML fetching + extraction helpers used by the web_fetch / web_extract tools.
  *
- * Goals (all dependency-free):
+ * Goals (all dependency-free except undici for proxy support):
  *  - Fetch with realistic browser headers and follow redirects.
  *  - Detect the page charset (HTTP header + <meta>) and decode correctly,
  *    so non-UTF-8 pages (GBK/GB2312/Big5/Shift_JIS ...) are not garbled.
+ *  - On a connectivity failure, transparently retry through the local proxy
+ *    configured via LOCAL_HTTPS_PROXY (.env), for network-restricted sites.
  *  - Strip boilerplate (script/style/nav/header/footer/...) and pull out the
  *    main article content instead of the whole noisy page.
  *  - Decode HTML entities and normalise whitespace into readable plain text.
  */
+import { fetch as undiciFetch, ProxyAgent } from 'undici'
+import { readConfigValue } from '../../config/config'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
-const DEFAULT_TIMEOUT_MS = 12000
+const DEFAULT_TIMEOUT_MS = 20000
+
+const PROXY_ENV_KEY = 'LOCAL_HTTPS_PROXY'
+let cachedProxy: { url: string; agent: ProxyAgent } | null = null
+
+/** Local proxy URL from LOCAL_HTTPS_PROXY (process.env or .env), or '' if unset. */
+export function getProxyUrl(): string {
+  return readConfigValue(PROXY_ENV_KEY).value.trim()
+}
+
+/** Cached undici ProxyAgent for the configured local proxy, or null if unset. */
+export function getProxyDispatcher(): ProxyAgent | null {
+  const url = getProxyUrl()
+  if (!url) return null
+  if (cachedProxy?.url === url) return cachedProxy.agent
+  const agent = new ProxyAgent(url)
+  cachedProxy = { url, agent }
+  return agent
+}
 
 export interface FetchedPage {
   /** Requested URL. */
@@ -38,19 +60,21 @@ export interface FetchPageOptions {
 export async function fetchPage(url: string, opts: FetchPageOptions = {}): Promise<FetchedPage> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, userAgent = DEFAULT_UA, maxBytes = 5 * 1024 * 1024 } = opts
 
-  const res = await fetch(url, {
-    redirect: 'follow',
-    headers: {
-      'User-Agent': userAgent,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      'Cache-Control': 'no-cache',
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  })
+  let res: Response
+  let viaProxy = false
+  try {
+    res = await requestOnce(url, userAgent, timeoutMs)
+  } catch (err) {
+    // Direct connection failed (timeout / DNS / refused / reset). If a local
+    // proxy is configured, retry through it before giving up.
+    const proxy = getProxyDispatcher()
+    if (!proxy) throw err
+    viaProxy = true
+    res = await requestOnce(url, userAgent, timeoutMs, proxy)
+  }
 
   if (!res.ok) {
-    throw new Error(`Fetch failed with HTTP ${res.status} ${res.statusText} for ${url}`)
+    throw new Error(`Fetch failed with HTTP ${res.status} ${res.statusText} for ${url}${viaProxy ? ' (via proxy)' : ''}`)
   }
 
   const contentType = res.headers.get('content-type') || ''
@@ -59,6 +83,27 @@ export async function fetchPage(url: string, opts: FetchPageOptions = {}): Promi
   const html = decodeBuffer(buffer, charset)
 
   return { url, finalUrl: res.url || url, status: res.status, contentType, charset, html }
+}
+
+async function requestOnce(
+  url: string,
+  userAgent: string,
+  timeoutMs: number,
+  dispatcher?: ProxyAgent,
+): Promise<Response> {
+  const headers = {
+    'User-Agent': userAgent,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+  }
+  const signal = AbortSignal.timeout(timeoutMs)
+  // For the proxy path use undici's own fetch so it and ProxyAgent come from the
+  // same undici version (Node's built-in fetch rejects an external dispatcher).
+  if (dispatcher) {
+    return undiciFetch(url, { redirect: 'follow', headers, signal, dispatcher }) as unknown as Response
+  }
+  return fetch(url, { redirect: 'follow', headers, signal })
 }
 
 async function readBodyLimited(res: Response, maxBytes: number): Promise<Uint8Array> {

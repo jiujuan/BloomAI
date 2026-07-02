@@ -17,6 +17,8 @@ type WebExtractInput = {
   maxLinks?: number
   /** true = force JS rendering, false = static only, omitted = auto (render if thin). */
   render?: boolean
+  /** Network timeout per attempt in ms (default 20000). */
+  timeoutMs?: number
 }
 
 type ExtractedLink = { url: string; text: string }
@@ -35,11 +37,12 @@ type WebExtractOutput = {
 const DEFAULT_MAX_CHARS = 20000
 const DEFAULT_MAX_LINKS = 50
 const DEFAULT_MAX_HEADINGS = 40
+const DEFAULT_TIMEOUT_MS = 20000
 
 export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = async (input) => {
-  const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render } = input
+  const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPage(url, { render })
+  const page = await loadPage(url, { render, timeoutMs })
   const { html, finalUrl } = page
 
   const title = extractTitle(html) || finalUrl
