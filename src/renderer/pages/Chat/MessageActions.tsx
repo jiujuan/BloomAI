@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Copy, ThumbsUp } from 'lucide-react'
+import { Copy, ThumbsUp, ClipboardPaste } from 'lucide-react'
 
 // Content-copy actions for assistant answers:
 //  - CopyButton: shown below the bubble on hover, copies the whole answer.
@@ -32,6 +32,32 @@ const COPIED_EVENT = 'bloom:copied'
 /** Fire the centered "已复制" toast (see CopyToast). */
 export function emitCopied(message = '已复制') {
   window.dispatchEvent(new CustomEvent(COPIED_EVENT, { detail: message }))
+}
+
+/**
+ * Wire a bubble element for the right-click selection menu (复制 / 点赞). Returns a ref to attach
+ * to the bubble, the current menu state, an onContextMenu handler, and a close callback.
+ * Shared by both assistant answers and user questions so they behave identically.
+ */
+export function useSelectionMenu<T extends HTMLElement = HTMLDivElement>() {
+  const bubbleRef = useRef<T>(null)
+  const [menu, setMenu] = useState<SelectionMenuState | null>(null)
+
+  // Right-click over a selection inside this bubble → custom menu. With no selection we don't
+  // preventDefault, so the native menu still works elsewhere. The range is captured so the menu
+  // can restore the highlight (the right-click can otherwise move the native selection).
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const sel = window.getSelection()
+    const text = sel?.toString().trim() || ''
+    if (!text || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (bubbleRef.current && bubbleRef.current.contains(range.commonAncestorContainer)) {
+      e.preventDefault()
+      setMenu({ x: e.clientX, y: e.clientY, text, range: range.cloneRange() })
+    }
+  }
+
+  return { bubbleRef, menu, handleContextMenu, closeMenu: () => setMenu(null) }
 }
 
 /** Copy-the-whole-answer button. Lives in the hover-revealed .msg-actions row below the bubble. */
@@ -69,7 +95,8 @@ export function SelectionMenu({
 }: {
   state: SelectionMenuState | null
   onClose: () => void
-  onLike: () => void
+  /** Omit to hide the 点赞 item (e.g. on the user's own question). */
+  onLike?: () => void
 }) {
   useEffect(() => {
     if (!state) return
@@ -108,7 +135,7 @@ export function SelectionMenu({
     if (ok) emitCopied()
   }
   const like = () => {
-    onLike()
+    onLike?.()
     onClose()
   }
 
@@ -129,10 +156,12 @@ export function SelectionMenu({
         <Copy size={13} />
         <span>复制</span>
       </button>
-      <button className="selection-menu-item" role="menuitem" onClick={like}>
-        <ThumbsUp size={13} />
-        <span>点赞</span>
-      </button>
+      {onLike && (
+        <button className="selection-menu-item" role="menuitem" onClick={like}>
+          <ThumbsUp size={13} />
+          <span>点赞</span>
+        </button>
+      )}
     </div>
   )
 }
@@ -143,6 +172,59 @@ export function LikedBadge() {
     <span className="msg-action-btn liked" title="已点赞" aria-label="已点赞">
       <ThumbsUp size={14} fill="currentColor" />
     </span>
+  )
+}
+
+/**
+ * Context menu with a single 粘贴 item for the chat input. Positioned at the cursor.
+ * Closes on outside click / scroll / resize / Escape. onPaste reads the clipboard and
+ * inserts it at the caret (see the input's contextmenu handler).
+ */
+export function PasteMenu({
+  state,
+  onClose,
+  onPaste,
+}: {
+  state: { x: number; y: number } | null
+  onClose: () => void
+  onPaste: () => void
+}) {
+  useEffect(() => {
+    if (!state) return
+    const close = () => onClose()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [state, onClose])
+
+  if (!state) return null
+
+  return (
+    <div
+      className="selection-menu"
+      style={{ top: state.y, left: state.x }}
+      role="menu"
+      onMouseDown={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button className="selection-menu-item" role="menuitem" onClick={onPaste}>
+        <ClipboardPaste size={13} />
+        <span>粘贴</span>
+      </button>
+    </div>
   )
 }
 

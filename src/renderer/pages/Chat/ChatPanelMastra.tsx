@@ -14,7 +14,7 @@ import { WorkflowSteps } from './parts/WorkflowSteps'
 import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
 import { PlanCard, type PlanStatus } from './parts/PlanCard'
 import { WriterParams, defaultWritingConfig } from './WriterParams'
-import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, type SelectionMenuState } from './MessageActions'
+import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, PasteMenu, useSelectionMenu } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 
 type ChatMode = 'chat' | 'plan' | 'deep'
@@ -112,6 +112,9 @@ export function ChatPanelMastra() {
   // back on restores the last selection (same lifetime as `team`/`mode` — component-scoped).
   const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
   const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  // Custom right-click "粘贴" menu for the input (position in viewport coords, or null when closed).
+  const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null)
   const [modelOverride, setModelOverride] = useState<string | null>(null)
   // Plan mode proposals for the current turn, in chronological order. Each entry keeps a stable
   // id so a card never changes DOM position when its status flips (ready → discarded); the newest
@@ -259,6 +262,38 @@ export function ChatPanelMastra() {
     if (tl) tl.scrollTo({ top: tl.scrollHeight, behavior: 'smooth' })
   }, [messages.length, status, plans.length])
 
+  // Right-click in the input → show our own "粘贴" menu instead of the native one.
+  const handleInputContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setPasteMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  // Read the clipboard and insert it at the caret (replacing any selection) in the input.
+  const pasteIntoInput = async () => {
+    setPasteMenu(null)
+    let text = ''
+    try {
+      text = await navigator.clipboard.readText()
+    } catch {
+      text = ''
+    }
+    if (!text) return
+    const el = inputRef.current
+    if (!el) {
+      setInput((prev) => prev + text)
+      return
+    }
+    const start = el.selectionStart ?? el.value.length
+    const end = el.selectionEnd ?? el.value.length
+    setInput(el.value.slice(0, start) + text + el.value.slice(end))
+    // Restore focus + caret after React re-renders with the new value.
+    const caret = start + text.length
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(caret, caret)
+    })
+  }
+
   const handleSend = () => {
     const text = input.trim()
     if (!text || isStreaming) return
@@ -326,6 +361,7 @@ export function ChatPanelMastra() {
   return (
     <div className="chat-panel">
       <CopyToast />
+      <PasteMenu state={pasteMenu} onClose={() => setPasteMenu(null)} onPaste={pasteIntoInput} />
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
       </div>
@@ -397,11 +433,13 @@ export function ChatPanelMastra() {
         <div className="input-area">
           <div className="input-shell">
             <textarea
+              ref={inputRef}
               className="input-box"
               value={input}
               placeholder="给 BloomAI 发消息…"
               rows={1}
               onChange={(e) => setInput(e.target.value)}
+              onContextMenu={handleInputContextMenu}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -545,15 +583,7 @@ type ApprovalProps = {
 
 function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { role: string; parts: any[]; streaming?: boolean } & ApprovalProps) {
   if (role === 'user') {
-    const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
-    return (
-      <div className="msg-group user">
-        <div className="msg-avatar user">You</div>
-        <div className="msg-col">
-          <div className="msg-bubble user"><p className="msg-text">{text}</p></div>
-        </div>
-      </div>
-    )
+    return <UserMessageView parts={parts} />
   }
 
   // While streaming, the assistant message can exist before any real content arrives — show the
@@ -563,25 +593,10 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
   // indicator visible below it until real answer content (text/tool/reasoning) shows up.
   const waitingAfterParts = streaming && !showWaiting && !hasAnswerContent(parts)
 
-  const bubbleRef = useRef<HTMLDivElement>(null)
-  const [menu, setMenu] = useState<SelectionMenuState | null>(null)
+  const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
   const [liked, setLiked] = useState(false)
   const fullText = assistantPlainText(parts)
   const canCopy = !streaming && !showWaiting && !!fullText
-
-  // Right-click over a selection inside this bubble → custom 复制/点赞 menu. With no selection we
-  // don't preventDefault, so the native menu still works elsewhere. The range is captured so the
-  // menu can restore the highlight (the right-click can otherwise move the native selection).
-  const handleContextMenu = (e: React.MouseEvent) => {
-    const sel = window.getSelection()
-    const text = sel?.toString().trim() || ''
-    if (!text || !sel || sel.rangeCount === 0) return
-    const range = sel.getRangeAt(0)
-    if (bubbleRef.current && bubbleRef.current.contains(range.commonAncestorContainer)) {
-      e.preventDefault()
-      setMenu({ x: e.clientX, y: e.clientY, text, range: range.cloneRange() })
-    }
-  }
 
   return (
     <div className="msg-group">
@@ -607,7 +622,25 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
             {liked && <LikedBadge />}
           </div>
         )}
-        <SelectionMenu state={menu} onClose={() => setMenu(null)} onLike={() => setLiked(true)} />
+        <SelectionMenu state={menu} onClose={closeMenu} onLike={() => setLiked(true)} />
+      </div>
+    </div>
+  )
+}
+
+/** User's own question bubble. Same right-click 复制 selection menu as answers (点赞 omitted). */
+function UserMessageView({ parts }: { parts: any[] }) {
+  const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
+  const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
+
+  return (
+    <div className="msg-group user">
+      <div className="msg-avatar user">You</div>
+      <div className="msg-col">
+        <div ref={bubbleRef} onContextMenu={handleContextMenu} className="msg-bubble user">
+          <p className="msg-text">{text}</p>
+        </div>
+        <SelectionMenu state={menu} onClose={closeMenu} />
       </div>
     </div>
   )
