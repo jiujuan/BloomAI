@@ -4,6 +4,7 @@ import { handleChatStream, toAISdkStream } from '@mastra/ai-sdk'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import { mastra } from '../../mastra'
 import { TEAM_AGENT_BY_TAB } from '../../mastra/agents/team'
+import { BLOOMAI_RESOURCE_ID } from '../../mastra/memory'
 import { normalizeWriting } from '../../mastra/agents/writer-prompt'
 import { messageRepo } from '../../db/repositories/message.repo'
 import { sessionRepo } from '../../db/repositories/session.repo'
@@ -84,11 +85,25 @@ chatRoutes.post('/', async (c) => {
     }
 
     const attachmentBlock = attachments.length ? await buildAttachmentBlock(attachments) : ''
-    // Compose the messages the agent reads: plan wrapping first (if any), then attachment
-    // excerpts appended to the last user message. Both operate on copies — body.messages (the
-    // clean query already persisted for the UI) is never mutated.
-    const withPlan = planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages
-    const agentMessages = attachmentBlock ? appendToLastUserMessage(withPlan, attachmentBlock) : withPlan
+
+    // Memory routing: the main chat agent uses Mastra Memory to manage its own context
+    // window (lastMessages cap + working memory + observational compression).  We only
+    // send the *new* user message; Mastra retrieves history from its LibSQL store.
+    // Team agents (research / writer / coder) have no Memory configured, so they still
+    // receive the full messages array as before — behaviour unchanged for them.
+    const useMemory = !teamAgentId
+
+    let agentMessages: any[]
+    if (useMemory) {
+      // Extract only the latest user message; Mastra Memory handles the rest of history.
+      const newMsg = body.messages?.at?.(-1)
+      const singleArr: any[] = newMsg ? [newMsg] : []
+      const withPlan = planTasks.length ? augmentLastUserMessage(singleArr, planTasks) : singleArr
+      agentMessages = attachmentBlock ? appendToLastUserMessage(withPlan, attachmentBlock) : withPlan
+    } else {
+      const withPlan = planTasks.length ? augmentLastUserMessage(body.messages, planTasks) : body.messages
+      agentMessages = attachmentBlock ? appendToLastUserMessage(withPlan, attachmentBlock) : withPlan
+    }
 
     const stream = await handleChatStream({
       mastra,
@@ -98,10 +113,10 @@ chatRoutes.post('/', async (c) => {
       onError: streamOnError('chat.stream', { sessionId, agentId: teamAgentId || 'chat' }),
       params: {
         ...body,
-        // Plan execution: feed the agent a user message that embeds the confirmed plan, so the
-        // plan anchors the actual prompt (not just the system instructions) and the model can't
-        // drift off-topic. The clean original query was already persisted above for the UI.
         messages: agentMessages,
+        // Memory-managed agents: threadId maps to the session, resourceId is the single
+        // local user. Mastra uses these to load/save working memory and message history.
+        ...(useMemory ? { threadId: sessionId, resourceId: BLOOMAI_RESOURCE_ID } : {}),
         requestContext,
         abortSignal: c.req.raw.signal,
         maxSteps: MAX_STEPS,

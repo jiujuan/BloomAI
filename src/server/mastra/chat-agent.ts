@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 import { resolveMastraModel } from './model-resolver'
 import { buildAgentTools } from './tools'
+import { chatMemory } from './memory'
 
 /**
  * Per-request values injected by server middleware (from headers/body) and read
@@ -79,4 +80,7 @@ export const chatAgent = new Agent({
   // Rebuilt per request so newly enabled tools / installed skills appear next turn.
   tools: ({ requestContext }) =>
     buildAgentTools(requestContext?.get('sessionId') as string | undefined),
+  // Memory: working memory + observational memory + bounded recent history.
+  // Activated per-request when threadId + resourceId are provided (see chat.ts).
+  memory: chatMemory,
 })
