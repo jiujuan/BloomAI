@@ -200,7 +200,7 @@ if (useMemory) {
 handleChatStream({
   params: {
     messages: agentMessages,
-    ...(useMemory ? { threadId: sessionId, resourceId: BLOOMAI_RESOURCE_ID } : {}),
+    ...(useMemory ? { memory: { thread: sessionId, resource: BLOOMAI_RESOURCE_ID } } : {}),
     // ...
   }
 })

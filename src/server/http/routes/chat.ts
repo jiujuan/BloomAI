@@ -114,9 +114,10 @@ chatRoutes.post('/', async (c) => {
       params: {
         ...body,
         messages: agentMessages,
-        // Memory-managed agents: threadId maps to the session, resourceId is the single
-        // local user. Mastra uses these to load/save working memory and message history.
-        ...(useMemory ? { threadId: sessionId, resourceId: BLOOMAI_RESOURCE_ID } : {}),
+        // Memory-managed agents: `memory.thread` maps to the session so Mastra loads
+        // history (last N messages + working memory + observations) from memory.db and
+        // saves the new turn back. resource scope persists working memory across sessions.
+        ...(useMemory ? { memory: { thread: sessionId, resource: BLOOMAI_RESOURCE_ID } } : {}),
         requestContext,
         abortSignal: c.req.raw.signal,
         maxSteps: MAX_STEPS,

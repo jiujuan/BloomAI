@@ -90,7 +90,8 @@ export const BLOOMAI_RESOURCE_ID = 'bloomai-local-user'
 
 export const chatMemory = new Memory({
   storage: new LibSQLStore({
-    config: { url: memoryDbUrl },
+    id: 'bloomai-memory',
+    url: memoryDbUrl,
   }),
   options: {
     lastMessages,
