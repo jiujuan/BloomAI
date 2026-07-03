@@ -13,12 +13,27 @@ export type ToolCallView = {
 
 export type ToolStatus = 'running' | 'success' | 'error' | 'permission'
 
+// Mastra-internal tools that run as silent background side-effects.
+// They must never appear as tool cards in the chat UI.
+const MASTRA_INTERNAL_TOOLS = new Set([
+  'updateWorkingMemory', // working memory schema update
+  'recall',              // observational memory retrieval
+])
+
+function getToolName(part: any): string {
+  return part.type === 'dynamic-tool'
+    ? String(part.toolName || 'tool')
+    : String(part.type).slice('tool-'.length)
+}
+
 export function isToolPart(part: any): boolean {
-  return !!part && typeof part.type === 'string' && (part.type === 'dynamic-tool' || part.type.startsWith('tool-'))
+  if (!part || typeof part.type !== 'string') return false
+  if (part.type !== 'dynamic-tool' && !part.type.startsWith('tool-')) return false
+  return !MASTRA_INTERNAL_TOOLS.has(getToolName(part))
 }
 
 export function toToolCallView(part: any): ToolCallView {
-  const name = part.type === 'dynamic-tool' ? String(part.toolName || 'tool') : String(part.type).slice('tool-'.length)
+  const name = getToolName(part)
   return {
     toolCallId: part.toolCallId || part.toolName || name,
     name,
@@ -123,14 +138,24 @@ function slimToolOutput(output: any): any {
 /** Bound the size of assistant UI parts for storage; lossless for what the cards display. */
 export function slimParts(parts: any[]): any[] {
   if (!Array.isArray(parts)) return []
-  return parts.map((part) => {
-    if (!part || typeof part.type !== 'string') return part
-    if (part.type === 'reasoning') {
-      return { ...part, text: typeof part.text === 'string' ? truncate(part.text, MAX_REASONING) : part.text }
-    }
-    if (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) {
-      return { ...part, output: part.output !== undefined ? slimToolOutput(part.output) : part.output }
-    }
-    return part
-  })
+  return parts
+    .filter((part) => {
+      if (!part || typeof part.type !== 'string') return true
+      // Drop Mastra-internal tool parts entirely — they're background side-effects,
+      // not UI content, and storing them wastes SQLite space.
+      if (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) {
+        return !MASTRA_INTERNAL_TOOLS.has(getToolName(part))
+      }
+      return true
+    })
+    .map((part) => {
+      if (!part || typeof part.type !== 'string') return part
+      if (part.type === 'reasoning') {
+        return { ...part, text: typeof part.text === 'string' ? truncate(part.text, MAX_REASONING) : part.text }
+      }
+      if (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) {
+        return { ...part, output: part.output !== undefined ? slimToolOutput(part.output) : part.output }
+      }
+      return part
+    })
 }
