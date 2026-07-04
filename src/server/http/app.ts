@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { logError } from '../logger/logger'
+import { logError, serverLogger } from '../logger/logger'
 import { chatRoutes } from './routes/chat'
 import { sessionsRoutes } from './routes/sessions'
 import { personasRoutes } from './routes/personas'
@@ -21,6 +21,13 @@ export function createHonoApp(): Hono {
 
   app.use('*', cors({ origin: '*' }))
 
+  // Access log: method + path + status + duration on every request.
+  app.use('*', async (c, next) => {
+    const start = Date.now()
+    await next()
+    serverLogger.info(`${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`)
+  })
+
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.3.0', server: 'hono' }))
 
   app.route('/api/v1/chat', chatRoutes)
@@ -36,7 +43,6 @@ export function createHonoApp(): Hono {
   app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404))
 
   app.onError((err, c) => {
-    console.error('[Error]', err.message)
     logError('http.error', err, { method: c.req.method, path: c.req.path })
     const status = (err as any).statusCode || (err as any).status || 500
     return c.json({ error: { code: (err as any).code || 'INTERNAL_ERROR', message: err.message || 'Internal server error' } }, status)

@@ -1,8 +1,19 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createLogger, LogLevel } from '@mastra/core/logger'
 import { resolveErrorTimeline, type ResponseError } from '@shared/llm-response-contract/error-timeline-registry'
 import { expandPath, readConfigValue } from '../config/config'
+
+function resolveLogLevel(raw: string): LogLevel {
+  return (Object.values(LogLevel) as string[]).includes(raw) ? (raw as LogLevel) : LogLevel.INFO
+}
+
+/** Structured stdout logger powered by Mastra / Pino. Level controlled by LOG_LEVEL env var. */
+export const serverLogger = createLogger({
+  name: 'bloomai',
+  level: resolveLogLevel(readConfigValue('LOG_LEVEL', 'info').value),
+})
 
 export type LogEntry = {
   timestamp: string
@@ -42,12 +53,15 @@ export function appendLog(entry: Omit<LogEntry, 'timestamp'> & { timestamp?: str
 export function logError(scope: string, error: unknown, details?: Record<string, unknown>): LogEntry {
   const responseError = getResponseError(error)
   const definition = resolveErrorTimeline(responseError)
-  return appendLog({
+  const logEntry = appendLog({
     level: definition.logLevel,
     scope,
     message: responseError.message,
     details: mergeDetails(details, error, responseError.code),
   })
+  // Mirror to stdout so errors appear in structured console output alongside Mastra logs.
+  serverLogger.error(`[${scope}] ${logEntry.message}`, logEntry.details ?? {})
+  return logEntry
 }
 
 export function readLogs(date?: string): LogEntry[] {
