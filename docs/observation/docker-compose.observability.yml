@@ -1,0 +1,75 @@
+version: "3.8"
+
+# BloomAI 本地可观测性栈 (LGTM: Loki + Grafana + Tempo + Prometheus)
+#
+# 用法:
+#   docker compose -f docs/observation/docker-compose.observability.yml up -d
+#
+# 然后在 .env 中设置:
+#   OTEL_ENABLED=true
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+#
+# 服务端口:
+#   4318  - OTLP HTTP (traces + metrics 接收)
+#   9090  - Prometheus UI
+#   3200  - Grafana Tempo (内部)
+#   3000  - Grafana UI (http://localhost:3000)
+
+services:
+  # OTel Collector — 统一接收 OTLP 信号，转发到各后端
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Collector 自身 Prometheus 指标
+    depends_on:
+      - tempo
+      - prometheus
+
+  # Grafana Tempo — 分布式追踪存储
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API (Grafana 数据源)
+
+  # Prometheus — 指标存储（接受 remote-write 和 scrape）
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+
+  # Grafana — 统一可视化层
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - tempo
+      - prometheus
+
+volumes:
+  tempo-data:
+  prometheus-data:
+  grafana-data:
