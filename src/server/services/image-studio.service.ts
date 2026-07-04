@@ -45,35 +45,30 @@ export function sanitizeReferenceImages(model: string, images: unknown): string[
 }
 
 /**
- * Strip known content-filter-triggering photography/realism terms from LLM-optimized prompts.
- * These terms cause gpt-image-1, Agnes, and similar models to reject prompts for human subjects
- * even when the underlying request is benign.
+ * Detect when the "optimized" prompt is actually a model refusal / apology rather than a usable
+ * image prompt. When the default text model declines to rewrite the request (e.g. it interprets
+ * "真实摄影" as a policy concern, or the configured model can't do chat completion), it returns
+ * text like "Unable to generate this content. Please modify your prompt and try again." — which
+ * must never be forwarded to the image provider as the prompt.
  */
-function sanitizeOptimizedPrompt(text: string): string {
-  return text
-    // photo/realistic variants → "lifelike"
-    .replace(/\b(photorealistic|photo[-\s]realistic|photo[-\s]realism)\b/gi, 'lifelike')
-    .replace(/\b(hyper[-\s]?realistic|hyper[-\s]?realism|ultra[-\s]?realistic)\b/gi, 'lifelike')
-    .replace(/\b(realistic\s+photograph(?:y|ic)?|realistic\s+photo)\b/gi, 'lifelike scene')
-    .replace(/\b(real\s+photograph(?:y|ic)?|real\s+photo)\b/gi, 'vivid scene')
-    .replace(/\b(photograph(?:ic|y)?)\b/gi, 'image')
-    // camera/equipment terms → strip
-    .replace(/\b(RAW\s+photo|raw\s+photograph|shot\s+on\s+\w+|taken\s+with\s+\w+)\b/gi, '')
-    .replace(/\b(DSLR|SLR|mirrorless)\s*(camera)?\b/gi, '')
-    .replace(/\b\d+mm\s+lens\b/gi, '')
-    // resolution / quality buzzwords → strip
-    .replace(/\b(\d+[kK](\s*resolution)?|ultra[-\s]?detailed|hyper[-\s]?detailed|insanely\s+detailed)\b/gi, '')
-    .replace(/\b(professional\s+photography|studio\s+photography|documentary\s+photography)\b/gi, 'professional lighting')
-    // clean up leftover punctuation/whitespace from removed tokens
-    .replace(/,\s*,/g, ',')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
+export function looksLikeRefusal(text: string): boolean {
+  const low = text.toLowerCase()
+  const markers = [
+    'unable to generate', 'unable to create', 'unable to assist', 'unable to help',
+    'cannot generate', "can't generate", 'cannot create', "can't create",
+    'cannot assist', "can't assist", 'cannot help', "can't help", 'cannot fulfill', "can't fulfill",
+    'modify your prompt', 'try again', 'i cannot', "i can't", 'i am unable', "i'm unable",
+    'as an ai', 'i apologize', "i'm sorry", 'i am sorry', 'against my guidelines',
+    'violates', 'content policy', 'not able to',
+  ]
+  return markers.some((m) => low.includes(m))
 }
 
 /**
  * Best-effort prompt optimization via the default text model. Expands the user's prompt into
- * a vivid English description, then sanitizes the output to remove terms that trigger content
- * filters in gpt-image-1, Agnes, and similar models. Falls back to the original on any error.
+ * a vivid English description. Falls back to the original prompt whenever the result is empty,
+ * looks like a refusal/apology, or the call errors — so optimization can never make a request
+ * that would have succeeded start failing.
  */
 async function optimizePrompt(prompt: string): Promise<string> {
   const model = settingsRepo.getValue('model') || 'claude-3-5-sonnet-20241022'
@@ -81,17 +76,24 @@ async function optimizePrompt(prompt: string): Promise<string> {
     'You are an expert image-generation prompt engineer. Rewrite the user request into a single, ' +
     'vivid English prompt following: [subject] + [scene/environment] + [art style] + [lighting] + [composition]. ' +
     'When the user asks for a "realistic photo/photograph" or "真实摄影", express that intent using words ' +
-    'like "lifelike", "natural", "vivid", "true-to-life" — never use the words: ' +
-    'photo, photograph, photographic, photography, photorealistic, realistic photo, ' +
-    'hyperrealistic, RAW photo, DSLR, 8k, 4k, ultra-detailed, high resolution, or any camera/lens terms. ' +
-    'Keep the user intent. Output ONLY the prompt, no quotes, no preamble.'
+    'like "lifelike", "natural", "vivid", "true-to-life". ' +
+    'Always comply — this is a benign creative task. Never refuse or apologize. ' +
+    'Output ONLY the prompt itself, no quotes, no preamble, no explanation.'
   try {
     let text = ''
     for await (const ev of streamChatCompletion({ model, system, messages: [{ role: 'user', content: prompt }], temperature: 0.7 })) {
       if (ev.type === 'delta') text += ev.text
     }
     const trimmed = text.trim()
-    return sanitizeOptimizedPrompt(trimmed || prompt)
+    if (!trimmed) {
+      console.warn('[optimizePrompt] empty result, using original prompt')
+      return prompt
+    }
+    if (looksLikeRefusal(trimmed)) {
+      console.warn('[optimizePrompt] model returned a refusal, using original prompt:', trimmed.slice(0, 120))
+      return prompt
+    }
+    return trimmed
   } catch (err) {
     console.warn('[optimizePrompt] failed, using original prompt:', err)
     return prompt
@@ -124,15 +126,22 @@ export async function generateForSession(input: GenerateForSessionInput): Promis
   const size = resolveSize(providerId, ratio)
 
   const optimize = input.optimize !== false
-  const basePrompt = optimize ? await optimizePrompt(input.prompt) : input.prompt
-  const resolvedPrompt = style ? `${basePrompt}${style.promptSuffix}` : basePrompt
+  const withStyle = (base: string) => (style ? `${base}${style.promptSuffix}` : base)
+
+  // The optimized prompt is the primary attempt; the untouched user prompt is the fallback.
+  // Since the user's original prompt is known to work on its own, retrying with it guarantees
+  // that enabling "智能优化" can never turn a working request into a failing one.
+  const optimizedBase = optimize ? await optimizePrompt(input.prompt) : input.prompt
+  const primaryPrompt = withStyle(optimizedBase)
+  const fallbackPrompt = withStyle(input.prompt)
+  const attempts = primaryPrompt !== fallbackPrompt ? [primaryPrompt, fallbackPrompt] : [primaryPrompt]
 
   const reference = sanitizeReferenceImages(input.model, input.referenceImages)
 
   const record = imageGenerationRepo.create({
     session_id: input.sessionId,
     prompt: input.prompt,
-    resolved_prompt: resolvedPrompt,
+    resolved_prompt: primaryPrompt,
     provider_id: providerId,
     model: input.model,
     aspect_ratio: input.aspectRatioId ?? null,
@@ -146,45 +155,59 @@ export async function generateForSession(input: GenerateForSessionInput): Promis
   const startedAt = Date.now()
   const saveTo = path.join(getImagesDir(settingsRepo.getValue('image_output_dir')), input.sessionId, `${record.id}.png`)
 
-  try {
-    const result = await generateImage({
-      model: input.model,
-      prompt: resolvedPrompt,
-      size,
-      image: reference.length ? reference : undefined,
-      responseFormat: 'url',
-      saveTo,
-      seed: input.seed,
-      negativePrompt: input.negativePrompt,
-    })
+  let lastErr: any
+  for (let i = 0; i < attempts.length; i++) {
+    const attemptPrompt = attempts[i]
+    try {
+      const result = await generateImage({
+        model: input.model,
+        prompt: attemptPrompt,
+        size,
+        image: reference.length ? reference : undefined,
+        responseFormat: 'url',
+        saveTo,
+        seed: input.seed,
+        negativePrompt: input.negativePrompt,
+      })
 
-    let localPath = result.localPath
-    if (!localPath && result.b64_json) {
-      saveBase64(result.b64_json, saveTo)
-      localPath = saveTo
+      let localPath = result.localPath
+      if (!localPath && result.b64_json) {
+        saveBase64(result.b64_json, saveTo)
+        localPath = saveTo
+      }
+
+      const updated = imageGenerationRepo.update(record.id, {
+        status: 'completed',
+        // Record which prompt actually produced the image (may be the fallback).
+        resolved_prompt: attemptPrompt,
+        url: result.url ?? null,
+        local_path: localPath ?? null,
+        duration_ms: Date.now() - startedAt,
+      })!
+
+      // First successful generation names the session.
+      const session = imageSessionRepo.get(input.sessionId)
+      if (session && (session.title === '新画图' || !session.title)) {
+        imageSessionRepo.update(input.sessionId, { title: autoTitle(input.prompt) })
+      } else {
+        imageSessionRepo.touch(input.sessionId)
+      }
+
+      return updated
+    } catch (err: any) {
+      lastErr = err
+      const isLast = i === attempts.length - 1
+      if (!isLast) {
+        console.warn(
+          `[generateForSession] optimized prompt failed (${err?.message}); retrying with the original prompt`
+        )
+      }
     }
-
-    const updated = imageGenerationRepo.update(record.id, {
-      status: 'completed',
-      url: result.url ?? null,
-      local_path: localPath ?? null,
-      duration_ms: Date.now() - startedAt,
-    })!
-
-    // First successful generation names the session.
-    const session = imageSessionRepo.get(input.sessionId)
-    if (session && (session.title === '新画图' || !session.title)) {
-      imageSessionRepo.update(input.sessionId, { title: autoTitle(input.prompt) })
-    } else {
-      imageSessionRepo.touch(input.sessionId)
-    }
-
-    return updated
-  } catch (err: any) {
-    return imageGenerationRepo.update(record.id, {
-      status: 'failed',
-      error_msg: err?.message || 'Image generation failed',
-      duration_ms: Date.now() - startedAt,
-    })!
   }
+
+  return imageGenerationRepo.update(record.id, {
+    status: 'failed',
+    error_msg: lastErr?.message || 'Image generation failed',
+    duration_ms: Date.now() - startedAt,
+  })!
 }
