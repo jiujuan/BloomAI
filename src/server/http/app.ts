@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logError, serverLogger } from '../logger/logger'
+import { getTracer, SpanStatusCode } from '../telemetry/tracer'
+import { getMeter } from '../telemetry/metrics'
 import { chatRoutes } from './routes/chat'
 import { sessionsRoutes } from './routes/sessions'
 import { personasRoutes } from './routes/personas'
@@ -18,14 +20,47 @@ import { attachmentsRoutes } from './routes/attachments'
  */
 export function createHonoApp(): Hono {
   const app = new Hono()
+  const httpTracer = getTracer('bloomai.http')
+  // Lazily created on first request — after initMetrics() has registered the global MeterProvider.
+  let _httpDuration: ReturnType<ReturnType<typeof getMeter>['createHistogram']> | null = null
 
   app.use('*', cors({ origin: '*' }))
 
-  // Access log: method + path + status + duration on every request.
+  // HTTP trace span — must come before the access-log middleware so the span wraps the full request.
+  app.use('*', async (c, next) => {
+    const span = httpTracer.startSpan(`${c.req.method} ${c.req.path}`, {
+      attributes: { 'http.method': c.req.method, 'http.route': c.req.path },
+    })
+    try {
+      await next()
+      span.setAttribute('http.status_code', c.res.status)
+      if (c.res.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR })
+    } catch (err: any) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+      span.recordException(err)
+      throw err
+    } finally {
+      span.end()
+    }
+  })
+
+  // Access log: method + path + status + duration on every request. Also records HTTP duration metric.
   app.use('*', async (c, next) => {
     const start = Date.now()
     await next()
-    serverLogger.info(`${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`)
+    const elapsed = Date.now() - start
+    serverLogger.info(`${c.req.method} ${c.req.path} ${c.res.status} ${elapsed}ms`)
+    if (!_httpDuration) {
+      _httpDuration = getMeter('bloomai.http').createHistogram('bloomai.http.request.duration_ms', {
+        unit: 'ms',
+        description: 'HTTP request duration',
+      })
+    }
+    _httpDuration.record(elapsed, {
+      method: c.req.method,
+      route: c.req.path,
+      status_code: String(c.res.status),
+    })
   })
 
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.3.0', server: 'hono' }))

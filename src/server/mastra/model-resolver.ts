@@ -4,7 +4,23 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { MastraModelConfig } from '@mastra/core/llm'
 import { resolveRuntimeModel } from '../llm/model-selection'
 import { getProviderApiKey, getProviderBaseUrl } from '../llm/settings'
+import { getTracer, SpanStatusCode } from '../telemetry/tracer'
+import { getMeter } from '../telemetry/metrics'
+import type { Histogram } from '@opentelemetry/api'
 import type { ResolvedLlmModel } from '../llm/types'
+
+const tracer = getTracer('bloomai.llm')
+
+let _resolveDuration: Histogram | null = null
+function getResolveDuration() {
+  if (!_resolveDuration) {
+    _resolveDuration = getMeter('bloomai.llm').createHistogram('bloomai.llm.model_resolve.duration_ms', {
+      unit: 'ms',
+      description: 'Model resolution duration',
+    })
+  }
+  return _resolveDuration
+}
 
 /**
  * Bridges BloomAI's provider/model registry to a concrete AI SDK v6 model.
@@ -18,12 +34,39 @@ import type { ResolvedLlmModel } from '../llm/types'
  * Used as the Agent's dynamic `model` so the request-selected model wins per turn.
  */
 export async function resolveMastraModel(requestedModel?: string): Promise<MastraModelConfig> {
-  const { resolved } = await resolveRuntimeModel({
-    consumer: 'agent',
-    modality: 'text',
-    requestedModel,
+  const start = Date.now()
+  const span = tracer.startSpan('llm.model_resolve', {
+    attributes: { 'llm.requested_model': requestedModel ?? 'default' },
   })
-  return toAiSdkModel(resolved)
+  try {
+    const { resolved } = await resolveRuntimeModel({
+      consumer: 'agent',
+      modality: 'text',
+      requestedModel,
+    })
+    span.setAttributes({
+      'llm.provider': resolved.provider.id,
+      'llm.provider_kind': resolved.provider.kind,
+      'llm.model': resolved.model.modelId,
+    })
+    getResolveDuration().record(Date.now() - start, {
+      provider: resolved.provider.id,
+      model: resolved.model.modelId,
+      status: 'success',
+    })
+    return toAiSdkModel(resolved)
+  } catch (err: any) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+    span.recordException(err)
+    getResolveDuration().record(Date.now() - start, {
+      provider: 'unknown',
+      model: requestedModel ?? 'default',
+      status: 'error',
+    })
+    throw err
+  } finally {
+    span.end()
+  }
 }
 
 function toAiSdkModel(resolved: ResolvedLlmModel): MastraModelConfig {
