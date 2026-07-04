@@ -1,6 +1,6 @@
-﻿# 馃尭 BloomAI v0.2 鈥?Sprout
+# 🌸 BloomAI v0.2 — Sprout
 
-> Local-first AI Desktop Assistant 路 Tools System + Skills Market 路 v0.2.0
+> Local-first AI Desktop Assistant · Tools System + Skills Market · v0.2.0
 
 ---
 
@@ -10,32 +10,32 @@ Building on v0.1's chat engine, v0.2 adds the complete **Tools System** and **Sk
 
 | Feature | Status |
 |---|---|
-| 22 built-in tools across 5 categories | 鉁?|
-| BaseTool-style executor with 15s timeout + persistence | 鉁?|
-| Three-tier permission system (readonly / write / shell) | 鉁?|
-| Permission dialogs (low/medium/high risk) | 鉁?|
-| Tool Call cards in chat (running/success/error states) | 鉁?|
-| Tool Management page (enable/disable, stats, search) | 鉁?|
-| Tool Detail page (schema viewer, run history) | 鉁?|
-| Tool Test Runner (manual parameter input + execution) | 鉁?|
-| Skills Market (8 official/community skills) | 鉁?|
-| Skill Editor (js-function / http-api / prompt-template) | 鉁?|
-| Skill install/uninstall from market | 鉁?|
-| All v0.1 features remain fully intact | 鉁?|
+| 22 built-in tools across 5 categories | ✅ |
+| BaseTool-style executor with 15s timeout + persistence | ✅ |
+| Three-tier permission system (readonly / write / shell) | ✅ |
+| Permission dialogs (low/medium/high risk) | ✅ |
+| Tool Call cards in chat (running/success/error states) | ✅ |
+| Tool Management page (enable/disable, stats, search) | ✅ |
+| Tool Detail page (schema viewer, run history) | ✅ |
+| Tool Test Runner (manual parameter input + execution) | ✅ |
+| Skills Market (8 official/community skills) | ✅ |
+| Skill Editor (js-function / http-api / prompt-template) | ✅ |
+| Skill install/uninstall from market | ✅ |
+| All v0.1 features remain fully intact | ✅ |
 
 ---
 
 ## Tools Reference (22 total)
 
-### 馃寪 Web (4)
+### 🌐 Web (4)
 | Tool | Permission | Description |
 |---|---|---|
 | `web_search` | none | Search the web via DuckDuckGo Instant Answers |
 | `web_fetch` | network | Fetch and extract text content from any URL |
-| `web_screenshot` | network | Capture a webpage screenshot (stub 鈥?needs Playwright) |
+| `web_screenshot` | network | Capture a webpage screenshot (stub — needs Playwright) |
 | `web_extract` | network | Extract headings and links from a webpage |
 
-### 馃搧 File System (6)
+### 📁 File System (6)
 | Tool | Permission | Description |
 |---|---|---|
 | `fs_read` | fs | Read file contents with offset/limit |
@@ -43,31 +43,31 @@ Building on v0.1's chat engine, v0.2 adds the complete **Tools System** and **Sk
 | `fs_edit` | write | Replace an exact unique string in a file |
 | `fs_grep` | fs | Regex search across file(s) |
 | `fs_glob` | fs | Find files by pattern |
-| `bash` | shell | Execute whitelisted commands (ls, cat, grep, find鈥? |
+| `bash` | shell | Execute whitelisted commands (ls, cat, grep, find…) |
 
-### 馃搫 Document (5)
+### 📄 Document (5)
 | Tool | Permission | Description |
 |---|---|---|
-| `doc_markdown` | fs | Parse Markdown 鈫?headings, code blocks, links |
-| `doc_pdf` | fs | PDF metadata (stub 鈥?needs pdf-parse) |
+| `doc_markdown` | fs | Parse Markdown → headings, code blocks, links |
+| `doc_pdf` | fs | PDF metadata (stub — needs pdf-parse) |
 | `doc_txt` | fs | Read + chunk plain text |
-| `doc_csv` | fs | Parse CSV 鈫?rows + column statistics |
-| `doc_docx` | fs | DOCX parsing (stub 鈥?needs mammoth) |
+| `doc_csv` | fs | Parse CSV → rows + column statistics |
+| `doc_docx` | fs | DOCX parsing (stub — needs mammoth) |
 
-### 馃柤锔?Multimodal (4)
+### 🖼️ Multimodal (4)
 | Tool | Permission | Description |
 |---|---|---|
 | `vision` | network | Analyze images via Claude vision (real API call) |
-| `ocr` | fs | OCR text extraction (stub 鈥?needs Tesseract) |
+| `ocr` | fs | OCR text extraction (stub — needs Tesseract) |
 | `image_gen` | network | Generate images via DALL-E 3 (real API call) |
-| `image_edit` | fs | Image editing (stub 鈥?needs sharp) |
+| `image_edit` | fs | Image editing (stub — needs sharp) |
 
-### 鈿?Execution (3)
+### ⚡ Execution (3)
 | Tool | Permission | Description |
 |---|---|---|
 | `node_runner` | sandbox | Run JS in a `node:vm` sandbox, 5s timeout |
 | `python_runner` | sandbox | Run Python 3 in a subprocess, 10s timeout |
-| `shell` | shell | Full shell access 鈥?requires **permanent** permission grant |
+| `shell` | shell | Full shell access — requires **permanent** permission grant |
 
 > **Note**: 5 tools (`web_screenshot`, `doc_pdf`, `doc_docx`, `ocr`, `image_edit`) return stub responses since their npm dependencies (playwright, pdf-parse, mammoth, tesseract.js, sharp) were intentionally **not** installed to keep the build lightweight and avoid native compilation. They are fully wired into the permission/execution/persistence pipeline and will work immediately once those packages are added.
 
@@ -141,21 +141,20 @@ GET    /api/v1/skills/:id/runs               # Skill run history
 
 ## Architecture Notes
 
-- **Drizzle ORM over node:sqlite**: Avoids native compilation entirely 鈥?works in any sandboxed/restricted environment without node-gyp.
+- **Drizzle ORM over node:sqlite**: Avoids native compilation entirely — works in any sandboxed/restricted environment without node-gyp.
 - **Three-tier permissions**: `null`/`fs`/`network` (soft, auto-allowed), `write` (needs confirmation dialog), `shell` (needs explicit **permanent** grant via `/tools/permissions/shell/grant`).
 - **vm sandbox for JS execution**: Both `node_runner` tool and `js-function` skills run inside `node:vm` contexts with no access to `require`, `process`, or the filesystem.
 - **15-second hard timeout**: Every tool call races against a timeout via `Promise.race`, regardless of category.
-- **All v0.1 data persists**: Sessions, messages, and personas are untouched 鈥?v0.2 is purely additive at the schema level.
+- **All v0.1 data persists**: Sessions, messages, and personas are untouched — v0.2 is purely additive at the schema level.
 
 ---
 
 ## What's NOT in this build (by design, per roadmap)
 
-- Multi-Agent system (small red book / WeChat agents) 鈫?**v0.3**
-- Workflow automation engine 鈫?**v0.4**
-- Native dependencies for stub tools (playwright, pdf-parse, mammoth, tesseract.js, sharp) 鈥?install separately if needed
+- Multi-Agent system (small red book / WeChat agents) → **v0.3**
+- Workflow automation engine → **v0.4**
+- Native dependencies for stub tools (playwright, pdf-parse, mammoth, tesseract.js, sharp) — install separately if needed
 
 ---
 
-*BloomAI v0.2.0 "Sprout" 路 Built on v0.1 "Seedling" 路 June 2026*
-
+*BloomAI v0.2.0 "Sprout" · Built on v0.1 "Seedling" · June 2026*
