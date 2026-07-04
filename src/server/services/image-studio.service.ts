@@ -46,15 +46,22 @@ export function sanitizeReferenceImages(model: string, images: unknown): string[
 
 /**
  * Best-effort prompt optimization via the default text model. Expands the user's prompt into
- * the recommended [subject]+[scene]+[style]+[light]+[composition]+[quality] structure. Falls
- * back to the original prompt on any error so it never blocks image generation.
+ * a vivid English description. Falls back to the original prompt on any error so it never
+ * blocks image generation.
+ *
+ * NOTE: Deliberately avoids instructing the LLM to add photorealism / photography-style quality
+ * tags ("photorealistic", "hyperrealistic", "8k", "RAW photo", etc.) because modern image models
+ * (gpt-image-1) have aggressive content filters that reject such terms for human subjects.
  */
 async function optimizePrompt(prompt: string): Promise<string> {
   const model = settingsRepo.getValue('model') || 'claude-3-5-sonnet-20241022'
   const system =
     'You are an expert image-generation prompt engineer. Rewrite the user request into a single, ' +
-    'vivid English prompt following: [subject] + [scene/environment] + [style] + [lighting] + ' +
-    '[composition] + [quality]. Keep the user intent. Output ONLY the prompt, no quotes, no preamble.'
+    'vivid English prompt following: [subject] + [scene/environment] + [art style] + [lighting] + [composition]. ' +
+    'Use descriptive, imaginative language. ' +
+    'Do NOT use any of these terms: photorealistic, hyperrealistic, ultra-detailed, 8k, 4k, RAW photo, DSLR, ' +
+    'professional photography, high resolution, or similar camera/photography technical terms. ' +
+    'Keep the user intent. Output ONLY the prompt, no quotes, no preamble.'
   try {
     let text = ''
     for await (const ev of streamChatCompletion({ model, system, messages: [{ role: 'user', content: prompt }], temperature: 0.7 })) {
@@ -62,7 +69,8 @@ async function optimizePrompt(prompt: string): Promise<string> {
     }
     const trimmed = text.trim()
     return trimmed || prompt
-  } catch {
+  } catch (err) {
+    console.warn('[optimizePrompt] failed, using original prompt:', err)
     return prompt
   }
 }

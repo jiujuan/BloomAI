@@ -48,20 +48,31 @@ export async function saveGeneratedImage(url: string, saveTo: string): Promise<s
   return filePath
 }
 
-/** Adapter for the OpenAI images/generations endpoint (dall-e-3, dall-e-2). */
+/** Adapter for the OpenAI images/generations endpoint (dall-e-3, dall-e-2, gpt-image-1). */
 export const openaiImageAdapter: ImageProviderAdapter = {
   async generate(input) {
     const apiKey = getProviderApiKey(input.resolved.provider)
     const baseUrl = getProviderBaseUrl(input.resolved.provider)
     const model = input.resolved.model.modelId
+    const isGptImage1 = model === 'gpt-image-1'
+
     const body: Record<string, unknown> = {
       model,
       prompt: input.prompt,
       n: 1,
       size: input.size || '1024x1024',
-      quality: input.quality || 'standard',
     }
-    if (input.responseFormat) body.response_format = input.responseFormat
+
+    if (isGptImage1) {
+      // gpt-image-1 only accepts 'low' | 'medium' | 'high' | 'auto'; no response_format support
+      const q = input.quality
+      body.quality = (q === 'hd' || q === 'standard' || !q) ? 'medium' : q
+      // response_format is intentionally omitted — gpt-image-1 always returns b64_json
+    } else {
+      // dall-e-3 / dall-e-2
+      body.quality = input.quality || 'standard'
+      if (input.responseFormat) body.response_format = input.responseFormat
+    }
 
     const response = await fetch(`${baseUrl}/images/generations`, {
       method: 'POST',
