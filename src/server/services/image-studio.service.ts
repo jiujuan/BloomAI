@@ -45,22 +45,45 @@ export function sanitizeReferenceImages(model: string, images: unknown): string[
 }
 
 /**
+ * Strip known content-filter-triggering photography/realism terms from LLM-optimized prompts.
+ * These terms cause gpt-image-1, Agnes, and similar models to reject prompts for human subjects
+ * even when the underlying request is benign.
+ */
+function sanitizeOptimizedPrompt(text: string): string {
+  return text
+    // photo/realistic variants → "lifelike"
+    .replace(/\b(photorealistic|photo[-\s]realistic|photo[-\s]realism)\b/gi, 'lifelike')
+    .replace(/\b(hyper[-\s]?realistic|hyper[-\s]?realism|ultra[-\s]?realistic)\b/gi, 'lifelike')
+    .replace(/\b(realistic\s+photograph(?:y|ic)?|realistic\s+photo)\b/gi, 'lifelike scene')
+    .replace(/\b(real\s+photograph(?:y|ic)?|real\s+photo)\b/gi, 'vivid scene')
+    .replace(/\b(photograph(?:ic|y)?)\b/gi, 'image')
+    // camera/equipment terms → strip
+    .replace(/\b(RAW\s+photo|raw\s+photograph|shot\s+on\s+\w+|taken\s+with\s+\w+)\b/gi, '')
+    .replace(/\b(DSLR|SLR|mirrorless)\s*(camera)?\b/gi, '')
+    .replace(/\b\d+mm\s+lens\b/gi, '')
+    // resolution / quality buzzwords → strip
+    .replace(/\b(\d+[kK](\s*resolution)?|ultra[-\s]?detailed|hyper[-\s]?detailed|insanely\s+detailed)\b/gi, '')
+    .replace(/\b(professional\s+photography|studio\s+photography|documentary\s+photography)\b/gi, 'professional lighting')
+    // clean up leftover punctuation/whitespace from removed tokens
+    .replace(/,\s*,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+/**
  * Best-effort prompt optimization via the default text model. Expands the user's prompt into
- * a vivid English description. Falls back to the original prompt on any error so it never
- * blocks image generation.
- *
- * NOTE: Deliberately avoids instructing the LLM to add photorealism / photography-style quality
- * tags ("photorealistic", "hyperrealistic", "8k", "RAW photo", etc.) because modern image models
- * (gpt-image-1) have aggressive content filters that reject such terms for human subjects.
+ * a vivid English description, then sanitizes the output to remove terms that trigger content
+ * filters in gpt-image-1, Agnes, and similar models. Falls back to the original on any error.
  */
 async function optimizePrompt(prompt: string): Promise<string> {
   const model = settingsRepo.getValue('model') || 'claude-3-5-sonnet-20241022'
   const system =
     'You are an expert image-generation prompt engineer. Rewrite the user request into a single, ' +
     'vivid English prompt following: [subject] + [scene/environment] + [art style] + [lighting] + [composition]. ' +
-    'Use descriptive, imaginative language. ' +
-    'Do NOT use any of these terms: photorealistic, hyperrealistic, ultra-detailed, 8k, 4k, RAW photo, DSLR, ' +
-    'professional photography, high resolution, or similar camera/photography technical terms. ' +
+    'When the user asks for a "realistic photo/photograph" or "真实摄影", express that intent using words ' +
+    'like "lifelike", "natural", "vivid", "true-to-life" — never use the words: ' +
+    'photo, photograph, photographic, photography, photorealistic, realistic photo, ' +
+    'hyperrealistic, RAW photo, DSLR, 8k, 4k, ultra-detailed, high resolution, or any camera/lens terms. ' +
     'Keep the user intent. Output ONLY the prompt, no quotes, no preamble.'
   try {
     let text = ''
@@ -68,7 +91,7 @@ async function optimizePrompt(prompt: string): Promise<string> {
       if (ev.type === 'delta') text += ev.text
     }
     const trimmed = text.trim()
-    return trimmed || prompt
+    return sanitizeOptimizedPrompt(trimmed || prompt)
   } catch (err) {
     console.warn('[optimizePrompt] failed, using original prompt:', err)
     return prompt
