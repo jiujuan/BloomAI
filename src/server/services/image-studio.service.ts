@@ -7,6 +7,9 @@ import { getImagesDir } from '../db/paths'
 import { imageGenerationRepo, type ImageGeneration } from '../db/repositories/image-generation.repo'
 import { imageSessionRepo } from '../db/repositories/image-session.repo'
 import { settingsRepo } from '../db/repositories/settings.repo'
+import { getTracer, SpanStatusCode, context, trace } from '../telemetry/tracer'
+import { getMeter } from '../telemetry/metrics'
+import type { Histogram, Counter } from '@opentelemetry/api'
 
 export interface GenerateForSessionInput {
   sessionId: string
@@ -18,6 +21,32 @@ export interface GenerateForSessionInput {
   negativePrompt?: string
   seed?: number
   optimize?: boolean // default true
+}
+
+const imgTracer = getTracer('bloomai.image')
+
+// Lazily created instrument singletons (must be after initMetrics() registers the MeterProvider).
+let _optimizeCounters: { fallback: Counter; refusal: Counter } | null = null
+function getOptimizeCounters() {
+  if (!_optimizeCounters) {
+    const m = getMeter('bloomai.image')
+    _optimizeCounters = {
+      fallback: m.createCounter('bloomai.image.optimize.fallback_total', { description: 'Times optimize fell back to original prompt (empty result)' }),
+      refusal: m.createCounter('bloomai.image.optimize.refusal_total', { description: 'Times optimize fell back due to model refusal' }),
+    }
+  }
+  return _optimizeCounters
+}
+
+let _genDuration: Histogram | null = null
+function getGenDuration() {
+  if (!_genDuration) {
+    _genDuration = getMeter('bloomai.image').createHistogram('bloomai.image.generate.duration_ms', {
+      unit: 'ms',
+      description: 'Image generation duration per attempt',
+    })
+  }
+  return _genDuration
 }
 
 /** DALL·E 3 only accepts a fixed size set; Agnes-style providers accept arbitrary WxH. */
@@ -71,6 +100,7 @@ export function looksLikeRefusal(text: string): boolean {
  * that would have succeeded start failing.
  */
 async function optimizePrompt(prompt: string): Promise<string> {
+  const span = imgTracer.startSpan('image.optimize_prompt')
   const model = settingsRepo.getValue('model') || 'claude-3-5-sonnet-20241022'
   const system =
     'You are an expert image-generation prompt engineer. Rewrite the user request into a single, ' +
@@ -87,15 +117,25 @@ async function optimizePrompt(prompt: string): Promise<string> {
     const trimmed = text.trim()
     if (!trimmed) {
       console.warn('[optimizePrompt] empty result, using original prompt')
+      span.setAttribute('optimize.fallback', true)
+      getOptimizeCounters().fallback.add(1)
+      span.end()
       return prompt
     }
     if (looksLikeRefusal(trimmed)) {
       console.warn('[optimizePrompt] model returned a refusal, using original prompt:', trimmed.slice(0, 120))
+      span.setAttribute('optimize.refusal', true)
+      getOptimizeCounters().refusal.add(1)
+      span.end()
       return prompt
     }
+    span.setAttribute('optimize.fallback', false)
+    span.end()
     return trimmed
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[optimizePrompt] failed, using original prompt:', err)
+    span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+    span.end()
     return prompt
   }
 }
@@ -117,97 +157,129 @@ function saveBase64(b64: string, filePath: string): void {
  * failed) so the caller can render an inline result/error card.
  */
 export async function generateForSession(input: GenerateForSessionInput): Promise<ImageGeneration> {
-  // Validate model/modality up front (throws on unknown/disabled model).
-  const resolved = await resolveModel(input.model, 'image')
-  const providerId = resolved.provider.id
-
-  const ratio = getAspectRatio(input.aspectRatioId)
-  const style = getImageStyle(input.styleId)
-  const size = resolveSize(providerId, ratio)
-
-  const optimize = input.optimize !== false
-  const withStyle = (base: string) => (style ? `${base}${style.promptSuffix}` : base)
-
-  // The optimized prompt is the primary attempt; the untouched user prompt is the fallback.
-  // Since the user's original prompt is known to work on its own, retrying with it guarantees
-  // that enabling "智能优化" can never turn a working request into a failing one.
-  const optimizedBase = optimize ? await optimizePrompt(input.prompt) : input.prompt
-  const primaryPrompt = withStyle(optimizedBase)
-  const fallbackPrompt = withStyle(input.prompt)
-  const attempts = primaryPrompt !== fallbackPrompt ? [primaryPrompt, fallbackPrompt] : [primaryPrompt]
-
-  const reference = sanitizeReferenceImages(input.model, input.referenceImages)
-
-  const record = imageGenerationRepo.create({
-    session_id: input.sessionId,
-    prompt: input.prompt,
-    resolved_prompt: primaryPrompt,
-    provider_id: providerId,
-    model: input.model,
-    aspect_ratio: input.aspectRatioId ?? null,
-    style: input.styleId ?? null,
-    size: size ?? null,
-    seed: input.seed ?? null,
-    reference_images: reference.length ? JSON.stringify(reference) : null,
-    status: 'in_progress',
+  const rootSpan = imgTracer.startSpan('image.generate', {
+    attributes: {
+      'image.model': input.model,
+      'image.optimize': String(input.optimize !== false),
+      'image.style': input.styleId ?? 'none',
+      'image.session_id': input.sessionId,
+    },
   })
 
-  const startedAt = Date.now()
-  const saveTo = path.join(getImagesDir(settingsRepo.getValue('image_output_dir')), input.sessionId, `${record.id}.png`)
-
-  let lastErr: any
-  for (let i = 0; i < attempts.length; i++) {
-    const attemptPrompt = attempts[i]
+  return context.with(trace.setSpan(context.active(), rootSpan), async () => {
     try {
-      const result = await generateImage({
+      // Validate model/modality up front (throws on unknown/disabled model).
+      const resolved = await resolveModel(input.model, 'image')
+      const providerId = resolved.provider.id
+
+      const ratio = getAspectRatio(input.aspectRatioId)
+      const style = getImageStyle(input.styleId)
+      const size = resolveSize(providerId, ratio)
+
+      const optimize = input.optimize !== false
+      const withStyle = (base: string) => (style ? `${base}${style.promptSuffix}` : base)
+
+      // The optimized prompt is the primary attempt; the untouched user prompt is the fallback.
+      // Since the user's original prompt is known to work on its own, retrying with it guarantees
+      // that enabling "智能优化" can never turn a working request into a failing one.
+      const optimizedBase = optimize ? await optimizePrompt(input.prompt) : input.prompt
+      const primaryPrompt = withStyle(optimizedBase)
+      const fallbackPrompt = withStyle(input.prompt)
+      const attempts = primaryPrompt !== fallbackPrompt ? [primaryPrompt, fallbackPrompt] : [primaryPrompt]
+
+      const reference = sanitizeReferenceImages(input.model, input.referenceImages)
+
+      const record = imageGenerationRepo.create({
+        session_id: input.sessionId,
+        prompt: input.prompt,
+        resolved_prompt: primaryPrompt,
+        provider_id: providerId,
         model: input.model,
-        prompt: attemptPrompt,
-        size,
-        image: reference.length ? reference : undefined,
-        responseFormat: 'url',
-        saveTo,
-        seed: input.seed,
-        negativePrompt: input.negativePrompt,
+        aspect_ratio: input.aspectRatioId ?? null,
+        style: input.styleId ?? null,
+        size: size ?? null,
+        seed: input.seed ?? null,
+        reference_images: reference.length ? JSON.stringify(reference) : null,
+        status: 'in_progress',
       })
 
-      let localPath = result.localPath
-      if (!localPath && result.b64_json) {
-        saveBase64(result.b64_json, saveTo)
-        localPath = saveTo
+      const startedAt = Date.now()
+      const saveTo = path.join(getImagesDir(settingsRepo.getValue('image_output_dir')), input.sessionId, `${record.id}.png`)
+
+      let lastErr: any
+      for (let i = 0; i < attempts.length; i++) {
+        const attemptPrompt = attempts[i]
+        const attemptSpan = imgTracer.startSpan('image.generate.attempt', {
+          attributes: { 'image.attempt_index': i, 'image.is_fallback': i > 0 },
+        })
+        try {
+          const result = await generateImage({
+            model: input.model,
+            prompt: attemptPrompt,
+            size,
+            image: reference.length ? reference : undefined,
+            responseFormat: 'url',
+            saveTo,
+            seed: input.seed,
+            negativePrompt: input.negativePrompt,
+          })
+
+          let localPath = result.localPath
+          if (!localPath && result.b64_json) {
+            saveBase64(result.b64_json, saveTo)
+            localPath = saveTo
+          }
+
+          const updated = imageGenerationRepo.update(record.id, {
+            status: 'completed',
+            // Record which prompt actually produced the image (may be the fallback).
+            resolved_prompt: attemptPrompt,
+            url: result.url ?? null,
+            local_path: localPath ?? null,
+            duration_ms: Date.now() - startedAt,
+          })!
+
+          // First successful generation names the session.
+          const session = imageSessionRepo.get(input.sessionId)
+          if (session && (session.title === '新画图' || !session.title)) {
+            imageSessionRepo.update(input.sessionId, { title: autoTitle(input.prompt) })
+          } else {
+            imageSessionRepo.touch(input.sessionId)
+          }
+
+          attemptSpan.end()
+          rootSpan.setStatus({ code: SpanStatusCode.OK })
+          rootSpan.end()
+          getGenDuration().record(Date.now() - startedAt, { model: input.model, status: 'success', is_fallback: String(i > 0) })
+          return updated
+        } catch (err: any) {
+          attemptSpan.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+          attemptSpan.recordException(err)
+          attemptSpan.end()
+          lastErr = err
+          const isLast = i === attempts.length - 1
+          if (!isLast) {
+            console.warn(
+              `[generateForSession] optimized prompt failed (${err?.message}); retrying with the original prompt`
+            )
+          }
+        }
       }
 
-      const updated = imageGenerationRepo.update(record.id, {
-        status: 'completed',
-        // Record which prompt actually produced the image (may be the fallback).
-        resolved_prompt: attemptPrompt,
-        url: result.url ?? null,
-        local_path: localPath ?? null,
+      const failed = imageGenerationRepo.update(record.id, {
+        status: 'failed',
+        error_msg: lastErr?.message || 'Image generation failed',
         duration_ms: Date.now() - startedAt,
       })!
-
-      // First successful generation names the session.
-      const session = imageSessionRepo.get(input.sessionId)
-      if (session && (session.title === '新画图' || !session.title)) {
-        imageSessionRepo.update(input.sessionId, { title: autoTitle(input.prompt) })
-      } else {
-        imageSessionRepo.touch(input.sessionId)
-      }
-
-      return updated
+      rootSpan.setStatus({ code: SpanStatusCode.ERROR, message: lastErr?.message })
+      rootSpan.end()
+      getGenDuration().record(Date.now() - startedAt, { model: input.model, status: 'error', is_fallback: 'false' })
+      return failed
     } catch (err: any) {
-      lastErr = err
-      const isLast = i === attempts.length - 1
-      if (!isLast) {
-        console.warn(
-          `[generateForSession] optimized prompt failed (${err?.message}); retrying with the original prompt`
-        )
-      }
+      rootSpan.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+      rootSpan.recordException(err)
+      rootSpan.end()
+      throw err
     }
-  }
-
-  return imageGenerationRepo.update(record.id, {
-    status: 'failed',
-    error_msg: lastErr?.message || 'Image generation failed',
-    duration_ms: Date.now() - startedAt,
-  })!
+  })
 }
