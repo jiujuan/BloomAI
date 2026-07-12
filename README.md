@@ -147,14 +147,4 @@ GET    /api/v1/skills/:id/runs               # Skill run history
 - **15-second hard timeout**: Every tool call races against a timeout via `Promise.race`, regardless of category.
 - **All v0.1 data persists**: Sessions, messages, and personas are untouched — v0.2 is purely additive at the schema level.
 
----
 
-## What's NOT in this build (by design, per roadmap)
-
-- Multi-Agent system (small red book / WeChat agents) → **v0.3**
-- Workflow automation engine → **v0.4**
-- Native dependencies for stub tools (playwright, pdf-parse, mammoth, tesseract.js, sharp) — install separately if needed
-
----
-
-*BloomAI v0.2.0 "Sprout" · Built on v0.1 "Seedling" · June 2026*
