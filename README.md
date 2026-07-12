@@ -1,6 +1,6 @@
 # 🌸 BloomAI v0.2 — Sprout
 
-> Local-first AI Desktop Assistant · Tools System + Skills Market · v0.2.0
+> Local-first AI Desktop Assistant
 
 ---
 
