@@ -6,7 +6,7 @@
 
 ## What's new in v0.2
 
-Building on v0.1's chat engine, v0.2 adds the complete **Tools System** and **Skills Market**:
+Building on v0.1's chat engine, v0.2 adds the complete **Tools System**:
 
 | Feature | Status |
 |---|---|
