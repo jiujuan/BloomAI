@@ -187,7 +187,10 @@ chatRoutes.post('/plan', async (c) => {
   let tasks: string[] = []
   try {
     const planner = mastra.getAgent('plan-planner')
-    const res = await planner.generate(prompt, { requestContext })
+    const res = await planner.generate(prompt, {
+      requestContext,
+      memory: { thread: sessionId, resource: BLOOMAI_RESOURCE_ID },
+    })
     tasks = parsePlanTasks(res.text)
   } catch (error) {
     logError('chat.proposePlan', { code: 'PLAN_ERROR', message: sanitizeErrorMessage(error, 'propose plan failed') }, { sessionId })
