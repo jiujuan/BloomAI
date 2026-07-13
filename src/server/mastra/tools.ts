@@ -2,7 +2,7 @@ import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { toolRepo } from '../db/repositories/tool.repo'
 import { skillRepo } from '../db/repositories/skill.repo'
-import { executeTool } from '../tools/execute-tool'
+import { executeLegacyToolCapability, needsInteractiveApprovalForTool } from '../skills/policy/capability-broker'
 import { runSkill } from '../skills/run-skill'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
 
@@ -19,13 +19,13 @@ export function toSkillToolId(skillId: string): string {
 }
 
 /**
- * Builds the Mastra tool surface for the chat agent from BloomAI's own registries —
+ * Builds the Mastra tool surface for the chat agent from BloomAI's own registries �?
  * every enabled built-in tool plus every installed skill. The LLM decides which to
  * call (ReAct loop); there is no separate intent-routing layer. Tools are rebuilt per
  * request so enabling a tool / installing a skill takes effect on the next turn.
  *
- * Enablement is the gate: disabled tools are not offered, and executeTool re-checks
- * `is_enabled` at call time.
+ * Tools are offered only when enabled; CapabilityBroker re-checks enablement,
+ * authorization, approval and timeout policy at call time.
  */
 export function buildAgentTools(sessionId?: string): Record<string, MastraTool> {
   return { ...buildBuiltinTools(sessionId), ...buildSkillTools(sessionId) }
@@ -66,36 +66,25 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
   for (const tool of toolRepo.list()) {
     if (tool.is_enabled !== 1) continue
     if (options.filter && !options.filter(tool.id)) continue
-    const needsApproval = !!(tool.requires_permission && options.approvalLevels?.has(tool.requires_permission))
+    const needsApproval = needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
     tools[tool.id] = createTool({
       id: tool.id,
       description: tool.description || `Run BloomAI tool ${tool.name}`,
       inputSchema: jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
       ...(needsApproval ? { requireApproval: true } : {}),
       execute: async (input) => {
-        // Approval-gated tools rely on interactive approval; others use the soft permission gate.
-        if (!needsApproval) {
-          const denial = checkToolPermission(tool.id, tool.requires_permission)
-          if (denial) return denial
-        }
-        return executeTool(tool.id, (input ?? {}) as object, sessionId)
+        const result = await executeLegacyToolCapability({
+          caller: 'chat',
+          toolId: tool.id,
+          input: (input ?? {}) as Record<string, unknown>,
+          sessionId,
+          approvalGranted: needsApproval,
+        })
+        return result.output
       },
     })
   }
   return tools
-}
-
-// Gate mutating / code-exec tools behind the existing tool_permissions grant. Returns a
-// soft-error result (not a throw) when denied so the agent relays it to the user instead
-// of silently running, or hard-failing the turn.
-function checkToolPermission(toolId: string, level: string | null): { error: string; permissionRequired: true; level: string } | null {
-  if (!level || !GATED_PERMISSION_LEVELS.has(level)) return null
-  if (toolRepo.getPermission(toolId)?.granted === 1) return null
-  return {
-    error: `Permission required: "${toolId}" needs "${level}" access, which the user has not granted. Ask the user to grant it in Tools settings before retrying — do not assume it succeeded.`,
-    permissionRequired: true,
-    level,
-  }
 }
 
 export function buildSkillTools(sessionId?: string): Record<string, MastraTool> {

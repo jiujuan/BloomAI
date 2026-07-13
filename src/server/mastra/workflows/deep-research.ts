@@ -1,6 +1,6 @@
 import { createWorkflow, createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
-import { executeTool } from '../../tools/execute-tool'
+import { executeLegacyToolCapability } from '../../skills/policy/capability-broker'
 import { researchWriterAgent } from '../agents/research-writer-agent'
 
 /**
@@ -57,8 +57,12 @@ const searchWeb = createStep({
     // Search every sub-question in parallel, then dedup by URL and cap the set.
     const perQuestion = await Promise.all(
       inputData.subQuestions.map(async (subQuestion) => {
-        const out = await executeTool('web_search', { query: subQuestion, limit: 4 }, 'deep-research')
-          .catch(() => ({ results: [] }))
+        const out = await executeLegacyToolCapability({
+          caller: 'workflow',
+          toolId: 'web_search',
+          input: { query: subQuestion, limit: 4 },
+          sessionId: 'deep-research',
+        }).then((result) => result.output).catch(() => ({ results: [] }))
         const results = Array.isArray((out as any)?.results) ? (out as any).results : []
         return results.map((r: any) => ({
           title: String(r.title ?? r.url ?? ''),
@@ -92,7 +96,12 @@ const fetchContent = createStep({
     const topToFetch = inputData.results.slice(0, 3)
     const fetched = await Promise.all(
       topToFetch.map(async (r) => {
-        const out = await executeTool('web_fetch', { url: r.url }, 'deep-research').catch(() => null)
+        const out = await executeLegacyToolCapability({
+          caller: 'workflow',
+          toolId: 'web_fetch',
+          input: { url: r.url },
+          sessionId: 'deep-research',
+        }).then((result) => result.output).catch(() => null)
         const content = out && typeof (out as any).content === 'string' ? (out as any).content.slice(0, 800) : ''
         return [r.url, content] as const
       }),

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { toolRepo } from '../../db/repositories/tool.repo'
-import { executeTool } from '../../tools/execute-tool'
+import { CapabilityError, executeLegacyToolCapability } from '../../skills/policy/capability-broker'
 import { readJson, readIntQuery } from '../util'
 
 export const toolsRoutes = new Hono()
@@ -42,9 +42,16 @@ toolsRoutes.patch('/:id', async (c) => {
 toolsRoutes.post('/:id/run', async (c) => {
   const body = await readJson<any>(c)
   try {
-    return c.json({ data: await executeTool(c.req.param('id'), body.input || {}, body.sessionId) })
+    const result = await executeLegacyToolCapability({
+      caller: 'http',
+      toolId: c.req.param('id'),
+      input: body.input || {},
+      sessionId: body.sessionId,
+      approvalGranted: body.approvalGranted === true,
+    })
+    return c.json({ data: result.output, meta: { toolRunId: result.toolRunId } })
   } catch (err: any) {
-    return c.json({ error: { code: 'TOOL_ERROR', message: err.message } }, 500)
+    return c.json({ error: { code: err.code || 'TOOL_ERROR', message: err.message } }, err instanceof CapabilityError ? 403 : 500)
   }
 })
 

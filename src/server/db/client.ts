@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { createRequire } from 'node:module'
+import { runSqlMigrations } from './migrations'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
 
@@ -46,6 +47,7 @@ export async function initDb() {
   ensureDataDir()
   const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite')
   state.dbInstance = new DatabaseSync(getDbPath())
+  state.dbInstance.exec('PRAGMA foreign_keys = ON')
 
   state.db = {
     exec(sql: string) { state.dbInstance!.exec(sql) },
@@ -359,6 +361,9 @@ function seedSkills() {
 export async function runMigrations() {
   await initDb()
   runBootstrapSql()
+  const state = getState()
+  if (!state.dbInstance) throw new Error('Database has not been initialized. Call initDb() first.')
+  runSqlMigrations(state.dbInstance)
   seedPersonas()
   seedSettings()
   seedLlm()

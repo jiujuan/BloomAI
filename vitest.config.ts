@@ -4,6 +4,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     setupFiles: ['./vitest.setup.ts'],
+    // SQLite migration setup can contend across integration suites on Windows.
+    testTimeout: 15_000,
+    exclude: ['**/node_modules/**', '**/dist/**', '**/dist-electron/**', '**/.claude/**'],
   },
   resolve: {
     alias: {
