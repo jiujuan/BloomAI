@@ -5,6 +5,7 @@ import type { ArticleIllustrationJob, ArticleIllustrationScene, ArticleSourceDra
 type State = {
   mode: 'single' | 'article'
   source: ArticleSourceDraft
+  sourceMode: 'text' | 'file'
   executionMode: 'skill' | 'fallback'
   selectedSkillVersionId: string | null
   config: { imageCount: number; model: string; aspectRatioId: string; styleId: string }
@@ -19,6 +20,7 @@ type Actions = {
   reset: () => void
   setMode: (mode: State['mode']) => void
   setSource: (patch: Partial<ArticleSourceDraft>) => void
+  setSourceMode: (mode: State['sourceMode']) => void
   setExecution: (mode: State['executionMode'], skillVersionId?: string | null) => void
   setConfig: (patch: Partial<State['config']>) => void
   setScenes: (scenes: ArticleIllustrationScene[]) => void
@@ -35,17 +37,18 @@ type Actions = {
   openJob: (job: ArticleIllustrationJob) => void
   resumeJob: (id: string) => Promise<void>
 }
-const initial = (): State => ({ mode: 'single', source: { text: '', url: '', urlConsent: false }, executionMode: 'fallback', selectedSkillVersionId: null, config: { imageCount: 3, model: '', aspectRatioId: '4:3', styleId: 'watercolor' }, eligibleSkills: [], scenes: [], activeJob: null, recoverableJobs: [], loading: false, error: null })
+const initial = (): State => ({ mode: 'single', source: { text: '', url: '', urlConsent: false }, sourceMode: 'text', executionMode: 'fallback', selectedSkillVersionId: null, config: { imageCount: 3, model: '', aspectRatioId: '4:3', styleId: 'watercolor' }, eligibleSkills: [], scenes: [], activeJob: null, recoverableJobs: [], loading: false, error: null })
 
 export const useArticleIllustrationStore = create<State & Actions>((set, get) => ({
   ...initial(),
   reset: () => set(initial()),
   setMode: (mode) => set({ mode }),
   setSource: (patch) => set((state) => ({ source: { ...state.source, ...patch } })),
-  setExecution: (executionMode, selectedSkillVersionId = null) => set({ executionMode, selectedSkillVersionId }),
+  setSourceMode: (sourceMode) => set({ sourceMode }),
+  setExecution: (executionMode, selectedSkillVersionId) => set((state) => ({ executionMode, selectedSkillVersionId: selectedSkillVersionId === undefined ? state.selectedSkillVersionId : selectedSkillVersionId })),
   setConfig: (patch) => set((state) => ({ config: { ...state.config, ...patch } })),
   setScenes: (scenes) => set({ scenes: normalizeOrdinals(scenes) }),
-  addScene: () => set((state) => ({ scenes: [...state.scenes, { id: `draft-${Date.now()}`, ordinal: state.scenes.length + 1, title: 'New scene', excerpt: '', prompt: 'Describe the article illustration scene', status: 'planned', generation_id: null, error_message: null, retry_count: 0 }] })),
+  addScene: () => set((state) => ({ scenes: [...state.scenes, { id: `draft-${Date.now()}`, ordinal: state.scenes.length + 1, title: '新场景', excerpt: '', prompt: '请描述文章配图场景', status: 'planned', generation_id: null, error_message: null, retry_count: 0 }] })),
   removeScene: (id) => set((state) => ({ scenes: normalizeOrdinals(state.scenes.filter((scene) => scene.id !== id)) })),
   moveScene: (id, direction) => set((state) => {
     const index = state.scenes.findIndex((scene) => scene.id === id)
@@ -67,8 +70,8 @@ export const useArticleIllustrationStore = create<State & Actions>((set, get) =>
   createPlan: async () => {
     const state = get(); set({ loading: true, error: null })
     try {
-      const source = state.source.filePath && state.source.fileName ? { type: 'file' as const, filePath: state.source.filePath, fileName: state.source.fileName }
-        : state.source.url.trim() ? { type: 'url' as const, url: state.source.url.trim(), consent: state.source.urlConsent }
+      const source = state.sourceMode === 'file'
+        ? { type: 'file' as const, filePath: state.source.filePath ?? '', fileName: state.source.fileName ?? '' }
         : { type: 'text' as const, text: state.source.text }
       const job = await platform.articleIllustrations.createPlan({ source, mode: state.executionMode, skillVersionId: state.selectedSkillVersionId ?? undefined, config: state.config })
       set({ activeJob: job, scenes: job.scenes, loading: false })
@@ -104,4 +107,4 @@ export const useArticleIllustrationStore = create<State & Actions>((set, get) =>
 }))
 
 function normalizeOrdinals(scenes: ArticleIllustrationScene[]) { return scenes.map((scene, index) => ({ ...scene, ordinal: index + 1 })) }
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Article illustration request failed' }
+function errorMessage(error: unknown) { return error instanceof Error ? error.message : '文章配图请求失败' }

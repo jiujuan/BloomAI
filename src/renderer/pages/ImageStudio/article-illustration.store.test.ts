@@ -27,4 +27,37 @@ describe('article illustration store', () => {
     expect(useArticleIllustrationStore.getState().scenes.map((current) => current.ordinal)).toEqual([1, 2])
     expect(useArticleIllustrationStore.getState().scenes).toHaveLength(2)
   })
+
+  it('keeps drafts when switching the active article source mode', () => {
+    const store = useArticleIllustrationStore.getState()
+    store.setSource({ text: '保留的正文草稿' })
+    store.setSourceMode('file')
+
+    expect(useArticleIllustrationStore.getState()).toMatchObject({
+      sourceMode: 'file',
+      source: { text: '保留的正文草稿' },
+    })
+  })
+
+
+  it('uses Chinese defaults for a newly added scene', () => {
+    const store = useArticleIllustrationStore.getState()
+    store.addScene()
+
+    expect(useArticleIllustrationStore.getState().scenes).toEqual([
+      expect.objectContaining({ title: '新场景', prompt: '请描述文章配图场景' }),
+    ])
+  })
+
+  it('keeps the selected Skill when switching to the fallback route', () => {
+    const store = useArticleIllustrationStore.getState()
+    store.setExecution('skill', 'skill-version-1')
+    store.setExecution('fallback')
+
+    expect(useArticleIllustrationStore.getState()).toMatchObject({
+      executionMode: 'fallback',
+      selectedSkillVersionId: 'skill-version-1',
+    })
+  })
+
 })
