@@ -15,6 +15,7 @@ import {
   skill_artifacts,
   skill_capability_grants,
   skill_installations,
+  skill_run_commands,
   skill_packages,
   skill_run_events,
   skill_runs_v2,
@@ -141,6 +142,90 @@ export const skillPackageRepo = {
 
   getRun(id: string) {
     return getOrmDb().select().from(skill_runs_v2).where(eq(skill_runs_v2.id, id)).get()
+  },
+
+  applyRunChange(data: {
+    runId: string
+    expectedRevision: number
+    changes: {
+      status?: string
+      input?: Record<string, unknown>
+      output?: Record<string, unknown> | null
+      waitingReason?: string | null
+      cancelRequested?: boolean
+      startedAt?: number | null
+      finishedAt?: number | null
+      errorCode?: string | null
+      errorMessage?: string | null
+    }
+    event: { type: string; payload: Record<string, unknown> }
+    command?: { idempotencyKey: string }
+  }): { run: typeof skill_runs_v2.$inferSelect; duplicate: boolean } | undefined {
+    return getOrmDb().transaction((tx) => {
+      if (data.command) {
+        const existing = tx.select().from(skill_run_commands).where(and(
+          eq(skill_run_commands.run_id, data.runId),
+          eq(skill_run_commands.idempotency_key, data.command.idempotencyKey),
+        )).get()
+        if (existing) return { run: JSON.parse(existing.result_json) as typeof skill_runs_v2.$inferSelect, duplicate: true }
+      }
+
+      const now = Date.now()
+      const changes = data.changes
+      const result = tx.update(skill_runs_v2).set({
+        ...(changes.status === undefined ? {} : { status: changes.status }),
+        ...(changes.input === undefined ? {} : { input_json: stringifyJsonObject(changes.input, 'input') }),
+        ...(changes.output === undefined ? {} : { output_json: changes.output === null ? null : stringifyJsonObject(changes.output, 'output') }),
+        ...(changes.waitingReason === undefined ? {} : { waiting_reason: changes.waitingReason }),
+        ...(changes.cancelRequested === undefined ? {} : { cancel_requested: changes.cancelRequested ? 1 : 0 }),
+        ...(changes.startedAt === undefined ? {} : { started_at: changes.startedAt }),
+        ...(changes.finishedAt === undefined ? {} : { finished_at: changes.finishedAt }),
+        ...(changes.errorCode === undefined ? {} : { error_code: changes.errorCode }),
+        ...(changes.errorMessage === undefined ? {} : { error_message: changes.errorMessage }),
+        revision: data.expectedRevision + 1,
+        updated_at: now,
+      }).where(and(
+        eq(skill_runs_v2.id, data.runId),
+        eq(skill_runs_v2.revision, data.expectedRevision),
+      )).run()
+      if (result.changes !== 1) return undefined
+
+      const run = tx.select().from(skill_runs_v2).where(eq(skill_runs_v2.id, data.runId)).get()
+      if (!run) throw new Error(`Run not found after update: ${data.runId}`)
+      const lastSeq = tx.select({ seq: sql<number>`coalesce(max(${skill_run_events.seq}), 0)` })
+        .from(skill_run_events).where(eq(skill_run_events.run_id, data.runId)).get()?.seq ?? 0
+      tx.insert(skill_run_events).values({
+        id: uuidv4(),
+        run_id: data.runId,
+        seq: Number(lastSeq) + 1,
+        schema_version: 1,
+        type: data.event.type,
+        payload_json: stringifyJsonObject(data.event.payload, 'payload'),
+        created_at: now,
+      }).run()
+      if (data.command) {
+        tx.insert(skill_run_commands).values({
+          id: uuidv4(),
+          run_id: data.runId,
+          idempotency_key: data.command.idempotencyKey,
+          result_json: JSON.stringify(run),
+          created_at: now,
+        }).run()
+      }
+      return { run, duplicate: false }
+    })
+  },
+
+  listRunsByStatus(status: string) {
+    return getOrmDb().select().from(skill_runs_v2).where(eq(skill_runs_v2.status, status)).all()
+  },
+
+  getCommandResult(runId: string, idempotencyKey: string) {
+    const command = getOrmDb().select().from(skill_run_commands).where(and(
+      eq(skill_run_commands.run_id, runId),
+      eq(skill_run_commands.idempotency_key, idempotencyKey),
+    )).get()
+    return command ? JSON.parse(command.result_json) : undefined
   },
 
   appendEvent(data: {

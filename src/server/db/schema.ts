@@ -215,6 +215,16 @@ export const skill_run_events = sqliteTable('skill_run_events', {
   runSeqIdx: index('idx_skill_run_events_run_seq').on(table.run_id, table.seq),
 }))
 
+export const skill_run_commands = sqliteTable('skill_run_commands', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  idempotency_key: text('idempotency_key').notNull(),
+  result_json: text('result_json').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runIdx: index('idx_skill_run_commands_run').on(table.run_id, table.created_at),
+}))
+
 export const skill_artifacts = sqliteTable('skill_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),

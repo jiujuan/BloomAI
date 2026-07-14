@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server'
 import { loadDotEnv } from './config/load-env'
 import { createHonoApp } from './http/app'
 import { runMigrations } from './db/client'
+import { SkillRunCoordinator } from './skills/runtime'
 import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
 import { serverLogger } from './logger/logger'
 import { initTracing, shutdownTracing } from './telemetry/tracer'
@@ -24,6 +25,8 @@ serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT })
 
 runMigrations()
   .then(() => {
+    const interrupted = new SkillRunCoordinator().markInterruptedRuns()
+    if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
     const app = createHonoApp()
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)

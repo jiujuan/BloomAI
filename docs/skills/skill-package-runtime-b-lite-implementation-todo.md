@@ -298,18 +298,18 @@ package.read_asset
 
 ## 10. TODO 08：持久化 Skill Run 状态机
 
-- [ ] 新增 `SkillRunCoordinator`。
-- [ ] `startRun()` 只返回 `runId`。
-- [ ] `dispatchCommand()` 处理确认、修改和取消。
-- [ ] `subscribeEvents()` 支持 `afterSeq`。
-- [ ] `getRun()` 返回当前状态。
-- [ ] 所有状态转换通过单一状态机。
-- [ ] 使用 `revision` 防止并发覆盖。
-- [ ] Command 支持幂等键。
-- [ ] 应用启动后将遗留 `running` 标记为 `interrupted`。
-- [ ] 支持恢复 interrupted Run。
-- [ ] 支持 `cancel_requested`。
-- [ ] 支持 `completed_with_errors`。
+- [x] 新增 `SkillRunCoordinator`。
+- [x] `startRun()` 只返回 `runId`。
+- [x] `dispatchCommand()` 处理确认、修改和取消。
+- [x] `subscribeEvents()` 支持 `afterSeq`。
+- [x] `getRun()` 返回当前状态。
+- [x] 所有状态转换通过单一状态机。
+- [x] 使用 `revision` 防止并发覆盖。
+- [x] Command 支持幂等键。
+- [x] 应用启动后将遗留 `running` 标记为 `interrupted`。
+- [x] 支持恢复 interrupted Run。
+- [x] 支持 `cancel_requested`。
+- [x] 支持 `completed_with_errors`。
 
 状态：
 
