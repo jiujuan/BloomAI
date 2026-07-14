@@ -1,0 +1,35 @@
+import React, { useEffect, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Clock3, FileOutput, LoaderCircle, Play, X } from 'lucide-react'
+import { useSkillRuntimeStore } from './skill-runtime.store'
+import { artifactContentUrl, formatDate } from './skill-runtime.types'
+import type { SkillRun, SkillVersion } from './skill-runtime.types'
+
+export function RunSkillDialog({ version, onClose, onStarted }: { version: SkillVersion; onClose: () => void; onStarted: (runId: string) => void }) {
+  const { startRun } = useSkillRuntimeStore()
+  const [input, setInput] = useState('{}')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const start = async () => {
+    let parsed: Record<string, unknown>
+    try { parsed = JSON.parse(input) as Record<string, unknown>; if (Array.isArray(parsed) || !parsed) throw new Error('') } catch { setError('输入必须是 JSON 对象。'); return }
+    setBusy(true); setError(null)
+    try { const run = await startRun({ skillVersionId: version.id, input: parsed }); onStarted(run.id); onClose() } catch (cause) { setError(cause instanceof Error ? cause.message : '无法创建运行。') } finally { setBusy(false) }
+  }
+  return <div className="skills-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="skills-modal skills-run-modal" role="dialog" aria-modal="true" aria-labelledby="run-skill-title" onMouseDown={(event) => event.stopPropagation()}><header className="skills-modal-head"><div><div className="skills-eyebrow"><Play size={14} />调试运行</div><h2 id="run-skill-title">运行 {version.version}</h2></div><button className="skills-icon-button" onClick={onClose} aria-label="关闭运行窗口"><X size={16} /></button></header><div className="skills-modal-body"><p className="skills-muted">此入口面向高级用户。输入会被运行时汇总记录，不会在事件中保留敏感数据。</p><label className="skills-field"><span>运行输入（JSON 对象）</span><textarea className="skills-code-input" value={input} onChange={(event) => setInput(event.target.value)} spellCheck={false} /></label>{error && <div className="skills-message error"><AlertTriangle size={15} />{error}</div>}</div><footer className="skills-modal-foot"><button className="skills-button secondary" onClick={onClose}>取消</button><button className="skills-button primary" onClick={start} disabled={busy}>{busy ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}开始运行</button></footer></section></div>
+}
+
+export function RunDetailDrawer({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const { selectedRun, runEvents, runArtifacts, loadRun, loadRunEvents, loadArtifacts, commandRun } = useSkillRuntimeStore()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { let active = true; Promise.all([loadRun(runId), loadRunEvents(runId), loadArtifacts(runId)]).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : '加载运行详情失败。') }); return () => { active = false } }, [runId])
+  const run = selectedRun?.id === runId ? selectedRun : null
+  const command = async (type: 'confirm' | 'cancel') => { if (!run) return; setBusy(true); setError(null); try { await commandRun(run.id, { type, expectedRevision: run.revision }) } catch (cause) { setError(cause instanceof Error ? cause.message : '无法更新运行。') } finally { setBusy(false) } }
+  return <aside className="skills-drawer skills-run-drawer" aria-label="Skill Run 详情"><header className="skills-drawer-head"><div><div className="skills-eyebrow">Run</div><h2>{run ? run.status : '加载运行详情'}</h2><p>{run ? '更新于 ' + formatDate(run.updatedAt) : '正在读取事件与产物'}</p></div><button className="skills-icon-button" onClick={onClose} aria-label="关闭运行详情"><X size={16} /></button></header><div className="skills-drawer-scroll">{error && <div className="skills-message error"><AlertTriangle size={15} />{error}</div>}{!run ? <div className="skills-loading"><LoaderCircle className="spin" size={18} />正在加载 Run…</div> : <><section className="skills-detail-section"><div className="skills-detail-heading"><h3>状态</h3><span className={'skills-status ' + statusTone(run.status)}>{run.status}</span></div><dl className="skills-detail-kv"><div><dt>Run ID</dt><dd className="skills-mono">{run.id}</dd></div><div><dt>入口</dt><dd>{run.surface || 'skills'}</dd></div><div><dt>开始时间</dt><dd>{formatDate(run.startedAt)}</dd></div><div><dt>完成时间</dt><dd>{formatDate(run.finishedAt)}</dd></div></dl>{run.errorMessage && <div className="skills-message error"><AlertTriangle size={15} />{run.errorMessage}</div>}<div className="skills-action-row">{run.status === 'waiting_approval' && <button className="skills-button primary" disabled={busy} onClick={() => command('confirm')}><CheckCircle2 size={14} />确认继续</button>}{!isTerminal(run.status) && <button className="skills-button danger" disabled={busy} onClick={() => command('cancel')}>{busy ? <LoaderCircle className="spin" size={14} /> : <X size={14} />}取消 Run</button>}</div></section><section className="skills-detail-section"><div className="skills-detail-heading"><h3>事件时间线</h3><Clock3 size={15} /></div>{runEvents.length === 0 ? <p className="skills-muted">尚无可展示的运行事件。</p> : <ol className="skills-timeline">{runEvents.map((event) => <li key={event.id}><span className={'skills-timeline-dot ' + eventTone(event.type)}></span><div><strong>{event.type}</strong><p>{summarizeEvent(event.payload)}</p></div><time>{formatDate(event.createdAt)}</time></li>)}</ol>}</section><section className="skills-detail-section"><div className="skills-detail-heading"><h3>Artifacts</h3><FileOutput size={15} /></div>{runArtifacts.length === 0 ? <p className="skills-muted">运行尚未产出可导出的文件。</p> : <div className="skills-artifact-list">{runArtifacts.map((artifact) => <a className="skills-artifact" href={artifactContentUrl(artifact.id)} target="_blank" rel="noreferrer" key={artifact.id}><FileOutput size={15} /><span><strong>{artifact.kind}</strong><p>{artifact.path} · {formatBytes(artifact.size_bytes)}</p></span></a>)}</div>}</section></>}</div></aside>
+}
+
+function isTerminal(status: string) { return ['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(status) }
+function statusTone(status: string) { if (status === 'completed') return 'success'; if (status === 'failed' || status === 'cancelled') return 'danger'; if (status.startsWith('waiting')) return 'warning'; return 'info' }
+function eventTone(type: string) { if (type.includes('failed')) return 'danger'; if (type.includes('completed')) return 'success'; if (type.includes('approval')) return 'warning'; return 'info' }
+function summarizeEvent(payload: Record<string, unknown>) { const keys = Object.keys(payload); if (typeof payload.title === 'string') return payload.title; if (typeof payload.reason === 'string') return payload.reason; if (keys.length === 0) return '已记录'; return keys.map((key) => key + ': ' + String(payload[key])).join(' · ') }
+function formatBytes(bytes: number) { if (bytes < 1024) return bytes + ' B'; if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'; return (bytes / (1024 * 1024)).toFixed(1) + ' MB' }
