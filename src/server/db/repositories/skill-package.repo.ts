@@ -10,6 +10,7 @@ import {
   type SkillCapability,
   type StoredCapabilityGrant,
 } from '../../skills/policy/capability-policy'
+import { normalizeSkillRunEvent } from '../../skills/runtime/skill-run-events'
 import { getOrmDb } from '../client'
 import {
   skill_artifacts,
@@ -194,13 +195,14 @@ export const skillPackageRepo = {
       if (!run) throw new Error(`Run not found after update: ${data.runId}`)
       const lastSeq = tx.select({ seq: sql<number>`coalesce(max(${skill_run_events.seq}), 0)` })
         .from(skill_run_events).where(eq(skill_run_events.run_id, data.runId)).get()?.seq ?? 0
+      const event = normalizeSkillRunEvent(data.event)
       tx.insert(skill_run_events).values({
         id: uuidv4(),
         run_id: data.runId,
         seq: Number(lastSeq) + 1,
-        schema_version: 1,
-        type: data.event.type,
-        payload_json: stringifyJsonObject(data.event.payload, 'payload'),
+        schema_version: event.schemaVersion,
+        type: event.type,
+        payload_json: JSON.stringify(event.payload),
         created_at: now,
       }).run()
       if (data.command) {
@@ -234,13 +236,14 @@ export const skillPackageRepo = {
     type: string
     payload: Record<string, unknown>
   }) {
+    const event = normalizeSkillRunEvent(data)
     const row = {
       id: uuidv4(),
       run_id: data.runId,
       seq: data.seq,
-      schema_version: 1,
-      type: data.type,
-      payload_json: stringifyJsonObject(data.payload, 'payload'),
+      schema_version: event.schemaVersion,
+      type: event.type,
+      payload_json: JSON.stringify(event.payload),
       created_at: Date.now(),
     }
     getOrmDb().insert(skill_run_events).values(row).run()
@@ -278,6 +281,18 @@ export const skillPackageRepo = {
       created_at: Date.now(),
     }
     getOrmDb().insert(skill_artifacts).values(row).run()
+    this.appendEvent({
+      runId: data.runId,
+      seq: this.listEvents(data.runId).length + 1,
+      type: 'artifact.created',
+      payload: {
+        artifactId: row.id,
+        kind: row.kind,
+        path: row.path,
+        sha256: row.sha256,
+        sizeBytes: row.size_bytes,
+      },
+    })
     return row
   },
 

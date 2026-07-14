@@ -85,8 +85,9 @@ describe('skillPackageRepo', () => {
       context: {},
     })
 
-    skillPackageRepo.appendEvent({ runId: run.id, seq: 1, type: 'run.started', payload: {} })
-    expect(() => skillPackageRepo.appendEvent({ runId: run.id, seq: 1, type: 'run.started', payload: {} })).toThrow()
+    const event = { type: 'run.status_changed', payload: { from: 'created', to: 'running', revision: 1 } }
+    skillPackageRepo.appendEvent({ runId: run.id, seq: 1, ...event })
+    expect(() => skillPackageRepo.appendEvent({ runId: run.id, seq: 1, ...event })).toThrow()
     expect(() =>
       skillPackageRepo.createArtifact({
         runId: 'missing-run',

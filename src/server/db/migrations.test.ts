@@ -76,6 +76,7 @@ describe('database migrations', () => {
       '003-skill-runtime-artifacts',
       '004-skill-capability-grants',
       '005-skill-capability-grant-state',
+      '006-skill-run-commands',
     ])
   })
 

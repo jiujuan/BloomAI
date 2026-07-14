@@ -330,20 +330,20 @@ interrupted
 
 ## 11. TODO 09：事件协议与脱敏
 
-- [ ] 定义稳定的 `SkillRunEvent` discriminated union。
-- [ ] 为事件增加 `seq`。
-- [ ] 为事件增加 schema version。
-- [ ] 增加输入摘要事件。
-- [ ] 增加文件加载事件。
-- [ ] 增加步骤事件。
-- [ ] 增加 Capability 调用事件。
-- [ ] 增加审批事件。
-- [ ] 增加 Artifact 事件。
-- [ ] 增加完成、部分完成和失败事件。
-- [ ] 对 headers、token、API key 脱敏。
-- [ ] 大文本改存 Artifact，只在事件中保存引用。
-- [ ] Base64 图片不得写入事件表。
-- [ ] 限制单事件 payload 大小。
+- [x] 定义稳定的 `SkillRunEvent` discriminated union。
+- [x] 为事件增加 `seq`。
+- [x] 为事件增加 schema version。
+- [x] 增加输入摘要事件。
+- [x] 增加文件加载事件。
+- [x] 增加步骤事件。
+- [x] 增加 Capability 调用事件。
+- [x] 增加审批事件。
+- [x] 增加 Artifact 事件。
+- [x] 增加完成、部分完成和失败事件。
+- [x] 对 headers、token、API key 脱敏。
+- [x] 大文本改存 Artifact，只在事件中保存引用。
+- [x] Base64 图片不得写入事件表。
+- [x] 限制单事件 payload 大小。
 
 ## 12. TODO 10：Artifact Store
 

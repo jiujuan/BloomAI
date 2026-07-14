@@ -56,6 +56,18 @@ describe('SkillRunCoordinator', () => {
       revision: 1,
       surface: 'image',
     })
+    expect(coordinator.subscribeEvents(result.runId)).toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        type: 'input.summarized',
+        payload: { keys: ['article'], byteLength: expect.any(Number) },
+      }),
+      expect.objectContaining({
+        schemaVersion: 1,
+        type: 'run.status_changed',
+        payload: { from: 'created', to: 'validating', revision: 1 },
+      }),
+    ])
   })
 
   it('applies a confirmation command once and resumes a waiting run', async () => {
@@ -78,7 +90,7 @@ describe('SkillRunCoordinator', () => {
     expect(first.status).toBe('running')
     expect(repeated).toEqual(first)
     expect(skillPackageRepo.getRun(runId)).toMatchObject({ status: 'running', revision: 3, waiting_reason: null })
-    expect(coordinator.subscribeEvents(runId, 1).map((event) => event.seq)).toEqual([2, 3])
+    expect(coordinator.subscribeEvents(runId, 2).map((event) => event.seq)).toEqual([3, 4])
   })
 
   it('merges input changes only while waiting for input', async () => {
@@ -96,6 +108,19 @@ describe('SkillRunCoordinator', () => {
 
     expect(run.status).toBe('waiting_input')
     expect(run.input).toEqual({ count: 3, style: 'editorial' })
+  })
+
+  it('emits an approval event with only the waiting reason', async () => {
+    const { SkillRunCoordinator, version } = await loadRuntime()
+    const coordinator = new SkillRunCoordinator()
+    const { runId } = coordinator.startRun({ skillVersionId: version.id, input: {}, context: {} })
+
+    coordinator.transition(runId, 'waiting_approval', { expectedRevision: 1, waitingReason: 'approve image generation' })
+
+    expect(coordinator.subscribeEvents(runId).at(-1)).toMatchObject({
+      type: 'approval.required',
+      payload: { reason: 'approve image generation', capabilities: [] },
+    })
   })
 
   it('records cancellation requests without overwriting the active state', async () => {

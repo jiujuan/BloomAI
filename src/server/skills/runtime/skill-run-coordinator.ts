@@ -108,6 +108,12 @@ export class SkillRunCoordinator {
       sessionId: input.sessionId,
       imageSessionId: input.imageSessionId,
     })
+    skillPackageRepo.appendEvent({
+      runId: run.id,
+      seq: 1,
+      type: 'input.summarized',
+      payload: inputSummary(input.input),
+    })
     this.transition(run.id, 'validating', { expectedRevision: run.revision })
     return { runId: run.id }
   }
@@ -156,10 +162,7 @@ export class SkillRunCoordinator {
         startedAt: targetStatus === 'running' && current.startedAt === null ? now : undefined,
         finishedAt: terminalStatuses.has(targetStatus) ? now : null,
       },
-      event: {
-        type: `run.${targetStatus}`,
-        payload: { from: current.status, to: targetStatus, revision: data.expectedRevision + 1 },
-      },
+      event: transitionEvent(current.status, targetStatus, data, data.expectedRevision + 1),
     })
     if (!result) throw new SkillRunConflictError(runId)
     return mapRun(result.run)
@@ -179,7 +182,7 @@ export class SkillRunCoordinator {
       return this.applyCommandChange(runId, current, parsed, {
         input,
         waitingReason: current.waitingReason,
-      }, 'run.input_modified')
+      }, 'input.summarized')
     }
     if (terminalStatuses.has(current.status)) return current
     return this.applyCommandChange(runId, current, parsed, { cancelRequested: true }, 'run.cancel_requested')
@@ -210,7 +213,10 @@ export class SkillRunCoordinator {
       runId,
       expectedRevision: command.expectedRevision,
       changes: { status: targetStatus, waitingReason: null, ...changes },
-      event: { type: 'run.confirmed', payload: { from: current.status, to: targetStatus, revision: command.expectedRevision + 1 } },
+      event: {
+        type: 'run.status_changed',
+        payload: { from: current.status, to: targetStatus, revision: command.expectedRevision + 1 },
+      },
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
@@ -228,7 +234,9 @@ export class SkillRunCoordinator {
       runId,
       expectedRevision: command.expectedRevision,
       changes,
-      event: { type: eventType, payload: { revision: command.expectedRevision + 1 } },
+      event: eventType === 'input.summarized'
+        ? { type: eventType, payload: inputSummary(changes.input ?? {}) }
+        : { type: eventType, payload: { revision: command.expectedRevision + 1 } },
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
@@ -238,6 +246,30 @@ export class SkillRunCoordinator {
 
 function isWaiting(status: SkillRunStatus): boolean {
   return status === 'waiting_input' || status === 'waiting_approval'
+}
+
+function transitionEvent(
+  from: SkillRunStatus,
+  to: SkillRunStatus,
+  data: { waitingReason?: string | null; errorCode?: string | null; errorMessage?: string | null },
+  revision: number,
+): { type: string; payload: Record<string, unknown> } {
+  if (to === 'completed') return { type: 'run.completed', payload: { revision } }
+  if (to === 'completed_with_errors') return { type: 'run.completed_with_errors', payload: { revision } }
+  if (to === 'waiting_approval') {
+    return { type: 'approval.required', payload: { reason: data.waitingReason ?? 'Approval required', capabilities: [] } }
+  }
+  if (to === 'failed') {
+    return {
+      type: 'run.failed',
+      payload: { code: data.errorCode ?? 'RUN_FAILED', message: data.errorMessage ?? 'Skill run failed', revision },
+    }
+  }
+  return { type: 'run.status_changed', payload: { from, to, revision } }
+}
+
+function inputSummary(input: Record<string, unknown>) {
+  return { keys: Object.keys(input).sort(), byteLength: Buffer.byteLength(JSON.stringify(input), 'utf8') }
 }
 
 function parseJsonObject(value: string, fieldName: string): Record<string, unknown> {
