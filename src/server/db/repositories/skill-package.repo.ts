@@ -296,6 +296,17 @@ export const skillPackageRepo = {
     return row
   },
 
+  getArtifact(id: string) {
+    return getOrmDb().select().from(skill_artifacts).where(eq(skill_artifacts.id, id)).get()
+  },
+
+  listArtifacts(runId: string) {
+    return getOrmDb().select().from(skill_artifacts)
+      .where(eq(skill_artifacts.run_id, runId))
+      .orderBy(asc(skill_artifacts.created_at))
+      .all()
+  },
+
   createCapabilityGrant(data: {
     skillVersionId: string
     capability: SkillCapability

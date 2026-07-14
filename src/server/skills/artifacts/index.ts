@@ -1,1 +1,1 @@
-export {}
+export { ArtifactStore, ArtifactStoreError } from './artifact-store'

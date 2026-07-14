@@ -12,6 +12,10 @@ export function getDbPath(): string {
   return path.join(getDataDir(), 'bloomai.db')
 }
 
+export function getSkillRunArtifactsDir(runId: string): string {
+  return path.join(getDataDir(), 'skills', 'runs', runId, 'artifacts')
+}
+
 /**
  * Root directory for saved generated images. Defaults to <dataDir>/images; callers may pass
  * a user-configured override (settings `image_output_dir`), supporting `~` and absolute paths.
