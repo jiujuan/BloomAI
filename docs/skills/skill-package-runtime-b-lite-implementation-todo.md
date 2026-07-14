@@ -490,14 +490,14 @@ Artifacts：
 
 ## 19. TODO 17：旧 Skills 兼容
 
-- [ ] 将现有 Runner 移到 `legacy/`。
-- [ ] 旧 Skill 数据表保持可读。
-- [ ] 旧 API 保持可用。
-- [ ] Legacy Skill 仍可作为普通 Mastra Tool。
-- [ ] Package Skill 不再包装成同步 Mastra Tool。
-- [ ] UI 清楚标记 `Legacy` 与 `Package`。
-- [ ] 新建轻量 Skill 功能暂时保持。
-- [ ] 补充 Legacy 和 Package ID 命名空间，避免冲突。
+- [x] 将现有 Runner 移到 `legacy/`。
+- [x] 旧 Skill 数据表保持可读。
+- [x] 旧 API 保持可用。
+- [x] Legacy Skill 仍可作为普通 Mastra Tool。
+- [x] Package Skill 不再包装成同步 Mastra Tool。
+- [x] UI 清楚标记 `Legacy` 与 `Package`。
+- [x] 新建轻量 Skill 功能暂时保持。
+- [x] 补充 Legacy 和 Package ID 命名空间，避免冲突。
 
 ## 20. TODO 18：测试策略
 
