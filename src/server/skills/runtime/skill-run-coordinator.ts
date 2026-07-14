@@ -141,6 +141,7 @@ export class SkillRunCoordinator {
   transition(runId: string, targetStatus: SkillRunStatus, data: {
     expectedRevision: number
     waitingReason?: string | null
+    approvalCapabilities?: string[]
     output?: Record<string, unknown> | null
     errorCode?: string | null
     errorMessage?: string | null
@@ -251,13 +252,13 @@ function isWaiting(status: SkillRunStatus): boolean {
 function transitionEvent(
   from: SkillRunStatus,
   to: SkillRunStatus,
-  data: { waitingReason?: string | null; errorCode?: string | null; errorMessage?: string | null },
+  data: { waitingReason?: string | null; approvalCapabilities?: string[]; errorCode?: string | null; errorMessage?: string | null },
   revision: number,
 ): { type: string; payload: Record<string, unknown> } {
   if (to === 'completed') return { type: 'run.completed', payload: { revision } }
   if (to === 'completed_with_errors') return { type: 'run.completed_with_errors', payload: { revision } }
   if (to === 'waiting_approval') {
-    return { type: 'approval.required', payload: { reason: data.waitingReason ?? 'Approval required', capabilities: [] } }
+    return { type: 'approval.required', payload: { reason: data.waitingReason ?? 'Approval required', capabilities: data.approvalCapabilities ?? [] } }
   }
   if (to === 'failed') {
     return {

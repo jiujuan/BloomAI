@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { toolRepo, type Tool } from '../../db/repositories/tool.repo'
 import { executeToolInternal, ToolExecutionError } from '../../tools/execute-tool'
+import { ImageStudioCapabilityAdapter } from '../adapters/image-studio-capability-adapter'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
 
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -97,6 +98,10 @@ export async function executeCapability(request: CapabilityRequest): Promise<Cap
     }
   } else {
     requireLegacyToolPermission(tool, parsed.grantContext)
+  }
+
+  if (parsed.caller === 'package-runtime' && parsed.capability === 'image.generate') {
+    return executePackageImageCapability(parsed, toolId)
   }
 
   try {
@@ -198,6 +203,52 @@ function enforcePackageScope(request: CapabilityRequest, scope: CapabilityScope)
     }
   }).length
   if (calls >= scope.maxCalls) throw new CapabilityDeniedError(`Image generation budget exhausted (${scope.maxCalls} calls)`)
+}
+
+const imageGenerationInputSchema = z.object({
+  prompt: z.string().min(1),
+  model: z.string().min(1),
+  imageSessionId: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  aspectRatioId: z.string().min(1).optional(),
+  styleId: z.string().min(1).nullable().optional(),
+  referenceImages: z.array(z.string().min(1)).optional(),
+  negativePrompt: z.string().min(1).optional(),
+  seed: z.number().int().optional(),
+  optimize: z.boolean().optional(),
+}).strict()
+
+async function executePackageImageCapability(request: CapabilityRequest, toolId: string): Promise<CapabilityResult> {
+  if (!request.runId) throw new CapabilityDeniedError('Package capability calls require a runId')
+  const input = imageGenerationInputSchema.parse(request.input)
+  const toolRun = toolRepo.startRun(toolId, request.sessionId ?? null, input)
+  try {
+    const batch = await new ImageStudioCapabilityAdapter().run({
+      runId: request.runId,
+      imageSessionId: input.imageSessionId,
+      title: input.title,
+      items: [{
+        id: toolRun.id,
+        prompt: input.prompt,
+        model: input.model,
+        aspectRatioId: input.aspectRatioId,
+        styleId: input.styleId,
+        referenceImages: input.referenceImages,
+        negativePrompt: input.negativePrompt,
+        seed: input.seed,
+        optimize: input.optimize,
+      }],
+    })
+    const output = { imageSessionId: batch.imageSessionId, status: batch.status, item: batch.items[0] }
+    toolRepo.completeRun(toolRun.id, output)
+    auditPackageCall(request, toolId, toolRun.id, 'completed')
+    return { capability: request.capability, toolId, toolRunId: toolRun.id, output }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Image generation failed'
+    toolRepo.failRun(toolRun.id, message)
+    auditPackageCall(request, toolId, toolRun.id, 'failed', message)
+    throw error
+  }
 }
 
 function auditPackageCall(

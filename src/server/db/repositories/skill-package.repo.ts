@@ -145,6 +145,14 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_runs_v2).where(eq(skill_runs_v2.id, id)).get()
   },
 
+  setRunImageSessionId(runId: string, imageSessionId: string) {
+    getOrmDb().update(skill_runs_v2).set({
+      image_session_id: imageSessionId,
+      updated_at: Date.now(),
+    }).where(eq(skill_runs_v2.id, runId)).run()
+    return this.getRun(runId)
+  },
+
   applyRunChange(data: {
     runId: string
     expectedRevision: number

@@ -372,18 +372,18 @@ interrupted
 
 ## 13. TODO 11：Instruction Agent Adapter
 
-- [ ] 新增 `InstructionAgentAdapter`。
-- [ ] 从 SkillVersion 读取 `SKILL.md`。
-- [ ] 将用户输入和 Manifest 转换为运行上下文。
-- [ ] 只暴露允许的 capabilities。
-- [ ] 不把所有安装 Skill 注入同一上下文。
-- [ ] 对 references 使用按需读取。
-- [ ] 限制最大 Agent steps。
-- [ ] 限制模型 token 消耗。
-- [ ] 支持等待用户输入。
-- [ ] 支持等待能力审批。
-- [ ] 支持取消。
-- [ ] 将最终结果标准化为 Run output。
+- [x] 新增 `InstructionAgentAdapter`。
+- [x] 从 SkillVersion 读取 `SKILL.md`。
+- [x] 将用户输入和 Manifest 转换为运行上下文。
+- [x] 只暴露允许的 capabilities。
+- [x] 不把所有安装 Skill 注入同一上下文。
+- [x] 对 references 使用按需读取。
+- [x] 限制最大 Agent steps。
+- [x] 限制模型 token 消耗。
+- [x] 支持等待用户输入。
+- [x] 支持等待能力审批。
+- [x] 支持取消。
+- [x] 将最终结果标准化为 Run output。
 
 首期不实现通用工作流 DSL，先让 Instruction Agent 通过受控能力完成流程。
 
@@ -391,19 +391,19 @@ interrupted
 
 文章配图 Skill 不应直接使用简单 `image_gen` 返回值。
 
-- [ ] 新增 `ImageStudioCapabilityAdapter`。
-- [ ] 创建或关联 `image_session`。
-- [ ] 复用 `generateForSession()`。
-- [ ] 每张图创建 `image_generations` 记录。
-- [ ] 将 Generation ID 关联到 Skill Artifact。
-- [ ] 支持最大并发数，首期建议为 2。
-- [ ] 支持每张图独立状态。
-- [ ] 支持单图重试。
-- [ ] 支持修改 prompt 后重试。
-- [ ] 支持跳过失败图片。
-- [ ] 支持整组取消。
-- [ ] 输出 Markdown 插图清单。
-- [ ] 运行结束计算 `completed` 或 `completed_with_errors`。
+- [x] 新增 `ImageStudioCapabilityAdapter`。
+- [x] 创建或关联 `image_session`。
+- [x] 复用 `generateForSession()`。
+- [x] 每张图创建 `image_generations` 记录。
+- [x] 将 Generation ID 关联到 Skill Artifact。
+- [x] 支持最大并发数，首期建议为 2。
+- [x] 支持每张图独立状态。
+- [x] 支持单图重试。
+- [x] 支持修改 prompt 后重试。
+- [x] 支持跳过失败图片。
+- [x] 支持整组取消。
+- [x] 输出 Markdown 插图清单。
+- [x] 运行结束计算 `completed` 或 `completed_with_errors`。
 
 ## 15. TODO 13：HTTP API
 

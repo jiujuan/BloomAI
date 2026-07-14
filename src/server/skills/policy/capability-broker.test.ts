@@ -118,7 +118,13 @@ describe('CapabilityBroker', () => {
       grantMode: 'persistent',
       scope: { allowedModels: ['agnes-image-2.1-flash'], maxCalls: 1 },
     })
-    toolRegistry.image_gen = vi.fn(async () => ({ url: 'https://example.test/image.png' }))
+    const imageStudio = await import('../../services/image-studio.service')
+    vi.spyOn(imageStudio, 'generateForSession').mockResolvedValue({
+      id: 'generation-1', session_id: 'unused', message_id: null, prompt: 'A lighthouse', resolved_prompt: 'A lighthouse', provider_id: 'fixture',
+      model: 'agnes-image-2.1-flash', aspect_ratio: null, style: null, size: null, seed: null, reference_images: null,
+      status: 'completed', provider_task_id: null, progress: null, url: 'https://example.test/image.png', local_path: null,
+      error_msg: null, duration_ms: 1, created_at: Date.now(), updated_at: Date.now(),
+    })
 
     await expect(executeCapability({
       caller: 'package-runtime',
@@ -132,7 +138,7 @@ describe('CapabilityBroker', () => {
       capability: 'image.generate',
       input: { prompt: 'A lighthouse', model: 'agnes-image-2.1-flash' },
       runId: run.id,
-    })).resolves.toMatchObject({ toolId: 'image_gen' })
+    })).resolves.toMatchObject({ toolId: 'image_gen', output: { status: 'completed', imageSessionId: expect.any(String) } })
 
     await expect(executeCapability({
       caller: 'package-runtime',

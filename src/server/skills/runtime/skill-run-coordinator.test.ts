@@ -115,11 +115,15 @@ describe('SkillRunCoordinator', () => {
     const coordinator = new SkillRunCoordinator()
     const { runId } = coordinator.startRun({ skillVersionId: version.id, input: {}, context: {} })
 
-    coordinator.transition(runId, 'waiting_approval', { expectedRevision: 1, waitingReason: 'approve image generation' })
+    coordinator.transition(runId, 'waiting_approval', {
+      expectedRevision: 1,
+      waitingReason: 'approve image generation',
+      approvalCapabilities: ['image.generate'],
+    })
 
     expect(coordinator.subscribeEvents(runId).at(-1)).toMatchObject({
       type: 'approval.required',
-      payload: { reason: 'approve image generation', capabilities: [] },
+      payload: { reason: 'approve image generation', capabilities: ['image.generate'] },
     })
   })
 
