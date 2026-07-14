@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!-- PROTOTYPE ONLY: throwaway static UI mockup for Skill Package Runtime admin flows. -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skill Package Runtime - Skills Admin Prototype</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f2f5;
+      --panel-3: #e7ebef;
+      --text: #1f2933;
+      --muted: #64707d;
+      --subtle: #8b97a3;
+      --line: #d6dce3;
+      --line-2: #e5e9ee;
+      --accent: #256f9c;
+      --accent-bg: #e8f3f8;
+      --success: #2f7d4f;
+      --success-bg: #e8f5ed;
+      --warning: #a16207;
+      --warning-bg: #fff4d6;
+      --danger: #b42318;
+      --danger-bg: #fdebea;
+      --radius-md: 7px;
+      --radius-lg: 8px;
+      --shadow: 0 16px 38px rgba(31, 41, 51, 0.14);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      font-family: var(--font);
+      color: var(--text);
+      background: var(--bg);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 0.5px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: var(--radius-md);
+      height: 30px;
+      padding: 0 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--panel-2); }
+    button.primary {
+      background: var(--accent-bg);
+      color: var(--accent);
+      border-color: #b7d6e5;
+      font-weight: 650;
+    }
+    button.danger {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-color: #f3c5c0;
+    }
+    button.icon { width: 30px; padding: 0; }
+    input, textarea, select {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      color: var(--text);
+      outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #8ec3dc; }
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      background: var(--bg);
+    }
+    .rail {
+      background: #202830;
+      color: #d8dee6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 8px;
+      gap: 8px;
+    }
+    .rail-mark {
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .rail button {
+      width: 44px;
+      height: 42px;
+      border-radius: 8px;
+      border-color: transparent;
+      background: transparent;
+      color: #bac4cf;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      padding: 4px;
+    }
+    .rail button.active { background: rgba(255,255,255,0.12); color: #fff; }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 0.5px solid var(--line);
+      background: var(--panel);
+    }
+    .title { font-weight: 650; font-size: 14px; }
+    .small { color: var(--muted); font-size: 12px; }
+    .muted { color: var(--muted); }
+    .top-actions { display: flex; gap: 8px; align-items: center; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      border-radius: 999px;
+      padding: 1px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--panel-3);
+      border: 0.5px solid var(--line);
+      white-space: nowrap;
+    }
+    .badge.success { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .badge.warn { color: var(--warning); background: var(--warning-bg); border-color: #efd38b; }
+    .badge.info { color: var(--accent); background: var(--accent-bg); border-color: #b7d6e5; }
+    .badge.danger { color: var(--danger); background: var(--danger-bg); border-color: #f3c5c0; }
+    .layout {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 226px 390px minmax(0,1fr);
+    }
+    .left, .list, .detail {
+      min-height: 0;
+      overflow: auto;
+    }
+    .left {
+      background: var(--panel-2);
+      border-right: 0.5px solid var(--line);
+      padding: 10px;
+    }
+    .list {
+      background: var(--panel);
+      border-right: 0.5px solid var(--line);
+      padding: 10px;
+    }
+    .detail { background: var(--panel); display: flex; flex-direction: column; }
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      padding: 0 9px;
+      margin-bottom: 10px;
+    }
+    .search input { border: none; background: transparent; flex: 1; min-width: 0; }
+    .nav-tabs { display: grid; gap: 5px; margin-bottom: 14px; }
+    .nav-tabs button {
+      justify-content: flex-start;
+      height: 34px;
+      background: transparent;
+      border-color: transparent;
+      color: var(--muted);
+    }
+    .nav-tabs button.active {
+      background: var(--panel);
+      border-color: var(--line-2);
+      color: var(--text);
+    }
+    .install-box {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 10px;
+      background: var(--panel);
+      display: grid;
+      gap: 8px;
+    }
+    .install-box input { height: 32px; padding: 0 9px; width: 100%; }
+    .skill-row {
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-lg);
+      padding: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      background: var(--panel);
+      display: grid;
+      gap: 7px;
+    }
+    .skill-row:hover { border-color: #b7d6e5; background: #fbfdfe; }
+    .skill-row.active { border-color: #8ec3dc; background: var(--accent-bg); }
+    .row-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+    .row-title { font-weight: 650; }
+    .cap-row { display: flex; gap: 5px; flex-wrap: wrap; }
+    .detail-head {
+      padding: 14px 16px;
+      border-bottom: 0.5px solid var(--line);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .detail-body {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 16px 80px;
+      display: grid;
+      gap: 14px;
+    }
+    .section {
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .section-head {
+      padding: 9px 11px;
+      background: var(--panel-2);
+      border-bottom: 0.5px solid var(--line-2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .section-title { font-weight: 650; }
+    .section-body { padding: 11px; display: grid; gap: 10px; }
+    .kv {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+    .kv .key { color: var(--muted); }
+    .permission {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 0.5px solid var(--line-2);
+    }
+    .permission:last-child { border-bottom: none; }
+    .switch {
+      width: 38px;
+      height: 20px;
+      border-radius: 999px;
+      background: #c9d2dc;
+      position: relative;
+      border: none;
+      padding: 0;
+      flex: none;
+    }
+    .switch.on { background: var(--accent); }
+    .switch:after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .15s;
+    }
+    .switch.on:after { transform: translateX(18px); }
+    .run-row {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+    }
+    .dot {
+      width: 18px; height: 18px; border-radius: 50%;
+      display: grid; place-items: center;
+      border: 0.5px solid var(--line);
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 11px;
+    }
+    .run-row.done .dot { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .run-row.waiting .dot { color: var(--warning); background: var(--warning-bg); border-color: #efd38b; }
+    .run-row.running .dot { color: var(--accent); background: var(--accent-bg); border-color: #b7d6e5; }
+    .drawer {
+      position: fixed;
+      right: 0;
+      top: 48px;
+      bottom: 0;
+      width: min(470px, 94vw);
+      background: var(--panel);
+      border-left: 0.5px solid var(--line);
+      box-shadow: var(--shadow);
+      display: none;
+      flex-direction: column;
+      z-index: 30;
+    }
+    .drawer.open { display: flex; }
+    .drawer-head {
+      padding: 12px 14px;
+      border-bottom: 0.5px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .drawer-body {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+    }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 650; color: var(--muted); }
+    .field textarea { min-height: 118px; padding: 9px; resize: vertical; }
+    .field input, .field select { height: 32px; padding: 0 9px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .timeline {
+      display: grid;
+      gap: 8px;
+    }
+    .event {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+    }
+    .event.active { border-color: #b7d6e5; background: var(--accent-bg); }
+    .event.warn { border-color: #efd38b; background: var(--warning-bg); }
+    .artifact-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+    .artifact {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 8px;
+      min-height: 74px;
+      display: grid;
+      align-content: space-between;
+      background: var(--panel);
+    }
+    .footer-switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      z-index: 60;
+      background: #202830;
+      color: #fff;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      padding: 5px;
+      gap: 4px;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .footer-switcher button {
+      height: 30px;
+      border-radius: 999px;
+      border-color: transparent;
+      color: #dce4ec;
+      background: transparent;
+    }
+    .footer-switcher button.active { background: rgba(255,255,255,.13); color: #fff; }
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      background: #202830;
+      color: #fff;
+      border-radius: var(--radius-md);
+      padding: 9px 12px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: .18s ease;
+      z-index: 70;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    @media (max-width: 1080px) {
+      .app { grid-template-columns: 54px 1fr; }
+      .layout { grid-template-columns: 1fr; }
+      .left { display: none; }
+      .list { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail" aria-label="主导航">
+      <div class="rail-mark">B</div>
+      <button type="button" onclick="location.href='skill-runtime-chat-image-prototype.html'">Chat</button>
+      <button type="button" onclick="location.href='skill-runtime-chat-image-prototype.html#image'">Image</button>
+      <button class="active" type="button">Skills</button>
+    </nav>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="title">Skills 管理 · Package Runtime</div>
+          <div class="small">可交互原型：安装、详情、权限、运行历史和产物审计。</div>
+        </div>
+        <div class="top-actions">
+          <button type="button" onclick="openInstall()">从 GitHub 安装</button>
+          <button class="primary" type="button" onclick="openRun()">运行 Skill</button>
+        </div>
+      </header>
+
+      <section class="layout">
+        <aside class="left">
+          <div class="search">
+            <span class="small">Search</span>
+            <input placeholder="skill / package / run">
+          </div>
+          <nav class="nav-tabs" aria-label="Skills tabs">
+            <button class="active" id="tabInstalled" type="button" onclick="switchTab('installed')">Installed</button>
+            <button id="tabMarket" type="button" onclick="switchTab('market')">Market</button>
+            <button id="tabRuns" type="button" onclick="switchTab('runs')">Runs</button>
+          </nav>
+          <div class="install-box">
+            <div class="title">安装第三方 Skill</div>
+            <div class="small">支持 GitHub repo、repo 子目录、本地目录或 zip。</div>
+            <input value="https://github.com/jimliu/baoyu-skills">
+            <button class="primary" type="button" onclick="openInstall()">解析 Package</button>
+          </div>
+        </aside>
+
+        <aside class="list" id="skillList">
+          <div class="side-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div class="title" id="listTitle">Installed Skills</div>
+              <div class="small" id="listSub">3 installed package skills</div>
+            </div>
+            <span class="badge info">local</span>
+          </div>
+
+          <div class="skill-row active" data-skill="article" onclick="selectSkill('article')">
+            <div class="row-top">
+              <div>
+                <div class="row-title">文章配图</div>
+                <div class="small">根据长文生成插图计划并批量出图</div>
+              </div>
+              <span class="badge success">installed</span>
+            </div>
+            <div class="cap-row"><span class="badge">article</span><span class="badge">image</span><span class="badge">batch</span></div>
+          </div>
+
+          <div class="skill-row" data-skill="xiaohei" onclick="selectSkill('xiaohei')">
+            <div class="row-top">
+              <div>
+                <div class="row-title">小黑插画</div>
+                <div class="small">黑白插画，多场景图生成</div>
+              </div>
+              <span class="badge success">installed</span>
+            </div>
+            <div class="cap-row"><span class="badge">illustration</span><span class="badge">image</span></div>
+          </div>
+
+          <div class="skill-row" data-skill="hv" onclick="selectSkill('hv')">
+            <div class="row-top">
+              <div>
+                <div class="row-title">HV Analysis</div>
+                <div class="small">深度研究、Markdown 报告、PDF 输出</div>
+              </div>
+              <span class="badge warn">needs setup</span>
+            </div>
+            <div class="cap-row"><span class="badge">research</span><span class="badge">pdf</span><span class="badge danger">python</span></div>
+          </div>
+        </aside>
+
+        <section class="detail">
+          <div class="detail-head">
+            <div>
+              <div class="title" id="detailTitle">文章配图</div>
+              <div class="small" id="detailSub">github.com/jimliu/baoyu-skills · skills/baoyu-article-illustrator · v1.0.0</div>
+            </div>
+            <div class="top-actions">
+              <button type="button" onclick="location.href='skill-runtime-chat-image-prototype.html#image'">在 AI 画图中使用</button>
+              <button class="primary" type="button" onclick="openRun()">运行</button>
+            </div>
+          </div>
+
+          <div class="detail-body" id="detailBody">
+            <div class="section">
+              <div class="section-head">
+                <span class="section-title">Package</span>
+                <span class="badge success">manifest ok</span>
+              </div>
+              <div class="section-body">
+                <div class="kv"><div class="key">运行时</div><div>instruction-agent</div></div>
+                <div class="kv"><div class="key">入口文件</div><div>SKILL.md</div></div>
+                <div class="kv"><div class="key">References</div><div>workflow.md · style-presets.md · prompt-construction.md</div></div>
+                <div class="kv"><div class="key">输出产物</div><div>image · prompt · markdown</div></div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-head">
+                <span class="section-title">权限</span>
+                <button type="button" onclick="toast('权限变更已保存。')">保存</button>
+              </div>
+              <div class="section-body">
+                <div class="permission">
+                  <div><strong>图片生成</strong><div class="small">允许调用 image_gen，运行前会提示成本。</div></div>
+                  <button class="switch on" type="button" onclick="toggleSwitch(this)" aria-label="图片生成权限"></button>
+                </div>
+                <div class="permission">
+                  <div><strong>写入产物目录</strong><div class="small">只允许写入 skill run artifacts。</div></div>
+                  <button class="switch on" type="button" onclick="toggleSwitch(this)" aria-label="写入产物目录权限"></button>
+                </div>
+                <div class="permission">
+                  <div><strong>读取工作区文件</strong><div class="small">默认关闭，运行时由用户上传文章。</div></div>
+                  <button class="switch" type="button" onclick="toggleSwitch(this)" aria-label="读取工作区文件权限"></button>
+                </div>
+                <div class="permission">
+                  <div><strong>Shell / Python</strong><div class="small">此 skill 不需要，保持关闭。</div></div>
+                  <button class="switch" type="button" onclick="toggleSwitch(this)" aria-label="Shell Python 权限"></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-head">
+                <span class="section-title">最近运行</span>
+                <button type="button" onclick="switchTab('runs')">查看全部</button>
+              </div>
+              <div class="section-body">
+                <div class="run-row done">
+                  <span class="dot">✓</span>
+                  <div><strong>公众号文章配图</strong><div class="small">6 images · 6 prompts · Image Studio</div></div>
+                  <button onclick="openRunDetail('done')">打开</button>
+                </div>
+                <div class="run-row waiting">
+                  <span class="dot">!</span>
+                  <div><strong>产品架构长文</strong><div class="small">等待确认插图计划</div></div>
+                  <button onclick="openRunDetail('waiting')">继续</button>
+                </div>
+                <div class="run-row running">
+                  <span class="dot">•</span>
+                  <div><strong>研究报告配图</strong><div class="small">生成图片 3/8</div></div>
+                  <button onclick="openRunDetail('running')">查看</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-head">
+                <span class="section-title">产物预览</span>
+                <span class="badge">latest run</span>
+              </div>
+              <div class="section-body">
+                <div class="artifact-grid">
+                  <div class="artifact"><strong>images/</strong><span class="small">6 PNG</span></div>
+                  <div class="artifact"><strong>prompts.md</strong><span class="small">6 prompts</span></div>
+                  <div class="artifact"><strong>illustration-plan.md</strong><span class="small">Markdown</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <aside class="drawer" id="installDrawer" aria-label="安装 Skill Package">
+    <div class="drawer-head">
+      <div>
+        <div class="title">安装 Skill Package</div>
+        <div class="small">解析仓库、选择 skill、确认权限后安装。</div>
+      </div>
+      <button class="icon" onclick="closeInstall()">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field">
+        <label>来源 URL</label>
+        <input value="https://github.com/jimliu/baoyu-skills">
+      </div>
+      <div class="field">
+        <label>Ref / commit</label>
+        <input value="main">
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">发现的 Skills</span>
+          <span class="badge success">3 found</span>
+        </div>
+        <div class="section-body">
+          <label class="permission">
+            <span><strong>文章配图</strong><div class="small">skills/baoyu-article-illustrator</div></span>
+            <input type="checkbox" checked>
+          </label>
+          <label class="permission">
+            <span><strong>社交媒体卡片</strong><div class="small">skills/social-card-maker</div></span>
+            <input type="checkbox">
+          </label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">权限变更</span>
+          <span class="badge warn">review</span>
+        </div>
+        <div class="section-body">
+          <div class="permission"><div><strong>图片生成</strong><div class="small">将使用 image_gen 工具。</div></div><span class="badge info">new</span></div>
+          <div class="permission"><div><strong>写入产物目录</strong><div class="small">保存图片、prompt、Markdown 清单。</div></div><span class="badge info">new</span></div>
+          <div class="permission"><div><strong>Shell</strong><div class="small">未请求。</div></div><span class="badge success">none</span></div>
+        </div>
+      </div>
+      <button class="primary" onclick="installPackage()">安装所选 Skills</button>
+    </div>
+  </aside>
+
+  <aside class="drawer" id="runDrawer" aria-label="运行 Skill">
+    <div class="drawer-head">
+      <div>
+        <div class="title">运行：文章配图</div>
+        <div class="small">后台管理入口，适合调试和高级用户。</div>
+      </div>
+      <button class="icon" onclick="closeRun()">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field">
+        <label>文章正文 / URL / 文件</label>
+        <textarea>粘贴文章正文，或在正式实现中上传 MD/DOCX/PDF/TXT...</textarea>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>输出位置</label>
+          <select><option>AI 画图新会话</option><option>当前 Chat 会话</option><option>仅保存产物</option></select>
+        </div>
+        <div class="field">
+          <label>图片数量</label>
+          <select><option>6 张</option><option>4 张</option><option>8 张</option></select>
+        </div>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>比例</label>
+          <select><option>4:3</option><option>1:1</option><option>16:9</option></select>
+        </div>
+        <div class="field">
+          <label>风格</label>
+          <select><option>编辑插画</option><option>黑白线稿</option><option>水彩</option></select>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head"><span class="section-title">运行前确认</span></div>
+        <div class="section-body">
+          <div class="small">这个 skill 将读取你提供的文章，生成插图计划；只有在你确认计划后才会生成图片。</div>
+        </div>
+      </div>
+      <button class="primary" onclick="startRun()">开始运行</button>
+    </div>
+  </aside>
+
+  <aside class="drawer" id="runDetailDrawer" aria-label="运行详情">
+    <div class="drawer-head">
+      <div>
+        <div class="title" id="runDetailTitle">Skill Run</div>
+        <div class="small">事件流、确认点和产物审计。</div>
+      </div>
+      <button class="icon" onclick="closeRunDetail()">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Timeline</span>
+          <span class="badge" id="runDetailStatus">running</span>
+        </div>
+        <div class="section-body">
+          <div class="timeline" id="runDetailTimeline"></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">Artifacts</span>
+          <button onclick="toast('已打开本地 artifacts 目录。')">打开目录</button>
+        </div>
+        <div class="section-body">
+          <div class="artifact-grid">
+            <div class="artifact"><strong>images/</strong><span class="small">6 PNG</span></div>
+            <div class="artifact"><strong>prompts.md</strong><span class="small">prompt list</span></div>
+            <div class="artifact"><strong>run.json</strong><span class="small">trace</span></div>
+          </div>
+        </div>
+      </div>
+      <button class="primary" onclick="location.href='skill-runtime-chat-image-prototype.html#image'">在 AI 画图中打开</button>
+    </div>
+  </aside>
+
+  <div class="footer-switcher" aria-label="原型页面切换">
+    <button type="button" onclick="location.href='skill-runtime-chat-image-prototype.html'">Chat / AI 画图</button>
+    <button class="active" type="button">Skills 管理</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const skillData = {
+      article: {
+        title: '文章配图',
+        sub: 'github.com/jimliu/baoyu-skills · skills/baoyu-article-illustrator · v1.0.0',
+        runtime: 'instruction-agent',
+        entry: 'SKILL.md',
+        refs: 'workflow.md · style-presets.md · prompt-construction.md',
+        outputs: 'image · prompt · markdown'
+      },
+      xiaohei: {
+        title: '小黑插画',
+        sub: 'github.com/helloianneo/ian-xiaohei-illustrations · main · v1.0.0',
+        runtime: 'instruction-agent',
+        entry: 'SKILL.md',
+        refs: 'references/style.md · assets/examples',
+        outputs: 'image · prompt'
+      },
+      hv: {
+        title: 'HV Analysis',
+        sub: 'github.com/KKKKhazix/khazix-skills · hv-analysis · v1.0.0',
+        runtime: 'workflow + script',
+        entry: 'SKILL.md',
+        refs: 'references/research.md · scripts/md_to_pdf.py',
+        outputs: 'markdown · pdf · json'
+      }
+    };
+
+    function qs(id) { return document.getElementById(id); }
+
+    function toast(message) {
+      const el = qs('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+    }
+
+    function switchTab(tab) {
+      ['Installed','Market','Runs'].forEach(name => qs('tab' + name).classList.toggle('active', name.toLowerCase() === tab));
+      qs('listTitle').textContent = tab === 'installed' ? 'Installed Skills' : tab === 'market' ? 'Market Packages' : 'Recent Runs';
+      qs('listSub').textContent = tab === 'installed' ? '3 installed package skills' : tab === 'market' ? 'GitHub and community packages' : 'Skill runs across Chat, Image, Skills';
+      if (tab === 'market') renderMarket();
+      if (tab === 'runs') renderRuns();
+      if (tab === 'installed') renderInstalled();
+    }
+
+    function renderInstalled() {
+      qs('skillList').innerHTML = `
+        <div class="side-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div><div class="title" id="listTitle">Installed Skills</div><div class="small" id="listSub">3 installed package skills</div></div>
+          <span class="badge info">local</span>
+        </div>
+        <div class="skill-row active" data-skill="article" onclick="selectSkill('article')">
+          <div class="row-top"><div><div class="row-title">文章配图</div><div class="small">根据长文生成插图计划并批量出图</div></div><span class="badge success">installed</span></div>
+          <div class="cap-row"><span class="badge">article</span><span class="badge">image</span><span class="badge">batch</span></div>
+        </div>
+        <div class="skill-row" data-skill="xiaohei" onclick="selectSkill('xiaohei')">
+          <div class="row-top"><div><div class="row-title">小黑插画</div><div class="small">黑白插画，多场景图生成</div></div><span class="badge success">installed</span></div>
+          <div class="cap-row"><span class="badge">illustration</span><span class="badge">image</span></div>
+        </div>
+        <div class="skill-row" data-skill="hv" onclick="selectSkill('hv')">
+          <div class="row-top"><div><div class="row-title">HV Analysis</div><div class="small">深度研究、Markdown 报告、PDF 输出</div></div><span class="badge warn">needs setup</span></div>
+          <div class="cap-row"><span class="badge">research</span><span class="badge">pdf</span><span class="badge danger">python</span></div>
+        </div>`;
+      selectSkill('article');
+    }
+
+    function renderMarket() {
+      qs('skillList').innerHTML = `
+        <div class="side-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div><div class="title" id="listTitle">Market Packages</div><div class="small" id="listSub">GitHub and community packages</div></div>
+          <span class="badge">remote</span>
+        </div>
+        <div class="skill-row" onclick="openInstall()">
+          <div class="row-top"><div><div class="row-title">baoyu-skills</div><div class="small">文章配图、卡片、图像工作流</div></div><span class="badge info">GitHub</span></div>
+          <div class="cap-row"><span class="badge">image</span><span class="badge">article</span><span class="badge">xhs</span></div>
+        </div>
+        <div class="skill-row" onclick="openInstall()">
+          <div class="row-top"><div><div class="row-title">ian-xiaohei-illustrations</div><div class="small">黑白插画风格图像生成</div></div><span class="badge info">GitHub</span></div>
+          <div class="cap-row"><span class="badge">illustration</span><span class="badge">batch</span></div>
+        </div>
+        <div class="skill-row" onclick="openInstall()">
+          <div class="row-top"><div><div class="row-title">khazix hv-analysis</div><div class="small">研究分析和 PDF 报告</div></div><span class="badge warn">script</span></div>
+          <div class="cap-row"><span class="badge">research</span><span class="badge danger">python</span></div>
+        </div>`;
+    }
+
+    function renderRuns() {
+      qs('skillList').innerHTML = `
+        <div class="side-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div><div class="title" id="listTitle">Recent Runs</div><div class="small" id="listSub">Skill runs across Chat, Image, Skills</div></div>
+          <span class="badge">audit</span>
+        </div>
+        <div class="skill-row" onclick="openRunDetail('done')">
+          <div class="row-top"><div><div class="row-title">公众号文章配图</div><div class="small">文章配图 · Image Studio</div></div><span class="badge success">done</span></div>
+          <div class="cap-row"><span class="badge">6 images</span><span class="badge">6 prompts</span></div>
+        </div>
+        <div class="skill-row" onclick="openRunDetail('waiting')">
+          <div class="row-top"><div><div class="row-title">产品架构长文</div><div class="small">等待确认插图计划</div></div><span class="badge warn">waiting</span></div>
+          <div class="cap-row"><span class="badge">approval</span><span class="badge">plan</span></div>
+        </div>
+        <div class="skill-row" onclick="openRunDetail('running')">
+          <div class="row-top"><div><div class="row-title">研究报告配图</div><div class="small">生成图片 3/8</div></div><span class="badge info">running</span></div>
+          <div class="cap-row"><span class="badge">image</span><span class="badge">in progress</span></div>
+        </div>`;
+    }
+
+    function selectSkill(id) {
+      const data = skillData[id];
+      document.querySelectorAll('.skill-row[data-skill]').forEach(row => row.classList.toggle('active', row.dataset.skill === id));
+      qs('detailTitle').textContent = data.title;
+      qs('detailSub').textContent = data.sub;
+      qs('detailBody').querySelector('.section-body').innerHTML = `
+        <div class="kv"><div class="key">运行时</div><div>${data.runtime}</div></div>
+        <div class="kv"><div class="key">入口文件</div><div>${data.entry}</div></div>
+        <div class="kv"><div class="key">References</div><div>${data.refs}</div></div>
+        <div class="kv"><div class="key">输出产物</div><div>${data.outputs}</div></div>`;
+      toast(`已切换到 ${data.title}`);
+    }
+
+    function toggleSwitch(btn) { btn.classList.toggle('on'); }
+    function openInstall() { qs('installDrawer').classList.add('open'); }
+    function closeInstall() { qs('installDrawer').classList.remove('open'); }
+    function openRun() { qs('runDrawer').classList.add('open'); }
+    function closeRun() { qs('runDrawer').classList.remove('open'); }
+    function closeRunDetail() { qs('runDetailDrawer').classList.remove('open'); }
+
+    function installPackage() {
+      closeInstall();
+      switchTab('installed');
+      toast('Package 已安装，权限等待用户确认。');
+    }
+
+    function startRun() {
+      closeRun();
+      openRunDetail('waiting');
+      toast('运行已创建，等待插图计划确认。');
+    }
+
+    function openRunDetail(kind) {
+      qs('runDetailDrawer').classList.add('open');
+      const title = kind === 'done' ? '公众号文章配图' : kind === 'waiting' ? '产品架构长文' : '研究报告配图';
+      const status = kind === 'done' ? 'completed' : kind === 'waiting' ? 'waiting approval' : 'running';
+      qs('runDetailTitle').textContent = title;
+      qs('runDetailStatus').textContent = status;
+      qs('runDetailStatus').className = kind === 'done' ? 'badge success' : kind === 'waiting' ? 'badge warn' : 'badge info';
+      const timeline = qs('runDetailTimeline');
+      if (kind === 'done') {
+        timeline.innerHTML = `
+          <div class="event"><span class="dot">✓</span><div>读取文章</div><span class="small">done</span></div>
+          <div class="event"><span class="dot">✓</span><div>生成插图计划</div><span class="small">done</span></div>
+          <div class="event"><span class="dot">✓</span><div>调用 image_gen 6 次</div><span class="small">done</span></div>
+          <div class="event"><span class="dot">✓</span><div>保存图片、prompt、Markdown 清单</div><span class="small">done</span></div>`;
+      } else if (kind === 'waiting') {
+        timeline.innerHTML = `
+          <div class="event"><span class="dot">✓</span><div>读取文章</div><span class="small">done</span></div>
+          <div class="event"><span class="dot">✓</span><div>生成插图计划</div><span class="small">done</span></div>
+          <div class="event warn"><span class="dot">!</span><div>等待用户确认 6 张插图计划</div><button onclick="toast('计划已确认，开始批量出图。')">确认</button></div>`;
+      } else {
+        timeline.innerHTML = `
+          <div class="event"><span class="dot">✓</span><div>读取文章</div><span class="small">done</span></div>
+          <div class="event"><span class="dot">✓</span><div>生成插图计划</div><span class="small">done</span></div>
+          <div class="event active"><span class="dot">•</span><div>生成图片 3/8</div><span class="small">running</span></div>`;
+      }
+    }
+  </script>
+</body>
+</html>

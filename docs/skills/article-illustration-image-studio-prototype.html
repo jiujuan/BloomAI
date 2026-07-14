@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!-- PROTOTYPE ONLY: throwaway static UI mockup for article/text illustration inside AI Image Studio. -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI 画图 · 文章配图模式原型</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f1f3f6;
+      --panel-3: #e6ebf0;
+      --text: #202a33;
+      --muted: #64717f;
+      --subtle: #8b98a6;
+      --line: #d7dde4;
+      --line-2: #e6eaf0;
+      --accent: #256f9c;
+      --accent-bg: #e8f3f8;
+      --accent-line: #acd2e3;
+      --success: #2f7d4f;
+      --success-bg: #e8f5ed;
+      --warning: #a16207;
+      --warning-bg: #fff4d6;
+      --danger: #b42318;
+      --danger-bg: #fdebea;
+      --radius-sm: 5px;
+      --radius-md: 7px;
+      --radius-lg: 8px;
+      --shadow: 0 16px 38px rgba(32, 42, 51, 0.14);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      background: var(--bg);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow: hidden;
+    }
+    button, input, textarea, select { font: inherit; }
+    button {
+      height: 30px;
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    button:hover { background: var(--panel-2); }
+    button.primary {
+      background: var(--accent-bg);
+      border-color: var(--accent-line);
+      color: var(--accent);
+      font-weight: 650;
+    }
+    button.ghost { background: transparent; border-color: transparent; }
+    button.icon { width: 30px; padding: 0; }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+    textarea, input, select {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      color: var(--text);
+      outline: none;
+    }
+    textarea:focus, input:focus, select:focus { border-color: var(--accent-line); }
+
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      background: var(--bg);
+    }
+    .rail {
+      background: #202830;
+      color: #d8dee6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 8px;
+      gap: 8px;
+    }
+    .rail-mark {
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .rail button {
+      width: 44px;
+      height: 42px;
+      border-radius: 8px;
+      border-color: transparent;
+      background: transparent;
+      color: #bac4cf;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      padding: 4px;
+    }
+    .rail button.active { background: rgba(255,255,255,.12); color: #fff; }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      background: var(--panel);
+      border-bottom: 0.5px solid var(--line);
+    }
+    .title { font-size: 14px; font-weight: 700; }
+    .small { font-size: 12px; color: var(--muted); }
+    .muted { color: var(--muted); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .badge {
+      min-height: 20px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 1px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--panel-3);
+      border: 0.5px solid var(--line);
+      white-space: nowrap;
+    }
+    .badge.info { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-line); }
+    .badge.success { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .badge.warn { color: var(--warning); background: var(--warning-bg); border-color: #efd38b; }
+    .mode-tabs {
+      height: 36px;
+      padding: 4px 14px;
+      border-bottom: 0.5px solid var(--line);
+      background: var(--panel);
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .mode-tabs button.active {
+      color: var(--accent);
+      background: var(--accent-bg);
+      border-color: var(--accent-line);
+    }
+    .variant {
+      flex: 1;
+      min-height: 0;
+      display: none;
+    }
+    .variant.active { display: grid; }
+
+    /* Shared UI pieces */
+    .section {
+      border: 0.5px solid var(--line-2);
+      background: var(--panel);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .section-head {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 11px;
+      background: var(--panel-2);
+      border-bottom: 0.5px solid var(--line-2);
+    }
+    .section-title { font-weight: 700; }
+    .section-body { padding: 11px; display: grid; gap: 10px; }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; color: var(--muted); font-weight: 650; }
+    .field textarea { width: 100%; min-height: 130px; padding: 9px; resize: vertical; }
+    .field input, .field select { height: 32px; padding: 0 9px; width: 100%; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 9px;
+      border: 0.5px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .chip.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-line); }
+    .seg {
+      display: flex;
+      gap: 3px;
+      padding: 3px;
+      border-radius: var(--radius-md);
+      background: var(--panel-2);
+    }
+    .seg button {
+      flex: 1;
+      height: 28px;
+      background: transparent;
+      border-color: transparent;
+    }
+    .seg button.active {
+      background: var(--panel);
+      border-color: var(--line);
+      color: var(--accent);
+    }
+    .source-panel { display: none; }
+    .source-panel.active { display: grid; gap: 10px; }
+    .dropzone {
+      min-height: 132px;
+      border: 1px dashed var(--line);
+      border-radius: var(--radius-lg);
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 14px;
+      background: #fbfcfd;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 0;
+    }
+    .switch {
+      width: 38px;
+      height: 20px;
+      border-radius: 999px;
+      background: #c9d2dc;
+      position: relative;
+      flex: none;
+      border: none;
+      padding: 0;
+    }
+    .switch.on { background: var(--accent); }
+    .switch:after {
+      content: "";
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .15s;
+    }
+    .switch.on:after { transform: translateX(18px); }
+    .plan-list { display: grid; gap: 8px; }
+    .plan-item {
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+      padding: 9px;
+      display: grid;
+      gap: 5px;
+      background: var(--panel);
+    }
+    .plan-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .step-list { display: grid; gap: 8px; }
+    .step {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+    }
+    .dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      border: 0.5px solid var(--line);
+      color: var(--muted);
+      background: var(--panel);
+    }
+    .step.done .dot { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .step.active .dot { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-line); }
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(37,111,156,.36);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      70% { box-shadow: 0 0 0 8px rgba(37,111,156,0); }
+      100% { box-shadow: 0 0 0 0 rgba(37,111,156,0); }
+    }
+    .image-grid { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 12px; }
+    .image-card {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--panel);
+      min-width: 0;
+    }
+    .art, .skeleton {
+      height: 154px;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--subtle);
+    }
+    .art {
+      background:
+        linear-gradient(140deg, rgba(37,111,156,.24), transparent 42%),
+        linear-gradient(30deg, rgba(47,125,79,.16), transparent 48%),
+        #dfe7ed;
+    }
+    .art:before {
+      content: "";
+      position: absolute;
+      left: 18px;
+      top: 22px;
+      width: 58px;
+      height: 78px;
+      border-radius: 12px 12px 8px 8px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(255,255,255,.9);
+    }
+    .art:after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      bottom: 18px;
+      width: 78px;
+      height: 38px;
+      border-radius: 8px;
+      background: rgba(32,42,51,.18);
+    }
+    .skeleton { background: var(--panel-2); }
+    .skeleton:after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.72), transparent);
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+    .image-meta { padding: 8px; display: grid; gap: 6px; }
+    .image-actions { display: flex; gap: 4px; }
+    .image-actions button { width: 26px; height: 26px; padding: 0; }
+    .empty-state {
+      height: 100%;
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 24px;
+    }
+    .empty-inner { display: grid; gap: 8px; max-width: 380px; }
+
+    /* Variant A: Workbench */
+    .workbench {
+      grid-template-columns: 260px minmax(0,1fr) 350px;
+      min-height: 0;
+    }
+    .wb-sessions, .wb-config, .wb-main {
+      min-height: 0;
+      overflow: auto;
+    }
+    .wb-sessions {
+      background: var(--panel-2);
+      border-right: 0.5px solid var(--line);
+      padding: 10px;
+    }
+    .wb-main {
+      background: var(--panel);
+      padding: 16px;
+    }
+    .wb-config {
+      background: var(--panel-2);
+      border-left: 0.5px solid var(--line);
+      padding: 10px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+    .session-row {
+      padding: 9px 10px;
+      border-radius: var(--radius-md);
+      margin-bottom: 6px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .session-row.active {
+      background: var(--panel);
+      color: var(--text);
+      border: 0.5px solid var(--line-2);
+    }
+    .wb-inner { max-width: 940px; margin: 0 auto; display: grid; gap: 14px; }
+
+    /* Variant B: Wizard */
+    .wizard {
+      grid-template-columns: 320px minmax(0,1fr);
+      min-height: 0;
+    }
+    .wizard-left {
+      background: var(--panel-2);
+      border-right: 0.5px solid var(--line);
+      padding: 12px;
+      overflow: auto;
+    }
+    .wizard-main {
+      background: var(--panel);
+      min-width: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+    .wizard-step {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 10px;
+      margin-bottom: 8px;
+      background: var(--panel);
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+    .wizard-step.active { border-color: var(--accent-line); background: var(--accent-bg); }
+    .wizard-canvas { max-width: 900px; margin: 0 auto; display: grid; gap: 14px; }
+
+    /* Variant C: Article editor */
+    .editor {
+      grid-template-columns: minmax(360px, 42%) minmax(0,1fr);
+      min-height: 0;
+    }
+    .article-pane {
+      background: var(--panel);
+      border-right: 0.5px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .article-toolbar {
+      min-height: 46px;
+      padding: 8px 12px;
+      border-bottom: 0.5px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .article-editor {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+    .article-doc {
+      max-width: 680px;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+    .article-doc h2 { margin: 0; font-size: 20px; }
+    .article-doc p { margin: 0; color: #38444f; line-height: 1.7; }
+    .insert-slot {
+      border: 1px dashed var(--accent-line);
+      background: var(--accent-bg);
+      color: var(--accent);
+      border-radius: var(--radius-lg);
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .illustration-pane {
+      background: var(--panel-2);
+      min-width: 0;
+      overflow: auto;
+      padding: 12px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      background: #202830;
+      color: #fff;
+      border-radius: var(--radius-md);
+      padding: 9px 12px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: .18s ease;
+      z-index: 70;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .variant-switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      z-index: 60;
+      background: #202830;
+      color: #fff;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .variant-switcher button {
+      height: 30px;
+      border-radius: 999px;
+      border-color: transparent;
+      color: #dce4ec;
+      background: transparent;
+    }
+    .variant-switcher button.active { background: rgba(255,255,255,.13); color: #fff; }
+
+    @media (max-width: 1180px) {
+      .workbench { grid-template-columns: 1fr 340px; }
+      .wb-sessions { display: none; }
+    }
+    @media (max-width: 920px) {
+      .app { grid-template-columns: 54px 1fr; }
+      .workbench, .wizard, .editor { grid-template-columns: 1fr; }
+      .wb-config, .wizard-left, .article-pane { display: none; }
+      .image-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail" aria-label="主导航">
+      <div class="rail-mark">B</div>
+      <button type="button">Chat</button>
+      <button type="button" class="active">Image</button>
+      <button type="button">Skills</button>
+    </nav>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="title">AI 画图 · 文章配图模式</div>
+          <div class="small">新一版原型：Chat 不承载生成界面，文章/文字配图统一在 AI 画图页完成。</div>
+        </div>
+        <div class="top-actions">
+          <span class="badge info">Article Illustration</span>
+          <span class="badge">Prototype</span>
+          <button type="button" class="primary" onclick="runCurrentPlan()">生成插图计划</button>
+        </div>
+      </header>
+
+      <div class="mode-tabs" aria-label="AI 画图模式">
+        <button type="button">单图生成</button>
+        <button type="button" class="active">文章配图</button>
+        <button type="button">批量变体</button>
+        <button type="button">参考图重绘</button>
+      </div>
+
+      <!-- Variant A: Workbench -->
+      <section class="variant workbench active" data-variant="A">
+        <aside class="wb-sessions">
+          <div class="section" style="margin-bottom:10px">
+            <div class="section-head"><span class="section-title">画图会话</span><button class="icon">+</button></div>
+            <div class="section-body">
+              <div class="session-row active"><strong>公众号文章配图</strong><div class="small">文章配图 · 计划中</div></div>
+              <div class="session-row"><strong>产品主图</strong><div class="small">12 generations</div></div>
+              <div class="session-row"><strong>风格探索</strong><div class="small">reference images</div></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-head"><span class="section-title">最近 Skill</span></div>
+            <div class="section-body">
+              <span class="chip active">文章配图</span>
+              <span class="chip">小黑插画</span>
+              <span class="chip">封面组图</span>
+            </div>
+          </div>
+        </aside>
+
+        <section class="wb-main">
+          <div class="wb-inner">
+            <div class="section" id="workbenchPlan">
+              <div class="section-head">
+                <span class="section-title">文章配图工作台</span>
+                <span class="badge warn">先生成计划</span>
+              </div>
+              <div class="section-body">
+                <div class="empty-state">
+                  <div class="empty-inner">
+                    <div class="title">把文章交给配图 Skill，先得到可编辑插图计划</div>
+                    <div class="small">输入正文、URL 或文件，配置图片数量、比例、风格和模型。确认计划后才会批量出图。</div>
+                    <div class="chips" style="justify-content:center">
+                      <span class="chip active">正文</span>
+                      <span class="chip">URL</span>
+                      <span class="chip">文件</span>
+                    </div>
+                    <button class="primary" type="button" onclick="runCurrentPlan()">生成插图计划</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="workbenchOutput"></div>
+          </div>
+        </section>
+
+        <aside class="wb-config">
+          <div class="section">
+            <div class="section-head">
+              <span class="section-title">输入文章</span>
+              <span class="badge info">正文</span>
+            </div>
+            <div class="section-body">
+              <div class="seg">
+                <button class="active" type="button" onclick="switchSource(this, 'text')">正文</button>
+                <button type="button" onclick="switchSource(this, 'url')">URL</button>
+                <button type="button" onclick="switchSource(this, 'file')">文件</button>
+              </div>
+              <div class="source-panel active" data-source-panel="text">
+                <div class="field">
+                  <label>文章或文字内容</label>
+                  <textarea>这是一篇关于 AI 产品如何从单点工具走向工作流的文章。文章讨论了用户输入、任务拆解、视觉表达和跨页面协作...</textarea>
+                </div>
+              </div>
+              <div class="source-panel" data-source-panel="url">
+                <div class="field">
+                  <label>文章 URL</label>
+                  <input value="https://example.com/article">
+                </div>
+                <div class="small">运行时通过 web_fetch 读取正文，并保留来源链接。</div>
+              </div>
+              <div class="source-panel" data-source-panel="file">
+                <div class="dropzone">
+                  <div>
+                    <strong>拖入 MD / DOCX / PDF / TXT</strong>
+                    <div class="small">或点击选择文件</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head"><span class="section-title">配图设置</span></div>
+            <div class="section-body">
+              <div class="two">
+                <div class="field"><label>图片数量</label><select><option>6 张</option><option>4 张</option><option>8 张</option></select></div>
+                <div class="field"><label>比例</label><select><option>4:3</option><option>16:9</option><option>1:1</option></select></div>
+              </div>
+              <div class="field"><label>风格</label><select><option>编辑插画</option><option>小黑线稿</option><option>水彩解释图</option></select></div>
+              <div class="field"><label>模型</label><select><option>Agnes Image</option><option>GPT Image</option><option>Qwen Image</option></select></div>
+              <div class="toggle-row"><span>统一人物与品牌视觉</span><button class="switch on" onclick="toggleSwitch(this)"></button></div>
+              <div class="toggle-row"><span>保存每张图 prompt</span><button class="switch on" onclick="toggleSwitch(this)"></button></div>
+              <button class="primary" type="button" onclick="runCurrentPlan()">生成插图计划</button>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <!-- Variant B: Wizard -->
+      <section class="variant wizard" data-variant="B">
+        <aside class="wizard-left">
+          <div class="wizard-step active"><span class="dot">1</span><div><strong>输入内容</strong><div class="small">正文 / URL / 文件</div></div></div>
+          <div class="wizard-step"><span class="dot">2</span><div><strong>配置风格</strong><div class="small">数量、比例、模型</div></div></div>
+          <div class="wizard-step"><span class="dot">3</span><div><strong>审核计划</strong><div class="small">编辑场景后确认</div></div></div>
+          <div class="wizard-step"><span class="dot">4</span><div><strong>批量生成</strong><div class="small">逐张产出，可重试</div></div></div>
+          <div class="section" style="margin-top:12px">
+            <div class="section-head"><span class="section-title">本模式适合</span></div>
+            <div class="section-body small">低学习成本，适合第一次使用文章配图的用户。每一步只暴露当前必须做的选择。</div>
+          </div>
+        </aside>
+
+        <main class="wizard-main">
+          <div class="wizard-canvas">
+            <div class="section">
+              <div class="section-head">
+                <span class="section-title">1. 输入要配图的内容</span>
+                <span class="badge info">Wizard</span>
+              </div>
+              <div class="section-body">
+                <div class="seg">
+                  <button class="active" type="button" onclick="switchSource(this, 'text')">粘贴正文</button>
+                  <button type="button" onclick="switchSource(this, 'url')">读取 URL</button>
+                  <button type="button" onclick="switchSource(this, 'file')">上传文件</button>
+                </div>
+                <div class="field">
+                  <label>正文</label>
+                  <textarea>把文章正文粘贴在这里。系统会先拆成可视化场景，不会直接生成图片。</textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-head"><span class="section-title">2. 选择输出策略</span></div>
+              <div class="section-body">
+                <div class="three">
+                  <div class="field"><label>图片数</label><select><option>6 张</option><option>4 张</option></select></div>
+                  <div class="field"><label>比例</label><select><option>4:3</option><option>16:9</option></select></div>
+                  <div class="field"><label>风格</label><select><option>编辑插画</option><option>小黑插画</option></select></div>
+                </div>
+                <div class="chips">
+                  <span class="chip active">统一视觉</span>
+                  <span class="chip active">保存 prompt</span>
+                  <span class="chip">允许联网读取</span>
+                </div>
+                <div style="display:flex;justify-content:flex-end">
+                  <button class="primary" onclick="runCurrentPlan()">下一步：生成插图计划</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="wizardOutput"></div>
+          </div>
+        </main>
+      </section>
+
+      <!-- Variant C: Article editor -->
+      <section class="variant editor" data-variant="C">
+        <aside class="article-pane">
+          <div class="article-toolbar">
+            <div>
+              <div class="title">文章编辑器</div>
+              <div class="small">在正文段落之间插入配图槽位</div>
+            </div>
+            <button class="primary" onclick="runCurrentPlan()">分析并生成配图槽位</button>
+          </div>
+          <div class="article-editor">
+            <article class="article-doc">
+              <h2>AI 产品如何从工具走向工作流</h2>
+              <p>过去的 AI 产品常常围绕单点能力设计：问答、写作、画图、搜索。用户每次只完成一个局部动作，然后手动把结果搬到下一个工具。</p>
+              <div class="insert-slot">
+                <span>建议插图 1：开篇主视觉</span>
+                <button onclick="runCurrentPlan()">生成计划</button>
+              </div>
+              <p>真正的转变发生在用户开始用 AI 完成连续任务。系统需要理解输入、拆解步骤、调用工具、等待确认，并把产物组织成可继续编辑的对象。</p>
+              <div class="insert-slot">
+                <span>建议插图 2：任务拆解流程</span>
+                <button onclick="runCurrentPlan()">生成计划</button>
+              </div>
+              <p>对于文章配图来说，最重要的不是立即生成图片，而是先确定文章中哪些位置值得配图，每张图承担什么表达任务。</p>
+            </article>
+          </div>
+        </aside>
+
+        <main class="illustration-pane">
+          <div class="section">
+            <div class="section-head">
+              <span class="section-title">配图控制台</span>
+              <span class="badge info">Editor-first</span>
+            </div>
+            <div class="section-body">
+              <div class="two">
+                <div class="field"><label>风格</label><select><option>编辑插画</option><option>小黑线稿</option></select></div>
+                <div class="field"><label>比例</label><select><option>4:3</option><option>16:9</option></select></div>
+              </div>
+              <div class="toggle-row"><span>按文章段落保留插图位置</span><button class="switch on" onclick="toggleSwitch(this)"></button></div>
+              <button class="primary" onclick="runCurrentPlan()">生成所有槽位的插图计划</button>
+            </div>
+          </div>
+          <div id="editorOutput">
+            <div class="section">
+              <div class="section-head"><span class="section-title">推荐理由</span></div>
+              <div class="section-body small">这个方案适合未来做公众号/Markdown 导出：图片不是单独生成，而是绑定文章段落和插图位置。</div>
+            </div>
+          </div>
+        </main>
+      </section>
+    </main>
+  </div>
+
+  <div class="variant-switcher" aria-label="原型方案切换">
+    <button type="button" onclick="prevVariant()">←</button>
+    <button id="variantA" class="active" type="button" onclick="setVariant('A')">A 工作台</button>
+    <button id="variantB" type="button" onclick="setVariant('B')">B 向导</button>
+    <button id="variantC" type="button" onclick="setVariant('C')">C 编辑器</button>
+    <button type="button" onclick="nextVariant()">→</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const variants = ['A', 'B', 'C'];
+    let currentVariant = new URLSearchParams(location.search).get('variant') || 'A';
+    if (!variants.includes(currentVariant)) currentVariant = 'A';
+    let generatedCount = 0;
+
+    function qs(selector, root = document) { return root.querySelector(selector); }
+    function qsa(selector, root = document) { return [...root.querySelectorAll(selector)]; }
+
+    function toast(message) {
+      const el = document.getElementById('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+    }
+
+    function setVariant(variant) {
+      currentVariant = variant;
+      qsa('.variant').forEach(el => el.classList.toggle('active', el.dataset.variant === variant));
+      variants.forEach(v => document.getElementById('variant' + v).classList.toggle('active', v === variant));
+      const url = new URL(location.href);
+      url.searchParams.set('variant', variant);
+      history.replaceState(null, '', url);
+      toast(variant === 'A' ? '方案 A：工作台式布局' : variant === 'B' ? '方案 B：分步向导布局' : '方案 C：文章编辑器布局');
+    }
+
+    function prevVariant() {
+      const i = variants.indexOf(currentVariant);
+      setVariant(variants[(i + variants.length - 1) % variants.length]);
+    }
+
+    function nextVariant() {
+      const i = variants.indexOf(currentVariant);
+      setVariant(variants[(i + 1) % variants.length]);
+    }
+
+    function switchSource(button, source) {
+      const container = button.closest('.section-body');
+      if (!container) return;
+      qsa('.seg button', container).forEach(btn => btn.classList.toggle('active', btn === button));
+      qsa('[data-source-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.sourcePanel === source));
+      toast(source === 'text' ? '已切换到正文输入' : source === 'url' ? '已切换到 URL 读取' : '已切换到文件上传');
+    }
+
+    function toggleSwitch(button) {
+      button.classList.toggle('on');
+    }
+
+    function activeOutputTarget() {
+      if (currentVariant === 'A') return document.getElementById('workbenchOutput');
+      if (currentVariant === 'B') return document.getElementById('wizardOutput');
+      return document.getElementById('editorOutput');
+    }
+
+    function planMarkup(compact = false) {
+      const count = compact ? 3 : 6;
+      const items = [
+        ['开篇主视觉', '标题后', '表达 AI 产品从单点工具演进为工作流系统。'],
+        ['任务拆解图', '第一节', '展示文章被拆成场景、prompt 与图片任务。'],
+        ['运行时间线', '中段', '展示读取文章、生成计划、确认、批量出图和保存产物。'],
+        ['工具协作图', '中段', '表现 Skill Runtime 调用 web、image、artifact store。'],
+        ['用户确认点', '后段', '强调计划确认和成本确认，而非自动批量出图。'],
+        ['收尾总结图', '结尾', '把 Chat、AI 画图、Skills 后台分工收束成一张图。']
+      ].slice(0, count);
+      return `
+        <div class="section">
+          <div class="section-head">
+            <span class="section-title">插图计划 · ${items.length} 张</span>
+            <span class="badge warn">等待确认</span>
+          </div>
+          <div class="section-body">
+            <div class="plan-list">
+              ${items.map((item, index) => `
+                <div class="plan-item">
+                  <div class="plan-item-head"><strong>${index + 1}. ${item[0]}</strong><span class="badge">${item[1]}</span></div>
+                  <div class="small">${item[2]}</div>
+                  <div class="chips"><span class="chip">4:3</span><span class="chip">编辑插画</span><span class="chip">可编辑</span></div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="section-body" style="border-top:0.5px solid var(--line-2);display:flex;justify-content:flex-end;gap:8px">
+            <button type="button" onclick="toast('已重新规划，保留当前风格和数量。')">重新规划</button>
+            <button type="button" onclick="toast('正式实现中可编辑每张图的画面描述。')">编辑计划</button>
+            <button type="button" class="primary" onclick="startGenerating()">确认并开始生成</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function runCurrentPlan() {
+      const target = activeOutputTarget();
+      target.innerHTML = planMarkup(currentVariant === 'C');
+      if (currentVariant === 'A') {
+        document.getElementById('workbenchPlan').style.display = 'none';
+      }
+      toast('插图计划已生成，等待确认。');
+    }
+
+    function startGenerating() {
+      const target = activeOutputTarget();
+      target.innerHTML = `
+        <div class="section">
+          <div class="section-head">
+            <span class="section-title">文章配图正在运行</span>
+            <span class="badge info" id="runStatus">生成图片 1/6</span>
+          </div>
+          <div class="section-body">
+            <div class="step-list" id="runSteps">
+              <div class="step done"><span class="dot">✓</span><span>读取文章</span><span class="small">完成</span></div>
+              <div class="step done"><span class="dot">✓</span><span>生成插图计划</span><span class="small">完成</span></div>
+              <div class="step active"><span class="dot"><span class="pulse"></span></span><span>批量生成图片</span><span class="small" id="imageProgress">1/6</span></div>
+              <div class="step"><span class="dot">○</span><span>保存 prompt 与清单</span><span class="small">等待</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="image-grid" id="generatedGrid"></div>
+      `;
+      generatedCount = 0;
+      addNextImage();
+    }
+
+    function addNextImage() {
+      const grid = document.getElementById('generatedGrid');
+      if (!grid) return;
+      if (generatedCount >= 6) {
+        finishGeneration();
+        return;
+      }
+      const index = generatedCount + 1;
+      const card = document.createElement('div');
+      card.className = 'image-card';
+      card.innerHTML = `<div class="skeleton">第 ${index} 张生成中</div><div class="image-meta"><div class="small">场景 ${index}</div></div>`;
+      grid.appendChild(card);
+      document.getElementById('runStatus').textContent = `生成图片 ${index}/6`;
+      document.getElementById('imageProgress').textContent = `${index}/6`;
+      setTimeout(() => {
+        card.innerHTML = `
+          <div class="art"></div>
+          <div class="image-meta">
+            <div><strong>插图 ${index}</strong></div>
+            <div class="small">4:3 · 编辑插画 · Agnes Image</div>
+            <div class="image-actions">
+              <button title="下载">↓</button>
+              <button title="复制">⧉</button>
+              <button title="重绘" onclick="toast('已将第 ${index} 张加入重绘队列。')">↻</button>
+              <button title="设为参考图" onclick="toast('已设为参考图。')">＋</button>
+            </div>
+          </div>`;
+        generatedCount += 1;
+        setTimeout(addNextImage, 320);
+      }, 430);
+    }
+
+    function finishGeneration() {
+      const status = document.getElementById('runStatus');
+      if (status) {
+        status.textContent = '已完成';
+        status.className = 'badge success';
+      }
+      const steps = document.getElementById('runSteps');
+      if (steps) {
+        steps.children[2].className = 'step done';
+        steps.children[2].querySelector('.dot').textContent = '✓';
+        steps.children[2].querySelector('.small').textContent = '6/6';
+        steps.children[3].className = 'step done';
+        steps.children[3].querySelector('.dot').textContent = '✓';
+        steps.children[3].querySelector('.small').textContent = '完成';
+      }
+      const summary = document.createElement('div');
+      summary.className = 'section';
+      summary.innerHTML = `
+        <div class="section-head">
+          <span class="section-title">文章配图完成</span>
+          <span class="badge success">6 images</span>
+        </div>
+        <div class="section-body">
+          <div class="small">生成 6 张图片 · 6 个 prompt · 1 份 Markdown 插图清单。每张图可以继续重绘、下载、设为参考图。</div>
+          <div class="chips">
+            <button onclick="toast('已复制全部 prompt。')">复制全部 prompt</button>
+            <button onclick="toast('已导出 Markdown 清单。')">导出 Markdown 清单</button>
+            <button class="primary" onclick="toast('已打开产物目录。')">打开产物目录</button>
+          </div>
+        </div>
+      `;
+      activeOutputTarget().appendChild(summary);
+      toast('文章配图完成。');
+    }
+
+    document.addEventListener('keydown', event => {
+      const tag = (event.target && event.target.tagName || '').toLowerCase();
+      if (tag === 'textarea' || tag === 'input' || tag === 'select') return;
+      if (event.key === 'ArrowLeft') prevVariant();
+      if (event.key === 'ArrowRight') nextVariant();
+    });
+
+    setVariant(currentVariant);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!-- PROTOTYPE ONLY: throwaway static UI mockup for Skill Package Runtime Chat/Image flows. -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skill Package Runtime - Chat and Image Studio Prototype</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f2f5;
+      --panel-3: #e7ebef;
+      --text: #1f2933;
+      --muted: #64707d;
+      --subtle: #8b97a3;
+      --line: #d6dce3;
+      --line-2: #e5e9ee;
+      --accent: #256f9c;
+      --accent-bg: #e8f3f8;
+      --success: #2f7d4f;
+      --success-bg: #e8f5ed;
+      --warning: #a16207;
+      --warning-bg: #fff4d6;
+      --danger: #b42318;
+      --danger-bg: #fdebea;
+      --radius-sm: 5px;
+      --radius-md: 7px;
+      --radius-lg: 8px;
+      --shadow: 0 16px 38px rgba(31, 41, 51, 0.14);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      background: var(--bg);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow: hidden;
+    }
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 0.5px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: var(--radius-md);
+      height: 30px;
+      padding: 0 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    button:hover { background: var(--panel-2); }
+    button.primary {
+      background: var(--accent-bg);
+      color: var(--accent);
+      border-color: #b7d6e5;
+      font-weight: 600;
+    }
+    button.danger {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-color: #f3c5c0;
+    }
+    button.ghost { border-color: transparent; background: transparent; }
+    button.icon { width: 30px; padding: 0; }
+    textarea, input, select {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      color: var(--text);
+      outline: none;
+    }
+    textarea:focus, input:focus, select:focus { border-color: #8ec3dc; }
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      background: var(--bg);
+    }
+    .rail {
+      background: #202830;
+      color: #d8dee6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 8px;
+      gap: 8px;
+    }
+    .rail-mark {
+      width: 34px; height: 34px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .rail button {
+      width: 44px;
+      height: 42px;
+      border-radius: 8px;
+      border-color: transparent;
+      background: transparent;
+      color: #bac4cf;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      padding: 4px;
+    }
+    .rail button.active { background: rgba(255,255,255,0.12); color: #fff; }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 0.5px solid var(--line);
+      background: var(--panel);
+    }
+    .title { font-weight: 650; font-size: 14px; }
+    .top-actions { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .page { flex: 1; min-height: 0; display: none; }
+    .page.active { display: flex; }
+
+    /* Chat */
+    .chat-layout { width: 100%; min-width: 0; display: grid; grid-template-columns: 250px 1fr; }
+    .sessions {
+      border-right: 0.5px solid var(--line);
+      background: var(--panel-2);
+      padding: 10px;
+      overflow: auto;
+    }
+    .side-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .side-title { font-size: 12px; font-weight: 650; color: var(--muted); }
+    .session {
+      padding: 9px 10px;
+      border-radius: var(--radius-md);
+      margin-bottom: 5px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .session.active { background: var(--panel); color: var(--text); border: 0.5px solid var(--line-2); }
+    .session .small { color: var(--subtle); font-size: 11px; margin-top: 2px; }
+    .chat-panel { min-width: 0; display: flex; flex-direction: column; background: var(--panel); }
+    .timeline {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg { display: flex; gap: 10px; align-items: flex-start; max-width: 860px; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--panel-3);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      flex: none;
+    }
+    .msg.user .avatar { background: var(--accent-bg); color: var(--accent); }
+    .bubble {
+      border: 0.5px solid var(--line-2);
+      background: var(--panel);
+      border-radius: var(--radius-lg);
+      padding: 10px 12px;
+      box-shadow: 0 1px 0 rgba(31,41,51,0.03);
+      max-width: 720px;
+    }
+    .msg.user .bubble { background: var(--accent-bg); border-color: #c8ddeb; color: #1f5573; }
+    .composer {
+      padding: 12px 16px;
+      border-top: 0.5px solid var(--line);
+      background: var(--panel);
+    }
+    .composer-shell {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .composer textarea {
+      width: 100%;
+      border: none;
+      resize: none;
+      padding: 11px 12px;
+      min-height: 68px;
+      display: block;
+    }
+    .composer-toolbar {
+      border-top: 0.5px solid var(--line-2);
+      padding: 7px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .chip-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .chip {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 9px;
+      border: 0.5px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 12px;
+    }
+    .chip.active { background: var(--accent-bg); border-color: #b7d6e5; color: var(--accent); }
+    .skill-suggestion, .skill-run-card, .plan-card {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      overflow: hidden;
+      min-width: 520px;
+    }
+    .card-head {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 12px;
+      background: var(--panel-2);
+      border-bottom: 0.5px solid var(--line-2);
+    }
+    .card-title { font-weight: 650; display: flex; align-items: center; gap: 8px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 20px;
+      border-radius: 999px;
+      padding: 0 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--panel-3);
+      border: 0.5px solid var(--line);
+      white-space: nowrap;
+    }
+    .badge.success { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .badge.warn { color: var(--warning); background: var(--warning-bg); border-color: #efd38b; }
+    .badge.info { color: var(--accent); background: var(--accent-bg); border-color: #b7d6e5; }
+    .card-body { padding: 12px; }
+    .skill-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .skill-option {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+      background: var(--panel);
+    }
+    .skill-option.selected { border-color: #90c3dc; background: var(--accent-bg); }
+    .option-title { font-weight: 650; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; color: var(--muted); }
+    .card-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 0 12px 12px; }
+    .step-list { display: grid; gap: 8px; }
+    .step {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+    }
+    .dot {
+      width: 18px; height: 18px; border-radius: 50%;
+      display: grid; place-items: center;
+      font-size: 11px; border: 0.5px solid var(--line);
+      color: var(--muted); background: var(--panel);
+    }
+    .step.done .dot { color: var(--success); background: var(--success-bg); border-color: #b8dbc4; }
+    .step.active .dot { color: var(--accent); background: var(--accent-bg); border-color: #b7d6e5; }
+    .pulse {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(37,111,156,.36);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(37,111,156,0); } 100% { box-shadow: 0 0 0 0 rgba(37,111,156,0); } }
+
+    /* Image studio */
+    .image-layout { width: 100%; min-width: 0; display: grid; grid-template-columns: 230px minmax(0,1fr) 330px; }
+    .image-sessions, .image-right {
+      background: var(--panel-2);
+      border-right: 0.5px solid var(--line);
+      padding: 10px;
+      overflow: auto;
+    }
+    .image-right { border-right: none; border-left: 0.5px solid var(--line); }
+    .image-main { min-width: 0; background: var(--panel); display: flex; flex-direction: column; }
+    .image-stream {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+    .image-inner { max-width: 920px; margin: 0 auto; display: grid; gap: 16px; }
+    .right-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 10px; }
+    .right-tabs button { height: 28px; font-size: 12px; }
+    .right-tabs button.active { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+    .right-section { display: none; }
+    .right-section.active { display: grid; gap: 8px; }
+    .skill-tile {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+    }
+    .tile-top { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+    .cap-row { display: flex; gap: 5px; flex-wrap: wrap; }
+    .template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .template-card {
+      background: var(--panel);
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .thumb {
+      height: 82px;
+      background:
+        linear-gradient(135deg, rgba(37,111,156,.18), transparent 45%),
+        linear-gradient(45deg, rgba(47,125,79,.2), transparent 55%),
+        #dbe4ea;
+      position: relative;
+      overflow: hidden;
+    }
+    .thumb:before {
+      content: "";
+      position: absolute;
+      width: 64px; height: 64px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.62);
+      border: 1px solid rgba(255,255,255,.7);
+      transform: rotate(-10deg);
+      left: 16px; top: 14px;
+    }
+    .thumb:after {
+      content: "";
+      position: absolute;
+      width: 92px; height: 32px;
+      border-radius: 18px;
+      background: rgba(31,41,51,.18);
+      right: 10px; bottom: 12px;
+    }
+    .template-card .meta { padding: 7px; display: grid; gap: 5px; }
+    .run-drawer {
+      position: fixed;
+      right: 0;
+      top: 46px;
+      bottom: 0;
+      width: min(460px, 94vw);
+      background: var(--panel);
+      border-left: 0.5px solid var(--line);
+      box-shadow: var(--shadow);
+      z-index: 20;
+      display: none;
+      flex-direction: column;
+    }
+    .run-drawer.open { display: flex; }
+    .drawer-head {
+      padding: 12px 14px;
+      border-bottom: 0.5px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .drawer-body { padding: 14px; overflow: auto; display: grid; gap: 14px; }
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 650; color: var(--muted); }
+    .field textarea { min-height: 118px; padding: 9px; resize: vertical; }
+    .field input, .field select { height: 32px; padding: 0 9px; }
+    .seg { display: flex; background: var(--panel-2); padding: 3px; border-radius: var(--radius-md); gap: 3px; }
+    .seg button { flex: 1; height: 28px; background: transparent; border-color: transparent; }
+    .seg button.active { background: var(--panel); border-color: var(--line); color: var(--accent); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; }
+    .switch {
+      width: 38px; height: 20px; border-radius: 999px; background: #c9d2dc; position: relative; flex: none;
+    }
+    .switch.on { background: var(--accent); }
+    .switch:after {
+      content: "";
+      position: absolute; top: 3px; left: 3px;
+      width: 14px; height: 14px; border-radius: 50%; background: #fff;
+      transition: transform .15s;
+    }
+    .switch.on:after { transform: translateX(18px); }
+    .plan-card { min-width: 0; }
+    .plan-item {
+      border: 0.5px solid var(--line-2);
+      border-radius: var(--radius-md);
+      padding: 9px;
+      display: grid;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .plan-item-head { display: flex; justify-content: space-between; gap: 8px; }
+    .image-grid { display: grid; grid-template-columns: repeat(3, minmax(150px,1fr)); gap: 12px; }
+    .image-card {
+      border: 0.5px solid var(--line);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--panel);
+    }
+    .image-card .art {
+      height: 160px;
+      background:
+        linear-gradient(140deg, rgba(37,111,156,.24), transparent 40%),
+        linear-gradient(30deg, rgba(161,98,7,.15), transparent 45%),
+        #dfe7ed;
+      position: relative;
+    }
+    .image-card .art:before {
+      content: "";
+      position: absolute;
+      left: 18px; top: 24px;
+      width: 58px; height: 78px;
+      border-radius: 12px 12px 8px 8px;
+      background: rgba(255,255,255,.7);
+      border: 1px solid rgba(255,255,255,.9);
+    }
+    .image-card .art:after {
+      content: "";
+      position: absolute;
+      right: 16px; bottom: 20px;
+      width: 78px; height: 38px;
+      border-radius: 8px;
+      background: rgba(31,41,51,.18);
+    }
+    .image-card .image-meta { padding: 8px; display: grid; gap: 6px; }
+    .image-actions { display: flex; gap: 4px; }
+    .image-actions button { height: 26px; width: 26px; padding: 0; }
+    .skeleton {
+      height: 160px;
+      background: var(--panel-2);
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--subtle);
+    }
+    .skeleton:after {
+      content: "";
+      position: absolute; inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.7), transparent);
+      animation: shimmer 1.4s infinite;
+    }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+    .footer-switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      z-index: 50;
+      background: #202830;
+      color: #fff;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      display: flex;
+      align-items: center;
+      padding: 5px;
+      gap: 4px;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .footer-switcher button {
+      height: 30px;
+      border-radius: 999px;
+      border-color: transparent;
+      color: #dce4ec;
+      background: transparent;
+    }
+    .footer-switcher button.active { background: rgba(255,255,255,.13); color: #fff; }
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      background: #202830;
+      color: #fff;
+      border-radius: var(--radius-md);
+      padding: 9px 12px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: .18s ease;
+      z-index: 60;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 54px 1fr; }
+      .chat-layout { grid-template-columns: 1fr; }
+      .sessions { display: none; }
+      .image-layout { grid-template-columns: 1fr; }
+      .image-sessions, .image-right { display: none; }
+      .skill-suggestion, .skill-run-card { min-width: 0; }
+      .image-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail" aria-label="主导航">
+      <div class="rail-mark">B</div>
+      <button class="active" id="navChat" type="button" title="Chat">Chat</button>
+      <button id="navImage" type="button" title="AI 画图">Image</button>
+      <button type="button" title="Skills 管理" onclick="location.href='skill-runtime-admin-prototype.html'">Skills</button>
+    </nav>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="title" id="pageTitle">Chat · Skill 推荐与运行</div>
+          <div class="small">可交互原型：从自然语言触发 skill，再转入 AI 画图工作台完成文章配图。</div>
+        </div>
+        <div class="top-actions">
+          <span class="badge info">Prototype</span>
+          <span class="badge">Skill Package Runtime</span>
+        </div>
+      </header>
+
+      <section class="page active" id="chatPage" aria-label="Chat 页面原型">
+        <div class="chat-layout">
+          <aside class="sessions">
+            <div class="side-head">
+              <span class="side-title">Sessions</span>
+              <button class="icon" title="新建会话">+</button>
+            </div>
+            <div class="session active">
+              <div>公众号文章配图</div>
+              <div class="small">Skill suggestion pending</div>
+            </div>
+            <div class="session">
+              <div>研究报告草稿</div>
+              <div class="small">Yesterday</div>
+            </div>
+            <div class="session">
+              <div>产品图生成</div>
+              <div class="small">Image Studio handoff</div>
+            </div>
+          </aside>
+
+          <section class="chat-panel">
+            <div class="timeline" id="chatTimeline">
+              <div class="msg user">
+                <div class="avatar">You</div>
+                <div>
+                  <div class="chip-row" style="justify-content:flex-end;margin-bottom:6px">
+                    <span class="chip">article.docx</span>
+                  </div>
+                  <div class="bubble">给这篇文章配 6 张适合公众号的图，风格要统一，比例 4:3。</div>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="avatar">AI</div>
+                <div class="skill-suggestion" id="skillSuggestion">
+                  <div class="card-head">
+                    <div class="card-title">检测到文章配图任务</div>
+                    <span class="badge warn">需要确认</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="muted" style="margin-top:0">已识别上传文件 `article.docx`。推荐使用下列 Skill 先生成插图计划，再确认批量出图。</p>
+                    <div class="skill-list">
+                      <div class="skill-option selected">
+                        <div class="option-title">文章配图</div>
+                        <div class="small">适合公众号、博客、长文配图</div>
+                        <div class="cap-row"><span class="badge">article</span><span class="badge">image</span></div>
+                      </div>
+                      <div class="skill-option">
+                        <div class="option-title">小黑插画</div>
+                        <div class="small">适合黑白幽默插画风格</div>
+                        <div class="cap-row"><span class="badge">illustration</span><span class="badge">batch</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card-actions">
+                    <button type="button" onclick="normalAnswer()">普通回答</button>
+                    <button type="button" onclick="showSkillRun()">使用文章配图</button>
+                    <button type="button" class="primary" onclick="handoffToImage()">打开到 AI 画图</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="composer-shell">
+                <textarea id="chatInput">给这篇文章配 6 张适合公众号的图，风格要统一，比例 4:3。</textarea>
+                <div class="composer-toolbar">
+                  <div class="chip-row">
+                    <button class="icon" title="上传附件">+</button>
+                    <span class="chip active">对话</span>
+                    <span class="chip">Agnes 2.0</span>
+                    <button class="chip" type="button" onclick="showSkillRun()">Skills</button>
+                    <span class="chip">article.docx</span>
+                  </div>
+                  <button class="primary" type="button" onclick="showSkillRun()">发送</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page" id="imagePage" aria-label="AI 画图页面原型">
+        <div class="image-layout">
+          <aside class="image-sessions">
+            <div class="side-head">
+              <span class="side-title">Image Sessions</span>
+              <button class="icon" title="新建画图会话">+</button>
+            </div>
+            <div class="session active">
+              <div>公众号文章配图</div>
+              <div class="small">6 images planned</div>
+            </div>
+            <div class="session">
+              <div>产品主图</div>
+              <div class="small">12 generations</div>
+            </div>
+          </aside>
+
+          <section class="image-main">
+            <div class="image-stream">
+              <div class="image-inner" id="imageStream">
+                <div class="plan-card" id="imageEmptyPlan">
+                  <div class="card-head">
+                    <div class="card-title">文章配图 Skill</div>
+                    <span class="badge info">待配置</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="muted" style="margin-top:0">从右侧 Skills 选择「文章配图」，粘贴正文、上传文章或输入 URL 后，系统会先生成可编辑插图计划。</p>
+                    <button class="primary" type="button" onclick="openDrawer()">运行文章配图</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="composer-shell">
+                <textarea placeholder="描述你想要的图片，或从右侧 Skills 运行文章配图..."></textarea>
+                <div class="composer-toolbar">
+                  <div class="chip-row">
+                    <span class="chip active">图像生成</span>
+                    <span class="chip">Agnes Image</span>
+                    <span class="chip">4:3</span>
+                    <span class="chip">编辑插画</span>
+                    <button class="chip" onclick="openDrawer()">文章配图</button>
+                  </div>
+                  <button class="primary" onclick="openDrawer()">生成插图计划</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="image-right">
+            <div class="right-tabs">
+              <button class="active" data-right-tab="skills" onclick="switchRightTab('skills')">Skills</button>
+              <button data-right-tab="templates" onclick="switchRightTab('templates')">模板</button>
+              <button data-right-tab="artifacts" onclick="switchRightTab('artifacts')">产物</button>
+            </div>
+
+            <section class="right-section active" id="right-skills">
+              <div class="skill-tile">
+                <div class="tile-top">
+                  <div>
+                    <div class="option-title">文章配图</div>
+                    <div class="small">根据长文生成插图计划并批量出图</div>
+                  </div>
+                  <span class="badge success">installed</span>
+                </div>
+                <div class="cap-row"><span class="badge">article</span><span class="badge">image</span><span class="badge">batch</span></div>
+                <div class="small">将读取文章、生成图片、保存 prompt 与图片产物。</div>
+                <button class="primary" type="button" onclick="openDrawer()">运行</button>
+              </div>
+              <div class="skill-tile">
+                <div class="tile-top">
+                  <div>
+                    <div class="option-title">小黑插画</div>
+                    <div class="small">黑白插图风格，多张场景图</div>
+                  </div>
+                  <span class="badge">installed</span>
+                </div>
+                <div class="cap-row"><span class="badge">illustration</span><span class="badge">style</span></div>
+                <button type="button" onclick="toast('已选择小黑插画，可复用同一运行抽屉。')">查看</button>
+              </div>
+            </section>
+
+            <section class="right-section" id="right-templates">
+              <div class="template-grid">
+                <div class="template-card">
+                  <div class="thumb"></div>
+                  <div class="meta">
+                    <div class="option-title">社论插画</div>
+                    <button onclick="toast('模板已填入 Composer。')">做同款</button>
+                  </div>
+                </div>
+                <div class="template-card">
+                  <div class="thumb"></div>
+                  <div class="meta">
+                    <div class="option-title">科技长文</div>
+                    <button onclick="toast('模板已填入 Composer。')">做同款</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="right-section" id="right-artifacts">
+              <div class="skill-tile">
+                <div class="option-title">本次运行产物</div>
+                <div class="small" id="artifactText">尚未生成。运行文章配图后会显示图片、prompt 和 Markdown 清单。</div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="run-drawer" id="runDrawer" aria-label="文章配图运行配置">
+    <div class="drawer-head">
+      <div>
+        <div class="title">运行：文章配图</div>
+        <div class="small">输入文章，配置输出，先生成插图计划。</div>
+      </div>
+      <button class="icon" title="关闭" onclick="closeDrawer()">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field">
+        <label>输入来源</label>
+        <div class="seg">
+          <button class="active" type="button">正文</button>
+          <button type="button">URL</button>
+          <button type="button">文件</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="articleText">文章正文</label>
+        <textarea id="articleText">这是一篇关于 AI 产品如何从工具走向工作流的文章。文章讨论了用户输入、任务拆解、视觉表达和跨页面协作...</textarea>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>图片数量</label>
+          <select><option>6 张</option><option>4 张</option><option>8 张</option></select>
+        </div>
+        <div class="field">
+          <label>比例</label>
+          <select><option>4:3</option><option>1:1</option><option>16:9</option></select>
+        </div>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>风格</label>
+          <select><option>编辑插画</option><option>水彩</option><option>黑白线稿</option></select>
+        </div>
+        <div class="field">
+          <label>图像模型</label>
+          <select><option>Agnes Image</option><option>GPT Image</option></select>
+        </div>
+      </div>
+      <div>
+        <div class="toggle-row"><span>统一人物与品牌视觉</span><span class="switch on"></span></div>
+        <div class="toggle-row"><span>保存每张图的 prompt</span><span class="switch on"></span></div>
+      </div>
+      <div class="skill-tile">
+        <div class="option-title">权限摘要</div>
+        <div class="small">这个 skill 将读取你提供的文章，生成 6 张图片，并把图片、prompt 与清单保存到本地运行目录。</div>
+      </div>
+      <button class="primary" type="button" onclick="createPlan()">生成插图计划</button>
+    </div>
+  </aside>
+
+  <div class="footer-switcher" aria-label="原型页面切换">
+    <button id="switchChat" class="active" type="button" onclick="switchPage('chat')">Chat 流程</button>
+    <button id="switchImage" type="button" onclick="switchPage('image')">AI 画图流程</button>
+    <button type="button" onclick="location.href='skill-runtime-admin-prototype.html'">Skills 管理</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state = { page: 'chat', generated: 0, planned: false };
+
+    function qs(id) { return document.getElementById(id); }
+
+    function switchPage(page) {
+      state.page = page;
+      qs('chatPage').classList.toggle('active', page === 'chat');
+      qs('imagePage').classList.toggle('active', page === 'image');
+      qs('navChat').classList.toggle('active', page === 'chat');
+      qs('navImage').classList.toggle('active', page === 'image');
+      qs('switchChat').classList.toggle('active', page === 'chat');
+      qs('switchImage').classList.toggle('active', page === 'image');
+      qs('pageTitle').textContent = page === 'chat' ? 'Chat · Skill 推荐与运行' : 'AI 画图 · 文章配图工作台';
+    }
+
+    function switchRightTab(tab) {
+      document.querySelectorAll('[data-right-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.rightTab === tab));
+      ['skills','templates','artifacts'].forEach(id => qs('right-' + id).classList.toggle('active', id === tab));
+    }
+
+    function toast(message) {
+      const el = qs('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+    }
+
+    function normalAnswer() {
+      qs('skillSuggestion').style.display = 'none';
+      const msg = document.createElement('div');
+      msg.className = 'msg';
+      msg.innerHTML = '<div class="avatar">AI</div><div class="bubble">可以。我会先提取文章关键段落，再给出 6 个配图场景建议。你也可以使用文章配图 Skill 直接进入批量出图流程。</div>';
+      qs('chatTimeline').appendChild(msg);
+      msg.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function showSkillRun() {
+      qs('skillSuggestion').style.display = 'none';
+      const msg = document.createElement('div');
+      msg.className = 'msg';
+      msg.innerHTML = `
+        <div class="avatar">AI</div>
+        <div class="skill-run-card">
+          <div class="card-head">
+            <div class="card-title">文章配图 Skill</div>
+            <span class="badge info">等待确认</span>
+          </div>
+          <div class="card-body">
+            <div class="step-list">
+              <div class="step done"><span class="dot">✓</span><span>读取 article.docx</span><span class="small">完成</span></div>
+              <div class="step done"><span class="dot">✓</span><span>识别文章结构与核心主题</span><span class="small">完成</span></div>
+              <div class="step active"><span class="dot"><span class="pulse"></span></span><span>准备生成 6 张插图计划</span><span class="small">待确认</span></div>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button type="button" onclick="openDrawerFromChat()">查看计划设置</button>
+            <button type="button" class="primary" onclick="handoffToImage()">打开到 AI 画图</button>
+          </div>
+        </div>`;
+      qs('chatTimeline').appendChild(msg);
+      msg.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    function openDrawerFromChat() {
+      switchPage('image');
+      openDrawer();
+    }
+
+    function handoffToImage() {
+      switchPage('image');
+      openDrawer();
+      toast('已把 article.docx 和配图意图带到 AI 画图页面。');
+    }
+
+    function openDrawer() { qs('runDrawer').classList.add('open'); }
+    function closeDrawer() { qs('runDrawer').classList.remove('open'); }
+
+    function createPlan() {
+      closeDrawer();
+      state.planned = true;
+      switchPage('image');
+      const stream = qs('imageStream');
+      stream.innerHTML = `
+        <div class="plan-card">
+          <div class="card-head">
+            <div class="card-title">插图计划 · 6 张</div>
+            <span class="badge warn">等待确认</span>
+          </div>
+          <div class="card-body">
+            <div class="plan-item">
+              <div class="plan-item-head"><strong>1. 开篇主视觉</strong><span class="badge">标题后</span></div>
+              <div class="small">表现 AI 产品从单点工具演进为工作流系统，横向构图，左侧人物，右侧流程界面。</div>
+            </div>
+            <div class="plan-item">
+              <div class="plan-item-head"><strong>2. 任务拆解图</strong><span class="badge">第一节</span></div>
+              <div class="small">用编辑插画表达文章被拆成场景、prompt、图片任务的过程。</div>
+            </div>
+            <div class="plan-item">
+              <div class="plan-item-head"><strong>3. Skill 运行时间线</strong><span class="badge">中段</span></div>
+              <div class="small">展示读取文章、生成计划、用户确认、批量出图、保存产物的流程。</div>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button type="button" onclick="toast('已重新规划，保留原数量和风格。')">重新规划</button>
+            <button type="button" onclick="toast('可在正式实现中编辑单个场景。')">编辑场景</button>
+            <button class="primary" type="button" onclick="startGenerating()">开始生成</button>
+          </div>
+        </div>`;
+      toast('插图计划已生成，等待确认。');
+    }
+
+    function startGenerating() {
+      const stream = qs('imageStream');
+      stream.innerHTML = `
+        <div class="skill-run-card">
+          <div class="card-head">
+            <div class="card-title">文章配图正在运行</div>
+            <span class="badge info" id="runStatus">生成图片 1/6</span>
+          </div>
+          <div class="card-body">
+            <div class="step-list" id="runSteps">
+              <div class="step done"><span class="dot">✓</span><span>读取文章</span><span class="small">完成</span></div>
+              <div class="step done"><span class="dot">✓</span><span>生成插图计划</span><span class="small">完成</span></div>
+              <div class="step active"><span class="dot"><span class="pulse"></span></span><span>批量生成图片</span><span class="small" id="imageProgress">1/6</span></div>
+              <div class="step"><span class="dot">○</span><span>保存 prompt 与清单</span><span class="small">等待</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="image-grid" id="generatedGrid"></div>`;
+      state.generated = 0;
+      addNextImage();
+    }
+
+    function addNextImage() {
+      const grid = qs('generatedGrid');
+      if (state.generated >= 6) {
+        finishGeneration();
+        return;
+      }
+      const idx = state.generated + 1;
+      const card = document.createElement('div');
+      card.className = 'image-card';
+      card.innerHTML = `<div class="skeleton">第 ${idx} 张生成中</div><div class="image-meta"><div class="small">场景 ${idx}</div></div>`;
+      grid.appendChild(card);
+      qs('runStatus').textContent = `生成图片 ${idx}/6`;
+      qs('imageProgress').textContent = `${idx}/6`;
+      setTimeout(() => {
+        card.innerHTML = `
+          <div class="art"></div>
+          <div class="image-meta">
+            <div class="option-title">插图 ${idx}</div>
+            <div class="small">4:3 · 编辑插画 · Agnes Image</div>
+            <div class="image-actions">
+              <button title="下载">↓</button>
+              <button title="复制">⧉</button>
+              <button title="重绘" onclick="toast('已将第 ${idx} 张加入重绘队列。')">↻</button>
+              <button title="做同款" onclick="toast('已把第 ${idx} 张参数填回 Composer。')">↗</button>
+            </div>
+          </div>`;
+        state.generated += 1;
+        setTimeout(addNextImage, 420);
+      }, 560);
+    }
+
+    function finishGeneration() {
+      qs('runStatus').textContent = '已完成';
+      qs('runStatus').className = 'badge success';
+      const steps = qs('runSteps');
+      steps.children[2].className = 'step done';
+      steps.children[2].querySelector('.dot').textContent = '✓';
+      steps.children[2].querySelector('.small').textContent = '6/6';
+      steps.children[3].className = 'step done';
+      steps.children[3].querySelector('.dot').textContent = '✓';
+      steps.children[3].querySelector('.small').textContent = '完成';
+      const summary = document.createElement('div');
+      summary.className = 'skill-run-card';
+      summary.innerHTML = `
+        <div class="card-head">
+          <div class="card-title">文章配图完成</div>
+          <span class="badge success">6 images</span>
+        </div>
+        <div class="card-body">
+          <div class="small">生成 6 张图片 · 6 个 prompt · 1 份 Markdown 插图清单。</div>
+        </div>
+        <div class="card-actions">
+          <button onclick="switchRightTab('artifacts')">查看产物</button>
+          <button onclick="toast('已复制全部 prompt。')">复制全部 prompt</button>
+          <button class="primary" onclick="toast('已导出 Markdown 清单。')">导出清单</button>
+        </div>`;
+      qs('imageStream').appendChild(summary);
+      qs('artifactText').textContent = '6 张图片、6 个 prompt、1 份 Markdown 插图清单已保存。';
+      toast('文章配图完成。');
+    }
+
+    document.addEventListener('keydown', (event) => {
+      const tag = (event.target && event.target.tagName || '').toLowerCase();
+      if (tag === 'textarea' || tag === 'input' || tag === 'select') return;
+      if (event.key === 'ArrowLeft') switchPage('chat');
+      if (event.key === 'ArrowRight') switchPage('image');
+    });
+
+    if (location.hash === '#image') {
+      switchPage('image');
+    }
+  </script>
+</body>
+</html>
