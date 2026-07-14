@@ -409,52 +409,52 @@ interrupted
 
 Package：
 
-- [ ] `POST /skill-packages/inspect`。
-- [ ] `POST /skill-packages/install`。
-- [ ] `GET /skill-packages`。
-- [ ] `GET /skill-packages/:id`。
-- [ ] `DELETE /skill-installations/:id`。
+- [x] `POST /skill-packages/inspect`。
+- [x] `POST /skill-packages/install`。
+- [x] `GET /skill-packages`。
+- [x] `GET /skill-packages/:id`。
+- [x] `DELETE /skill-installations/:id`。
 
 Runs：
 
-- [ ] `POST /skill-runs`。
-- [ ] `GET /skill-runs`。
-- [ ] `GET /skill-runs/:id`。
-- [ ] `GET /skill-runs/:id/events?afterSeq=`。
-- [ ] `POST /skill-runs/:id/commands`。
-- [ ] `POST /skill-runs/:id/cancel`。
-- [ ] `GET /skill-runs/:id/artifacts`。
+- [x] `POST /skill-runs`。
+- [x] `GET /skill-runs`。
+- [x] `GET /skill-runs/:id`。
+- [x] `GET /skill-runs/:id/events?afterSeq=`。
+- [x] `POST /skill-runs/:id/commands`。
+- [x] `POST /skill-runs/:id/cancel`。
+- [x] `GET /skill-runs/:id/artifacts`。
 
 Artifacts：
 
-- [ ] `GET /skill-artifacts/:id/content`。
-- [ ] `POST /skill-artifacts/:id/export`。
+- [x] `GET /skill-artifacts/:id/content`。
+- [x] `POST /skill-artifacts/:id/export`。
 
 接口要求：
 
-- [ ] 全部输入使用 Zod 校验。
-- [ ] 使用统一错误格式。
-- [ ] 列表接口分页。
-- [ ] Command 使用幂等 ID。
-- [ ] 旧 `/skills/:id/run` 保持兼容。
-- [ ] Package Skill 禁止通过旧同步运行接口执行。
+- [x] 全部输入使用 Zod 校验。
+- [x] 使用统一错误格式。
+- [x] 列表接口分页。
+- [x] Command 使用幂等 ID。
+- [x] 旧 `/skills/:id/run` 保持兼容。
+- [x] Package Skill 禁止通过旧同步运行接口执行。
 
 ## 16. TODO 14：Skills 后台页面
 
-- [ ] 增加 `Installed / Market / Runs` tabs。
-- [ ] 增加 GitHub URL 安装入口。
-- [ ] 增加安装前 Package 检查页。
-- [ ] 展示来源和 commit。
-- [ ] 展示 Manifest。
-- [ ] 展示不兼容能力。
-- [ ] 展示权限差异。
-- [ ] 展示当前安装版本。
-- [ ] 展示最近 Runs。
-- [ ] 展示事件时间线。
-- [ ] 展示 Artifacts。
-- [ ] 支持撤销权限。
-- [ ] 支持禁用和卸载 Skill。
-- [ ] Package 更新暂时只提供重新安装固定版本。
+- [x] 增加 `Installed / Market / Runs` tabs。
+- [x] 增加 GitHub URL 安装入口。
+- [x] 增加安装前 Package 检查页。
+- [x] 展示来源和 commit。
+- [x] 展示 Manifest。
+- [x] 展示不兼容能力。
+- [x] 展示权限差异。
+- [x] 展示当前安装版本。
+- [x] 展示最近 Runs。
+- [x] 展示事件时间线。
+- [x] 展示 Artifacts。
+- [x] 支持撤销权限。
+- [x] 支持禁用和卸载 Skill。
+- [x] Package 更新暂时只提供重新安装固定版本。
 
 ## 17. TODO 15：AI 画图页面文章配图模式
 

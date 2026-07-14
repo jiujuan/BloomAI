@@ -2,7 +2,9 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { inflateRawSync } from 'zlib'
+import { runMigrations } from '../../db/client'
 import { getDataDir } from '../../db/paths'
+import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { isSkillPackageRuntimeEnabled } from './feature-flag'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 
@@ -28,6 +30,14 @@ export type InstalledPackage = {
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
   sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
 }
+export type InspectedPackage = {
+  sourceType: PackageInstallSource['kind']
+  relativeSkillPath: string
+  manifestHash: string
+  manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+}
+
 
 export type PackageInstallResult = { status: 'awaiting_permission_review'; packages: InstalledPackage[] }
 
@@ -49,6 +59,37 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
+  async inspect(source: PackageInstallSource): Promise<{ packages: InspectedPackage[] }> {
+    if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
+    const roots = getPackageRoots()
+    fs.mkdirSync(roots.staging, { recursive: true })
+    const stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
+    try {
+      const sourceRoot = path.join(stage, 'source')
+      const sourceSnapshot = await materializeSource(source, sourceRoot)
+      const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
+      const skills = discoverSkillDirectories(selectedRoot)
+      if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
+      return {
+        packages: skills.map((skillDirectory) => {
+          const files = collectFiles(skillDirectory)
+          return {
+            sourceType: source.kind,
+            relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
+            manifestHash: hashJson(files),
+            manifest: { ...resolveSkillManifest(skillDirectory), files },
+            sourceSnapshot: { ...sourceSnapshot, files },
+          }
+        }),
+      }
+    } catch (error) {
+      if (error instanceof PackageInstallError) throw error
+      throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
+    } finally {
+      fs.rmSync(stage, { recursive: true, force: true })
+    }
+  }
+
   async install(source: PackageInstallSource): Promise<PackageInstallResult> {
     if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
 
@@ -101,9 +142,7 @@ export class PackageInstaller {
     const relativeSkillPath = normalizeRelative(path.relative(data.selectedRoot, data.skillDirectory))
     const sourceSnapshot = { ...data.sourceSnapshot, files }
     const manifest = { ...resolvedManifest, files }
-    const { runMigrations } = await import('../../db/client')
     await runMigrations()
-    const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
     const packageRecord = skillPackageRepo.createPackage({
       name: path.basename(data.skillDirectory), description: '', sourceType: data.source.kind,
       sourceUri: sourceUriFor(data.source), sourceRef: data.sourceSnapshot.sourceCommit ?? data.sourceSnapshot.sourceRef ?? null,

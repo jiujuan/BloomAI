@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import {
@@ -54,6 +54,18 @@ export const skillPackageRepo = {
     return row
   },
 
+  getPackage(id: string) {
+    return getOrmDb().select().from(skill_packages).where(eq(skill_packages.id, id)).get()
+  },
+
+  listPackages(options: { limit: number; offset: number }) {
+    const data = getOrmDb().select().from(skill_packages).orderBy(desc(skill_packages.updated_at))
+      .limit(options.limit).offset(options.offset).all()
+    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages).get()?.count ?? 0
+    return { data, total: Number(total) }
+  },
+
+
   createVersion(data: {
     packageId: string
     version: string
@@ -83,6 +95,12 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_versions).where(eq(skill_versions.id, id)).get()
   },
 
+  listVersions(packageId: string) {
+    return getOrmDb().select().from(skill_versions).where(eq(skill_versions.package_id, packageId))
+      .orderBy(desc(skill_versions.created_at)).all()
+  },
+
+
   createInstallation(data: {
     packageId: string
     currentVersionId: string
@@ -103,8 +121,27 @@ export const skillPackageRepo = {
     return row
   },
 
-  deleteInstallation(id: string): void {
-    getOrmDb().delete(skill_installations).where(eq(skill_installations.id, id)).run()
+  getInstallation(id: string) {
+    return getOrmDb().select().from(skill_installations).where(eq(skill_installations.id, id)).get()
+  },
+
+  setInstallationEnabled(id: string, enabled: boolean) {
+    const now = Date.now()
+    const result = getOrmDb().update(skill_installations)
+      .set({ enabled: enabled ? 1 : 0, updated_at: now })
+      .where(eq(skill_installations.id, id))
+      .run()
+    return result.changes === 1 ? this.getInstallation(id) : undefined
+  },
+
+  listInstallations(packageId: string) {
+    return getOrmDb().select().from(skill_installations).where(eq(skill_installations.package_id, packageId))
+      .orderBy(desc(skill_installations.updated_at)).all()
+  },
+
+
+  deleteInstallation(id: string): boolean {
+    return getOrmDb().delete(skill_installations).where(eq(skill_installations.id, id)).run().changes === 1
   },
 
   createRun(data: {
@@ -229,6 +266,42 @@ export const skillPackageRepo = {
   listRunsByStatus(status: string) {
     return getOrmDb().select().from(skill_runs_v2).where(eq(skill_runs_v2.status, status)).all()
   },
+
+  listRuns(options: { limit: number; offset: number; status?: string; skillVersionId?: string }) {
+    const conditions = [
+      options.status === undefined ? undefined : eq(skill_runs_v2.status, options.status),
+      options.skillVersionId === undefined ? undefined : eq(skill_runs_v2.skill_version_id, options.skillVersionId),
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_runs_v2)
+    const data = where === undefined
+      ? query.orderBy(desc(skill_runs_v2.updated_at)).limit(options.limit).offset(options.offset).all()
+      : query.where(where).orderBy(desc(skill_runs_v2.updated_at)).limit(options.limit).offset(options.offset).all()
+    const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_runs_v2)
+    const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0
+    return { data, total: Number(total) }
+  },
+
+  resolveRunnableVersion(referenceId: string) {
+    const directVersion = this.getVersion(referenceId)
+    if (directVersion) {
+      const installation = this.listInstallations(directVersion.package_id).find((entry) =>
+        entry.current_version_id === directVersion.id && entry.enabled === 1 && entry.status === 'installed'
+      )
+      return installation ? directVersion : undefined
+    }
+    const installation = this.getInstallation(referenceId)
+    if (installation?.enabled === 1 && installation.status === 'installed') return this.getVersion(installation.current_version_id)
+    const packageRecord = this.getPackage(referenceId)
+    if (!packageRecord) return undefined
+    const activeInstallation = this.listInstallations(packageRecord.id).find((entry) => entry.enabled === 1 && entry.status === 'installed')
+    return activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
+  },
+
+  isPackageReference(id: string) {
+    return Boolean(this.getPackage(id) || this.getVersion(id) || this.getInstallation(id))
+  },
+
 
   getCommandResult(runId: string, idempotencyKey: string) {
     const command = getOrmDb().select().from(skill_run_commands).where(and(

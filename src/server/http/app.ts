@@ -9,6 +9,7 @@ import { personasRoutes } from './routes/personas'
 import { settingsRoutes } from './routes/settings'
 import { llmRoutes } from './routes/llm'
 import { toolsRoutes } from './routes/tools'
+import { skillPackageRuntimeRoutes } from './routes/skill-package-runtime'
 import { skillsRoutes } from './routes/skills'
 import { imageStudioRoutes } from './routes/images'
 import { attachmentsRoutes } from './routes/attachments'
@@ -73,6 +74,7 @@ export function createHonoApp(): Hono {
   app.route('/api/v1/tools', toolsRoutes)
   app.route('/api/v1/skills', skillsRoutes)
   app.route('/api/v1/attachments', attachmentsRoutes)
+  app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', imageStudioRoutes)
 
   app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404))

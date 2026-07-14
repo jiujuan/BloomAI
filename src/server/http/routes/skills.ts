@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { skillRepo } from '../../db/repositories/skill.repo'
+import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { runSkill } from '../../skills/run-skill'
 import { readJson, readIntQuery } from '../util'
 
@@ -56,6 +57,9 @@ skillsRoutes.delete('/:id', (c) => {
 
 skillsRoutes.post('/:id/run', async (c) => {
   try {
+  if (skillPackageRepo.isPackageReference(c.req.param('id'))) {
+    return c.json({ error: { code: 'PACKAGE_SKILL_ASYNC_ONLY', message: 'Package Skills must be started through POST /skill-runs' } }, 409)
+  }
     return c.json({ data: await runSkill(c.req.param('id'), (await readJson<any>(c)).input || {}) })
   } catch (err: any) {
     return c.json({ error: { code: 'SKILL_ERROR', message: err.message } }, 500)
