@@ -4,6 +4,7 @@ import path from 'path'
 import { inflateRawSync } from 'zlib'
 import { getDataDir } from '../../db/paths'
 import { isSkillPackageRuntimeEnabled } from './feature-flag'
+import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 const MAX_FILE_COUNT = 10_000
@@ -24,7 +25,7 @@ export type InstalledPackage = {
   relativeSkillPath: string
   packagePath: string
   manifestHash: string
-  manifest: { entryPath: 'SKILL.md'; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
   sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
 }
 
@@ -82,6 +83,7 @@ export class PackageInstaller {
     sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string }
   }): Promise<InstalledPackage> {
     const files = collectFiles(data.skillDirectory)
+    const resolvedManifest = resolveSkillManifest(data.skillDirectory)
     const manifestHash = hashJson(files)
     const finalPath = path.join(data.roots.packages, manifestHash)
     if (!fs.existsSync(finalPath)) {
@@ -98,7 +100,7 @@ export class PackageInstaller {
     }
     const relativeSkillPath = normalizeRelative(path.relative(data.selectedRoot, data.skillDirectory))
     const sourceSnapshot = { ...data.sourceSnapshot, files }
-    const manifest = { entryPath: 'SKILL.md' as const, files }
+    const manifest = { ...resolvedManifest, files }
     const { runMigrations } = await import('../../db/client')
     await runMigrations()
     const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')

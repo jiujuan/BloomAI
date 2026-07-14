@@ -124,6 +124,14 @@ describe('PackageInstaller', () => {
     expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
   })
 
+  it('rejects invalid SKILL.md frontmatter before creating an immutable package snapshot', async () => {
+    writeFile('SKILL.md', '---\nname: [unterminated\n---\nBody')
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+
+    await expect(new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+  })
+
   it('rejects hard-linked files in local package directories', async () => {
     writeFile('safe/SKILL.md', '# Safe\n')
     fs.linkSync(path.join(fixtureDir, 'safe', 'SKILL.md'), path.join(fixtureDir, 'safe', 'linked.md'))
