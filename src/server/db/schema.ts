@@ -294,3 +294,39 @@ export const image_generations = sqliteTable('image_generations', {
 
 export type Setting = typeof settings.$inferSelect
 export type NewSetting = typeof settings.$inferInsert
+
+export const article_illustration_jobs = sqliteTable('article_illustration_jobs', {
+  id: text('id').primaryKey(),
+  source_type: text('source_type').notNull(),
+  source_label: text('source_label').notNull(),
+  source_url: text('source_url'),
+  article_text: text('article_text').notNull(),
+  mode: text('mode').notNull(),
+  skill_version_id: text('skill_version_id'),
+  run_id: text('run_id'),
+  image_session_id: text('image_session_id'),
+  config_json: text('config_json').notNull().default('{}'),
+  status: text('status').notNull().default('waiting_approval'),
+  error_message: text('error_message'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  statusUpdatedIdx: index('idx_article_illustration_jobs_status_updated').on(table.status, table.updated_at),
+}))
+
+export const article_illustration_scenes = sqliteTable('article_illustration_scenes', {
+  id: text('id').primaryKey(),
+  job_id: text('job_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  title: text('title').notNull(),
+  excerpt: text('excerpt').notNull().default(''),
+  prompt: text('prompt').notNull(),
+  status: text('status').notNull().default('planned'),
+  generation_id: text('generation_id'),
+  error_message: text('error_message'),
+  retry_count: integer('retry_count').notNull().default(0),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  jobOrdinalIdx: index('idx_article_illustration_scenes_job_ordinal').on(table.job_id, table.ordinal),
+}))

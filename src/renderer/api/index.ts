@@ -19,12 +19,15 @@ async function apiFetch(path: string, options?: RequestInit) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }))
     throw new Error(err.error?.message || `HTTP ${res.status}`)
   }
-  // 204 No Content (e.g. DELETE) carries no body — calling res.json() would throw.
+  // 204 No Content (e.g. DELETE) carries no body 鈥?calling res.json() would throw.
   if (res.status === 204) return null
   return res.json()
 }
 
 export type LlmModality = 'text' | 'image' | 'video'
+export type ArticleIllustrationSceneDto = { id: string; ordinal: number; title: string; excerpt: string; prompt: string; status: string; generation_id: string | null; error_message: string | null; retry_count: number }
+export type ArticleIllustrationJobDto = { id: string; source_type: 'text' | 'url' | 'file'; source_label: string; source_url: string | null; article_text: string; mode: 'skill' | 'fallback'; skill_version_id: string | null; run_id: string | null; image_session_id: string | null; config: Record<string, unknown>; status: string; error_message: string | null; scenes: ArticleIllustrationSceneDto[] }
+export type EligibleImageSkillDto = { packageId: string; packageName: string; skillVersionId: string; version: string; requiredCapabilities: string[]; activeImageGrant: { grantMode: string; maxCalls: number | null; allowedModels: string[] | null } | null }
 
 export type LlmProviderSummary = {
   id: string
@@ -57,7 +60,7 @@ export type OllamaRemoteModel = {
   details?: Record<string, unknown>
 }
 
-// AI 画图 (Image Studio) types — snake_case to match server rows (like Message/Session).
+// AI 鐢诲浘 (Image Studio) types 鈥?snake_case to match server rows (like Message/Session).
 
 export type ImageSessionSummary = {
   id: string
@@ -138,7 +141,7 @@ export const platform = {
     await apiFetch('/chat/assistant', { method: 'POST', body: JSON.stringify(payload) })
   },
   // Plan mode step 1: propose a short task list for the user to confirm. `avoid` lets
-  // "重新计划" ask for a different plan than the one just shown.
+  // "閲嶆柊璁″垝" ask for a different plan than the one just shown.
   async proposePlan(p: { sessionId: string; query: string; model?: string; avoid?: string[] }): Promise<{ tasks: string[] }> {
     const { data } = await apiFetch('/chat/plan', {
       method: 'POST',
@@ -224,7 +227,7 @@ export const platform = {
     return data
   },
 
-  // AI 画图 (Image Studio)
+  // AI 鐢诲浘 (Image Studio)
   image: {
     async listSessions(): Promise<ImageSessionSummary[]> {
       const { data } = await apiFetch('/image-sessions')
@@ -246,7 +249,7 @@ export const platform = {
       return data
     },
     async listTemplates(category?: string) {
-      const suffix = category && category !== '全部' ? `?category=${encodeURIComponent(category)}` : ''
+      const suffix = category && category !== '鍏ㄩ儴' ? `?category=${encodeURIComponent(category)}` : ''
       const { data } = await apiFetch(`/image-templates${suffix}`)
       return data
     },
@@ -256,6 +259,18 @@ export const platform = {
     },
   },
 
+  articleIllustrations: {
+    async listEligibleSkills(): Promise<EligibleImageSkillDto[]> { const { data } = await apiFetch('/article-illustrations/eligible-skills'); return data },
+    async listRecoverable(): Promise<ArticleIllustrationJobDto[]> { const { data } = await apiFetch('/article-illustrations/recoverable'); return data },
+    async get(id: string): Promise<ArticleIllustrationJobDto> { const { data } = await apiFetch(`/article-illustrations/${id}`); return data },
+    async createPlan(payload: object): Promise<ArticleIllustrationJobDto> { const { data } = await apiFetch('/article-illustrations/plans', { method: 'POST', body: JSON.stringify(payload) }); return data },
+    async updateScene(jobId: string, sceneId: string, patch: object): Promise<ArticleIllustrationSceneDto> { const { data } = await apiFetch(`/article-illustrations/${jobId}/scenes/${sceneId}`, { method: 'PATCH', body: JSON.stringify(patch) }); return data },
+    async replaceScenes(jobId: string, scenes: object[]): Promise<ArticleIllustrationSceneDto[]> { const { data } = await apiFetch(`/article-illustrations/${jobId}/scenes`, { method: 'PUT', body: JSON.stringify({ scenes }) }); return data },
+    async confirm(id: string): Promise<ArticleIllustrationJobDto> { const { data } = await apiFetch(`/article-illustrations/${id}/confirm`, { method: 'POST', body: '{}' }); return data },
+    async retryScene(jobId: string, sceneId: string): Promise<ArticleIllustrationJobDto> { const { data } = await apiFetch(`/article-illustrations/${jobId}/scenes/${sceneId}/retry`, { method: 'POST', body: '{}' }); return data },
+    async resume(id: string): Promise<ArticleIllustrationJobDto> { const { data } = await apiFetch(`/article-illustrations/${id}/resume`, { method: 'POST', body: '{}' }); return data },
+    async exportMarkdown(id: string): Promise<string> { const { data } = await apiFetch(`/article-illustrations/${id}/export`); return data.markdown },
+  },
   // Clipboard (Electron only, graceful fallback)
   async readClipboard(): Promise<string> {    if (isElectron()) return (window as any).bloomai.readClipboard()
     try { return await navigator.clipboard.readText() } catch { return '' }
