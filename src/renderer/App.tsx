@@ -9,6 +9,7 @@ import { ToolManagePage } from '@renderer/pages/Tools'
 import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
 import { SkillsMarket } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
+import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
 import { useSessionStore, usePersonaStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme, applyFont } from '@renderer/api'
 
@@ -82,6 +83,11 @@ export function App() {
           </>
         )}
         {activePage === 'image' && <ImageStudioPage />}
+        {activePage === 'article-illustration' && (
+          <div className="image-studio image-studio-article">
+            <ArticleIllustrationWorkbench />
+          </div>
+        )}
         {activePage === 'personas' && (
           <div className="page-full">
             <PersonasPage />
