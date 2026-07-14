@@ -77,6 +77,7 @@ describe('database migrations', () => {
       '004-skill-capability-grants',
       '005-skill-capability-grant-state',
       '006-skill-run-commands',
+      '007-article-illustration-jobs',
     ])
   })
 
