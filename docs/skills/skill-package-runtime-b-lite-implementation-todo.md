@@ -514,14 +514,14 @@ Artifacts：
 
 ### 20.2 集成测试
 
-- [ ] 安装本地 fixture Package。
-- [ ] GitHub Archive mock。
-- [ ] 启动、暂停、恢复和取消 Run。
-- [ ] 应用重启后 interrupted 恢复。
-- [ ] 权限拒绝。
-- [ ] 图片预算耗尽。
-- [ ] 文章配图部分失败。
-- [ ] Legacy Skill 回归。
+- [x] 安装本地 fixture Package。
+- [x] GitHub Archive mock。
+- [x] 启动、暂停、恢复和取消 Run。
+- [x] 应用重启后 interrupted 恢复。
+- [x] 权限拒绝。
+- [x] 图片预算耗尽。
+- [x] 文章配图部分失败。
+- [x] Legacy Skill 回归。
 
 ### 20.3 端到端测试
 
