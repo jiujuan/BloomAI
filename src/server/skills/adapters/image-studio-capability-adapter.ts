@@ -170,7 +170,9 @@ export class ImageStudioBatch {
 
   private writeManifest(): void {
     this.manifestRevision += 1
-    const fileName = this.manifestRevision === 1 ? 'illustrations.md' : `illustrations-${this.manifestRevision}.md`
+    const existingPaths = new Set(skillPackageRepo.listArtifacts(this.runId).map((artifact) => artifact.path))
+    let fileName = manifestFileName(this.manifestRevision)
+    while (existingPaths.has(fileName)) fileName = manifestFileName(++this.manifestRevision)
     const lines = [
       '# Illustrations', '', `Image Studio session: ${this.session!.id}`, '',
       '| Item | Status | Generation | Prompt | Error |',
@@ -203,6 +205,10 @@ export class ImageStudioBatch {
 function positiveInteger(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) throw new ImageStudioCapabilityAdapterError(`${label} must be a positive integer`)
   return value
+}
+
+function manifestFileName(revision: number): string {
+  return revision === 1 ? 'illustrations.md' : `illustrations-${revision}.md`
 }
 
 function artifactStem(itemId: string, attempt: number): string {

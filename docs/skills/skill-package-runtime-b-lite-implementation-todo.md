@@ -525,15 +525,15 @@ Artifacts：
 
 ### 20.3 端到端测试
 
-- [ ] 安装文章配图 fixture。
-- [ ] 上传 Markdown。
-- [ ] 生成插图计划。
-- [ ] 用户确认。
-- [ ] 模拟生成 6 张图。
-- [ ] 单图失败与重试。
-- [ ] Artifacts 可下载。
-- [ ] Image Studio 可重新打开结果。
-- [ ] Skills Runs 页面可追溯全过程。
+- [x] 安装文章配图 fixture。
+- [x] 上传 Markdown。
+- [x] 生成插图计划。
+- [x] 用户确认。
+- [x] 模拟生成 6 张图。
+- [x] 单图失败与重试。
+- [x] Artifacts 可下载。
+- [x] Image Studio 可重新打开结果。
+- [x] Skills Runs 页面可追溯全过程。
 
 ### 20.4 安全测试
 

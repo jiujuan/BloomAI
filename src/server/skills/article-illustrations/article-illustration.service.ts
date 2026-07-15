@@ -22,12 +22,20 @@ export type EligibleImageSkill = {
 
 function manifestCapabilities(raw: string): string[] {
   try {
-    const manifest = JSON.parse(raw) as { capabilities?: unknown; capability?: unknown; permissions?: unknown }
-    const capabilities = manifest.capabilities ?? manifest.capability ?? manifest.permissions ?? []
+    const manifest = JSON.parse(raw) as { capabilities?: unknown; capability?: unknown; permissions?: unknown; requestedCapabilities?: unknown }
+    const capabilities = manifest.capabilities ?? manifest.capability ?? manifest.permissions
     if (Array.isArray(capabilities)) return capabilities.filter((entry): entry is string => typeof entry === 'string')
-    return capabilities && typeof capabilities === 'object'
-      ? Object.entries(capabilities as Record<string, unknown>).filter(([, enabled]) => enabled === true).map(([capability]) => capability)
-      : []
+    if (capabilities && typeof capabilities === 'object') {
+      return Object.entries(capabilities as Record<string, unknown>).filter(([, enabled]) => enabled === true).map(([capability]) => capability)
+    }
+    if (Array.isArray(manifest.requestedCapabilities)) {
+      return manifest.requestedCapabilities.flatMap((entry) => typeof entry === 'string'
+        ? [entry]
+        : entry && typeof entry === 'object' && typeof (entry as { capability?: unknown }).capability === 'string'
+          ? [(entry as { capability: string }).capability]
+          : [])
+    }
+    return []
   } catch { return [] }
 }
 
