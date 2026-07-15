@@ -503,14 +503,14 @@ Artifacts：
 
 ### 20.1 单元测试
 
-- [ ] Manifest 解析。
-- [ ] 路径穿越防护。
-- [ ] ZIP 安全检查。
-- [ ] Capability Policy。
-- [ ] Run 状态转换。
-- [ ] Event 脱敏。
-- [ ] Artifact 路径隔离。
-- [ ] 图片预算计算。
+- [x] Manifest 解析。
+- [x] 路径穿越防护。
+- [x] ZIP 安全检查。
+- [x] Capability Policy。
+- [x] Run 状态转换。
+- [x] Event 脱敏。
+- [x] Artifact 路径隔离。
+- [x] 图片预算计算。
 
 ### 20.2 集成测试
 
