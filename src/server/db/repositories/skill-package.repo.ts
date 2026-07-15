@@ -11,6 +11,7 @@ import {
   type StoredCapabilityGrant,
 } from '../../skills/policy/capability-policy'
 import { normalizeSkillRunEvent } from '../../skills/runtime/skill-run-events'
+import { resolvePackageSkillId } from '../../skills/identifiers'
 import { getOrmDb } from '../client'
 import {
   skill_artifacts,
@@ -283,23 +284,29 @@ export const skillPackageRepo = {
   },
 
   resolveRunnableVersion(referenceId: string) {
-    const directVersion = this.getVersion(referenceId)
+    const packageReferenceId = resolvePackageSkillId(referenceId)
+    if (!packageReferenceId) return undefined
+
+    const directVersion = this.getVersion(packageReferenceId)
     if (directVersion) {
       const installation = this.listInstallations(directVersion.package_id).find((entry) =>
         entry.current_version_id === directVersion.id && entry.enabled === 1 && entry.status === 'installed'
       )
       return installation ? directVersion : undefined
     }
-    const installation = this.getInstallation(referenceId)
+    const installation = this.getInstallation(packageReferenceId)
     if (installation?.enabled === 1 && installation.status === 'installed') return this.getVersion(installation.current_version_id)
-    const packageRecord = this.getPackage(referenceId)
+    const packageRecord = this.getPackage(packageReferenceId)
     if (!packageRecord) return undefined
     const activeInstallation = this.listInstallations(packageRecord.id).find((entry) => entry.enabled === 1 && entry.status === 'installed')
     return activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
   },
 
-  isPackageReference(id: string) {
-    return Boolean(this.getPackage(id) || this.getVersion(id) || this.getInstallation(id))
+  isPackageReference(referenceId: string) {
+    const packageReferenceId = resolvePackageSkillId(referenceId)
+    return Boolean(packageReferenceId && (
+      this.getPackage(packageReferenceId) || this.getVersion(packageReferenceId) || this.getInstallation(packageReferenceId)
+    ))
   },
 
 

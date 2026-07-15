@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { toolRepo } from '../db/repositories/tool.repo'
 import { skillRepo } from '../db/repositories/skill.repo'
 import { executeLegacyToolCapability, needsInteractiveApprovalForTool } from '../skills/policy/capability-broker'
-import { runSkill } from '../skills/run-skill'
+import { runSkill } from '../skills/legacy'
+import { toLegacySkillToolId } from '../skills/legacy/mastra-tool-id'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
 
 type MastraTool = ReturnType<typeof createTool>
@@ -14,12 +15,11 @@ type MastraTool = ReturnType<typeof createTool>
 const GATED_PERMISSION_LEVELS = new Set(['write', 'shell', 'sandbox'])
 
 // Skill-backed tools live in a distinct namespace so they never collide with built-in tool ids.
-export function toSkillToolId(skillId: string): string {
-  return `skill_${skillId}`
-}
+/** @deprecated Use toLegacySkillToolId to make the runtime boundary explicit. */
+export const toSkillToolId = toLegacySkillToolId
 
 /**
- * Builds the Mastra tool surface for the chat agent from BloomAI's own registries â€?
+ * Builds the Mastra tool surface for the chat agent from BloomAI's own registries ï¿½?
  * every enabled built-in tool plus every installed skill. The LLM decides which to
  * call (ReAct loop); there is no separate intent-routing layer. Tools are rebuilt per
  * request so enabling a tool / installing a skill takes effect on the next turn.
@@ -89,6 +89,7 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
 
 export function buildSkillTools(sessionId?: string): Record<string, MastraTool> {
   const tools: Record<string, MastraTool> = {}
+  // Package Skills intentionally do not enter this synchronous Mastra Tool surface.
   for (const skill of skillRepo.listInstalled()) {
     const inputSchema = jsonSchemaToZodObject(parseParamsSchema(skill.params_schema))
     tools[toSkillToolId(skill.id)] = createTool({

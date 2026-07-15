@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { skillRepo } from '../../db/repositories/skill.repo'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { runSkill } from '../../skills/run-skill'
+import { resolveLegacySkillId } from '../../skills/identifiers'
+import { runSkill } from '../../skills/legacy'
 import { readJson, readIntQuery } from '../util'
 
 export const skillsRoutes = new Hono()
@@ -57,13 +58,23 @@ skillsRoutes.delete('/:id', (c) => {
 
 skillsRoutes.post('/:id/run', async (c) => {
   try {
-  if (skillPackageRepo.isPackageReference(c.req.param('id'))) {
-    return c.json({ error: { code: 'PACKAGE_SKILL_ASYNC_ONLY', message: 'Package Skills must be started through POST /skill-runs' } }, 409)
-  }
-    return c.json({ data: await runSkill(c.req.param('id'), (await readJson<any>(c)).input || {}) })
+    const referenceId = c.req.param('id')
+    // Preserve historical raw Legacy IDs, but prefer an actual Legacy row if an old
+    // database happens to use the same raw value as a Package Runtime record.
+    const legacySkillId = resolveLegacySkillId(referenceId)
+    if (!legacySkillId || !skillRepo.get(legacySkillId)) {
+      if (skillPackageRepo.isPackageReference(referenceId)) {
+        return c.json({ error: { code: 'PACKAGE_SKILL_ASYNC_ONLY', message: 'Package Skills must be started through POST /skill-runs' } }, 409)
+      }
+    }
+    return c.json({ data: await runSkill(referenceId, (await readJson<any>(c)).input || {}) })
   } catch (err: any) {
     return c.json({ error: { code: 'SKILL_ERROR', message: err.message } }, 500)
   }
 })
 
-skillsRoutes.get('/:id/runs', (c) => c.json({ data: skillRepo.listRuns(c.req.param('id'), readIntQuery(c, 'limit', 20)) }))
+skillsRoutes.get('/:id/runs', (c) => {
+  const legacySkillId = resolveLegacySkillId(c.req.param('id'))
+  if (!legacySkillId) return c.json({ data: [] })
+  return c.json({ data: skillRepo.listRuns(legacySkillId, readIntQuery(c, 'limit', 20)) })
+})
