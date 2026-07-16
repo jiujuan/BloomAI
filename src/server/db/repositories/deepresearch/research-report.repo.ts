@@ -49,6 +49,22 @@ export interface UpsertResearchCitationInput {
   rationale: string
 }
 
+export interface UpdateResearchSectionInput {
+  draft?: string | null
+  verifiedText?: string | null
+  status?: ResearchReportSectionDto['status']
+}
+
+export interface UpdateResearchClaimInput {
+  verificationStatus?: ResearchClaimDto['verificationStatus']
+  repairHistory?: JsonValue[]
+}
+
+export interface UpdateResearchCitationInput {
+  entailmentStatus?: ResearchCitationDto['entailmentStatus']
+  rationale?: string
+}
+
 export interface UpsertResearchArtifactInput {
   runId: string
   type: ResearchArtifactDto['type']
@@ -180,6 +196,34 @@ export const researchReportRepo = {
       }).run()
       return mapResearchClaim(tx.select().from(research_claims).where(eq(research_claims.id, id)).get()!)
     })
+  },
+
+  updateSection(id: string, data: UpdateResearchSectionInput): ResearchReportSectionDto {
+    const updates: Partial<typeof research_report_sections.$inferInsert> = { updated_at: Date.now() }
+    if (data.draft !== undefined) updates.draft = data.draft
+    if (data.verifiedText !== undefined) updates.verified_text = data.verifiedText
+    if (data.status !== undefined) updates.status = data.status
+    const result = getOrmDb().update(research_report_sections).set(updates).where(eq(research_report_sections.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research report section not found: ' + id)
+    return mapResearchSection(getOrmDb().select().from(research_report_sections).where(eq(research_report_sections.id, id)).get()!)
+  },
+
+  updateClaim(id: string, data: UpdateResearchClaimInput): ResearchClaimDto {
+    const updates: Partial<typeof research_claims.$inferInsert> = { updated_at: Date.now() }
+    if (data.verificationStatus !== undefined) updates.verification_status = data.verificationStatus
+    if (data.repairHistory !== undefined) updates.repair_history_json = encodeJson(data.repairHistory)
+    const result = getOrmDb().update(research_claims).set(updates).where(eq(research_claims.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research claim not found: ' + id)
+    return mapResearchClaim(getOrmDb().select().from(research_claims).where(eq(research_claims.id, id)).get()!)
+  },
+
+  updateCitation(id: string, data: UpdateResearchCitationInput): ResearchCitationDto {
+    const updates: Partial<typeof research_citations.$inferInsert> = {}
+    if (data.entailmentStatus !== undefined) updates.entailment_status = data.entailmentStatus
+    if (data.rationale !== undefined) updates.rationale = data.rationale
+    const result = getOrmDb().update(research_citations).set(updates).where(eq(research_citations.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research citation not found: ' + id)
+    return mapResearchCitation(getOrmDb().select().from(research_citations).where(eq(research_citations.id, id)).get()!)
   },
 
   upsertCitation(input: UpsertResearchCitationInput): ResearchCitationDto {

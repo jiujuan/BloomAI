@@ -28,20 +28,20 @@ export function createDeterministicEvidenceAnalyst(): EvidenceAnalyst {
     async analyze({ questions, packets }) {
       const analyses: EvidenceAnalysis[] = []
       for (const question of questions) {
-        const packet = packets.find((candidate) => firstCitableSentence(candidate))
-        if (!packet) continue
-        const excerpt = firstCitableSentence(packet)
-        if (!excerpt) continue
-        analyses.push({
-          questionId: question.id,
-          snapshotId: packet.snapshotId,
-          passage: excerpt.passage,
-          summary: 'A bounded passage from ' + (packet.sourceTitle ?? packet.domain) + ' relevant to ' + question.intent + '.',
-          stance: 'contextual',
-          confidence: 0.55,
-          startOffset: excerpt.startOffset,
-          endOffset: excerpt.endOffset,
-        })
+        for (const packet of packets.slice(0, 3)) {
+          const excerpt = firstCitableSentence(packet)
+          if (!excerpt) continue
+          analyses.push({
+            questionId: question.id,
+            snapshotId: packet.snapshotId,
+            passage: excerpt.passage,
+            summary: 'A bounded passage from ' + (packet.sourceTitle ?? packet.domain) + ' relevant to ' + question.intent + '.',
+            stance: 'supporting',
+            confidence: 0.75,
+            startOffset: excerpt.startOffset,
+            endOffset: excerpt.endOffset,
+          })
+        }
       }
       return analyses
     },

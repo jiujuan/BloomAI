@@ -153,6 +153,18 @@ export const researchRunRepo = {
     return this.get(id)!
   },
 
+  setQuality(id: string, quality: ResearchQualityDto): ResearchRunDto {
+    const result = getOrmDb().update(research_runs).set({ quality_json: encodeJson(quality), updated_at: Date.now() }).where(eq(research_runs.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
+    return this.get(id)!
+  },
+
+  setReportArtifactId(id: string, artifactId: string): ResearchRunDto {
+    const result = getOrmDb().update(research_runs).set({ report_artifact_id: artifactId, updated_at: Date.now() }).where(eq(research_runs.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
+    return this.get(id)!
+  },
+
   setUsage(id: string, usage: ResearchUsageDto): ResearchRunDto {
     const result = getOrmDb().update(research_runs).set({
       usage_json: encodeJson(usage),

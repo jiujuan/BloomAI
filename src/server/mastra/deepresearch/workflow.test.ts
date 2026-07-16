@@ -45,16 +45,16 @@ function createRetrievalServices(repositories: Awaited<ReturnType<typeof loadTes
       return {
         output: {
           provider: 'fixture-search',
-          results: [{
-            title: 'Official enterprise AI assistant market data',
-            url: 'https://www.example.test/research?utm_source=fixture',
-            snippet: 'Official market data and methodology for enterprise AI assistants.',
-          }],
+          results: [
+            { title: 'Official enterprise AI assistant market data', url: 'https://a.fixture.gov/research?utm_source=fixture', snippet: 'Official market data and methodology for enterprise AI assistants.' },
+            { title: 'Official enterprise AI assistant market survey', url: 'https://b.fixture.gov/research', snippet: 'Official market survey and methodology for enterprise AI assistants.' },
+            { title: 'Official enterprise AI assistant benchmark', url: 'https://c.fixture.gov/research', snippet: 'Official benchmark methodology for enterprise AI assistants.' },
+          ],
         },
       }
     }
-    if (toolId === 'web_fetch') return { output: { finalUrl: url, status: 200, content: 'Fixture source content.' } }
-    if (toolId === 'web_extract') return { output: { finalUrl: url, title: 'Fixture source', text: 'Fixture source content.', headings: ['Overview'] } }
+    if (toolId === 'web_fetch') return { output: { finalUrl: url, status: 200, content: 'The official fixture source publishes a measured 2026 enterprise AI assistant market observation, documents its collection method, and states that buyers evaluate deployment fit, governance requirements, and vendor capabilities before adoption.' } }
+    if (toolId === 'web_extract') return { output: { finalUrl: url, title: 'Fixture source', text: 'The official fixture source publishes a measured 2026 enterprise AI assistant market observation, documents its collection method, and states that buyers evaluate deployment fit, governance requirements, and vendor capabilities before adoption.', headings: ['Overview'] } }
     throw new Error('Unexpected tool: ' + toolId)
   })
   return {
@@ -78,7 +78,7 @@ function createStorage() {
   return storage
 }
 
-describe('Deep Research Mastra skeleton workflow', () => {
+describe('Deep Research Mastra report workflow', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-deepresearch-workflow-'))
     originalEnv = { ...process.env }
@@ -96,7 +96,7 @@ describe('Deep Research Mastra skeleton workflow', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('persists a fixed brief, Mastra workflow id, events, and a skeleton Markdown artifact', async () => {
+  it('persists a verified cited report with Markdown and JSON artifacts', async () => {
     const repositories = await loadTestContext()
     const planner = {
       plan: vi.fn(async () => ({
@@ -137,8 +137,8 @@ describe('Deep Research Mastra skeleton workflow', () => {
     const detail = repositories.researchRunRepo.getDetail(run.id)!
     expect(planner.plan).toHaveBeenCalledTimes(1)
     expect(detail).toMatchObject({
-      status: 'completed_with_limitations',
-      phase: 'skeleton_complete',
+      status: 'completed',
+      phase: 'report_complete',
       workflowRunId: expect.any(String),
       brief: {
         title: 'Enterprise AI assistant market research',
@@ -157,17 +157,19 @@ describe('Deep Research Mastra skeleton workflow', () => {
     expect(detail.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'research.evidence.extracted' }),
       expect.objectContaining({ type: 'research.coverage.assessed' }),
-      expect.objectContaining({ type: 'research.iteration.completed' }),
+      expect.objectContaining({ type: 'research.section.drafted' }),
+      expect.objectContaining({ type: 'research.claim.verified' }),
+      expect.objectContaining({ type: 'research.quality.assessed' }),
     ]))
+    expect(detail.report?.sections).toHaveLength(10)
+    expect(detail.report?.claims.filter((claim) => claim.kind === 'factual').every((claim) => detail.report!.citations.some((citation) => citation.claimId === claim.id))).toBe(true)
+    expect(detail.report?.citations.map((citation) => citation.ordinal)).toEqual([...detail.report!.citations.keys()].map((index) => index + 1))
     expect(detail.artifacts).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'report_markdown',
-        fileName: 'research-skeleton.md',
-        contentType: 'text/markdown',
-      }),
+      expect.objectContaining({ type: 'report_markdown', fileName: 'report.md', contentType: 'text/markdown' }),
+      expect.objectContaining({ type: 'report_json', fileName: 'report.json', contentType: 'application/json' }),
     ]))
-    const skeletonPath = path.join(dataDir, 'deepresearch', 'runs', run.id, 'research-skeleton.md')
-    expect(fs.readFileSync(skeletonPath, 'utf8')).toContain('# Enterprise AI assistant market research')
+    const reportPath = path.join(dataDir, 'deepresearch', 'runs', run.id, 'report.md')
+    expect(fs.readFileSync(reportPath, 'utf8')).toContain('# Enterprise AI assistant market research')
   })
 
   it('suspends for a critical clarification then resumes planning without creating a second brief', async () => {
@@ -233,8 +235,8 @@ describe('Deep Research Mastra skeleton workflow', () => {
     })
     await vi.waitFor(() => {
       expect(repositories.researchRunRepo.get(run.id)).toMatchObject({
-        status: 'completed_with_limitations',
-        phase: 'skeleton_complete',
+        status: 'completed',
+        phase: 'report_complete',
       })
     })
 

@@ -11,7 +11,13 @@ import { briefPlannerAgent, createDeterministicBriefPlanner, type BriefPlanner }
 import { evidenceAnalystAgent, createDeterministicEvidenceAnalyst } from './agents/evidence-analyst'
 import { gapAnalystAgent, createDeterministicGapAnalyst, type GapAnalyst } from './agents/gap-analyst'
 import { createDeterministicQueryPlanner, queryPlannerAgent, type QueryPlanner } from './agents/query-planner'
+import { createDeterministicSectionWriter, sectionWriterAgent, type SectionWriter } from './agents/section-writer'
+import { claimExtractorAgent, createDeterministicClaimExtractor, type ClaimExtractor } from './agents/claim-extractor'
+import { citationVerifierAgent, createDeterministicCitationVerifier, type CitationVerifier } from './agents/citation-verifier'
+import { createDeterministicReportCritic, reportCriticAgent, type ReportCritic } from './agents/report-critic'
 import { createContentService } from '@server/services/deepresearch/content-service'
+import { ArtifactService } from '@server/services/deepresearch/artifact-service'
+import { CitationService } from '@server/services/deepresearch/citation-service'
 import { EvidenceService, type EvidenceAnalyst } from '@server/services/deepresearch/evidence-service'
 import { createSearchService } from '@server/services/deepresearch/search-service'
 import { SourceCurator } from '@server/services/deepresearch/source-curator'
@@ -26,6 +32,12 @@ export interface CreateDeepResearchMastraRuntimeOptions {
   evidenceAnalyst?: EvidenceAnalyst
   gapAnalyst?: GapAnalyst
   evidenceService?: EvidenceService
+  citationService?: CitationService
+  artifactService?: ArtifactService
+  sectionWriter?: SectionWriter
+  claimExtractor?: ClaimExtractor
+  citationVerifier?: CitationVerifier
+  reportCritic?: ReportCritic
   searchService?: ReturnType<typeof createSearchService>
   sourceCurator?: SourceCurator
   contentService?: ReturnType<typeof createContentService>
@@ -49,6 +61,12 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
     evidenceRepo: repositories.researchEvidenceRepo,
     questionRepo: repositories.researchQuestionRepo,
   })
+  const citationService = options.citationService ?? new CitationService({ reportRepo: repositories.researchReportRepo, listClaims: (runId) => repositories.researchReportRepo.listClaims(runId), listEvidence: (runId) => repositories.researchEvidenceRepo.list(runId) })
+  const artifactService = options.artifactService ?? new ArtifactService({ reportRepo: repositories.researchReportRepo, dataDir: options.dataDir })
+  const sectionWriter = options.sectionWriter ?? createDeterministicSectionWriter()
+  const claimExtractor = options.claimExtractor ?? createDeterministicClaimExtractor()
+  const citationVerifier = options.citationVerifier ?? createDeterministicCitationVerifier()
+  const reportCritic = options.reportCritic ?? createDeterministicReportCritic()
   const searchService = options.searchService ?? createSearchService()
   const sourceCurator = options.sourceCurator ?? new SourceCurator()
   const contentService = options.contentService ?? createContentService({ repositories })
@@ -56,7 +74,7 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
     id: 'bloomai-deep-research-runtime',
     url: resolveDeepResearchRuntimeUrl(options.dataDir),
   })
-  const workflow = createDeepResearchWorkflow({ repositories, planner, queryPlanner, gapAnalyst, evidenceService, searchService, sourceCurator, contentService, dataDir: options.dataDir })
+  const workflow = createDeepResearchWorkflow({ repositories, planner, queryPlanner, gapAnalyst, evidenceService, citationService, artifactService, sectionWriter, claimExtractor, citationVerifier, reportCritic, searchService, sourceCurator, contentService })
   const mastra = new Mastra({
     storage,
     logger: serverLogger,
@@ -65,6 +83,10 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
       'deep-research-query-planner': queryPlannerAgent,
       'deep-research-evidence-analyst': evidenceAnalystAgent,
       'deep-research-gap-analyst': gapAnalystAgent,
+      'deep-research-section-writer': sectionWriterAgent,
+      'deep-research-claim-extractor': claimExtractorAgent,
+      'deep-research-citation-verifier': citationVerifierAgent,
+      'deep-research-report-critic': reportCriticAgent,
     },
     workflows: { 'deep-research-v1': workflow },
   })
