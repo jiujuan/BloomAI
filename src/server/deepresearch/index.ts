@@ -1,3 +1,4 @@
+import { createDeepResearchMastraRuntime } from '../mastra/deepresearch/mastra'
 import { createDeepResearchExecutor, type DeepResearchRuntimeAdapter } from './executor'
 import { createDeepResearchService } from './deep-research.service'
 
@@ -6,16 +7,9 @@ export type { CreateDeepResearchExecutorOptions, DeepResearchExecutor, DeepResea
 export { createDeepResearchService } from './deep-research.service'
 export type { CreateDeepResearchServiceOptions, DeepResearchScheduler } from './deep-research.service'
 
-const unavailableRuntime: DeepResearchRuntimeAdapter = {
-  async start(): Promise<void> {
-    throw new Error('Deep Research runtime is not configured yet.')
-  },
-  async resume(): Promise<void> {
-    throw new Error('Deep Research runtime is not configured yet.')
-  },
-}
+const defaultRuntime = createDeepResearchMastraRuntime()
 
-export function createDeepResearchModule(runtime: DeepResearchRuntimeAdapter = unavailableRuntime) {
+export function createDeepResearchModule(runtime: DeepResearchRuntimeAdapter = defaultRuntime) {
   const executor = createDeepResearchExecutor({ runtime })
   const service = createDeepResearchService({ runtime: executor })
 

@@ -70,6 +70,7 @@ function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
     phase: row.phase,
     progress: row.progress,
     brief: row.brief_json ? decodeJson<ResearchBriefDto | null>(row.brief_json, null) : null,
+    workflowRunId: row.workflow_run_id,
     budget: decodeJson<ResearchBudgetDto>(row.budget_json, {
       maxQuestions: 0,
       maxIterations: 0,
@@ -132,6 +133,24 @@ export const researchRunRepo = {
   get(id: string): ResearchRunDto | undefined {
     const row = getOrmDb().select().from(research_runs).where(eq(research_runs.id, id)).get()
     return row ? mapRun(row) : undefined
+  },
+
+  setWorkflowRunId(id: string, workflowRunId: string): ResearchRunDto {
+    const result = getOrmDb().update(research_runs).set({
+      workflow_run_id: workflowRunId,
+      updated_at: Date.now(),
+    }).where(eq(research_runs.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
+    return this.get(id)!
+  },
+
+  setBrief(id: string, brief: ResearchBriefDto): ResearchRunDto {
+    const result = getOrmDb().update(research_runs).set({
+      brief_json: encodeJson(brief),
+      updated_at: Date.now(),
+    }).where(eq(research_runs.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
+    return this.get(id)!
   },
 
   list(filter: ResearchRunFilter = {}): ResearchRunDto[] {

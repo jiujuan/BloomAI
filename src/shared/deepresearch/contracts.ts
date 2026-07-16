@@ -103,6 +103,7 @@ export interface ResearchRunDto {
   phase: string
   progress: number
   brief: ResearchBriefDto | null
+  workflowRunId: string | null
   budget: ResearchBudgetDto
   usage: ResearchUsageDto
   quality: ResearchQualityDto | null

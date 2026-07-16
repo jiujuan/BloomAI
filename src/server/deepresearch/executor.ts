@@ -7,8 +7,8 @@ const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_LEASE_RENEWAL_MS = 10_000
 
 export interface DeepResearchRuntimeAdapter {
-  start(runId: string): Promise<void>
-  resume(runId: string, resumeData: ResearchClarificationInput): Promise<void>
+  start(runId: string): Promise<unknown>
+  resume(runId: string, resumeData: ResearchClarificationInput): Promise<unknown>
 }
 
 export interface DeepResearchExecutor {
@@ -42,7 +42,7 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
   const leaseRenewalMs = options.leaseRenewalMs ?? DEFAULT_LEASE_RENEWAL_MS
 
-  async function execute(runId: string, invoke: () => Promise<void>): Promise<boolean> {
+  async function execute(runId: string, invoke: () => Promise<unknown>): Promise<boolean> {
     if (!researchRunRepo.acquireLease(runId, executorId, leaseMs)) {
       return false
     }
