@@ -26,6 +26,7 @@ type ChatMode = 'chat' | 'plan' | 'deep'
 type TeamTab = '' | 'research' | 'writing' | 'coding'
 // One plan proposal in the current turn. Stable `id` keeps its card in a fixed position.
 type PlanEntry = { id: number; query: string; tasks: string[]; status: PlanStatus }
+type PendingChatMessage = { sessionId: string; parts: any[]; attachments: Attachment[] }
 const DEFAULT_MODEL = 'agnes-2.0-flash'
 const MODE_LABEL: Record<ChatMode, string> = { chat: '对话', plan: '计划', deep: '深度思考' }
 const MODE_ICON: Record<ChatMode, LucideIcon> = {
@@ -101,6 +102,13 @@ function friendlyError(error: { message?: string }): string {
   return msg
 }
 
+// useChat creates a new Chat instance whenever its id changes. A message intended for a newly
+// created session must therefore wait for that session to become active, otherwise it is appended
+// to the previous (id-less) instance and disappears on the next render.
+export function shouldQueueMessageUntilSessionIsActive(activeSessionId: string | null, sessionId: string): boolean {
+  return activeSessionId !== sessionId
+}
+
 /**
  * Chat panel on Mastra + AI SDK UI. Renders message.parts (text / reasoning / tool-*)
  * with rich tool cards; no bloom-response-v1 contract. mode/model travel as headers.
@@ -148,6 +156,10 @@ export function ChatPanelMastra() {
   const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
   const sessionIdRef = useRef<string | null>(activeSessionId)
   const pendingSessionIdRef = useRef<string | null>(null)
+  const [queuedMessage, setQueuedMessage] = useState<PendingChatMessage | null>(null)
+  // A brand-new session has no history to hydrate. Block its initial async history read until the
+  // first message is sent, otherwise an empty response can overwrite the optimistic bubbles.
+  const initialSessionActivationRef = useRef(false)
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   const teamRef = useRef(team)
@@ -252,6 +264,16 @@ export function ChatPanelMastra() {
   const isStreaming = status === 'submitted' || status === 'streaming'
   const waitingForAssistant = isStreaming && messages[messages.length - 1]?.role === 'user'
 
+  const sendChatMessage = async ({ sessionId, parts, attachments }: PendingChatMessage) => {
+    pendingSessionIdRef.current = sessionId
+    sendAttachmentsRef.current = attachments
+    try {
+      await sendMessage({ parts } as any)
+    } finally {
+      if (pendingSessionIdRef.current === sessionId) pendingSessionIdRef.current = null
+    }
+  }
+
   // Tracks decided approvals (id -> approved) so the card shows the outcome after a click.
   const [decidedApprovals, setDecidedApprovals] = useState<Record<string, boolean>>({})
   const handleDecide = (approvalId: string, approved: boolean) => {
@@ -267,6 +289,7 @@ export function ChatPanelMastra() {
       setMessages([])
       return
     }
+    if (initialSessionActivationRef.current) return
     platform
       .getMessages(activeSessionId)
       .then((rows: any[]) => {
@@ -282,6 +305,17 @@ export function ChatPanelMastra() {
       cancelled = true
     }
   }, [activeSessionId, setMessages])
+
+  // The first send after creating a session is deliberately deferred one render, so useChat has
+  // been recreated with that session id before it appends the optimistic user message.
+  useEffect(() => {
+    if (!queuedMessage || shouldQueueMessageUntilSessionIsActive(activeSessionId, queuedMessage.sessionId)) return
+    // The initial hydration effect has already skipped this new, empty session. Clear the marker
+    // before sending so later session switches load persisted history normally.
+    initialSessionActivationRef.current = false
+    setQueuedMessage(null)
+    void sendChatMessage(queuedMessage)
+  }, [activeSessionId, queuedMessage])
 
   const timelineRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -368,19 +402,25 @@ export function ChatPanelMastra() {
 
   const uploading = attachments.some((a) => a.status === 'uploading')
   const readyAttachments = attachments.filter((a) => a.att)
-  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading
+  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading && !queuedMessage
 
   const ensureActiveSessionId = async (): Promise<string> => {
     const existing = sessionIdRef.current || activeSessionId
     if (existing) return existing
-    const created = await createSession({ persona_id: activePersonaId || undefined, model })
-    sessionIdRef.current = created.id
-    return created.id
+    initialSessionActivationRef.current = true
+    try {
+      const created = await createSession({ persona_id: activePersonaId || undefined, model })
+      sessionIdRef.current = created.id
+      return created.id
+    } catch (error) {
+      initialSessionActivationRef.current = false
+      throw error
+    }
   }
 
   const handleSend = async () => {
     const text = input.trim()
-    if (isStreaming || uploading) return
+    if (isStreaming || uploading || queuedMessage) return
     if (!text && readyAttachments.length === 0) return
     const sessionId = await ensureActiveSessionId()
     // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
@@ -392,42 +432,46 @@ export function ChatPanelMastra() {
       const active = plans.find((p) => p.status === 'proposing' || p.status === 'ready')
       if (active && active.status !== 'ready') return // still generating; let it finish first
       setInput('')
-      maybeSetTitleFromFirstMessage(text)
+      maybeSetTitleFromFirstMessage(text, sessionId)
       const id = ++planIdRef.current
       setPlans((prev) => [
         ...prev.map((p) => (p.status === 'ready' ? { ...p, status: 'discarded' as PlanStatus } : p)),
         { id, query: text, tasks: [], status: 'proposing' },
       ])
+      initialSessionActivationRef.current = false
       void runProposal(id, text, undefined, sessionId)
       return
     }
-    pendingSessionIdRef.current = sessionId
     setInput('')
     // Reflect the first question in the sidebar title immediately (matches the server, which
     // titles the session from its first persisted user message). Without this the sidebar keeps
     // showing "New Chat" until a reload.
-    maybeSetTitleFromFirstMessage(text)
-    const parts = buildUserParts(text)
-    sendAttachmentsRef.current = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
-    setAttachments([]) // display cleared for next turn; sendAttachmentsRef carries this turn's files
-    setAttachError(null)
-    try {
-      await sendMessage({ parts } as any)
-    } finally {
-      pendingSessionIdRef.current = null
+    maybeSetTitleFromFirstMessage(text, sessionId)
+    const outgoing: PendingChatMessage = {
+      sessionId,
+      parts: buildUserParts(text),
+      attachments: attachmentsRef.current.filter((a) => a.att).map((a) => a.att!),
     }
+    setAttachments([]) // display cleared for next turn; outgoing.attachments carries this turn's files
+    setAttachError(null)
+
+    if (shouldQueueMessageUntilSessionIsActive(activeSessionId, sessionId)) {
+      setQueuedMessage(outgoing)
+      return
+    }
+    await sendChatMessage(outgoing)
   }
 
   // Reflect the first question in the sidebar title immediately. In normal mode the server sets
   // the title on the first persisted user message, but a plan proposal persists nothing until the
   // user confirms — so set it optimistically here (updates the store live and persists to DB).
-  const maybeSetTitleFromFirstMessage = (text: string) => {
+  const maybeSetTitleFromFirstMessage = (text: string, sessionId: string) => {
     const title = text.slice(0, 60).trim()
-    if (!title || !activeSessionId || messages.length > 0) return
+    if (!title || messages.length > 0) return
     const store = useSessionStore.getState()
-    const current = store.sessions.find((x) => x.id === activeSessionId)
+    const current = store.sessions.find((x) => x.id === sessionId)
     if (current && (!current.title || current.title === 'New Chat')) {
-      void store.updateSessionTitle(activeSessionId, title).catch(() => {})
+      void store.updateSessionTitle(sessionId, title).catch(() => {})
     }
   }
 
