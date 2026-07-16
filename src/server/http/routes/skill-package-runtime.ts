@@ -1,15 +1,9 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { z } from 'zod'
-import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { ArtifactStore, ArtifactStoreError } from '../../skills/artifacts'
-import { PackageInstallError, PackageInstaller } from '../../skills/packages/package-installer'
-import { SkillRunCoordinator } from '../../skills/runtime'
-import {
-  SkillRunConflictError,
-  SkillRunNotFoundError,
-  SkillRunTransitionError,
-} from '../../skills/runtime/skill-run-coordinator'
+import { mapErrorToHttpResponse } from '../error-mapper'
+import { ServiceError } from '../../services/errors'
+import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
 
 const jsonObjectSchema = z.record(z.unknown())
 const idSchema = z.string().min(1).max(200)
@@ -45,226 +39,82 @@ const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.strin
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
-const coordinator = new SkillRunCoordinator()
-const artifactStore = new ArtifactStore()
 
 skillPackageRuntimeRoutes.post('/skill-packages/inspect', async (c) => {
-  try {
-    const body = await readValidated(c, packageMutationSchema)
-    return c.json({ data: await new PackageInstaller().inspect(body.source) })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.post('/skill-packages/install', async (c) => {
-  try {
-    const body = await readValidated(c, packageMutationSchema)
-    return c.json({ data: await new PackageInstaller().install(body.source) }, 201)
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: await skillPackageRuntimeService.installPackage((await readValidated(c, packageMutationSchema)).source) }, 201) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   try {
     const page = paginationSchema.parse(c.req.query())
-    const result = skillPackageRepo.listPackages(page)
+    const result = skillPackageRuntimeService.listPackages(page)
     return c.json({ data: result.data, meta: pageMeta(page, result.total) })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
-  try {
-    const id = idSchema.parse(c.req.param('id'))
-    const packageRecord = skillPackageRepo.getPackage(id)
-    if (!packageRecord) throw new HttpApiError('NOT_FOUND', 'Skill package not found', 404)
-    const versions = skillPackageRepo.listVersions(id)
-    return c.json({ data: {
-      package: packageRecord,
-      versions,
-      installations: skillPackageRepo.listInstallations(id),
-      capabilityGrants: versions.flatMap((version) => skillPackageRepo.listCapabilityGrants(version.id).map((grant) => ({
-        ...grant,
-        skill_version_id: version.id,
-      }))),
-    } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
-  try {
-    const installation = skillPackageRepo.setInstallationEnabled(
-      idSchema.parse(c.req.param('id')),
-      (await readValidated(c, installationUpdateSchema)).enabled,
-    )
-    if (!installation) throw new HttpApiError('NOT_FOUND', 'Skill installation not found', 404)
-    return c.json({ data: installation })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.setInstallationEnabled(idSchema.parse(c.req.param('id')), (await readValidated(c, installationUpdateSchema)).enabled) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
-  try {
-    if (!skillPackageRepo.revokeCapabilityGrant(idSchema.parse(c.req.param('id')))) {
-      throw new HttpApiError('NOT_FOUND', 'Active capability grant not found', 404)
-    }
-    return c.json({ data: { revoked: true } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.delete('/skill-installations/:id', (c) => {
-  try {
-    const id = idSchema.parse(c.req.param('id'))
-    if (!skillPackageRepo.deleteInstallation(id)) throw new HttpApiError('NOT_FOUND', 'Skill installation not found', 404)
-    return c.json({ data: { uninstalled: true } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.removeInstallation(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.post('/skill-runs', async (c) => {
-  try {
-    const body = await readValidated(c, createRunSchema)
-    const version = skillPackageRepo.resolveRunnableVersion(body.skillVersionId ?? body.skillId!)
-    if (!version) throw new HttpApiError('NOT_FOUND', 'Installed and enabled Package Skill was not found', 404)
-    if (version.is_compatible !== 1) throw new HttpApiError('SKILL_VERSION_INCOMPATIBLE', 'Skill version is incompatible with the Package Runtime', 409)
-    const context = { ...(body.context ?? {}), ...(body.target ? { target: body.target } : {}) }
-    const started = coordinator.startRun({
-      skillVersionId: version.id,
-      input: body.input,
-      context,
-      surface: body.surface,
-      sessionId: body.sessionId,
-      imageSessionId: body.imageSessionId,
-    })
-    const run = coordinator.getRun(started.runId)
-    return c.json({ data: { runId: run.id, status: run.status, revision: run.revision } }, 201)
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.startRun(await readValidated(c, createRunSchema)) }, 201) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
   try {
     const page = paginationSchema.extend({ status: runStatusSchema.optional(), skillVersionId: idSchema.optional() }).parse(c.req.query())
-    const result = skillPackageRepo.listRuns(page)
-    return c.json({ data: result.data.map((run) => coordinator.getRun(run.id)), meta: pageMeta(page, result.total) })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+    const result = skillPackageRuntimeService.listRuns(page)
+    return c.json({ data: result.data, meta: pageMeta(page, result.total) })
+  } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-runs/:id', (c) => {
-  try {
-    return c.json({ data: coordinator.getRun(idSchema.parse(c.req.param('id'))) })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.getRun(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-runs/:id/events', (c) => {
   try {
     const id = idSchema.parse(c.req.param('id'))
     const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(c.req.query())
-    coordinator.getRun(id)
-    return c.json({ data: coordinator.subscribeEvents(id, afterSeq), meta: { afterSeq } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+    return c.json({ data: skillPackageRuntimeService.listRunEvents(id, afterSeq), meta: { afterSeq } })
+  } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.post('/skill-runs/:id/commands', async (c) => {
-  try {
-    const run = coordinator.dispatchCommand(idSchema.parse(c.req.param('id')), await readValidated(c, commandSchema))
-    return c.json({ data: run })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.executeRunCommand(idSchema.parse(c.req.param('id')), await readValidated(c, commandSchema)) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.post('/skill-runs/:id/cancel', async (c) => {
-  try {
-    const body = await readValidated(c, cancelSchema)
-    const run = coordinator.dispatchCommand(idSchema.parse(c.req.param('id')), { type: 'cancel', ...body })
-    return c.json({ data: run })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), await readValidated(c, cancelSchema)) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-runs/:id/artifacts', (c) => {
-  try {
-    const runId = idSchema.parse(c.req.param('id'))
-    coordinator.getRun(runId)
-    return c.json({ data: skillPackageRepo.listArtifacts(runId) })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  try { return c.json({ data: skillPackageRuntimeService.listRunArtifacts(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
   try {
-    const artifactId = idSchema.parse(c.req.param('id'))
-    const { runId } = artifactContentQuerySchema.parse(c.req.query())
-    coordinator.getRun(runId)
-    const content = artifactStore.readContent({ artifactId, runId })
+    const content = skillPackageRuntimeService.readArtifactContent(idSchema.parse(c.req.param('id')), artifactContentQuerySchema.parse(c.req.query()).runId)
     return new Response(Uint8Array.from(content.content), { headers: { 'Content-Type': content.mimeType } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+  } catch (error) { return errorResponse(c, error) }
 })
-
 skillPackageRuntimeRoutes.post('/skill-artifacts/:id/export', async (c) => {
   try {
-    const artifactId = idSchema.parse(c.req.param('id'))
     const body = await readValidated(c, artifactExportSchema)
-    coordinator.getRun(body.runId)
-    const path = artifactStore.exportArtifact({ artifactId, runId: body.runId, destinationDir: body.destinationDir })
-    return c.json({ data: { path } })
-  } catch (error) {
-    return errorResponse(c, error)
-  }
+    return c.json({ data: { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir) } })
+  } catch (error) { return errorResponse(c, error) }
 })
 
 async function readValidated<T extends z.ZodTypeAny>(c: Context, schema: T): Promise<z.infer<T>> {
   let body: unknown
-  try {
-    body = await c.req.json()
-  } catch {
-    throw new HttpApiError('VALIDATION_ERROR', 'Request body must be valid JSON', 400)
-  }
+  try { body = await c.req.json() } catch { throw new ServiceError('VALIDATION_ERROR', 'Request body must be valid JSON') }
   return schema.parse(body)
 }
-
-function pageMeta(page: { limit: number; offset: number }, total: number) {
-  return { ...page, total }
-}
-
-class HttpApiError extends Error {
-  constructor(readonly code: string, message: string, readonly status: number) {
-    super(message)
-  }
-}
-
+function pageMeta(page: { limit: number; offset: number }, total: number) { return { ...page, total } }
 function errorResponse(c: Context, error: unknown) {
-  if (error instanceof HttpApiError) return c.json({ error: { code: error.code, message: error.message } }, error.status as 400 | 404 | 409)
   if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)
-  if (error instanceof SkillRunNotFoundError) return c.json({ error: { code: 'NOT_FOUND', message: error.message } }, 404)
-  if (error instanceof SkillRunConflictError) return c.json({ error: { code: 'REVISION_CONFLICT', message: error.message } }, 409)
-  if (error instanceof SkillRunTransitionError) return c.json({ error: { code: 'INVALID_RUN_TRANSITION', message: error.message } }, 409)
-  if (error instanceof PackageInstallError) return c.json({ error: { code: 'PACKAGE_INSTALL_ERROR', message: error.message } }, 400)
-  if (error instanceof ArtifactStoreError) {
-    const status = error.message.startsWith('Artifact not found') ? 404 : 400
-    return c.json({ error: { code: status === 404 ? 'NOT_FOUND' : 'ARTIFACT_ERROR', message: error.message } }, status)
-  }
-  const message = error instanceof Error ? error.message : 'Internal server error'
-  return c.json({ error: { code: 'INTERNAL_ERROR', message } }, 500)
+  const response = mapErrorToHttpResponse(error)
+  return c.json(response.body, response.status)
 }

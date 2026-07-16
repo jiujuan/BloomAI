@@ -1,58 +1,60 @@
 import { Hono } from 'hono'
-import { toolRepo } from '../../db/repositories/tool.repo'
-import { CapabilityError, executeLegacyToolCapability } from '../../skills/policy/capability-broker'
+import { mapErrorToHttpResponse } from '../error-mapper'
+import { toolService } from '../../services/tool.service'
 import { readJson, readIntQuery } from '../util'
 
 export const toolsRoutes = new Hono()
 
 toolsRoutes.get('/', (c) => {
-  const category = c.req.query('category') || undefined
-  const tools = toolRepo.list(category)
-  const permMap = Object.fromEntries(toolRepo.listPermissions().map((p) => [p.tool_id, p]))
-  return c.json({ data: tools.map((t) => ({ ...t, permission: permMap[t.id] || null })) })
+  try {
+    return c.json({ data: toolService.list({ category: c.req.query('category') || undefined }) })
+  } catch (error) { return errorResponse(c, error) }
 })
 
-toolsRoutes.get('/stats', (c) => c.json({ data: toolRepo.getStats() }))
-toolsRoutes.get('/runs', (c) => c.json({ data: toolRepo.listAllRuns(readIntQuery(c, 'limit', 100)) }))
-toolsRoutes.get('/permissions', (c) => c.json({ data: toolRepo.listPermissions() }))
+toolsRoutes.get('/stats', (c) => {
+  try { return c.json({ data: toolService.getStats() }) } catch (error) { return errorResponse(c, error) }
+})
+toolsRoutes.get('/runs', (c) => {
+  try { return c.json({ data: toolService.listAllRuns(readIntQuery(c, 'limit', 100)) }) } catch (error) { return errorResponse(c, error) }
+})
+toolsRoutes.get('/permissions', (c) => {
+  try { return c.json({ data: toolService.listPermissions() }) } catch (error) { return errorResponse(c, error) }
+})
 
 toolsRoutes.post('/permissions/:id/grant', async (c) => {
-  const scope = (await readJson<any>(c)).scope || 'session'
-  toolRepo.grantPermission(c.req.param('id'), scope)
-  return c.json({ data: { tool_id: c.req.param('id'), granted: true, scope } })
+  try {
+    const body = await readJson<any>(c)
+    return c.json({ data: toolService.grantPermission(c.req.param('id'), body.scope) })
+  } catch (error) { return errorResponse(c, error) }
 })
 
 toolsRoutes.post('/permissions/:id/revoke', (c) => {
-  toolRepo.revokePermission(c.req.param('id'))
-  return c.json({ data: { tool_id: c.req.param('id'), granted: false } })
+  try { return c.json({ data: toolService.revokePermission(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })
 
 toolsRoutes.get('/:id', (c) => {
-  const tool = toolRepo.get(c.req.param('id'))
-  if (!tool) return c.json({ error: { code: 'NOT_FOUND', message: 'Tool not found' } }, 404)
-  return c.json({ data: { ...tool, permission: toolRepo.getPermission(c.req.param('id')) || null } })
+  try { return c.json({ data: toolService.get(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })
 
 toolsRoutes.patch('/:id', async (c) => {
-  const body = await readJson<any>(c)
-  if (typeof body.is_enabled === 'boolean') toolRepo.setEnabled(c.req.param('id'), body.is_enabled)
-  return c.json({ data: toolRepo.get(c.req.param('id')) })
+  try {
+    const body = await readJson<any>(c)
+    return c.json({ data: toolService.setEnabled(c.req.param('id'), body.is_enabled) })
+  } catch (error) { return errorResponse(c, error) }
 })
 
 toolsRoutes.post('/:id/run', async (c) => {
-  const body = await readJson<any>(c)
   try {
-    const result = await executeLegacyToolCapability({
-      caller: 'http',
-      toolId: c.req.param('id'),
-      input: body.input || {},
-      sessionId: body.sessionId,
-      approvalGranted: body.approvalGranted === true,
-    })
+    const result = await toolService.run(c.req.param('id'), await readJson<any>(c))
     return c.json({ data: result.output, meta: { toolRunId: result.toolRunId } })
-  } catch (err: any) {
-    return c.json({ error: { code: err.code || 'TOOL_ERROR', message: err.message } }, err instanceof CapabilityError ? 403 : 500)
-  }
+  } catch (error) { return errorResponse(c, error) }
 })
 
-toolsRoutes.get('/:id/runs', (c) => c.json({ data: toolRepo.listRuns(c.req.param('id'), readIntQuery(c, 'limit', 50)) }))
+toolsRoutes.get('/:id/runs', (c) => {
+  try { return c.json({ data: toolService.listRuns(c.req.param('id'), readIntQuery(c, 'limit', 50)) }) } catch (error) { return errorResponse(c, error) }
+})
+
+function errorResponse(c: any, error: unknown) {
+  const response = mapErrorToHttpResponse(error)
+  return c.json(response.body, response.status)
+}

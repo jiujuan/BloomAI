@@ -17,23 +17,6 @@ const LEGACY_ROUTE_IMPORT_ALLOWLIST: Readonly<Record<string, readonly string[]>>
   ],
   'attachments.ts': ['../../attachments/attachment-service'],
 
-  'skill-package-runtime.ts': [
-    '../../db/repositories/skill-package.repo',
-    '../../skills/artifacts',
-    '../../skills/packages/package-installer',
-    '../../skills/runtime',
-    '../../skills/runtime/skill-run-coordinator',
-  ],
-  'skills.ts': [
-    '../../db/repositories/skill.repo',
-    '../../db/repositories/skill-package.repo',
-    '../../skills/identifiers',
-    '../../skills/legacy',
-  ],
-  'tools.ts': [
-    '../../db/repositories/tool.repo',
-    '../../skills/policy/capability-broker',
-  ],
 }
 
 export type RouteDependencyBoundaryViolation = {
