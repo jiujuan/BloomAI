@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+﻿import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -9,15 +9,6 @@ const FORBIDDEN_ROUTE_IMPORT_PREFIXES = [
   '../../skills/',
   '../../attachments/',
 ] as const
-
-const LEGACY_ROUTE_IMPORT_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
-  'article-illustrations.ts': [
-    '../../skills/article-illustrations/article-source',
-    '../../skills/article-illustrations/article-illustration.service',
-  ],
-  'attachments.ts': ['../../attachments/attachment-service'],
-
-}
 
 export type RouteDependencyBoundaryViolation = {
   file: string
@@ -30,10 +21,7 @@ type RouteDirectoryOptions = { routesDirectory?: string }
 
 const routesDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), '../http/routes')
 
-/**
- * Reports production-route imports that bypass the service layer. The explicit
- * allowlist represents pre-existing debt and must shrink as migration phases land.
- */
+/** Reports production-route imports that bypass the application service layer. */
 export function findRouteDependencyBoundaryViolations(
   input: RouteSources | RouteDirectoryOptions = {},
 ): RouteDependencyBoundaryViolation[] {
@@ -41,16 +29,15 @@ export function findRouteDependencyBoundaryViolations(
     ? input
     : readProductionRouteSources((input as RouteDirectoryOptions).routesDirectory ?? routesDirectory)
 
-  return Object.entries(sources).flatMap(([file, content]) => {
-    const allowedSources = new Set(LEGACY_ROUTE_IMPORT_ALLOWLIST[file] ?? [])
-    return extractImportSources(content)
-      .filter((source) => isForbiddenRouteImport(source) && !allowedSources.has(source))
+  return Object.entries(sources).flatMap(([file, content]) =>
+    extractImportSources(content)
+      .filter(isForbiddenRouteImport)
       .map((source) => ({
         file,
         source,
         reason: 'HTTP routes must call application services instead of repositories or runtimes' as const,
-      }))
-  })
+      })),
+  )
 }
 
 function isRouteSources(input: RouteSources | RouteDirectoryOptions): input is RouteSources {

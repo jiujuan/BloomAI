@@ -1,7 +1,7 @@
 import { RequestContext } from '@mastra/core/request-context'
 import { handleChatStream, toAISdkStream } from '@mastra/ai-sdk'
 import { createUIMessageStream } from 'ai'
-import { extractAttachmentText } from '../attachments/attachment-service'
+import { extractAttachmentText } from './attachment.service'
 import { messageRepo } from '../db/repositories/message.repo'
 import { sessionRepo } from '../db/repositories/session.repo'
 import { logError, sanitizeErrorMessage } from '../logger/logger'

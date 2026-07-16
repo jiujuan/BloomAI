@@ -1,7 +1,7 @@
 # BloomAI Services 层迁移计划
 
 > 日期：2026-07-16  
-> 状态：阶段 0、1、2、3、4 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2、3、4 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行；阶段 5 待执行
+> 状态：阶段 0、1、2、3、4、5 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2、3、4、5 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行
 > 前置文档：[Services 层架构分析](./01-service-layer-architecture-analysis.md)  
 > 目标：在不破坏现有前后端 API、流式协议和本地数据兼容性的前提下，将后端 API 调用路径逐步统一为 `HTTP Route → Application Service → Repository / Runtime`。
 
@@ -162,7 +162,7 @@ services/** → http/routes/** 或 Hono Context
 - 新增 `src/server/services/errors.ts`：提供不包含 HTTP/Hono 细节的 `ServiceError`、稳定错误码和类型守卫；
 - 新增 `src/server/http/error-mapper.ts`：将 `ServiceError` 映射为既有 `{ error: { code, message } }` envelope；未知异常统一返回 `500 / INTERNAL_ERROR / Internal server error`，原始异常只记录到服务端日志；
 - `src/server/http/app.ts` 已通过同一个 Hono error handler 接入 mapper；stream Route 暂未改造；
-- 新增 `src/server/architecture/dependency-boundaries.ts` 和 `npm run test:architecture`。检查范围仅为生产 `src/server/http/routes/` 中的非测试 TypeScript 文件，阻止 Route 新增对 Repository、LLM、Mastra、Skills Runtime、Attachments 实现的直连；已有直连被逐文件登记在临时 allowlist 中，后续迁移每完成一个域必须同步删除对应例外，不能新增例外绕过规则；
+- 新增 `src/server/architecture/dependency-boundaries.ts` 和 `npm run test:architecture`。检查范围仅为生产 `src/server/http/routes/` 中的非测试 TypeScript 文件，阻止 Route 直连 Repository、LLM、Mastra、Skills Runtime 或 Attachments 实现；阶段 5 已删除所有临时 allowlist，生产 Route 必须仅通过 application service 调用业务能力。
 - P0 endpoint/依赖盘点沿用 [Services 层架构分析第 3 节](./01-service-layer-architecture-analysis.md#3-当前代码盘点)，并补齐 LLM（modality/provider 输入校验）与 Image Studio（模板筛选/生成必填字段）的 Route contract 测试；Chat Plan 与 Skill Package Runtime 使用既有 Route 测试作为基线；
 - 为避免 Windows 本地环境中默认并发 Vitest worker 对数据库迁移和 Mastra/Observability 初始化产生间歇性超时，`npm test` 固化为单个 fork worker。它牺牲部分并发速度以获得可重复的全量回归结果；并发优化应在测试隔离改造后另行处理，不能以放宽超时掩盖问题。
 
@@ -609,6 +609,18 @@ extractAttachmentText(attachment)
 - Chat service 通过 attachment service 获取上下文，不经 Route；
 - 文件路径、允许扩展名、大小、文本截断、安全校验集中在 attachment service。
 
+### 9.3 执行记录（2026-07-16）
+
+- 新增 `article-illustration.service.ts` application-service façade：统一代理规划、编辑、确认、重试、恢复、查询与导出，将 `ArticleSourceError` 、插图状态机错误和不存在资源转为通用 `ServiceError`。`canPasteText` 仅作为服务显式提供的安全详情保留在 HTTP error envelope 中。
+- 新增 `attachment.service.ts` application-service façade，明确 `saveUploadedAttachment(input)` 和 `extractAttachmentText(attachment)` 用例。底层 `attachments/attachment-service.ts` 仍是文件类型、路径、大小、截断和解析安全边界的单一实现。
+- `article-illustrations.ts` 仅保留 Zod HTTP 输入校验与 response 适配；`attachments.ts` 仅解析 multipart 与组装 HTTP response；`chat.service.ts` 通过 Attachment Service 获取附件文本上下文。既有 Article Illustration API path、状态码、`{ data }` / `{ error }` envelope 与附件 multipart 协议保持不变。
+- 删除 Article Illustrations 和 Attachments 的临时架构 allowlist；新的严格架构测试会直接报告这两个 Route 对 `skills/` 或 `attachments/` 的直接导入。
+- 已增加 Article Illustration / Attachment Service 单元测试、Attachment Route contract 测试与错误 mapper 详情回归测试。
+- 验证结果：`npm run test:architecture` 通过（1 个文件、3 个测试）；`npm test` 通过（74 个文件、329 个测试，182.24s）；`npm run typecheck` 通过；`npm run build` 通过；`git diff --check` 通过。构建仍输出既有 Vite CJS API deprecation 与 renderer chunk-size 警告，未产生 TypeScript 或构建错误。
+- 在随机端口、隔离临时 `DATA_DIR` / `DATA_DIR_ATTACHMENT` 的真实 Hono server 上完成后端 local API smoke：文本 source fallback plan（`201`）、缺少 URL consent（`400 / URL_CONSENT_REQUIRED`）、本地 URL SSRF 拦截（`400 / URL_NOT_ALLOWED`，`canPasteText: true`）、不存在 job/export（`404 / NOT_FOUND`）、`.txt` multipart 上传（`201` 并确认文件写入临时附件目录）及 `.exe` 拒绝（`400 / VALIDATION_ERROR`）均符合预期。未调用真实外部 LLM 或 Provider；临时 server 和数据目录已清理。
+- 风险与回滚：本阶段不修改数据库 schema、URL/API path、HTTP 状态码、响应 envelope 或附件 multipart 协议。若 Article Illustration 或附件回归，只需回滚本阶段 façade、Route 调用及对应架构规则变更；不要引入长期双路径业务逻辑。
+- Renderer 人工 smoke 尚未执行：当前自动化环境不能操作 Electron 桌面窗口。后续应在可交互桌面会话中验证 Article Illustration 工作台、附件上传及携带附件的 Chat 流程。
+
 ## 10. 阶段 6：依赖规则强制与文档收口
 
 ### 10.1 强化架构检查
@@ -775,11 +787,11 @@ npm run build
 
 ### Phase 5：收口与发布验证
 
-- [ ] 收口 Article Illustrations 和 Attachments 的错误边界。
-- [ ] 启用严格架构规则并清理例外。
-- [ ] 更新 README/ADR/开发文档。
-- [ ] 执行完整自动化测试、build 和前后端手工 smoke test。
-- [ ] 记录验证输出、风险和回滚点。
+- [x] 收口 Article Illustrations 和 Attachments 的错误边界。
+- [x] 启用严格架构规则并清理例外。
+- [x] 更新 Services 迁移计划与开发文档记录。
+- [x] 执行完整自动化测试、build 和后端本地 API smoke；Renderer 人工 smoke 待可交互桌面会话。
+- [x] 记录验证输出、风险和回滚点。
 
 ## 14. 完成定义
 

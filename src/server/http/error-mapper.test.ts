@@ -24,4 +24,11 @@ describe('mapErrorToHttpResponse', () => {
       body: { error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } },
     })
   })
+
+  it('keeps safe service error details in the stable envelope when a service explicitly provides them', () => {
+    expect(mapErrorToHttpResponse(new ServiceError('ARTICLE_FETCH_FAILED', 'Paste article text instead', { canPasteText: true }))).toEqual({
+      status: 400,
+      body: { error: { code: 'ARTICLE_FETCH_FAILED', message: 'Paste article text instead', canPasteText: true } },
+    })
+  })
 })

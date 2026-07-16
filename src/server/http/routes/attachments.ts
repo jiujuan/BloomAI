@@ -1,12 +1,12 @@
-import { Hono } from 'hono'
-import { logError, sanitizeErrorMessage } from '../../logger/logger'
-import { AttachmentError, saveAttachment } from '../../attachments/attachment-service'
+﻿import { Hono } from 'hono'
 import { type Attachment } from '../../../shared/attachments'
+import { attachmentService } from '../../services/attachment.service'
+import { ServiceError } from '../../services/errors'
+import { mapErrorToHttpResponse } from '../error-mapper'
 
 /**
- * Chat attachment upload. Accepts multipart/form-data with one or more `file` fields, validates
- * type (MD/DOCX/PDF/TXT/CSV) and size (5MB each), stores under DATA_DIR_ATTACHMENT/<YYYYMMDD>/,
- * and returns the stored metadata (including the server path the chat route needs to extract text).
+ * Chat attachment upload. Parses multipart/form-data, delegates validation and
+ * persistence to AttachmentService, then returns the stable stored metadata.
  */
 export const attachmentsRoutes = new Hono()
 
@@ -15,31 +15,32 @@ attachmentsRoutes.post('/', async (c) => {
   try {
     body = await c.req.parseBody({ all: true })
   } catch {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: '无法解析上传内容' } }, 400)
+    return attachmentError(c, new ServiceError('VALIDATION_ERROR', '\u65e0\u6cd5\u89e3\u6790\u4e0a\u4f20\u5185\u5bb9'))
   }
 
   // `all: true` yields an array when a field repeats; normalize `file` to a list either way.
-  const raw = body['file']
-  const files = (Array.isArray(raw) ? raw : [raw]).filter((f): f is File => f instanceof File)
+  const raw = body.file
+  const files = (Array.isArray(raw) ? raw : [raw]).filter((file): file is File => file instanceof File)
   if (files.length === 0) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: '缺少文件字段 file' } }, 400)
+    return attachmentError(c, new ServiceError('VALIDATION_ERROR', '\u7f3a\u5c11\u6587\u4ef6\u5b57\u6bb5 file'))
   }
 
   const saved: Attachment[] = []
   try {
     for (const file of files) {
       const buffer = Buffer.from(await file.arrayBuffer())
-      saved.push(saveAttachment({ name: file.name, buffer }))
+      saved.push(attachmentService.saveUploadedAttachment({ name: file.name, buffer }))
     }
   } catch (error) {
-    if (error instanceof AttachmentError) {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: error.message } }, 400)
-    }
-    logError('attachments.upload', { code: 'UPLOAD_ERROR', message: sanitizeErrorMessage(error, 'upload failed') })
-    return c.json({ error: { code: 'UPLOAD_ERROR', message: '附件保存失败' } }, 500)
+    return attachmentError(c, error instanceof ServiceError ? error : new ServiceError('UPLOAD_ERROR', '\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25'))
   }
 
-  // The renderer keeps the full metadata (incl. path) in memory to send back on the next chat
-  // turn; the path is only ever used server-side (validated against the attachment dir).
+  // The renderer keeps this metadata in memory for the next chat turn. The path
+  // remains server-side and is revalidated by the lower-level extractor.
   return c.json({ data: saved }, 201)
 })
+
+function attachmentError(c: any, error: unknown) {
+  const response = mapErrorToHttpResponse(error)
+  return c.json(response.body, response.status)
+}

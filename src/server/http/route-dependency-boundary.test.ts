@@ -1,4 +1,4 @@
-import path from 'node:path'
+﻿import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { findRouteDependencyBoundaryViolations } from '../architecture/dependency-boundaries'
@@ -6,7 +6,7 @@ import { findRouteDependencyBoundaryViolations } from '../architecture/dependenc
 const routesDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'routes')
 
 describe('HTTP route dependency boundary', () => {
-  it('reports a newly introduced direct repository import that is not explicitly grandfathered', () => {
+  it('reports a newly introduced direct repository import', () => {
     expect(findRouteDependencyBoundaryViolations({
       'new-route.ts': "import { personaRepo } from '../../db/repositories/persona.repo'",
     })).toEqual([
@@ -18,11 +18,25 @@ describe('HTTP route dependency boundary', () => {
     ])
   })
 
-  it('accepts only the explicitly documented legacy imports while the migration is in progress', () => {
-    expect(findRouteDependencyBoundaryViolations()).toEqual([])
+  it('does not grandfather Article Illustration or Attachment runtime imports', () => {
+    expect(findRouteDependencyBoundaryViolations({
+      'article-illustrations.ts': "import { articleIllustrationService } from '../../skills/article-illustrations/article-illustration.service'",
+      'attachments.ts': "import { saveAttachment } from '../../attachments/attachment-service'",
+    })).toEqual([
+      {
+        file: 'article-illustrations.ts',
+        source: '../../skills/article-illustrations/article-illustration.service',
+        reason: 'HTTP routes must call application services instead of repositories or runtimes',
+      },
+      {
+        file: 'attachments.ts',
+        source: '../../attachments/attachment-service',
+        reason: 'HTTP routes must call application services instead of repositories or runtimes',
+      },
+    ])
   })
 
-  it('keeps every production route within the current migration allowlist', () => {
+  it('keeps every production route within the strict service boundary', () => {
     expect(findRouteDependencyBoundaryViolations({ routesDirectory })).toEqual([])
   })
 })
