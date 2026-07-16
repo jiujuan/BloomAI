@@ -3,6 +3,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { toolRepo, type Tool } from '../../db/repositories/tool.repo'
 import { executeToolInternal, ToolExecutionError } from '../../tools/execute-tool'
 import { ImageStudioCapabilityAdapter } from '../adapters/image-studio-capability-adapter'
+import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
 
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -262,14 +263,16 @@ function auditPackageCall(
   skillPackageRepo.appendEvent({
     runId: request.runId,
     seq: skillPackageRepo.listEvents(request.runId).length + 1,
-    type: 'capability.call',
-    payload: {
-      runId: request.runId,
-      toolRunId,
-      capability: request.capability,
-      toolId,
-      status,
-      ...(error ? { error } : {}),
-    },
+    ...normalizeSkillRunEvent({
+      type: 'capability.call',
+      payload: {
+        runId: request.runId,
+        toolRunId,
+        capability: request.capability,
+        toolId,
+        status,
+        ...(error ? { error } : {}),
+      },
+    }),
   })
 }

@@ -6,7 +6,9 @@ export type LlmProviderId =
   | 'ollama'
   | string
 
-export type LlmModality = 'text' | 'image' | 'video'
+import type { LlmModality } from '../../shared/llm'
+
+export type { LlmModality } from '../../shared/llm'
 
 export type LlmMessage = {
   role: 'system' | 'user' | 'assistant'

@@ -1,7 +1,7 @@
 # BloomAI Services 层迁移计划
 
 > 日期：2026-07-16  
-> 状态：阶段 0、1、2、3、4、5 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2、3、4、5 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行
+> 状态：阶段 0、1、2、3、4、5、6 的代码迁移与架构门禁已完成；阶段 1、2、3、4、5 的 Renderer 页面人工 smoke test 仍待在可交互桌面会话中执行
 > 前置文档：[Services 层架构分析](./01-service-layer-architecture-analysis.md)  
 > 目标：在不破坏现有前后端 API、流式协议和本地数据兼容性的前提下，将后端 API 调用路径逐步统一为 `HTTP Route → Application Service → Repository / Runtime`。
 
@@ -652,6 +652,14 @@ extractAttachmentText(attachment)
 - 不保留永久性的双路径调用；
 - 使用 `rg` 和架构检查确认没有遗留 Route → Repo 依赖。
 
+### 10.4 执行记录（2026-07-16）
+
+- `src/server/architecture/dependency-boundaries.ts` 已从仅检查 Route 扩展为递归检查生产 Route、Service 与 Repository；它阻止 Route → Repo/runtime、Repository → Service/HTTP/runtime，以及 Service → Route/Hono 的依赖方向，并同时扫描静态与字面量动态 import。
+- `npm run test:architecture` 已改为执行 `src/server/architecture/dependency-boundaries.test.ts`。测试覆盖三类违规、生产目录扫描，以及 allowlist 必须具有原因、负责人和移除阶段的元数据约束；当前 `DEPENDENCY_BOUNDARY_ALLOWLIST` 为空。
+- 已移除 Repository 对 LLM 与 Skill Runtime 的反向依赖：LLM modality 和 Skill reference contract 移至 `src/shared/**`；运行时事件归一化、能力策略和 artifact 事件生成回到 runtime 边界，Repository 仅持久化已归一化的事件/数据；未被生产代码调用的能力授权继承 helper 已删除。
+- 已删除旧的 `src/server/http/route-dependency-boundary.test.ts` 路径及 `src/server/skills/identifiers.ts` 过渡 helper，避免保留重复 DTO/reference 转换或长期双路径。
+- 已更新本目录架构分析、项目 README 和 [ADR-0001](./03-http-route-application-service-adr.md)，明确目录职责、例外机制与验证命令。
+- 本阶段不更改数据库 schema、HTTP endpoint、状态码、response envelope、SSE 协议或 Renderer 调用方式。完整自动化验证结果记录于本次任务；Renderer 人工 smoke 仍受当前无可交互 Electron 桌面会话限制，不能据此宣称该手工门禁已完成。
 ## 11. 每阶段验证矩阵
 
 ### 11.1 必须运行的自动化命令
@@ -793,6 +801,13 @@ npm run build
 - [x] 执行完整自动化测试、build 和后端本地 API smoke；Renderer 人工 smoke 待可交互桌面会话。
 - [x] 记录验证输出、风险和回滚点。
 
+### Phase 6：依赖规则强制与文档收口
+
+- [x] 将架构检查扩展至生产 Route、Service 与 Repository，并检查静态/动态导入；
+- [x] 清除 Repository 对 LLM/Skill runtime 的反向依赖，且当前 allowlist 为空；
+- [x] 删除过渡测试路径、重复 shared helper 和无生产调用的继承 helper；
+- [x] 更新 Services 架构分析、README 和 ADR，明确目录职责及例外登记规则；
+- [x] 执行定向架构/回归检查；完整自动化命令结果记录在本次任务。
 ## 14. 完成定义
 
 迁移仅在以下条件全部满足时才算完成：

@@ -1,6 +1,6 @@
 import { skillRepo } from '../db/repositories/skill.repo'
 import { skillPackageRepo } from '../db/repositories/skill-package.repo'
-import { resolveLegacySkillId } from '../skills/identifiers'
+import { resolveLegacySkillId } from '../../shared/skill-references'
 import { runSkill } from '../skills/legacy'
 import { ServiceError } from './errors'
 

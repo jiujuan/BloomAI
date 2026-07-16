@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { LlmModality } from '../../llm/types'
+import type { LlmModality } from '../../../shared/llm'
 import { getOrmDb } from '../client'
 import { llm_models, llm_providers, llm_video_tasks } from '../schema'
 

@@ -146,5 +146,4 @@ GET    /api/v1/skills/:id/runs               # Skill run history
 - **vm sandbox for JS execution**: Both `node_runner` tool and `js-function` skills run inside `node:vm` contexts with no access to `require`, `process`, or the filesystem.
 - **15-second hard timeout**: Every tool call races against a timeout via `Promise.race`, regardless of category.
 - **All v0.1 data persists**: Sessions, messages, and personas are untouched — v0.2 is purely additive at the schema level.
-
-
+- **Backend dependency boundary**: `src/server/http/routes/**` adapts HTTP only and calls `src/server/services/**`; Services orchestrate repositories and runtimes; `src/server/db/repositories/**` remains persistence-only. `npm run test:architecture` enforces Route → Service → Repository/Runtime boundaries across production server code. See `docs/services/01-service-layer-architecture-analysis.md` and `docs/services/03-http-route-application-service-adr.md`.

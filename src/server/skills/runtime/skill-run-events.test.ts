@@ -93,35 +93,22 @@ describe('skill run event protocol', () => {
     expect(() => normalizeSkillRunEvent({ type: 'run.unknown', payload: {} })).toThrow(/event/i)
   })
 
-  it('never persists credentials or unbounded payloads through appendEvent', async () => {
+  it('normalizes events before repositories persist them', async () => {
     const { skillPackageRepo, run } = await createRunFixture()
+    const { normalizeSkillRunEvent } = await import('./skill-run-events')
 
     skillPackageRepo.appendEvent({
       runId: run.id,
       seq: 1,
-      type: 'step.completed',
-      payload: { title: 'fetch', authorization: 'Bearer private-token' },
+      ...normalizeSkillRunEvent({
+        type: 'step.completed',
+        payload: { title: 'fetch', authorization: 'Bearer private-token' },
+      }),
     })
 
     expect(skillPackageRepo.listEvents(run.id)[0].payload_json).toContain('[REDACTED]')
-    expect(() => skillPackageRepo.appendEvent({
-      runId: run.id,
-      seq: 2,
-      type: 'step.completed',
-      payload: { title: 'fetch', raw: 'x'.repeat(8_193) },
+    expect(() => normalizeSkillRunEvent({
+      type: 'step.completed', payload: { title: 'fetch', raw: 'x'.repeat(8_193) },
     })).toThrow(/payload/i)
-  })
-
-  it('records artifact metadata without persisting artifact content', async () => {
-    const { skillPackageRepo, run } = await createRunFixture()
-    const artifact = skillPackageRepo.createArtifact({
-      runId: run.id, kind: 'markdown', path: 'summary.md', sha256: 'artifact-hash', sizeBytes: 42,
-      metadata: { content: 'private body' },
-    })
-
-    expect(skillPackageRepo.listEvents(run.id)).toEqual([
-      expect.objectContaining({ type: 'artifact.created', payload_json: expect.not.stringContaining('private body') }),
-    ])
-    expect(skillPackageRepo.listEvents(run.id)[0].payload_json).toContain(artifact.id)
   })
 })

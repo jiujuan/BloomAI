@@ -3,6 +3,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { SkillPackageReader, type ReadAssetResult, type ReadTextResult } from '../packages/package-reader'
 import { executeCapability, type CapabilityRequest, type CapabilityResult } from '../policy/capability-broker'
 import { SkillRunCoordinator, type SkillRun } from '../runtime/skill-run-coordinator'
+import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 
 const DEFAULT_MAX_STEPS = 16
 const DEFAULT_MAX_TOKENS = 8_192
@@ -193,7 +194,11 @@ export class InstructionAgentAdapter {
   }
 
   private recordEvent(runId: string, type: 'package.file_loaded' | 'step.started' | 'step.completed', payload: Record<string, unknown>): void {
-    skillPackageRepo.appendEvent({ runId, seq: skillPackageRepo.listEvents(runId).length + 1, type, payload })
+    skillPackageRepo.appendEvent({
+      runId,
+      seq: skillPackageRepo.listEvents(runId).length + 1,
+      ...normalizeSkillRunEvent({ type, payload }),
+    })
   }
 }
 

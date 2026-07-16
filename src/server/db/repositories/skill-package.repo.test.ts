@@ -85,7 +85,7 @@ describe('skillPackageRepo', () => {
       context: {},
     })
 
-    const event = { type: 'run.status_changed', payload: { from: 'created', to: 'running', revision: 1 } }
+    const event = { schemaVersion: 1, type: 'run.status_changed', payload: { from: 'created', to: 'running', revision: 1 } }
     skillPackageRepo.appendEvent({ runId: run.id, seq: 1, ...event })
     expect(() => skillPackageRepo.appendEvent({ runId: run.id, seq: 1, ...event })).toThrow()
     expect(() =>
@@ -173,36 +173,4 @@ describe('skillPackageRepo', () => {
     })).toBeUndefined()
   })
 
-  it('copies only non-broadened active grants to an upgraded skill version', async () => {
-    const { skillPackageRepo } = await loadRepo()
-    const pkg = skillPackageRepo.createPackage({ name: 'Upgrade Pkg', description: '', sourceType: 'local-directory' })
-    const oldVersion = skillPackageRepo.createVersion({
-      packageId: pkg.id, version: '1.0.0', manifest: {}, manifestHash: 'upgrade-old', packagePath: '/packages/upgrade-old',
-    })
-    const newVersion = skillPackageRepo.createVersion({
-      packageId: pkg.id, version: '2.0.0', manifest: {}, manifestHash: 'upgrade-new', packagePath: '/packages/upgrade-new',
-    })
-    skillPackageRepo.createCapabilityGrant({
-      skillVersionId: oldVersion.id, capability: 'web.fetch', grantMode: 'persistent',
-      scope: { allowedDomains: ['docs.example.test'] }, grantedBy: 'user-1',
-    })
-    skillPackageRepo.createCapabilityGrant({
-      skillVersionId: oldVersion.id, capability: 'image.generate', grantMode: 'persistent',
-      scope: { allowedModels: ['agnes-image-2.1-flash'], maxCalls: 6 }, grantedBy: 'user-1',
-    })
-
-    const inherited = skillPackageRepo.inheritCapabilityGrants({
-      fromSkillVersionId: oldVersion.id,
-      toSkillVersionId: newVersion.id,
-      requestedCapabilities: [
-        { capability: 'web.fetch', scope: { allowedDomains: ['docs.example.test', 'api.example.test'] } },
-        { capability: 'image.generate', scope: { allowedModels: ['agnes-image-2.1-flash'], maxCalls: 4 } },
-        { capability: 'artifact.write', scope: {} },
-      ],
-    })
-
-    expect(inherited).toHaveLength(1)
-    expect(inherited[0]).toMatchObject({ skill_version_id: newVersion.id, capability: 'image.generate' })
-    expect(skillPackageRepo.listCapabilityGrants(newVersion.id)).toHaveLength(1)
-  })
 })

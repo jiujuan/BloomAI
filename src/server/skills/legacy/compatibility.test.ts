@@ -19,7 +19,7 @@ async function loadCompatibilityRuntime() {
     resolvePackageSkillId,
     toLegacySkillReference,
     toPackageSkillReference,
-  } = await import('../identifiers')
+  } = await import('../../../shared/skill-references')
   const { runSkill } = await import('./run-skill')
   const { toLegacySkillToolId } = await import('./mastra-tool-id')
 

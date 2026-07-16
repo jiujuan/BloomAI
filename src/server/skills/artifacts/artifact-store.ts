@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { getSkillRunArtifactsDir } from '../../db/paths'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
+import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 
 export class ArtifactStoreError extends Error {
   constructor(message: string) {
@@ -81,7 +82,7 @@ export class ArtifactStore {
     fs.mkdirSync(directory, { recursive: true })
     const target = path.join(directory, fileName)
     fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
-    return skillPackageRepo.createArtifact({
+    const artifact = skillPackageRepo.createArtifact({
       runId: input.runId,
       kind: input.kind,
       path: fileName,
@@ -90,6 +91,21 @@ export class ArtifactStore {
       sizeBytes: input.content.length,
       metadata: input.metadata,
     })
+    skillPackageRepo.appendEvent({
+      runId: input.runId,
+      seq: skillPackageRepo.listEvents(input.runId).length + 1,
+      ...normalizeSkillRunEvent({
+        type: 'artifact.created',
+        payload: {
+          artifactId: artifact.id,
+          kind: artifact.kind,
+          path: artifact.path,
+          sha256: artifact.sha256,
+          sizeBytes: artifact.size_bytes,
+        },
+      }),
+    })
+    return artifact
   }
 }
 

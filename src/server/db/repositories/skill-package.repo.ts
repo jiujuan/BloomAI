@@ -1,17 +1,7 @@
 import { and, asc, desc, eq, isNull, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
-import {
-  capabilityGrantRequestSchema,
-  selectInheritableGrants,
-  type CapabilityGrantMode,
-  type CapabilityScope,
-  type RequestedCapability,
-  type SkillCapability,
-  type StoredCapabilityGrant,
-} from '../../skills/policy/capability-policy'
-import { normalizeSkillRunEvent } from '../../skills/runtime/skill-run-events'
-import { resolvePackageSkillId } from '../../skills/identifiers'
+import { resolvePackageSkillId } from '../../../shared/skill-references'
 import { getOrmDb } from '../client'
 import {
   skill_artifacts,
@@ -205,7 +195,7 @@ export const skillPackageRepo = {
       errorCode?: string | null
       errorMessage?: string | null
     }
-    event: { type: string; payload: Record<string, unknown> }
+    event: { schemaVersion: number; type: string; payload: Record<string, unknown> }
     command?: { idempotencyKey: string }
   }): { run: typeof skill_runs_v2.$inferSelect; duplicate: boolean } | undefined {
     return getOrmDb().transaction((tx) => {
@@ -241,14 +231,13 @@ export const skillPackageRepo = {
       if (!run) throw new Error(`Run not found after update: ${data.runId}`)
       const lastSeq = tx.select({ seq: sql<number>`coalesce(max(${skill_run_events.seq}), 0)` })
         .from(skill_run_events).where(eq(skill_run_events.run_id, data.runId)).get()?.seq ?? 0
-      const event = normalizeSkillRunEvent(data.event)
       tx.insert(skill_run_events).values({
         id: uuidv4(),
         run_id: data.runId,
         seq: Number(lastSeq) + 1,
-        schema_version: event.schemaVersion,
-        type: event.type,
-        payload_json: JSON.stringify(event.payload),
+        schema_version: data.event.schemaVersion,
+        type: data.event.type,
+        payload_json: JSON.stringify(data.event.payload),
         created_at: now,
       }).run()
       if (data.command) {
@@ -321,17 +310,17 @@ export const skillPackageRepo = {
   appendEvent(data: {
     runId: string
     seq: number
+    schemaVersion: number
     type: string
     payload: Record<string, unknown>
   }) {
-    const event = normalizeSkillRunEvent(data)
     const row = {
       id: uuidv4(),
       run_id: data.runId,
       seq: data.seq,
-      schema_version: event.schemaVersion,
-      type: event.type,
-      payload_json: JSON.stringify(event.payload),
+      schema_version: data.schemaVersion,
+      type: data.type,
+      payload_json: JSON.stringify(data.payload),
       created_at: Date.now(),
     }
     getOrmDb().insert(skill_run_events).values(row).run()
@@ -369,18 +358,6 @@ export const skillPackageRepo = {
       created_at: Date.now(),
     }
     getOrmDb().insert(skill_artifacts).values(row).run()
-    this.appendEvent({
-      runId: data.runId,
-      seq: this.listEvents(data.runId).length + 1,
-      type: 'artifact.created',
-      payload: {
-        artifactId: row.id,
-        kind: row.kind,
-        path: row.path,
-        sha256: row.sha256,
-        sizeBytes: row.size_bytes,
-      },
-    })
     return row
   },
 
@@ -397,32 +374,24 @@ export const skillPackageRepo = {
 
   createCapabilityGrant(data: {
     skillVersionId: string
-    capability: SkillCapability
-    grantMode: CapabilityGrantMode
-    scope?: CapabilityScope
+    capability: string
+    grantMode: string
+    scope?: Record<string, unknown>
     grantedBy?: string | null
     expiresAt?: number | null
     sessionId?: string | null
   }) {
-    const grant = capabilityGrantRequestSchema.parse({
-      capability: data.capability,
-      grantMode: data.grantMode,
-      scope: data.scope ?? {},
-      sessionId: data.sessionId ?? undefined,
-      grantedBy: data.grantedBy ?? undefined,
-      expiresAt: data.expiresAt ?? undefined,
-    })
     const row = {
       id: uuidv4(),
       skill_version_id: data.skillVersionId,
-      capability: grant.capability,
-      grant_mode: grant.grantMode,
-      scope_json: stringifyJsonObject(grant.scope, 'scope'),
-      granted_by: grant.grantedBy ?? null,
+      capability: data.capability,
+      grant_mode: data.grantMode,
+      scope_json: stringifyJsonObject(data.scope ?? {}, 'scope'),
+      granted_by: data.grantedBy ?? null,
       granted_at: Date.now(),
-      expires_at: grant.expiresAt ?? null,
+      expires_at: data.expiresAt ?? null,
       revoked_at: null,
-      session_id: grant.sessionId ?? null,
+      session_id: data.sessionId ?? null,
       consumed_at: null,
     }
     getOrmDb().insert(skill_capability_grants).values(row).run()
@@ -480,23 +449,4 @@ export const skillPackageRepo = {
     return result.changes === 1
   },
 
-  inheritCapabilityGrants(data: {
-    fromSkillVersionId: string
-    toSkillVersionId: string
-    requestedCapabilities: RequestedCapability[]
-  }) {
-    const oldGrants = this.listCapabilityGrants(data.fromSkillVersionId) as StoredCapabilityGrant[]
-    const inheritable = selectInheritableGrants(
-      oldGrants.filter((grant) => grant.grant_mode === 'persistent'),
-      data.requestedCapabilities,
-    )
-    return inheritable.map((grant) => this.createCapabilityGrant({
-      skillVersionId: data.toSkillVersionId,
-      capability: grant.capability as SkillCapability,
-      grantMode: grant.grant_mode as CapabilityGrantMode,
-      scope: JSON.parse(grant.scope_json),
-      grantedBy: grant.granted_by,
-      expiresAt: grant.expires_at,
-    }))
-  },
 }

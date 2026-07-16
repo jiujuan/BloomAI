@@ -1,6 +1,6 @@
 import { skillRepo } from '../../db/repositories/skill.repo'
 import { skillRunnerRegistry } from './registry'
-import { resolveLegacySkillId } from '../identifiers'
+import { resolveLegacySkillId } from '../../../shared/skill-references'
 
 export async function runSkill(skillId: string, input: object): Promise<object> {
   const legacySkillId = resolveLegacySkillId(skillId)

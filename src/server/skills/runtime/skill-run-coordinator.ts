@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
+import { normalizeSkillRunEvent } from './skill-run-events'
 
 const runStatusSchema = z.enum([
   'created',
@@ -111,8 +112,7 @@ export class SkillRunCoordinator {
     skillPackageRepo.appendEvent({
       runId: run.id,
       seq: 1,
-      type: 'input.summarized',
-      payload: inputSummary(input.input),
+      ...normalizeSkillRunEvent({ type: 'input.summarized', payload: inputSummary(input.input) }),
     })
     this.transition(run.id, 'validating', { expectedRevision: run.revision })
     return { runId: run.id }
@@ -163,7 +163,7 @@ export class SkillRunCoordinator {
         startedAt: targetStatus === 'running' && current.startedAt === null ? now : undefined,
         finishedAt: terminalStatuses.has(targetStatus) ? now : null,
       },
-      event: transitionEvent(current.status, targetStatus, data, data.expectedRevision + 1),
+      event: normalizeSkillRunEvent(transitionEvent(current.status, targetStatus, data, data.expectedRevision + 1)),
     })
     if (!result) throw new SkillRunConflictError(runId)
     return mapRun(result.run)
@@ -214,10 +214,10 @@ export class SkillRunCoordinator {
       runId,
       expectedRevision: command.expectedRevision,
       changes: { status: targetStatus, waitingReason: null, ...changes },
-      event: {
+      event: normalizeSkillRunEvent({
         type: 'run.status_changed',
         payload: { from: current.status, to: targetStatus, revision: command.expectedRevision + 1 },
-      },
+      }),
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
@@ -235,9 +235,9 @@ export class SkillRunCoordinator {
       runId,
       expectedRevision: command.expectedRevision,
       changes,
-      event: eventType === 'input.summarized'
+      event: normalizeSkillRunEvent(eventType === 'input.summarized'
         ? { type: eventType, payload: inputSummary(changes.input ?? {}) }
-        : { type: eventType, payload: { revision: command.expectedRevision + 1 } },
+        : { type: eventType, payload: { revision: command.expectedRevision + 1 } }),
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
