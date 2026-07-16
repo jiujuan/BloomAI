@@ -1,7 +1,7 @@
 # BloomAI Services 层迁移计划
 
 > 日期：2026-07-16  
-> 状态：阶段 0 已完成；阶段 1–5 待执行  
+> 状态：阶段 0 已完成；阶段 1 的代码迁移、自动化验证和本地 API smoke test 已完成，前端页面人工 smoke test 待在可交互桌面会话中执行；阶段 2–5 待执行
 > 前置文档：[Services 层架构分析](./01-service-layer-architecture-analysis.md)  
 > 目标：在不破坏现有前后端 API、流式协议和本地数据兼容性的前提下，将后端 API 调用路径逐步统一为 `HTTP Route → Application Service → Repository / Runtime`。
 
@@ -260,6 +260,26 @@ npm run build              -> passed
 - 相关 service 单元测试与 Route 测试通过；
 - 前端 Personas、Settings、Sessions 页面手工 smoke test 通过；
 - 完整验证命令通过。
+
+### 5.6 执行记录（2026-07-16）
+
+已完成的迁移：
+
+- 新增 `src/server/services/persona.service.ts`，承接 Persona 的查询和 CRUD 编排。不存在的 Persona 统一抛出 `NOT_FOUND`；内置 Persona 删除统一抛出 `FORBIDDEN`，由公共 error mapper 输出标准错误 envelope 和 `403`。
+- 新增 `src/server/services/settings.service.ts`，集中定义 public/secret 字段分类、密钥脱敏和可写白名单。`GET /settings` 与 `GET /settings/:key` 均不会返回原始密钥；已兼容包含连字符的自定义 provider key，例如 `my-provider_api_key`。
+- 新增 `src/server/services/session.service.ts`，负责会话 CRUD、消息分页与 `meta.total`。删除会话继续沿用现有软归档语义：归档后不再出现在活动列表中，关联消息保留。
+- `src/server/http/routes/personas.ts`、`settings.ts`、`sessions.ts` 现在仅处理 HTTP 输入/输出并调用 Service；三者的临时 Route → Repository 例外已从 `src/server/architecture/dependency-boundaries.ts` 删除。
+- 为三个域分别补充了 Service 单元测试和 Route contract 测试，覆盖创建/更新/删除、`NOT_FOUND`、`FORBIDDEN`、设置项白名单和脱敏、Session 分页及软归档行为。
+
+验证记录：
+
+- `npm run test:architecture`：3/3 通过；
+- `npm test`：63 个测试文件、264 个测试通过；
+- `npm run typecheck`：通过；
+- `npm run build`：通过。构建仍输出既有的 Vite CJS API deprecation 与 renderer chunk-size 警告，未产生编译或构建错误；
+- 使用独立临时数据目录和本地服务端口 `3719` 完成 API smoke test：Persona create/update/list/delete，Settings 更新/读取/密钥脱敏（含自定义 provider key），Session create/update/list/messages/delete 均通过。测试数据已在验证后删除。
+
+前端手工 smoke test 的执行说明：本次自动化环境无法操作桌面 Electron 窗口，且默认 `3718` 端口已有运行中的 BloomAI 实例；为避免修改现有用户数据，未在该实例中执行点击操作。因此 Personas、Settings、Sessions 页面的人工作业仍需在可交互桌面会话中按上述 API 对应流程完成并记录结果。除该人工 UI 验收项外，阶段 1 的代码迁移和自动化/API 验证已完成。
 
 ## 6. 阶段 2：LLM Service 与 Image Studio 扩展（P0）
 

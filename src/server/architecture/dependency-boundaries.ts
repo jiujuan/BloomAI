@@ -34,12 +34,6 @@ const LEGACY_ROUTE_IMPORT_ALLOWLIST: Readonly<Record<string, readonly string[]>>
     '../../llm',
     '../../llm/settings',
   ],
-  'personas.ts': ['../../db/repositories/persona.repo'],
-  'sessions.ts': [
-    '../../db/repositories/session.repo',
-    '../../db/repositories/message.repo',
-  ],
-  'settings.ts': ['../../db/repositories/settings.repo'],
   'skill-package-runtime.ts': [
     '../../db/repositories/skill-package.repo',
     '../../skills/artifacts',
