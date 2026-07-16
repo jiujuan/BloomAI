@@ -16,15 +16,7 @@ const LEGACY_ROUTE_IMPORT_ALLOWLIST: Readonly<Record<string, readonly string[]>>
     '../../skills/article-illustrations/article-illustration.service',
   ],
   'attachments.ts': ['../../attachments/attachment-service'],
-  'chat.ts': [
-    '../../mastra',
-    '../../mastra/agents/team',
-    '../../mastra/memory',
-    '../../mastra/agents/writer-prompt',
-    '../../db/repositories/message.repo',
-    '../../db/repositories/session.repo',
-    '../../attachments/attachment-service',
-  ],
+
   'skill-package-runtime.ts': [
     '../../db/repositories/skill-package.repo',
     '../../skills/artifacts',

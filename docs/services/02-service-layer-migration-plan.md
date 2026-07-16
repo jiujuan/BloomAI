@@ -1,7 +1,7 @@
 # BloomAI Services 层迁移计划
 
 > 日期：2026-07-16  
-> 状态：阶段 0、1、2 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行；阶段 3–5 待执行
+> 状态：阶段 0、1、2、3 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2、3 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行；阶段 4–5 待执行
 > 前置文档：[Services 层架构分析](./01-service-layer-architecture-analysis.md)  
 > 目标：在不破坏现有前后端 API、流式协议和本地数据兼容性的前提下，将后端 API 调用路径逐步统一为 `HTTP Route → Application Service → Repository / Runtime`。
 
@@ -486,6 +486,25 @@ export const chatService = {
 - 普通聊天、团队 Agent、深度研究、计划模式、附件聊天和会话恢复可手工验证；
 - 全部自动化验证通过。
 
+### 7.6 执行记录（2026-07-16）
+
+本阶段已完成以下迁移，并保持既有 AI SDK UI stream 协议和 HTTP 契约：
+
+- 新增 `src/server/services/chat.service.ts`，集中 Chat 输入归一化、用户/assistant 消息持久化、附件上下文、计划生成与 Chat runtime orchestration；Route 仅保留 JSON/header 读取、既有 HTTP 状态码映射、`AbortSignal` 传递和 `createUIMessageStreamResponse` 适配。
+- 保留 `handleChatStream`、`data-plan` 注入时序、general Memory（`threadId`/`BLOOMAI_RESOURCE_ID`）、team agent 优先级、deep-research workflow、取消信号及 user/assistant 持久化时序；未重写 SSE/UI stream 协议。
+- 附件上下文仍使用 24000 字符总预算、客户端附件 DTO 和最后一条 user message 注入；计划 prompt 与附件提示文本保持与迁移前 Route 一致，提取失败会以安全提示文本进入 prompt。
+- `src/server/http/routes/chat.ts` 已成为薄 Route；`src/server/architecture/dependency-boundaries.ts` 已删除 `chat.ts` 的历史例外，架构检查开始直接约束该 Route。
+
+已在隔离环境完成验证：
+
+- `npm test -- src/server/services/chat.service.test.ts src/server/http/routes/chat-plan.test.ts`：2 个测试文件、21 个测试通过；覆盖输入、持久化、附件、计划、agent/memory、deep mode、`data-plan` 和取消信号，以及 Route HTTP contract。
+- `npm run test:architecture`：通过（1 个测试文件、3 个测试通过）；`npm run typecheck`：通过；`npm test`：通过（65 个测试文件、294 个测试通过）；`npm run build`：通过。
+- 使用独立临时 `DATA_DIR` 和端口 `39179` 启动短生命周期本地 server，验证 `GET /health`、无 session 的 `POST /api/v1/chat` 返回 `400`、空 query 的 `POST /api/v1/chat/plan` 返回 `{ data: { tasks: [] } }`、空 assistant 的 `POST /api/v1/chat/assistant` 返回 `{ data: null }`。未调用真实外部 Provider，临时 server 与数据目录均已清理。
+
+真实 Renderer Chat 人工 smoke（普通聊天、计划、附件、team agent、deep mode、取消及会话恢复）仍需在可交互 Electron 桌面会话中，使用可用的开发凭据完成；当前自动化环境不能操作桌面窗口，且不会影响用户正在运行的默认本地实例。该待验收项不影响本阶段已完成的代码迁移、自动化验证和隔离 API smoke 结论。
+
+回滚点：将本阶段的 `chat.service.ts`、薄 `chat.ts`、相关测试、架构 allowlist 清理和本执行记录作为单独提交；如出现流事件兼容问题，回滚该单独提交即可恢复原 Route 实现。
+
 ## 8. 阶段 4：Tools、Skills 与 Package Runtime
 
 ### 8.1 Tools Service
@@ -731,12 +750,12 @@ npm run build
 
 ### Phase 3：Chat
 
-- [ ] 提取纯输入归一化 helper 并测试。
-- [ ] 提取消息持久化/附件上下文服务并测试。
-- [ ] 提取 plan 用例并测试。
-- [ ] 提取 chat runtime orchestration，保持 stream 协议不变。
-- [ ] 迁移 `http/routes/chat.ts` 为薄 Route。
-- [ ] 验证普通聊天、计划、附件、team agent、deep mode 和取消。
+- [x] 提取纯输入归一化 helper 并测试。
+- [x] 提取消息持久化/附件上下文服务并测试。
+- [x] 提取 plan 用例并测试。
+- [x] 提取 chat runtime orchestration，保持 stream 协议不变。
+- [x] 迁移 `http/routes/chat.ts` 为薄 Route。
+- [x] 验证普通聊天、计划、附件、team agent、deep mode 和取消（自动化、隔离本地 API smoke 已完成；真实 Renderer 人工 smoke 待在可交互桌面会话中执行）。
 
 ### Phase 4：Tools / Skills / Package Runtime
 
