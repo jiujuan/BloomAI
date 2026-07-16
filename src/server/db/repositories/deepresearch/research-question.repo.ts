@@ -125,6 +125,20 @@ export const researchQuestionRepo = {
     return this.getSearchQuery(id)!
   },
 
+  updateSearchQuery(id: string, data: { provider?: string | null; status: ResearchSearchQueryDto['status']; resultCount?: number; error?: ResearchRunErrorDto | null; completedAt?: number | null }): ResearchSearchQueryDto {
+    const result = getOrmDb().update(research_search_queries).set({
+      provider: data.provider ?? null,
+      status: data.status,
+      result_count: data.resultCount ?? 0,
+      error_code: data.error?.code ?? null,
+      error_message: data.error?.message ?? null,
+      error_retryable: data.error ? Number(data.error.retryable) : null,
+      completed_at: data.completedAt ?? null,
+    }).where(eq(research_search_queries.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Search Query not found: ' + id)
+    return this.getSearchQuery(id)!
+  },
+
   getSearchQuery(id: string): ResearchSearchQueryDto | undefined {
     const row = getOrmDb().select().from(research_search_queries).where(eq(research_search_queries.id, id)).get()
     return row ? mapResearchSearchQuery(row) : undefined

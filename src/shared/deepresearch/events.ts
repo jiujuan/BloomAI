@@ -11,6 +11,7 @@ export type ResearchEventType =
   | 'research.source.discovered'
   | 'research.source.selected'
   | 'research.source.fetch_failed'
+  | 'research.sources.fetched'
   | 'research.evidence.extracted'
   | 'research.coverage.assessed'
   | 'research.iteration.started'
@@ -48,6 +49,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.source.discovered', IdentifierPayload>
   | ResearchEventBase<'research.source.selected', IdentifierPayload>
   | ResearchEventBase<'research.source.fetch_failed', IdentifierPayload & { errorCode: string }>
+  | ResearchEventBase<'research.sources.fetched', JsonObject & { sourceIds: string[]; fetchedCount: number; failedCount: number }>
   | ResearchEventBase<'research.evidence.extracted', CountPayload>
   | ResearchEventBase<'research.coverage.assessed', IdentifierPayload & { score: number }>
   | ResearchEventBase<'research.iteration.started', JsonObject & { iteration: number }>

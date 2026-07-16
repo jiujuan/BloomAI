@@ -8,6 +8,10 @@ import { clarificationSchema } from '@shared/deepresearch/schemas'
 import { getDataDir } from '@server/db/paths'
 import { serverLogger } from '@server/logger/logger'
 import { briefPlannerAgent, createDeterministicBriefPlanner, type BriefPlanner } from './agents/brief-planner'
+import { createDeterministicQueryPlanner, queryPlannerAgent, type QueryPlanner } from './agents/query-planner'
+import { createContentService } from '@server/services/deepresearch/content-service'
+import { createSearchService } from '@server/services/deepresearch/search-service'
+import { SourceCurator } from '@server/services/deepresearch/source-curator'
 import { defaultDeepResearchRepositories, type DeepResearchRepositories } from './workflow-context'
 import { createDeepResearchWorkflow } from './workflow'
 
@@ -15,6 +19,10 @@ export interface CreateDeepResearchMastraRuntimeOptions {
   dataDir?: string
   storage?: LibSQLStore
   planner?: BriefPlanner
+  queryPlanner?: QueryPlanner
+  searchService?: ReturnType<typeof createSearchService>
+  sourceCurator?: SourceCurator
+  contentService?: ReturnType<typeof createContentService>
   repositories?: DeepResearchRepositories
 }
 
@@ -26,15 +34,19 @@ export function resolveDeepResearchRuntimeUrl(dataDir = getDataDir()): string {
 export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastraRuntimeOptions = {}) {
   const repositories = options.repositories ?? defaultDeepResearchRepositories
   const planner = options.planner ?? createDeterministicBriefPlanner()
+  const queryPlanner = options.queryPlanner ?? createDeterministicQueryPlanner()
+  const searchService = options.searchService ?? createSearchService()
+  const sourceCurator = options.sourceCurator ?? new SourceCurator()
+  const contentService = options.contentService ?? createContentService({ repositories })
   const storage = options.storage ?? new LibSQLStore({
     id: 'bloomai-deep-research-runtime',
     url: resolveDeepResearchRuntimeUrl(options.dataDir),
   })
-  const workflow = createDeepResearchWorkflow({ repositories, planner, dataDir: options.dataDir })
+  const workflow = createDeepResearchWorkflow({ repositories, planner, queryPlanner, searchService, sourceCurator, contentService, dataDir: options.dataDir })
   const mastra = new Mastra({
     storage,
     logger: serverLogger,
-    agents: { 'deep-research-brief-planner': briefPlannerAgent },
+    agents: { 'deep-research-brief-planner': briefPlannerAgent, 'deep-research-query-planner': queryPlannerAgent },
     workflows: { 'deep-research-v1': workflow },
   })
   const activeRuns = new Map<string, Awaited<ReturnType<typeof workflow.createRun>>>()

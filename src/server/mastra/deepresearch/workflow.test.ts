@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StartResearchInput } from '@shared/deepresearch/contracts'
 import { createDeepResearchService } from '../../deepresearch/deep-research.service'
 import { createDeepResearchMastraRuntime } from './mastra'
+import { createContentService } from '@server/services/deepresearch/content-service'
+import { createSearchService } from '@server/services/deepresearch/search-service'
+import { SourceCurator } from '@server/services/deepresearch/source-curator'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -29,8 +32,40 @@ async function loadTestContext() {
   const { researchQuestionRepo } = await import('../../db/repositories/deepresearch/research-question.repo')
   const { researchReportRepo } = await import('../../db/repositories/deepresearch/research-report.repo')
   const { researchEventRepo } = await import('../../db/repositories/deepresearch/research-event.repo')
+  const { researchSourceRepo } = await import('../../db/repositories/deepresearch/research-source.repo')
 
-  return { client, researchRunRepo, researchQuestionRepo, researchReportRepo, researchEventRepo }
+  return { client, researchRunRepo, researchQuestionRepo, researchReportRepo, researchEventRepo, researchSourceRepo }
+}
+
+function createRetrievalServices(repositories: Awaited<ReturnType<typeof loadTestContext>>) {
+  const executeTool = vi.fn(async ({ toolId, input }: { toolId: string; input: Record<string, unknown> }) => {
+    const url = typeof input.url === 'string' ? input.url : 'https://www.example.test/research'
+    if (toolId === 'web_search') {
+      return {
+        output: {
+          provider: 'fixture-search',
+          results: [{
+            title: 'Official enterprise AI assistant market data',
+            url: 'https://www.example.test/research?utm_source=fixture',
+            snippet: 'Official market data and methodology for enterprise AI assistants.',
+          }],
+        },
+      }
+    }
+    if (toolId === 'web_fetch') return { output: { finalUrl: url, status: 200, content: 'Fixture source content.' } }
+    if (toolId === 'web_extract') return { output: { finalUrl: url, title: 'Fixture source', text: 'Fixture source content.', headings: ['Overview'] } }
+    throw new Error('Unexpected tool: ' + toolId)
+  })
+  return {
+    searchService: createSearchService({ executeTool, sleep: async () => {} }),
+    sourceCurator: new SourceCurator(),
+    contentService: createContentService({
+      repositories: { researchSourceRepo: repositories.researchSourceRepo, researchEventRepo: repositories.researchEventRepo },
+      executeTool,
+      sleep: async () => {},
+      lookup: async () => ['93.184.216.34'],
+    }),
+  }
 }
 
 function createStorage() {
@@ -73,11 +108,13 @@ describe('Deep Research Mastra skeleton workflow', () => {
         criticalClarifications: [],
       })),
     }
+    const retrieval = createRetrievalServices(repositories)
     const runtime = createDeepResearchMastraRuntime({
       dataDir,
       storage: createStorage(),
       planner,
       repositories,
+      ...retrieval,
     })
     runtimes.push(runtime)
     const run = repositories.researchRunRepo.create({
@@ -112,6 +149,10 @@ describe('Deep Research Mastra skeleton workflow', () => {
       expect.objectContaining({ type: 'research.run.completed' }),
       expect.objectContaining({ type: 'research.artifact.created' }),
     ]))
+    expect(detail.questions.length).toBeGreaterThan(0)
+    expect(detail.searchQueries.length).toBeGreaterThan(0)
+    expect(detail.sources.length).toBeGreaterThan(0)
+    expect(detail.snapshots.length).toBeGreaterThan(0)
     expect(detail.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'report_markdown',
@@ -141,11 +182,13 @@ describe('Deep Research Mastra skeleton workflow', () => {
         }],
       })),
     }
+    const retrieval = createRetrievalServices(repositories)
     const runtime = createDeepResearchMastraRuntime({
       dataDir,
       storage: createStorage(),
       planner,
       repositories,
+      ...retrieval,
     })
     runtimes.push(runtime)
     const service = createDeepResearchService({ runtime })

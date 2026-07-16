@@ -4,12 +4,14 @@ import { researchEventRepo } from '@server/db/repositories/deepresearch/research
 import { researchQuestionRepo } from '@server/db/repositories/deepresearch/research-question.repo'
 import { researchReportRepo } from '@server/db/repositories/deepresearch/research-report.repo'
 import { researchRunRepo } from '@server/db/repositories/deepresearch/research-run.repo'
+import { researchSourceRepo } from '@server/db/repositories/deepresearch/research-source.repo'
 
 export interface DeepResearchRepositories {
   researchRunRepo: typeof researchRunRepo
   researchQuestionRepo: typeof researchQuestionRepo
   researchReportRepo: typeof researchReportRepo
   researchEventRepo: typeof researchEventRepo
+  researchSourceRepo: typeof researchSourceRepo
 }
 
 export const defaultDeepResearchRepositories: DeepResearchRepositories = {
@@ -17,6 +19,7 @@ export const defaultDeepResearchRepositories: DeepResearchRepositories = {
   researchQuestionRepo,
   researchReportRepo,
   researchEventRepo,
+  researchSourceRepo,
 }
 
 export function assertRunnable(run: ResearchRunDto, allowedStatuses: readonly ResearchRunStatus[]): void {

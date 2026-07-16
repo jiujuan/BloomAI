@@ -153,6 +153,15 @@ export const researchRunRepo = {
     return this.get(id)!
   },
 
+  setUsage(id: string, usage: ResearchUsageDto): ResearchRunDto {
+    const result = getOrmDb().update(research_runs).set({
+      usage_json: encodeJson(usage),
+      updated_at: Date.now(),
+    }).where(eq(research_runs.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
+    return this.get(id)!
+  },
+
   list(filter: ResearchRunFilter = {}): ResearchRunDto[] {
     const conditions = []
     if (filter.sessionId) conditions.push(eq(research_runs.session_id, filter.sessionId))
