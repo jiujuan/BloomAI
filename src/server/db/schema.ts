@@ -1,4 +1,4 @@
-﻿import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+﻿import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const personas = sqliteTable('personas', {
   id: text('id').primaryKey(),
@@ -329,4 +329,218 @@ export const article_illustration_scenes = sqliteTable('article_illustration_sce
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
   jobOrdinalIdx: index('idx_article_illustration_scenes_job_ordinal').on(table.job_id, table.ordinal),
+}))
+
+
+export const research_runs = sqliteTable('research_runs', {
+  id: text('id').primaryKey(),
+  session_id: text('session_id'),
+  topic: text('topic').notNull(),
+  profile: text('profile').notNull(),
+  depth: text('depth').notNull(),
+  status: text('status').notNull(),
+  phase: text('phase').notNull(),
+  progress: real('progress').notNull().default(0),
+  input_json: text('input_json').notNull(),
+  brief_json: text('brief_json'),
+  budget_json: text('budget_json').notNull(),
+  usage_json: text('usage_json').notNull().default('{}'),
+  quality_json: text('quality_json'),
+  workflow_run_id: text('workflow_run_id'),
+  report_artifact_id: text('report_artifact_id'),
+  resume_phase: text('resume_phase'),
+  executor_id: text('executor_id'),
+  lease_expires_at: integer('lease_expires_at'),
+  heartbeat_at: integer('heartbeat_at'),
+  error_code: text('error_code'),
+  error_message: text('error_message'),
+  error_retryable: integer('error_retryable'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+  completed_at: integer('completed_at'),
+}, (table) => ({
+  statusUpdatedIdx: index('idx_research_runs_status_updated').on(table.status, table.updated_at),
+}))
+
+export const research_questions = sqliteTable('research_questions', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  parent_question_id: text('parent_question_id'),
+  ordinal: integer('ordinal').notNull(),
+  question: text('question').notNull(),
+  intent: text('intent').notNull(),
+  required_evidence_types_json: text('required_evidence_types_json').notNull().default('[]'),
+  priority: text('priority').notNull(),
+  status: text('status').notNull(),
+  coverage_json: text('coverage_json'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runParentOrdinalIdx: index('idx_research_questions_run_parent_ordinal').on(table.run_id, table.parent_question_id, table.ordinal),
+}))
+
+export const research_search_queries = sqliteTable('research_search_queries', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  question_id: text('question_id').notNull(),
+  iteration: integer('iteration').notNull(),
+  query: text('query').notNull(),
+  provider: text('provider'),
+  status: text('status').notNull(),
+  result_count: integer('result_count').notNull().default(0),
+  error_code: text('error_code'),
+  error_message: text('error_message'),
+  error_retryable: integer('error_retryable'),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+  completed_at: integer('completed_at'),
+}, (table) => ({
+  runStatusIdx: index('idx_research_search_queries_run_status').on(table.run_id, table.status),
+  runIdempotencyIdx: uniqueIndex('idx_research_search_queries_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_sources = sqliteTable('research_sources', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  canonical_url: text('canonical_url').notNull(),
+  domain: text('domain').notNull(),
+  title: text('title'),
+  author: text('author'),
+  publisher: text('publisher'),
+  published_at: integer('published_at'),
+  source_type: text('source_type').notNull(),
+  selection_status: text('selection_status').notNull(),
+  scores_json: text('scores_json').notNull().default('{}'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runSelectionIdx: index('idx_research_sources_run_selection').on(table.run_id, table.selection_status),
+  runCanonicalUrlIdx: uniqueIndex('idx_research_sources_run_canonical_url').on(table.run_id, table.canonical_url),
+}))
+
+export const research_source_snapshots = sqliteTable('research_source_snapshots', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  source_id: text('source_id').notNull(),
+  content_hash: text('content_hash').notNull(),
+  content: text('content').notNull(),
+  metadata_json: text('metadata_json').notNull().default('{}'),
+  fetched_at: integer('fetched_at').notNull(),
+  parser_version: text('parser_version').notNull(),
+  final_url: text('final_url').notNull(),
+  http_status: integer('http_status'),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runIdempotencyIdx: uniqueIndex('idx_research_source_snapshots_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_evidence = sqliteTable('research_evidence', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  question_id: text('question_id').notNull(),
+  snapshot_id: text('snapshot_id').notNull(),
+  passage: text('passage').notNull(),
+  summary: text('summary').notNull(),
+  stance: text('stance').notNull(),
+  confidence: real('confidence').notNull(),
+  start_offset: integer('start_offset').notNull(),
+  end_offset: integer('end_offset').notNull(),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runQuestionIdx: index('idx_research_evidence_run_question').on(table.run_id, table.question_id),
+  runIdempotencyIdx: uniqueIndex('idx_research_evidence_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_report_sections = sqliteTable('research_report_sections', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  title: text('title').notNull(),
+  purpose: text('purpose').notNull(),
+  draft: text('draft'),
+  verified_text: text('verified_text'),
+  status: text('status').notNull(),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runOrdinalIdx: index('idx_research_report_sections_run_ordinal').on(table.run_id, table.ordinal),
+  runIdempotencyIdx: uniqueIndex('idx_research_report_sections_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_claims = sqliteTable('research_claims', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  section_id: text('section_id').notNull(),
+  text: text('text').notNull(),
+  kind: text('kind').notNull(),
+  importance: text('importance').notNull(),
+  verification_status: text('verification_status').notNull(),
+  confidence: real('confidence').notNull(),
+  repair_history_json: text('repair_history_json').notNull().default('[]'),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runSectionIdx: index('idx_research_claims_run_section').on(table.run_id, table.section_id),
+  runIdempotencyIdx: uniqueIndex('idx_research_claims_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_citations = sqliteTable('research_citations', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  claim_id: text('claim_id').notNull(),
+  evidence_id: text('evidence_id').notNull(),
+  entailment_status: text('entailment_status').notNull(),
+  rationale: text('rationale').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runOrdinalIdx: uniqueIndex('idx_research_citations_run_ordinal').on(table.run_id, table.ordinal),
+}))
+
+export const research_quality_assessments = sqliteTable('research_quality_assessments', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  release_status: text('release_status').notNull(),
+  high_priority_question_coverage: real('high_priority_question_coverage').notNull(),
+  factual_claim_citation_coverage: real('factual_claim_citation_coverage').notNull(),
+  supported_citation_coverage: real('supported_citation_coverage').notNull(),
+  independent_cited_domain_count: integer('independent_cited_domain_count').notNull(),
+  contradiction_disclosure_coverage: real('contradiction_disclosure_coverage').notNull(),
+  required_section_coverage: real('required_section_coverage').notNull(),
+  limitations_json: text('limitations_json').notNull().default('[]'),
+  assessor_version: text('assessor_version').notNull(),
+  created_at: integer('created_at').notNull(),
+})
+
+export const research_events = sqliteTable('research_events', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  type: text('type').notNull(),
+  phase: text('phase').notNull(),
+  timestamp: integer('timestamp').notNull(),
+  payload_json: text('payload_json').notNull().default('{}'),
+}, (table) => ({
+  runSequenceIdx: uniqueIndex('idx_research_events_run_sequence').on(table.run_id, table.sequence),
+}))
+
+export const research_artifacts = sqliteTable('research_artifacts', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  type: text('type').notNull(),
+  file_name: text('file_name').notNull(),
+  content_type: text('content_type').notNull(),
+  storage_path: text('storage_path').notNull(),
+  size_bytes: integer('size_bytes').notNull().default(0),
+  content_hash: text('content_hash'),
+  metadata_json: text('metadata_json').notNull().default('{}'),
+  idempotency_key: text('idempotency_key').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runTypeIdx: index('idx_research_artifacts_run_type').on(table.run_id, table.type),
+  runIdempotencyIdx: uniqueIndex('idx_research_artifacts_run_idempotency').on(table.run_id, table.idempotency_key),
 }))

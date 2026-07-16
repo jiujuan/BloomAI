@@ -38,6 +38,39 @@ function migrationVersions() {
   }
 }
 
+function uniqueIndexColumnSets(tableName: string): string[][] {
+  const db = openRawDb()
+  try {
+    return db
+      .prepare(`PRAGMA index_list(${tableName})`)
+      .all()
+      .filter((row: any) => row.unique === 1)
+      .map((row: any) =>
+        db
+          .prepare(`PRAGMA index_info(${row.name})`)
+          .all()
+          .sort((left: any, right: any) => left.seqno - right.seqno)
+          .map((column: any) => column.name)
+      )
+  } finally {
+    db.close()
+  }
+}
+
+
+function foreignKeyActions(tableName: string) {
+  const db = openRawDb()
+  try {
+    return db.prepare(`PRAGMA foreign_key_list(${tableName})`).all().map((row: any) => ({
+      from: row.from,
+      table: row.table,
+      onDelete: row.on_delete,
+    }))
+  } finally {
+    db.close()
+  }
+}
+
 describe('database migrations', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-db-migrations-'))
@@ -68,6 +101,18 @@ describe('database migrations', () => {
         'skill_run_events',
         'skill_artifacts',
         'skill_capability_grants',
+        'research_runs',
+        'research_questions',
+        'research_search_queries',
+        'research_sources',
+        'research_source_snapshots',
+        'research_evidence',
+        'research_report_sections',
+        'research_claims',
+        'research_citations',
+        'research_quality_assessments',
+        'research_events',
+        'research_artifacts',
       ])
     )
     expect(migrationVersions()).toEqual([
@@ -78,7 +123,42 @@ describe('database migrations', () => {
       '005-skill-capability-grant-state',
       '006-skill-run-commands',
       '007-article-illustration-jobs',
+      '008-deep-research-core',
     ])
+
+    expect(uniqueIndexColumnSets('research_events')).toContainEqual(['run_id', 'sequence'])
+    expect(uniqueIndexColumnSets('research_sources')).toContainEqual(['run_id', 'canonical_url'])
+
+    for (const tableName of [
+      'research_search_queries',
+      'research_source_snapshots',
+      'research_evidence',
+      'research_report_sections',
+      'research_claims',
+      'research_artifacts',
+    ]) {
+      expect(uniqueIndexColumnSets(tableName)).toContainEqual(['run_id', 'idempotency_key'])
+    }
+
+    for (const tableName of [
+      'research_questions',
+      'research_search_queries',
+      'research_sources',
+      'research_source_snapshots',
+      'research_evidence',
+      'research_report_sections',
+      'research_claims',
+      'research_citations',
+      'research_quality_assessments',
+      'research_events',
+      'research_artifacts',
+    ]) {
+      expect(foreignKeyActions(tableName)).toContainEqual({
+        from: 'run_id',
+        table: 'research_runs',
+        onDelete: 'CASCADE',
+      })
+    }
   })
 
   it('upgrades a database that only has legacy skill tables', async () => {
