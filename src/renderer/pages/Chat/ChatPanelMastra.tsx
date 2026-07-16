@@ -5,7 +5,7 @@ import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Br
 import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
 import { platform } from '@renderer/api'
-import { useSessionStore, useSettingsStore, useLlmStore } from '@renderer/store'
+import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import { AssistantMarkdown } from './parts/AssistantMarkdown'
 import { ReasoningPart } from './parts/ReasoningPart'
@@ -106,9 +106,10 @@ function friendlyError(error: { message?: string }): string {
  * with rich tool cards; no bloom-response-v1 contract. mode/model travel as headers.
  */
 export function ChatPanelMastra() {
-  const { sessions, activeSessionId } = useSessionStore()
+  const { sessions, activeSessionId, createSession } = useSessionStore()
   const { settings } = useSettingsStore()
   const { textModels, loadTextModels } = useLlmStore()
+  const { activePersonaId } = usePersonaStore()
   const session = sessions.find((s) => s.id === activeSessionId)
 
   const [mode, setMode] = useState<ChatMode>('chat')
@@ -145,6 +146,8 @@ export function ChatPanelMastra() {
   // execution request fails, we restore them so nothing is lost — see useChat onError below.
   const lastPlanTurnRef = useRef<PlanEntry[] | null>(null)
   const model = modelOverride || session?.model || settings.model || DEFAULT_MODEL
+  const sessionIdRef = useRef<string | null>(activeSessionId)
+  const pendingSessionIdRef = useRef<string | null>(null)
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   const teamRef = useRef(team)
@@ -153,6 +156,7 @@ export function ChatPanelMastra() {
   modelRef.current = model
   teamRef.current = team
   writingRef.current = writing
+  sessionIdRef.current = activeSessionId
 
   useEffect(() => {
     loadTextModels()
@@ -196,7 +200,7 @@ export function ChatPanelMastra() {
           // config, whose values are Chinese — only sent when the 写作 tab is active.
           body: {
             messages,
-            sessionId: activeSessionId,
+            sessionId: pendingSessionIdRef.current || sessionIdRef.current || activeSessionId || '',
             plan: planRef.current || undefined,
             writing: teamRef.current === 'writing' ? writingRef.current : undefined,
             // Resolved attachments (with server path) for this turn. Read from a dedicated ref set
@@ -206,7 +210,7 @@ export function ChatPanelMastra() {
           headers: {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
-            'x-bloom-session': activeSessionId || '',
+            'x-bloom-session': pendingSessionIdRef.current || sessionIdRef.current || activeSessionId || '',
             'x-bloom-agent': teamRef.current,
           },
         }),
@@ -221,11 +225,12 @@ export function ChatPanelMastra() {
     // cards survive reloads. Read live state to avoid stale closures across renders.
     onFinish: ({ message }) => {
       if (message.role !== 'assistant') return
-      const sid = useSessionStore.getState().activeSessionId
+      const sid = useSessionStore.getState().activeSessionId || pendingSessionIdRef.current
       if (!sid) return
       // Plan execution finished: the confirmed plan streamed in as a data-plan part (server
       // side), so it's already in message.parts — just release the refs for the next turn.
       if (planRef.current) planRef.current = null
+      pendingSessionIdRef.current = null
       lastPlanTurnRef.current = null
       const parts = ((message as any).parts || []) as any[]
       const content = parts.filter((p) => p?.type === 'text').map((p) => p.text || '').join('')
@@ -237,6 +242,7 @@ export function ChatPanelMastra() {
     // the full turn — both drafts and the confirmed plan — stays visible above the error message.
     onError: () => {
       planRef.current = null
+      pendingSessionIdRef.current = null
       if (lastPlanTurnRef.current) {
         setPlans(lastPlanTurnRef.current)
         lastPlanTurnRef.current = null
@@ -364,10 +370,19 @@ export function ChatPanelMastra() {
   const readyAttachments = attachments.filter((a) => a.att)
   const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading
 
-  const handleSend = () => {
+  const ensureActiveSessionId = async (): Promise<string> => {
+    const existing = sessionIdRef.current || activeSessionId
+    if (existing) return existing
+    const created = await createSession({ persona_id: activePersonaId || undefined, model })
+    sessionIdRef.current = created.id
+    return created.id
+  }
+
+  const handleSend = async () => {
     const text = input.trim()
     if (isStreaming || uploading) return
     if (!text && readyAttachments.length === 0) return
+    const sessionId = await ensureActiveSessionId()
     // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
     // If a proposal is already pending, a new question discards it in place (kept visible as
     // "已丢弃", position unchanged) and proposes afresh below — only the latest plan is executable.
@@ -383,9 +398,10 @@ export function ChatPanelMastra() {
         ...prev.map((p) => (p.status === 'ready' ? { ...p, status: 'discarded' as PlanStatus } : p)),
         { id, query: text, tasks: [], status: 'proposing' },
       ])
-      void runProposal(id, text)
+      void runProposal(id, text, undefined, sessionId)
       return
     }
+    pendingSessionIdRef.current = sessionId
     setInput('')
     // Reflect the first question in the sidebar title immediately (matches the server, which
     // titles the session from its first persisted user message). Without this the sidebar keeps
@@ -395,7 +411,11 @@ export function ChatPanelMastra() {
     sendAttachmentsRef.current = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
     setAttachments([]) // display cleared for next turn; sendAttachmentsRef carries this turn's files
     setAttachError(null)
-    void sendMessage({ parts } as any)
+    try {
+      await sendMessage({ parts } as any)
+    } finally {
+      pendingSessionIdRef.current = null
+    }
   }
 
   // Reflect the first question in the sidebar title immediately. In normal mode the server sets
@@ -413,10 +433,10 @@ export function ChatPanelMastra() {
 
   // Fill a plan entry's tasks from the server (in place, keeping its id/position). `avoid` is set
   // on 重新计划 to steer toward a different plan.
-  const runProposal = async (id: number, query: string, avoid?: string[]) => {
+  const runProposal = async (id: number, query: string, avoid?: string[], sessionId = sessionIdRef.current || activeSessionId || '') => {
     let tasks: string[]
     try {
-      const res = await platform.proposePlan({ sessionId: activeSessionId || '', query, model, avoid })
+      const res = await platform.proposePlan({ sessionId, query, model, avoid })
       tasks = res.tasks.length ? res.tasks : [query]
     } catch {
       tasks = [query] // fall back to a single task so the user can still proceed
@@ -432,8 +452,10 @@ export function ChatPanelMastra() {
   // 是: execute the confirmed tasks. planRef feeds the transport (request body) and onFinish.
   // Clear all plan cards (the chosen one becomes a real answer with its own data-plan card; any
   // discarded drafts are done with) but snapshot them first so onError can restore them on failure.
-  const handleConfirm = (entry: PlanEntry) => {
+  const handleConfirm = async (entry: PlanEntry) => {
     if (entry.status !== 'ready') return
+    const sessionId = await ensureActiveSessionId()
+    pendingSessionIdRef.current = sessionId
     planRef.current = entry.tasks
     lastPlanTurnRef.current = plans.map((p) => (p.id === entry.id ? { ...p, status: 'done' as PlanStatus } : p))
     const parts = buildUserParts(entry.query)
@@ -441,7 +463,11 @@ export function ChatPanelMastra() {
     setPlans([])
     setAttachments([]) // display cleared; sendAttachmentsRef carries this execution turn's files
     setAttachError(null)
-    void sendMessage({ parts } as any)
+    try {
+      await sendMessage({ parts } as any)
+    } finally {
+      pendingSessionIdRef.current = null
+    }
   }
 
   return (

@@ -32,7 +32,11 @@ chatRoutes.post('/', async (c) => {
   const body = await readJson<any>(c)
   const mode = c.req.header('x-bloom-mode') || 'chat'
   const model = c.req.header('x-bloom-model') || DEFAULT_CHAT_MODEL
-  const sessionId = c.req.header('x-bloom-session') || body.sessionId || body.id || ''
+  const sessionCandidate = c.req.header('x-bloom-session') || body.sessionId || body.id || ''
+  const sessionId = typeof sessionCandidate === 'string' ? sessionCandidate.trim() : ''
+  if (!sessionId) {
+    return c.json({ error: { code: 'SESSION_REQUIRED', message: 'A chat session is required.' } }, 400)
+  }
 
   const requestContext = new RequestContext()
   requestContext.set('mode', mode)
@@ -114,10 +118,10 @@ chatRoutes.post('/', async (c) => {
       params: {
         ...body,
         messages: agentMessages,
-        // Memory-managed agents: `memory.thread` maps to the session so Mastra loads
+        // Memory-managed agents: `memory.threadId` maps to the session so Mastra loads
         // history (last N messages + working memory + observations) from memory.db and
         // saves the new turn back. resource scope persists working memory across sessions.
-        ...(useMemory ? { memory: { thread: sessionId, resource: BLOOMAI_RESOURCE_ID } } : {}),
+        ...(useMemory ? { memory: { threadId: sessionId, resourceId: BLOOMAI_RESOURCE_ID } } : {}),
         requestContext,
         abortSignal: c.req.raw.signal,
         maxSteps: MAX_STEPS,
@@ -166,7 +170,11 @@ chatRoutes.post('/', async (c) => {
 chatRoutes.post('/plan', async (c) => {
   const body = await readJson<any>(c)
   const model = c.req.header('x-bloom-model') || DEFAULT_CHAT_MODEL
-  const sessionId = c.req.header('x-bloom-session') || body?.sessionId || ''
+  const sessionCandidate = c.req.header('x-bloom-session') || body?.sessionId || ''
+  const sessionId = typeof sessionCandidate === 'string' ? sessionCandidate.trim() : ''
+  if (!sessionId) {
+    return c.json({ error: { code: 'SESSION_REQUIRED', message: 'A chat session is required.' } }, 400)
+  }
   const query = typeof body?.query === 'string' ? body.query.trim() : ''
   if (!query) return c.json({ data: { tasks: [] } })
 
