@@ -102,6 +102,16 @@ export const researchQuestionRepo = {
       .map(mapResearchQuestion)
   },
 
+  updateCoverage(id: string, data: { coverage: ResearchCoverageDto; status: ResearchQuestionDto['status'] }): ResearchQuestionDto {
+    const result = getOrmDb().update(research_questions).set({
+      coverage_json: encodeJson(data.coverage),
+      status: data.status,
+      updated_at: Date.now(),
+    }).where(eq(research_questions.id, id)).run()
+    if (result.changes !== 1) throw new Error('Deep Research Question not found: ' + id)
+    return this.get(id)!
+  },
+
   createSearchQuery(input: CreateResearchSearchQueryInput): ResearchSearchQueryDto {
     const id = uuidv4()
     const now = Date.now()

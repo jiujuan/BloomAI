@@ -1,5 +1,6 @@
 import type { ResearchRunDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
 import { ResearchDomainError } from '@server/deepresearch/domain/errors'
+import { researchEvidenceRepo } from '@server/db/repositories/deepresearch/research-evidence.repo'
 import { researchEventRepo } from '@server/db/repositories/deepresearch/research-event.repo'
 import { researchQuestionRepo } from '@server/db/repositories/deepresearch/research-question.repo'
 import { researchReportRepo } from '@server/db/repositories/deepresearch/research-report.repo'
@@ -11,6 +12,7 @@ export interface DeepResearchRepositories {
   researchQuestionRepo: typeof researchQuestionRepo
   researchReportRepo: typeof researchReportRepo
   researchEventRepo: typeof researchEventRepo
+  researchEvidenceRepo: typeof researchEvidenceRepo
   researchSourceRepo: typeof researchSourceRepo
 }
 
@@ -19,6 +21,7 @@ export const defaultDeepResearchRepositories: DeepResearchRepositories = {
   researchQuestionRepo,
   researchReportRepo,
   researchEventRepo,
+  researchEvidenceRepo,
   researchSourceRepo,
 }
 

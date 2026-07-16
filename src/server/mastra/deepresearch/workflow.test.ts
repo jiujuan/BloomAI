@@ -32,9 +32,10 @@ async function loadTestContext() {
   const { researchQuestionRepo } = await import('../../db/repositories/deepresearch/research-question.repo')
   const { researchReportRepo } = await import('../../db/repositories/deepresearch/research-report.repo')
   const { researchEventRepo } = await import('../../db/repositories/deepresearch/research-event.repo')
+  const { researchEvidenceRepo } = await import('../../db/repositories/deepresearch/research-evidence.repo')
   const { researchSourceRepo } = await import('../../db/repositories/deepresearch/research-source.repo')
 
-  return { client, researchRunRepo, researchQuestionRepo, researchReportRepo, researchEventRepo, researchSourceRepo }
+  return { client, researchRunRepo, researchQuestionRepo, researchReportRepo, researchEventRepo, researchEvidenceRepo, researchSourceRepo }
 }
 
 function createRetrievalServices(repositories: Awaited<ReturnType<typeof loadTestContext>>) {
@@ -153,6 +154,11 @@ describe('Deep Research Mastra skeleton workflow', () => {
     expect(detail.searchQueries.length).toBeGreaterThan(0)
     expect(detail.sources.length).toBeGreaterThan(0)
     expect(detail.snapshots.length).toBeGreaterThan(0)
+    expect(detail.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'research.evidence.extracted' }),
+      expect.objectContaining({ type: 'research.coverage.assessed' }),
+      expect.objectContaining({ type: 'research.iteration.completed' }),
+    ]))
     expect(detail.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'report_markdown',
