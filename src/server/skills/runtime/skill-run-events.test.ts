@@ -52,6 +52,28 @@ describe('skill run event protocol', () => {
     })
   })
 
+  it('redacts API keys, bearer tokens, and request headers from persisted event payloads', async () => {
+    const { normalizeSkillRunEvent } = await import('./skill-run-events')
+
+    const event = normalizeSkillRunEvent({
+      type: 'step.completed',
+      payload: {
+        title: 'fetch reference',
+        request: {
+          headers: { authorization: 'Bearer sk-live-secret', 'x-api-key': 'sk-test-secret' },
+          openai_api_key: 'sk-project-secret',
+        },
+        summary: 'loaded safely',
+      },
+    })
+
+    expect(event.payload).toEqual({
+      title: 'fetch reference',
+      request: { headers: '[REDACTED]', openai_api_key: '[REDACTED]' },
+      summary: 'loaded safely',
+    })
+  })
+
   it('rejects base64 media and oversized text payloads', async () => {
     const { normalizeSkillRunEvent } = await import('./skill-run-events')
 

@@ -535,16 +535,16 @@ Artifacts：
 - [x] Image Studio 可重新打开结果。
 - [x] Skills Runs 页面可追溯全过程。
 
-### 20.4 安全测试
-
-- [ ] ZIP Slip。
-- [ ] Symlink escape。
-- [ ] 超大压缩包。
-- [ ] `../../.env` 引用。
-- [ ] 未授权 Python 或 Shell。
-- [ ] 直接调用内部工具绕过 Broker。
-- [ ] Event 中 API key 脱敏。
-- [ ] Artifact ID 越权读取。
+### 20.4 安全测试
+
+- [x] ZIP Slip?
+- [x] Symlink escape?
+- [x] 超大压缩包?
+- [x] `../../.env` 引用?
+- [x] 未授权 Python 或 Shell?
+- [x] 直接调用内部工具绕过 Broker?
+- [x] Event 中 API key 脱敏?
+- [x] Artifact ID 越权读取?
 
 ## 21. TODO 19：可观测性与运维
 

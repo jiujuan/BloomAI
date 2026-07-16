@@ -36,21 +36,23 @@ export class ArtifactStore {
     })
   }
 
-  readContent(artifactId: string): { mimeType: string; content: Buffer } {
-    const artifact = skillPackageRepo.getArtifact(artifactId)
-    if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${artifactId}`)
+  readContent(input: { artifactId: string; runId: string }): { mimeType: string; content: Buffer } {
+    const artifact = skillPackageRepo.getArtifact(input.artifactId)
+    if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
+    requireArtifactOwnership(artifact, input.runId)
     const fullPath = resolveArtifactFile(artifact.run_id, artifact.path)
     const stat = fs.lstatSync(fullPath)
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new ArtifactStoreError(`Artifact file must be regular: ${artifactId}`)
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new ArtifactStoreError(`Artifact file must be regular: ${input.artifactId}`)
     const content = fs.readFileSync(fullPath)
-    if (hashBuffer(content) !== artifact.sha256) throw new ArtifactStoreError(`Artifact hash mismatch: ${artifactId}`)
+    if (hashBuffer(content) !== artifact.sha256) throw new ArtifactStoreError(`Artifact hash mismatch: ${input.artifactId}`)
     return { mimeType: artifact.mime_type ?? 'application/octet-stream', content }
   }
 
-  exportArtifact(input: { artifactId: string; destinationDir: string }): string {
+  exportArtifact(input: { artifactId: string; runId: string; destinationDir: string }): string {
     const destinationDir = existingDirectory(input.destinationDir)
     const artifact = skillPackageRepo.getArtifact(input.artifactId)
     if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
+    requireArtifactOwnership(artifact, input.runId)
     const sourcePath = resolveArtifactFile(artifact.run_id, artifact.path)
     const sourceStat = fs.lstatSync(sourcePath)
     if (sourceStat.isSymbolicLink() || !sourceStat.isFile()) throw new ArtifactStoreError(`Artifact file must be regular: ${input.artifactId}`)
@@ -89,6 +91,11 @@ export class ArtifactStore {
       metadata: input.metadata,
     })
   }
+}
+
+function requireArtifactOwnership(artifact: { id: string; run_id: string }, runId: string): void {
+  requireExistingRunId(runId)
+  if (artifact.run_id !== runId) throw new ArtifactStoreError(`Artifact not found for run: ${artifact.id}`)
 }
 
 function requireExistingRunId(runId: string): void {

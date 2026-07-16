@@ -25,20 +25,21 @@ function writeFile(relativePath: string, content: string) {
   fs.writeFileSync(target, content)
 }
 
-function writeStoredZip(target: string, entries: Array<{ name: string; content: string; unixMode?: number }>) {
+function writeStoredZip(target: string, entries: Array<{ name: string; content: string; unixMode?: number; uncompressedSize?: number }>) {
   const chunks: Buffer[] = []
   const central: Buffer[] = []
   let offset = 0
   for (const entry of entries) {
     const name = Buffer.from(entry.name)
     const content = Buffer.from(entry.content)
+    const uncompressedSize = entry.uncompressedSize ?? content.length
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0)
     local.writeUInt16LE(20, 4)
     local.writeUInt32LE(0, 6)
     local.writeUInt32LE(0, 14)
     local.writeUInt32LE(content.length, 18)
-    local.writeUInt32LE(content.length, 22)
+    local.writeUInt32LE(uncompressedSize, 22)
     local.writeUInt16LE(0, 28)
     local.writeUInt16LE(name.length, 26)
     chunks.push(local, name, content)
@@ -52,7 +53,7 @@ function writeStoredZip(target: string, entries: Array<{ name: string; content: 
     header.writeUInt32LE(0, 16)
     header.writeUInt32LE(0, 20)
     header.writeUInt32LE(content.length, 20)
-    header.writeUInt32LE(content.length, 24)
+    header.writeUInt32LE(uncompressedSize, 24)
     header.writeUInt16LE(name.length, 28)
     header.writeUInt16LE(0, 32)
     header.writeUInt16LE(0, 34)
@@ -195,6 +196,20 @@ describe('PackageInstaller', () => {
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
     await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+  })
+
+  it('rejects oversized ZIP entries before extraction', async () => {
+    const zipPath = path.join(fixtureDir, 'oversized.zip')
+    writeStoredZip(zipPath, [{
+      name: 'skill/SKILL.md',
+      content: '# Oversized\n',
+      uncompressedSize: 10 * 1024 * 1024 + 1,
+    }])
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+
+    await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toThrow(/maximum size/i)
     expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
   })
 })

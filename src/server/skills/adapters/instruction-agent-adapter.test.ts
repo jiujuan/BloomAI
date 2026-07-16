@@ -66,8 +66,27 @@ describe('InstructionAgentAdapter', () => {
       expect(context.readText).toBeTypeOf('function')
       expect(context.readAsset).toBeTypeOf('function')
       expect(context.executeCapability).toBeTypeOf('function')
+      expect(Object.keys(context).sort()).toEqual([
+        'allowedCapabilities',
+        'completeStep',
+        'consumeTokens',
+        'executeCapability',
+        'input',
+        'instruction',
+        'isCancellationRequested',
+        'manifest',
+        'maxSteps',
+        'maxTokens',
+        'readAsset',
+        'readText',
+        'runContext',
+        'runId',
+        'startStep',
+      ].sort())
       expect(context).not.toHaveProperty('packagePath')
       expect(context).not.toHaveProperty('repository')
+      expect(context).not.toHaveProperty('executeToolInternal')
+      expect(context).not.toHaveProperty('toolRegistry')
       return { status: 'completed' as const, output: { plan: ['Dawn skyline'] }, tokensUsed: 240 }
     })
     const adapter = new InstructionAgentAdapter({ executor: { execute }, maxSteps: 8, maxTokens: 1_000 })

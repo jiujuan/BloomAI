@@ -154,6 +154,6 @@ export function formatDate(value: number | null | undefined) {
   return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(value) : '—'
 }
 
-export function artifactContentUrl(artifactId: string) {
-  return API_BASE + '/skill-artifacts/' + encodeURIComponent(artifactId) + '/content'
+export function artifactContentUrl(artifactId: string, runId: string) {
+  return API_BASE + '/skill-artifacts/' + encodeURIComponent(artifactId) + '/content?runId=' + encodeURIComponent(runId)
 }

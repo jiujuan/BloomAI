@@ -72,6 +72,7 @@ describe('SkillPackageReader', () => {
     const reader = new SkillPackageReader(packagePath)
 
     expect(() => reader.readText('../SKILL.md')).toThrow(SkillPackageReadError)
+    expect(() => reader.readText('../../.env')).toThrow(SkillPackageReadError)
     expect(() => reader.readText('/etc/passwd')).toThrow(SkillPackageReadError)
     expect(() => reader.readText('C:/Users/xing/.env')).toThrow(SkillPackageReadError)
   })

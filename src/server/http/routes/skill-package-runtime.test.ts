@@ -225,18 +225,41 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(artifacts.body.data).toHaveLength(1)
     expect(artifacts.body.data[0].id).toBe(artifact.id)
 
-    const content = await app.request(`/api/v1/skill-artifacts/${artifact.id}/content`)
+    const content = await app.request(`/api/v1/skill-artifacts/${artifact.id}/content?runId=${encodeURIComponent(runId)}`)
     expect(content.status).toBe(200)
     expect(content.headers.get('content-type')).toContain('text/markdown')
     await expect(content.text()).resolves.toBe('# Done')
 
     const exported = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ destinationDir: exportDir }),
+      body: JSON.stringify({ runId, destinationDir: exportDir }),
     })
     expect(exported.response.status).toBe(200)
     expect(exported.body.data.path).toBe(path.join(exportDir, 'summary.md'))
     expect(fs.readFileSync(exported.body.data.path, 'utf8')).toBe('# Done')
+  })
+
+  it('rejects artifact reads and exports when a valid artifact id is requested through another run id', async () => {
+    const { app, skillPackageRepo, ArtifactStore } = await loadApi()
+    const { pkg } = createRunnableFixture(skillPackageRepo)
+    const first = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: pkg.id, input: { article: 'first' } }) })
+    const second = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: pkg.id, input: { article: 'second' } }) })
+    const firstRunId = first.body.data.runId as string
+    const secondRunId = second.body.data.runId as string
+    const artifact = new ArtifactStore().writeText({ runId: firstRunId, kind: 'markdown', fileName: 'summary.md', content: '# Done' })
+
+    const missingRunId = await app.request(`/api/v1/skill-artifacts/${artifact.id}/content`)
+    expect(missingRunId.status).toBe(400)
+
+    const otherRunContent = await app.request(`/api/v1/skill-artifacts/${artifact.id}/content?runId=${encodeURIComponent(secondRunId)}`)
+    expect(otherRunContent.status).toBe(404)
+
+    const otherRunExport = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
+      method: 'POST',
+      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir }),
+    })
+    expect(otherRunExport.response.status).toBe(404)
+    expect(otherRunExport.body.error.code).toBe('NOT_FOUND')
   })
 
   it('keeps Legacy Skills synchronous while blocking Package references from the old API', async () => {

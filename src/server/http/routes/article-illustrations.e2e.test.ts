@@ -181,10 +181,10 @@ Create an editable illustration plan before generating images.
       expect.objectContaining({ kind: 'image-reference' }),
     ]))
     const manifest = artifacts.body.data.find((artifact: any) => artifact.kind === 'markdown' && artifact.path === 'illustrations.md')
-    const artifactContent = await app.request(new URL(`/api/v1/skill-artifacts/${manifest.id}/content`, 'http://localhost'))
+    const artifactContent = await app.request(new URL(`/api/v1/skill-artifacts/${manifest.id}/content?runId=${encodeURIComponent(runId)}`, 'http://localhost'))
     expect(artifactContent.status).toBe(200)
     await expect(artifactContent.text()).resolves.toContain('# Illustrations')
-    const exported = await requestJson(app, `/skill-artifacts/${manifest.id}/export`, { method: 'POST', body: JSON.stringify({ destinationDir: exportDir }) })
+    const exported = await requestJson(app, `/skill-artifacts/${manifest.id}/export`, { method: 'POST', body: JSON.stringify({ runId, destinationDir: exportDir }) })
     expect(exported.response.status).toBe(200)
     expect(fs.readFileSync(exported.body.data.path, 'utf8')).toContain('# Illustrations')
 

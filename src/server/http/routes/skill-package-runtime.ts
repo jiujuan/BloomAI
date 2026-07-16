@@ -40,6 +40,8 @@ const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
 ])
 const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() })
+const artifactContentQuerySchema = z.object({ runId: idSchema })
+const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1) })
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
@@ -210,7 +212,10 @@ skillPackageRuntimeRoutes.get('/skill-runs/:id/artifacts', (c) => {
 
 skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
   try {
-    const content = artifactStore.readContent(idSchema.parse(c.req.param('id')))
+    const artifactId = idSchema.parse(c.req.param('id'))
+    const { runId } = artifactContentQuerySchema.parse(c.req.query())
+    coordinator.getRun(runId)
+    const content = artifactStore.readContent({ artifactId, runId })
     return new Response(Uint8Array.from(content.content), { headers: { 'Content-Type': content.mimeType } })
   } catch (error) {
     return errorResponse(c, error)
@@ -219,8 +224,10 @@ skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
 
 skillPackageRuntimeRoutes.post('/skill-artifacts/:id/export', async (c) => {
   try {
-    const body = await readValidated(c, z.object({ destinationDir: z.string().min(1) }))
-    const path = artifactStore.exportArtifact({ artifactId: idSchema.parse(c.req.param('id')), destinationDir: body.destinationDir })
+    const artifactId = idSchema.parse(c.req.param('id'))
+    const body = await readValidated(c, artifactExportSchema)
+    coordinator.getRun(body.runId)
+    const path = artifactStore.exportArtifact({ artifactId, runId: body.runId, destinationDir: body.destinationDir })
     return c.json({ data: { path } })
   } catch (error) {
     return errorResponse(c, error)

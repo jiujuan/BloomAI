@@ -62,7 +62,7 @@ describe('ArtifactStore', () => {
     expect([markdown, json, prompt, image, manifest].map((artifact) => artifact.mime_type)).toEqual([
       'text/markdown', 'application/json', 'text/plain', 'application/vnd.bloomai.image-reference+json', 'application/vnd.bloomai.directory-manifest+json',
     ])
-    expect(store.readContent(markdown.id)).toEqual({ mimeType: 'text/markdown', content: Buffer.from('# Result') })
+    expect(store.readContent({ artifactId: markdown.id, runId: run.id })).toEqual({ mimeType: 'text/markdown', content: Buffer.from('# Result') })
     expect(fs.readFileSync(path.join(getSkillRunArtifactsDir(run.id), 'hero.json'), 'utf8')).toContain('image-1')
   })
 
@@ -75,7 +75,7 @@ describe('ArtifactStore', () => {
     expect(() => store.writeText({ runId: run.id, kind: 'markdown', fileName: 'wrong.json', content: 'x' })).toThrow(ArtifactStoreError)
     const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'summary.md', content: '# Result' })
     fs.writeFileSync(path.join(getSkillRunArtifactsDir(run.id), 'summary.md'), 'tampered')
-    expect(() => store.readContent(artifact.id)).toThrow(/hash/i)
+    expect(() => store.readContent({ artifactId: artifact.id, runId: run.id })).toThrow(/hash/i)
 
     const linked = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'linked.md', content: '# Linked' })
     const linkedPath = path.join(getSkillRunArtifactsDir(run.id), 'linked.md')
@@ -88,7 +88,7 @@ describe('ArtifactStore', () => {
       if (error?.code === 'EPERM') return
       throw error
     }
-    expect(() => store.readContent(linked.id)).toThrow(/regular/i)
+    expect(() => store.readContent({ artifactId: linked.id, runId: run.id })).toThrow(/regular/i)
   })
 
   it('exports an artifact only to an existing destination and retains files when a run is removed', async () => {
@@ -98,14 +98,32 @@ describe('ArtifactStore', () => {
     const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'summary.md', content: '# Result' })
     const destinationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-artifact-export-'))
 
-    const exported = store.exportArtifact({ artifactId: artifact.id, destinationDir })
+    const exported = store.exportArtifact({ artifactId: artifact.id, runId: run.id, destinationDir })
     expect(exported).toBe(path.join(destinationDir, 'summary.md'))
     expect(fs.readFileSync(exported, 'utf8')).toBe('# Result')
-    expect(() => store.exportArtifact({ artifactId: artifact.id, destinationDir })).toThrow(ArtifactStoreError)
-    expect(() => store.exportArtifact({ artifactId: artifact.id, destinationDir: path.join(destinationDir, 'missing') })).toThrow(ArtifactStoreError)
+    expect(() => store.exportArtifact({ artifactId: artifact.id, runId: run.id, destinationDir })).toThrow(ArtifactStoreError)
+    expect(() => store.exportArtifact({ artifactId: artifact.id, runId: run.id, destinationDir: path.join(destinationDir, 'missing') })).toThrow(ArtifactStoreError)
 
     store.removeRun(run.id)
     expect(fs.existsSync(getSkillRunArtifactsDir(run.id))).toBe(true)
+    fs.rmSync(destinationDir, { recursive: true, force: true })
+  })
+
+  it('rejects artifact reads and exports when the artifact id does not belong to the requested run', async () => {
+    const { run, skillPackageRepo } = await createRunFixture()
+    const { ArtifactStore, ArtifactStoreError } = await import('./artifact-store')
+    const store = new ArtifactStore()
+    const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'summary.md', content: '# Result' })
+    const version = skillPackageRepo.createVersion({
+      packageId: skillPackageRepo.createPackage({ name: 'Other artifact fixture', description: '', sourceType: 'local-directory' }).id,
+      version: '1.0.0', manifest: {}, manifestHash: 'other-artifact-fixture', packagePath: '/packages/other-artifact-fixture',
+    })
+    const otherRun = skillPackageRepo.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
+    const destinationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-artifact-export-'))
+
+    expect(() => store.readContent({ artifactId: artifact.id, runId: otherRun.id })).toThrow(ArtifactStoreError)
+    expect(() => store.exportArtifact({ artifactId: artifact.id, runId: otherRun.id, destinationDir })).toThrow(ArtifactStoreError)
+
     fs.rmSync(destinationDir, { recursive: true, force: true })
   })
 

@@ -93,7 +93,15 @@ describe('CapabilityBroker', () => {
       runId: run.id,
     })).rejects.toBeInstanceOf(CapabilityDeniedError)
 
+    await expect(executeCapability({
+      caller: 'package-runtime',
+      capability: 'python.execute',
+      input: { code: 'print(1)' },
+      runId: run.id,
+    })).rejects.toBeInstanceOf(CapabilityDeniedError)
+
     expect(toolRepo.listRuns('shell')).toEqual([])
+    expect(toolRepo.listRuns('python_runner')).toEqual([])
   })
 
   it('checks tool enablement at the broker boundary', async () => {
