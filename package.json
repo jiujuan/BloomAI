@@ -7,11 +7,12 @@
   "scripts": {
     "dev": "node scripts/dev-with-utf8-console.cjs",
     "build": "tsc --noEmit && vite build --config electron.vite.config.ts",
-    "test": "vitest run",
+    "test": "vitest run --pool=forks --maxWorkers=1 --minWorkers=1",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",
     "db:migrate": "node scripts/db-migrate.js",
-    "start:server": "tsx src/server/index.ts"
+    "start:server": "tsx src/server/index.ts",
+    "test:architecture": "vitest run src/server/http/route-dependency-boundary.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.91",
