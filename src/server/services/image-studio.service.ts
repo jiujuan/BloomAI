@@ -10,6 +10,8 @@ import { settingsRepo } from '../db/repositories/settings.repo'
 import { getTracer, SpanStatusCode, context, trace } from '../telemetry/tracer'
 import { getMeter } from '../telemetry/metrics'
 import type { Histogram, Counter } from '@opentelemetry/api'
+import { listTemplatesByCategory } from '../../shared/image-templates'
+import { ServiceError } from './errors'
 
 export interface GenerateForSessionInput {
   sessionId: string
@@ -23,6 +25,82 @@ export interface GenerateForSessionInput {
   optimize?: boolean // default true
 }
 
+export type ImageSessionInput = {
+  title?: unknown
+  default_model?: unknown
+}
+
+export type ImageFileResult = {
+  buffer: Buffer
+  contentType: 'image/png' | 'image/jpeg' | 'image/webp' | 'application/octet-stream'
+  cacheControl: string
+}
+
+const IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable'
+
+function imageNotFound(): ServiceError {
+  return new ServiceError('NOT_FOUND', 'Image not found')
+}
+
+function imageContentType(filePath: string): ImageFileResult['contentType'] {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    default: return 'application/octet-stream'
+  }
+}
+
+/** Application use cases for Image Studio session management and history. */
+export function listSessions() {
+  return imageSessionRepo.list()
+}
+
+export function createSession(input: ImageSessionInput = {}) {
+  return imageSessionRepo.create({
+    title: typeof input.title === 'string' ? input.title : undefined,
+    default_model: typeof input.default_model === 'string' ? input.default_model : undefined,
+  })
+}
+
+export function updateSession(id: string, input: ImageSessionInput = {}) {
+  const session = imageSessionRepo.update(id, {
+    title: typeof input.title === 'string' ? input.title : undefined,
+    default_model: typeof input.default_model === 'string' ? input.default_model : undefined,
+  })
+  if (!session) throw new ServiceError('NOT_FOUND', 'Image session not found')
+  return session
+}
+
+export function deleteSession(id: string): void {
+  imageSessionRepo.delete(id)
+}
+
+export function listGenerations(sessionId: string) {
+  return imageGenerationRepo.listBySession(sessionId)
+}
+
+export function listTemplates(category?: string) {
+  return listTemplatesByCategory(category)
+}
+
+/** Reads a generated local image only after validating its configured storage root. */
+export function openGeneratedImage(id: string): ImageFileResult {
+  const generation = imageGenerationRepo.get(id)
+  if (!generation?.local_path) throw imageNotFound()
+
+  const root = path.resolve(getImagesDir(settingsRepo.getValue('image_output_dir')))
+  const target = path.resolve(generation.local_path)
+  if (target !== root && !target.startsWith(root + path.sep)) throw imageNotFound()
+  if (!fs.existsSync(target)) throw imageNotFound()
+
+  return {
+    buffer: fs.readFileSync(target),
+    contentType: imageContentType(target),
+    cacheControl: IMAGE_CACHE_CONTROL,
+  }
+}
 const imgTracer = getTracer('bloomai.image')
 
 // Lazily created instrument singletons (must be after initMetrics() registers the MeterProvider).
@@ -157,6 +235,10 @@ function saveBase64(b64: string, filePath: string): void {
  * failed) so the caller can render an inline result/error card.
  */
 export async function generateForSession(input: GenerateForSessionInput): Promise<ImageGeneration> {
+  if (!input || typeof input.sessionId !== 'string' || !input.sessionId || typeof input.prompt !== 'string' || !input.prompt || typeof input.model !== 'string' || !input.model) {
+    throw new ServiceError('VALIDATION_ERROR', 'sessionId, prompt and model are required')
+  }
+
   const rootSpan = imgTracer.startSpan('image.generate', {
     attributes: {
       'image.model': input.model,

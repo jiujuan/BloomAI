@@ -50,3 +50,124 @@ describe('looksLikeRefusal', () => {
     ).toBe(false)
   })
 })
+
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, vi } from 'vitest'
+
+let dataDir: string
+let originalEnv: NodeJS.ProcessEnv
+
+async function loadImageStudioService() {
+  vi.resetModules()
+  process.env.DATA_DIR = dataDir
+
+  const client = await import('../db/client')
+  await client.runMigrations()
+  const { imageGenerationRepo } = await import('../db/repositories/image-generation.repo')
+  const service = await import('./image-studio.service') as any
+  return { client, imageGenerationRepo, service }
+}
+
+describe('Image Studio service session, history, templates, and media use cases', () => {
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-image-studio-service-'))
+    originalEnv = { ...process.env }
+  })
+
+  afterEach(async () => {
+    const client = await import('../db/client')
+    client.closeDb()
+    vi.resetModules()
+    process.env = originalEnv
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  it('creates, updates, lists, and archives image sessions through the service', async () => {
+    const { service } = await loadImageStudioService()
+    const created = service.createSession({ title: 'Service session', default_model: 'agnes-image-2.1-flash' })
+
+    expect(service.listSessions()).toEqual([expect.objectContaining({ id: created.id, title: 'Service session' })])
+    expect(service.updateSession(created.id, { title: 'Renamed' })).toMatchObject({ id: created.id, title: 'Renamed' })
+
+    service.deleteSession(created.id)
+    expect(service.listSessions()).toEqual([])
+  })
+
+  it('returns session generation history and shared templates through the service', async () => {
+    const { imageGenerationRepo, service } = await loadImageStudioService()
+    const session = service.createSession({ title: 'History' })
+    const generation = imageGenerationRepo.create({
+      session_id: session.id,
+      prompt: 'A flower',
+      provider_id: 'agnes',
+      model: 'agnes-image-2.1-flash',
+      status: 'completed',
+    })
+
+    expect(service.listGenerations(session.id)).toEqual([expect.objectContaining({ id: generation.id, prompt: 'A flower' })])
+    expect(service.listTemplates('\u56fd\u98ce')).toEqual([expect.objectContaining({ id: 'ink-landscape', category: '\u56fd\u98ce' })])
+  })
+
+  it('reads only safe generated image files with inferred content type and immutable cache metadata', async () => {
+    const { imageGenerationRepo, service } = await loadImageStudioService()
+    const session = service.createSession({ title: 'Media' })
+    const root = path.join(dataDir, 'images')
+    const localPath = path.join(root, session.id, 'image.webp')
+    fs.mkdirSync(path.dirname(localPath), { recursive: true })
+    fs.writeFileSync(localPath, Buffer.from('webp-data'))
+    const generation = imageGenerationRepo.create({
+      session_id: session.id,
+      prompt: 'A flower',
+      provider_id: 'agnes',
+      model: 'agnes-image-2.1-flash',
+      status: 'completed',
+      local_path: localPath,
+    })
+
+    expect(service.openGeneratedImage(generation.id)).toEqual({
+      buffer: Buffer.from('webp-data'),
+      contentType: 'image/webp',
+      cacheControl: 'private, max-age=31536000, immutable',
+    })
+  })
+
+  it('does not expose missing or outside-root local image paths', async () => {
+    const { imageGenerationRepo, service } = await loadImageStudioService()
+    const session = service.createSession({ title: 'Safe paths' })
+    const outsidePath = path.join(dataDir, 'outside.png')
+    fs.writeFileSync(outsidePath, 'outside')
+    const generation = imageGenerationRepo.create({
+      session_id: session.id,
+      prompt: 'A flower',
+      provider_id: 'agnes',
+      model: 'agnes-image-2.1-flash',
+      status: 'completed',
+      local_path: outsidePath,
+    })
+
+    expect(() => service.openGeneratedImage('missing')).toThrowError('Image not found')
+    expect(() => service.openGeneratedImage(generation.id)).toThrowError('Image not found')
+  })
+})
+
+  it('validates required generation fields before calling the LLM runtime', async () => {
+    const { service } = await loadImageStudioService()
+
+    await expect(service.generateForSession({})).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      message: 'sessionId, prompt and model are required',
+    })
+  })
+
+  it('propagates an unsupported image-model failure from the LLM runtime', async () => {
+    const unsupported = Object.assign(new Error('Unsupported image model'), { code: 'LLM_UNSUPPORTED_MODEL' })
+    vi.doMock('../llm', async () => {
+      const actual = await vi.importActual<typeof import('../llm')>('../llm')
+      return { ...actual, resolveModel: vi.fn().mockRejectedValue(unsupported) }
+    })
+    const { service } = await loadImageStudioService()
+
+    await expect(service.generateForSession({ sessionId: 'session-1', prompt: 'A flower', model: 'unknown-image' })).rejects.toBe(unsupported)
+  })

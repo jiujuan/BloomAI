@@ -25,15 +25,6 @@ const LEGACY_ROUTE_IMPORT_ALLOWLIST: Readonly<Record<string, readonly string[]>>
     '../../db/repositories/session.repo',
     '../../attachments/attachment-service',
   ],
-  'images.ts': [
-    '../../db/repositories/image-session.repo',
-    '../../db/repositories/image-generation.repo',
-  ],
-  'llm.ts': [
-    '../../db/repositories/llm.repo',
-    '../../llm',
-    '../../llm/settings',
-  ],
   'skill-package-runtime.ts': [
     '../../db/repositories/skill-package.repo',
     '../../skills/artifacts',

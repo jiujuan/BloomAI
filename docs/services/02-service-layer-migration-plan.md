@@ -1,7 +1,7 @@
 # BloomAI Services 层迁移计划
 
 > 日期：2026-07-16  
-> 状态：阶段 0 已完成；阶段 1 的代码迁移、自动化验证和本地 API smoke test 已完成，前端页面人工 smoke test 待在可交互桌面会话中执行；阶段 2–5 待执行
+> 状态：阶段 0、1、2 的代码迁移、自动化验证和本地 API smoke test 已完成；阶段 1、2 的 Renderer 页面人工 smoke test 待在可交互桌面会话中执行；阶段 3–5 待执行
 > 前置文档：[Services 层架构分析](./01-service-layer-architecture-analysis.md)  
 > 目标：在不破坏现有前后端 API、流式协议和本地数据兼容性的前提下，将后端 API 调用路径逐步统一为 `HTTP Route → Application Service → Repository / Runtime`。
 
@@ -376,6 +376,23 @@ openGeneratedImage(id): ImageFileResult  // 返回安全的文件描述或 strea
 - LLM 和 Image 的定向测试、全量测试、类型检查、构建均通过；
 - 对至少一个 mock provider 和本地文件图片链路完成手工 smoke test。
 
+### 6.5 执行记录（2026-07-16）
+
+已完成的迁移：
+
+- 新增 `src/server/services/llm.service.ts`。该 Service 统一 Provider/Model 的列表、创建、更新、DTO 映射、`config_json` / `capabilities_json` 安全解析、Settings/环境变量 API key 判定、modality 校验、Ollama 远程模型发现及视频任务创建/读取；它提供依赖注入 seam 以支持业务级单元测试。
+- `src/server/http/routes/llm.ts` 现仅承担 HTTP JSON 适配和 legacy LLM runtime error 的状态码兼容；不再直接导入 `llmRepo`、LLM runtime 或 LLM settings 模块。`LLM_PROVIDER_ERROR`、`LLM_UNSUPPORTED_MODEL` 等既有错误码继续按原 Route 合约返回。
+- 扩展 `src/server/services/image-studio.service.ts`，纳入图片 session CRUD、generation 历史、模板筛选、安全打开本地生成图片和既有生成编排。`openGeneratedImage` 会校验 generation、限制路径位于配置的图片根目录内、推断 content type，并以 `NOT_FOUND` 隐藏不存在/越界路径的文件系统细节。
+- `src/server/http/routes/images.ts` 现仅处理 HTTP 输入、错误响应与二进制 body/header 写出；不再直接导入 image session/generation Repo、文件系统或 image templates shared module。
+- 已从 `src/server/architecture/dependency-boundaries.ts` 删除 `llm.ts` 和 `images.ts` 的临时 allowlist 例外。阶段 2 未触及 Chat、SSE/AI SDK stream、Provider registry 或模型选择流程。
+
+测试和验证记录：
+
+- 阶段定向测试：`src/server/services/llm.service.test.ts`、`src/server/http/routes/llm.test.ts`、`src/server/services/image-studio.service.test.ts`、`src/server/http/routes/images.test.ts` 共 4 个测试文件、25 个测试通过，覆盖 Provider/Model 校验和错误、视频/Ollama runtime 透传、图片 session/history/template、图片生成参数、越界图片路径及媒体 header/body 合约。
+- `npm run test:architecture`：1 个测试文件、3 个测试通过；`npm run typecheck`：通过；`npm test`：64 个测试文件、277 个测试通过（150.69s）；`npm run build`：通过。构建仍输出既有 Vite CJS API deprecation 与 renderer chunk-size 警告，未产生编译或构建错误。
+- 使用隔离临时 `DATA_DIR`、动态本地端口 `59092` 和隐藏短生命周期 server 完成 API smoke：`/health`、LLM Provider create/update/list、Image Model create/filter、Image Session create/update/generation list、模板筛选、缺少字段的 `/images` `400 / VALIDATION_ERROR`、本地 fixture 的 `/media/image/:id` `200 / image/png`、`private`、`max-age=31536000`、`immutable` 缓存指令及缺失图片 `404 / NOT_FOUND` 均符合预期。未调用真实外部 provider；临时 server 已停止，临时数据已删除。
+
+Renderer 人工 smoke 的执行说明：当前自动化环境不能操作 Electron 桌面窗口，且默认 `3718` 端口已有用户运行中的 BloomAI 实例。为避免修改该实例及其本地数据，本阶段未对其执行点击操作。因此 LLM Settings/Provider/Model 管理和 Image Studio Renderer 页面仍需在可交互桌面会话中完成手工 smoke 并记录结果；除该人工 UI 验收项外，阶段 2 的代码迁移、自动化验证和隔离 API/本地文件链路验证均已完成。
 ## 7. 阶段 3：抽取 Chat Service（P0，高风险）
 
 ### 7.1 核心原则：不一次性重写流协议
@@ -706,11 +723,11 @@ npm run build
 
 ### Phase 2：LLM 与图片
 
-- [ ] 实现 `llm.service.ts`、DTO mapper 和测试。
-- [ ] 迁移 `http/routes/llm.ts`。
-- [ ] 扩展 `image-studio.service.ts` 的 session、历史、模板和文件读取用例。
-- [ ] 迁移 `http/routes/images.ts`。
-- [ ] 运行定向、全量、provider mock 和 Renderer smoke test。
+- [x] 实现 `llm.service.ts`、DTO mapper 和测试。
+- [x] 迁移 `http/routes/llm.ts`。
+- [x] 扩展 `image-studio.service.ts` 的 session、历史、模板和文件读取用例。
+- [x] 迁移 `http/routes/images.ts`。
+- [ ] 运行 Renderer 人工 smoke test（定向/全量、provider mock、本地 API 与图片文件链路 smoke 已完成；待可交互桌面会话执行）。
 
 ### Phase 3：Chat
 
