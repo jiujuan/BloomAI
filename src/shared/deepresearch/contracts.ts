@@ -107,6 +107,7 @@ export interface ResearchRunDto {
   usage: ResearchUsageDto
   quality: ResearchQualityDto | null
   reportArtifactId: string | null
+  resumePhase: string | null
   error: ResearchRunErrorDto | null
   createdAt: number
   updatedAt: number

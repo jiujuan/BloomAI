@@ -20,6 +20,7 @@ export type ResearchEventType =
   | 'research.quality.assessed'
   | 'research.artifact.created'
   | 'research.run.awaiting_input'
+  | 'research.clarification.answered'
   | 'research.run.completed'
   | 'research.run.failed'
   | 'research.run.cancelled'
@@ -56,6 +57,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.quality.assessed', JsonObject & { releaseStatus: string }>
   | ResearchEventBase<'research.artifact.created', IdentifierPayload>
   | ResearchEventBase<'research.run.awaiting_input', JsonObject & { clarificationIds: string[] }>
+  | ResearchEventBase<'research.clarification.answered', JsonObject & { clarificationId: string; answer: string }>
   | ResearchEventBase<'research.run.completed', JsonObject & { releaseStatus: string }>
   | ResearchEventBase<'research.run.failed', JsonObject & { errorCode: string; retryable: boolean }>
   | ResearchEventBase<'research.run.cancelled', JsonObject>

@@ -83,6 +83,7 @@ function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
     usage: decodeJson<ResearchUsageDto>(row.usage_json, initialResearchUsage()),
     quality: row.quality_json ? decodeJson<ResearchQualityDto | null>(row.quality_json, null) : null,
     reportArtifactId: row.report_artifact_id,
+    resumePhase: row.resume_phase,
     error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
