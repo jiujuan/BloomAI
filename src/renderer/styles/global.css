@@ -1692,7 +1692,12 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .deep-research-launcher-actions { display: flex; justify-content: flex-end; }
 .deep-research-primary-action { min-height: 32px; border: 0; border-radius: var(--radius-md); padding: 0 13px; background: var(--bg-info); color: var(--text-info); font-size: 12px; font-weight: 600; }
 .deep-research-primary-action:disabled, .research-icon-button:disabled { opacity: .45; cursor: not-allowed; }
-.deep-research-error { margin: 0; color: var(--text-danger); font-size: 12px; }.research-progress, .research-section, .research-report, .research-clarifications { padding: 14px 0 0; border-top: 0.5px solid var(--border-tertiary); }
+.deep-research-error { margin: 0; color: var(--text-danger); font-size: 12px; }
+.research-run-part { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 12px; border: 0.5px solid var(--border-secondary); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary); text-align: left; cursor: pointer; }
+.research-run-part:hover { border-color: var(--border-info); background: var(--bg-info); }
+.research-run-part-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.research-run-part-status { color: var(--text-info); font-size: 12px; }
+.research-run-part-id { grid-column: 1 / -1; color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; }.research-progress, .research-section, .research-report, .research-clarifications { padding: 14px 0 0; border-top: 0.5px solid var(--border-tertiary); }
 .research-evidence-panel { min-width: 0; border: 0.5px solid var(--border-tertiary); border-radius: 8px; padding: 14px; background: var(--bg-primary); }
 .research-progress-heading > div { display: flex; align-items: baseline; gap: 10px; }.research-progress-phase { color: var(--text-secondary); font-size: 12px; }.research-progress-heading strong { font-size: 15px; }
 .research-progress-track { height: 7px; margin: 10px 0 12px; overflow: hidden; border-radius: 4px; background: var(--bg-secondary); }.research-progress-value { display: block; height: 100%; background: var(--text-info); }
