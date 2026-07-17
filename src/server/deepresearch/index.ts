@@ -28,8 +28,13 @@ function getDefaultRuntime(): DeepResearchRuntimeAdapter {
 }
 
 async function loadDefaultRuntime(): Promise<DeepResearchRuntimeAdapter> {
-  defaultRuntimePromise ??= import('../mastra/deepresearch/mastra')
-    .then(({ createDeepResearchMastraRuntime }) => createDeepResearchMastraRuntime())
+  // The development server executes TypeScript through tsx's CommonJS hook.
+  // Native dynamic import() bypasses that hook, so it cannot resolve the
+  // extensionless TypeScript module or its @server/@shared aliases.
+  defaultRuntimePromise ??= Promise.resolve().then(() => {
+    const { createDeepResearchMastraRuntime } = require('../mastra/deepresearch/mastra')
+    return createDeepResearchMastraRuntime()
+  })
   return defaultRuntimePromise
 }
 
