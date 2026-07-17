@@ -1,8 +1,11 @@
+import fs from 'node:fs'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchClarificationInput, ResearchRunDto, ResearchRunStatus, StartResearchInput } from '@shared/deepresearch/contracts'
+import type { ResearchArtifactContent, ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, ResearchRunStatus, StartResearchInput } from '@shared/deepresearch/contracts'
 import { clarificationSchema, startResearchSchema } from '@shared/deepresearch/schemas'
 import { researchEventRepo } from '../db/repositories/deepresearch/research-event.repo'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
+import { researchReportRepo } from '../db/repositories/deepresearch/research-report.repo'
+import { subscribeToResearchEvents } from './research-event-publisher'
 import { getResearchBudget } from './domain/budgets'
 import { ResearchDomainError } from './domain/errors'
 
@@ -51,8 +54,28 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       return run
     },
 
-    getRun(runId: string): ResearchRunDto | undefined {
-      return researchRunRepo.get(runId)
+    getRun(runId: string): ResearchRunDetailDto | undefined {
+      return researchRunRepo.getDetail(runId)
+    },
+
+    listRuns(filter: ResearchRunFilter = {}): ResearchRunDto[] {
+      return researchRunRepo.list(filter)
+    },
+
+    listEvents(runId: string, afterSequence = 0): ResearchEventDto[] {
+      requireRun(runId)
+      return researchEventRepo.list(runId, afterSequence)
+    },
+
+    getArtifact(runId: string, artifactId: string): ResearchArtifactContent | undefined {
+      const stored = researchReportRepo.getStoredArtifact(runId, artifactId)
+      if (!stored || !fs.existsSync(stored.storagePath)) return undefined
+      return { artifact: stored.artifact, content: fs.readFileSync(stored.storagePath, 'utf8') }
+    },
+
+    subscribeToEvents(runId: string, listener: (event: ResearchEventDto) => void): () => void {
+      requireRun(runId)
+      return subscribeToResearchEvents(runId, listener)
     },
 
     async cancelRun(runId: string): Promise<ResearchRunDto> {
@@ -75,7 +98,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       return resumed
     },
 
-    async answerClarification(runId: string, input: ResearchClarificationInput): Promise<void> {
+    async answerClarification(runId: string, input: ResearchClarificationInput): Promise<ResearchRunDto> {
       const parsed = clarificationSchema.safeParse(input)
       if (!parsed.success) {
         throw new ResearchDomainError('RESEARCH_VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid clarification answer.', false)
@@ -96,6 +119,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
         },
       })
       schedule(() => runtime.resume(runId, parsed.data))
+      return researchRunRepo.get(runId)!
     },
 
     async recoverInterruptedRuns(now = Date.now()): Promise<ResearchRunDto[]> {

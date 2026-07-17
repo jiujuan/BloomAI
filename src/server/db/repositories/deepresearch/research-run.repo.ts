@@ -19,6 +19,7 @@ import type {
 import type { ResearchEventType } from '@shared/deepresearch/events'
 import { assertResearchTransition } from '@server/deepresearch/domain/state-machine'
 import { getOrmDb } from '../../client'
+import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
 import {
   research_artifacts,
   research_claims,
@@ -189,7 +190,7 @@ export const researchRunRepo = {
   },
 
   transitionWithEvent(id: string, to: ResearchRunStatus, options: TransitionResearchRunOptions = {}): ResearchRunDto {
-    return getOrmDb().transaction((tx) => {
+    const result = getOrmDb().transaction((tx) => {
       const currentRow = tx.select().from(research_runs).where(eq(research_runs.id, id)).get()
       if (!currentRow) throw new Error('Deep Research Run not found: ' + id)
 
@@ -217,15 +218,20 @@ export const researchRunRepo = {
       if (isTerminal(to)) updates.completed_at = now
 
       tx.update(research_runs).set(updates as typeof research_runs.$inferInsert).where(eq(research_runs.id, id)).run()
-      appendResearchEventInTransaction(tx, {
+      const event = appendResearchEventInTransaction(tx, {
         runId: id,
         type: options.eventType ?? 'research.run.status_changed',
         phase,
         payload: options.eventPayload ?? { from: current.status, to },
       })
 
-      return mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!)
+      return {
+        run: mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!),
+        event,
+      }
     })
+    publishResearchEvent(result.event)
+    return result.run
   },
 
   acquireLease(id: string, executorId: string, leaseMs: number, now = Date.now()): boolean {

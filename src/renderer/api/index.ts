@@ -4,6 +4,7 @@
 
 import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
+import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!(window as any).bloomai
@@ -17,7 +18,8 @@ async function apiFetch(path: string, options?: RequestInit) {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }))
-    throw new Error(err.error?.message || `HTTP ${res.status}`)
+    const error = Object.assign(new Error(err.error?.message || `HTTP ${res.status}`), { status: res.status, code: err.error?.code })
+    throw error
   }
   // 204 No Content (e.g. DELETE) carries no body 鈥?calling res.json() would throw.
   if (res.status === 204) return null
@@ -25,6 +27,7 @@ async function apiFetch(path: string, options?: RequestInit) {
 }
 
 export type LlmModality = 'text' | 'image' | 'video'
+export type DeepResearchStatusDto = { enabled: boolean; version: 'v2' }
 export type ArticleIllustrationSceneDto = { id: string; ordinal: number; title: string; excerpt: string; prompt: string; status: string; generation_id: string | null; error_message: string | null; retry_count: number }
 export type ArticleIllustrationJobDto = { id: string; source_type: 'text' | 'url' | 'file'; source_label: string; source_url: string | null; article_text: string; mode: 'skill' | 'fallback'; skill_version_id: string | null; run_id: string | null; image_session_id: string | null; config: Record<string, unknown>; status: string; error_message: string | null; scenes: ArticleIllustrationSceneDto[] }
 export type EligibleImageSkillDto = { packageId: string; packageName: string; skillVersionId: string; version: string; requiredCapabilities: string[]; activeImageGrant: { grantMode: string; maxCalls: number | null; allowedModels: string[] | null } | null }
@@ -259,6 +262,55 @@ export const platform = {
     },
   },
 
+  deepResearch: {
+    async getStatus(): Promise<DeepResearchStatusDto> {
+      try {
+        const { data } = await apiFetch('/deep-research/status')
+        return data
+      } catch (error) {
+        if ((error as Error & { status?: number }).status === 404) return { enabled: false, version: 'v2' }
+        throw error
+      }
+    },
+    async start(input: StartResearchInput): Promise<ResearchRunDto> {
+      const { data } = await apiFetch('/deep-research/runs', { method: 'POST', body: JSON.stringify(input) })
+      return data
+    },
+    async list(filter: ResearchRunFilter = {}): Promise<ResearchRunDto[]> {
+      const query = new URLSearchParams()
+      if (filter.sessionId) query.set('sessionId', filter.sessionId)
+      if (filter.statuses?.length) query.set('statuses', filter.statuses.join(','))
+      if (filter.profile) query.set('profile', filter.profile)
+      if (filter.limit !== undefined) query.set('limit', String(filter.limit))
+      if (filter.cursor) query.set('cursor', filter.cursor)
+      const suffix = query.size ? '?' + query.toString() : ''
+      const { data } = await apiFetch('/deep-research/runs' + suffix)
+      return data
+    },
+    async get(runId: string): Promise<ResearchRunDetailDto> {
+      const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId))
+      return data
+    },
+    async listEvents(runId: string, after = 0): Promise<ResearchEventDto[]> {
+      const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId) + '/events?after=' + encodeURIComponent(String(after)))
+      return data
+    },
+    async answerClarification(runId: string, input: ResearchClarificationInput): Promise<ResearchRunDto> {
+      const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId) + '/clarifications', { method: 'POST', body: JSON.stringify(input) })
+      return data
+    },
+    async cancel(runId: string): Promise<ResearchRunDto> {
+      const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST', body: '{}' })
+      return data
+    },
+    async resume(runId: string): Promise<ResearchRunDto> {
+      const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId) + '/resume', { method: 'POST', body: '{}' })
+      return data
+    },
+    artifactUrl(runId: string, artifactId: string): string {
+      return API_BASE + '/deep-research/runs/' + encodeURIComponent(runId) + '/artifacts/' + encodeURIComponent(artifactId)
+    },
+  },
   articleIllustrations: {
     async listEligibleSkills(): Promise<EligibleImageSkillDto[]> { const { data } = await apiFetch('/article-illustrations/eligible-skills'); return data },
     async listRecoverable(): Promise<ArticleIllustrationJobDto[]> { const { data } = await apiFetch('/article-illustrations/recoverable'); return data },

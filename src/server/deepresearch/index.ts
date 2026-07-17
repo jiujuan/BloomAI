@@ -1,4 +1,3 @@
-import { createDeepResearchMastraRuntime } from '../mastra/deepresearch/mastra'
 import { createDeepResearchExecutor, type DeepResearchRuntimeAdapter } from './executor'
 import { createDeepResearchService } from './deep-research.service'
 
@@ -7,9 +6,30 @@ export type { CreateDeepResearchExecutorOptions, DeepResearchExecutor, DeepResea
 export { createDeepResearchService } from './deep-research.service'
 export type { CreateDeepResearchServiceOptions, DeepResearchScheduler } from './deep-research.service'
 
-const defaultRuntime = createDeepResearchMastraRuntime()
+let defaultRuntime: DeepResearchRuntimeAdapter | undefined
+let defaultRuntimePromise: Promise<DeepResearchRuntimeAdapter> | undefined
 
-export function createDeepResearchModule(runtime: DeepResearchRuntimeAdapter = defaultRuntime) {
+function getDefaultRuntime(): DeepResearchRuntimeAdapter {
+  defaultRuntime ??= {
+    async start(runId: string): Promise<unknown> {
+      const runtime = await loadDefaultRuntime()
+      return runtime.start(runId)
+    },
+    async resume(runId, resumeData): Promise<unknown> {
+      const runtime = await loadDefaultRuntime()
+      return runtime.resume(runId, resumeData)
+    },
+  }
+  return defaultRuntime
+}
+
+async function loadDefaultRuntime(): Promise<DeepResearchRuntimeAdapter> {
+  defaultRuntimePromise ??= import('../mastra/deepresearch/mastra')
+    .then(({ createDeepResearchMastraRuntime }) => createDeepResearchMastraRuntime())
+  return defaultRuntimePromise
+}
+
+export function createDeepResearchModule(runtime: DeepResearchRuntimeAdapter = getDefaultRuntime()) {
   const executor = createDeepResearchExecutor({ runtime })
   const service = createDeepResearchService({ runtime: executor })
 
@@ -19,4 +39,9 @@ export function createDeepResearchModule(runtime: DeepResearchRuntimeAdapter = d
   })
 }
 
-export const deepResearchModule = createDeepResearchModule()
+let defaultModule: ReturnType<typeof createDeepResearchModule> | undefined
+
+export function getDeepResearchModule(): ReturnType<typeof createDeepResearchModule> {
+  defaultModule ??= createDeepResearchModule()
+  return defaultModule
+}

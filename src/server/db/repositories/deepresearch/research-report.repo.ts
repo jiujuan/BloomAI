@@ -77,6 +77,11 @@ export interface UpsertResearchArtifactInput {
   idempotencyKey: string
 }
 
+export interface StoredResearchArtifact {
+  artifact: ResearchArtifactDto
+  storagePath: string
+}
+
 export function mapResearchSection(row: typeof research_report_sections.$inferSelect): ResearchReportSectionDto {
   return {
     id: row.id,
@@ -315,5 +320,13 @@ export const researchReportRepo = {
 
   listArtifacts(runId: string): ResearchArtifactDto[] {
     return getOrmDb().select().from(research_artifacts).where(eq(research_artifacts.run_id, runId)).orderBy(asc(research_artifacts.created_at)).all().map(mapResearchArtifact)
+  },
+
+  getStoredArtifact(runId: string, artifactId: string): StoredResearchArtifact | undefined {
+    const row = getOrmDb().select().from(research_artifacts).where(and(
+      eq(research_artifacts.run_id, runId),
+      eq(research_artifacts.id, artifactId),
+    )).get()
+    return row ? { artifact: mapResearchArtifact(row), storagePath: row.storage_path } : undefined
   },
 }

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { JsonObject, ResearchEventDto } from '@shared/deepresearch/contracts'
 import type { ResearchEventType } from '@shared/deepresearch/events'
 import { getOrmDb } from '../../client'
+import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
 import { research_events } from '../../schema'
 import { decodeJson, EMPTY_JSON_OBJECT, encodeJson } from './repository-utils'
 
@@ -72,7 +73,9 @@ export function appendResearchEventInTransaction(executor: EventExecutor, input:
 
 export const researchEventRepo = {
   append(input: AppendResearchEventInput): ResearchEventDto {
-    return getOrmDb().transaction((tx) => appendResearchEventInTransaction(tx, input))
+    const event = getOrmDb().transaction((tx) => appendResearchEventInTransaction(tx, input))
+    publishResearchEvent(event)
+    return event
   },
 
   list(runId: string, afterSequence = 0): ResearchEventDto[] {
