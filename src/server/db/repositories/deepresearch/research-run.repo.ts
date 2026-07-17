@@ -195,7 +195,7 @@ export const researchRunRepo = {
       if (!currentRow) throw new Error('Deep Research Run not found: ' + id)
 
       const current = mapRun(currentRow)
-      assertResearchTransition(current.status, to)
+      assertResearchTransition(current.status, to, { error: current.error })
 
       const now = Date.now()
       const phase = options.phase ?? to

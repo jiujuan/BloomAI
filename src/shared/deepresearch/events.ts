@@ -1,4 +1,4 @@
-import type { JsonObject } from './contracts'
+﻿import type { JsonObject } from './contracts'
 
 export type ResearchEventType =
   | 'research.run.created'
@@ -25,6 +25,17 @@ export type ResearchEventType =
   | 'research.run.completed'
   | 'research.run.failed'
   | 'research.run.cancelled'
+  | 'research.attempt.created'
+  | 'research.attempt.started'
+  | 'research.checkpoint.completed'
+  | 'research.coverage.assessment_completed'
+  | 'research.coverage.gap_detected'
+  | 'research.iteration.planned'
+  | 'research.iteration.stopped'
+  | 'research.run.cancellation_requested'
+  | 'research.run.interrupted'
+  | 'research.run.resumed'
+  | 'research.recovery.reconciled'
 
 interface ResearchEventBase<TType extends ResearchEventType, TPayload extends JsonObject> {
   runId: string
@@ -63,3 +74,14 @@ export type ResearchEvent =
   | ResearchEventBase<'research.run.completed', JsonObject & { releaseStatus: string }>
   | ResearchEventBase<'research.run.failed', JsonObject & { errorCode: string; retryable: boolean }>
   | ResearchEventBase<'research.run.cancelled', JsonObject>
+  | ResearchEventBase<'research.attempt.created', IdentifierPayload & { ordinal: number; trigger: string }>
+  | ResearchEventBase<'research.attempt.started', IdentifierPayload>
+  | ResearchEventBase<'research.checkpoint.completed', IdentifierPayload & { checkpointKey: string; sequence: number }>
+  | ResearchEventBase<'research.coverage.assessment_completed', IdentifierPayload & { policyVersion: string }>
+  | ResearchEventBase<'research.coverage.gap_detected', JsonObject & { questionId: string; gapCodes: string[] }>
+  | ResearchEventBase<'research.iteration.planned', JsonObject & { iteration: number; targetQuestionIds: string[] }>
+  | ResearchEventBase<'research.iteration.stopped', JsonObject & { iteration: number; decision: string }>
+  | ResearchEventBase<'research.run.cancellation_requested', JsonObject & { reason: string | null }>
+  | ResearchEventBase<'research.run.interrupted', JsonObject>
+  | ResearchEventBase<'research.run.resumed', IdentifierPayload>
+  | ResearchEventBase<'research.recovery.reconciled', JsonObject & { checkpointKey: string | null }>

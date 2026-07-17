@@ -9,6 +9,8 @@ export type ResearchRunStatus =
   | 'queued'
   | 'planning'
   | 'researching'
+  | 'assessing_coverage'
+  | 'gap_filling'
   | 'synthesizing'
   | 'verifying'
   | 'completed'
@@ -18,6 +20,31 @@ export type ResearchRunStatus =
   | 'cancelled'
   | 'interrupted'
   | 'failed'
+
+/** The execution lifecycle for one start, resume, or retry of a Run. */
+export type ResearchAttemptStatus = 'queued' | 'running' | 'cancelling' | 'cancelled' | 'succeeded' | 'failed' | 'interrupted'
+export type ResearchAttemptTrigger = 'initial' | 'manual_resume' | 'auto_resume' | 'retry'
+export type ResearchCheckpointStatus = 'started' | 'completed' | 'invalidated' | 'skipped'
+export type ResearchCheckpointReplayPolicy = 'reuse' | 'retry_incomplete' | 'invalidate_if_version_changed'
+export type ResearchErrorCategory =
+  | 'cancelled'
+  | 'validation'
+  | 'budget'
+  | 'provider'
+  | 'network'
+  | 'timeout'
+  | 'rate_limit'
+  | 'concurrency'
+  | 'workflow'
+  | 'internal'
+export type ResearchIterationStatus = 'planned' | 'executing' | 'assessed' | 'completed' | 'stopped'
+export type ResearchLoopDecision =
+  | 'continue'
+  | 'stop_covered'
+  | 'stop_budget'
+  | 'stop_no_material_gain'
+  | 'stop_no_actionable_gaps'
+  | 'stop_cancelled'
 
 export interface ResearchTimeRange {
   from?: string
@@ -87,10 +114,113 @@ export interface ResearchUsageDto {
   deadlineAt: number | null
 }
 
+/** A JSON-safe recovery cursor. Missing optional IDs mean that phase resumes from its conservative boundary. */
+export interface ResearchCheckpointCursorDto {
+  version: 1
+  nextPhase: string
+  iteration: number
+  pendingQueryIds?: string[]
+  pendingSourceIds?: string[]
+  pendingSectionIds?: string[]
+}
+
 export interface ResearchRunErrorDto {
   code: string
   message: string
   retryable: boolean
+  /** Optional for V1 compatibility; consumers must use retryable as the recovery authority. */
+  category?: ResearchErrorCategory
+}
+
+export interface ResearchRunCapabilitiesDto {
+  canCancel: boolean
+  canResume: boolean
+  canRetry: boolean
+  canProvideClarification: boolean
+}
+
+export interface ResearchCancellationDto {
+  requestedAt: number | null
+  reason: string | null
+}
+
+export interface ResearchRunAttemptDto {
+  id: string
+  runId: string
+  ordinal: number
+  trigger: ResearchAttemptTrigger
+  status: ResearchAttemptStatus
+  workflowRunId: string | null
+  executorId: string | null
+  leaseExpiresAt: number | null
+  heartbeatAt: number | null
+  startCheckpointKey: string | null
+  endCheckpointKey: string | null
+  error: ResearchRunErrorDto | null
+  startedAt: number | null
+  endedAt: number | null
+  createdAt: number
+}
+
+export interface ResearchRunExecutionDto {
+  attempt: ResearchRunAttemptDto
+}
+
+export interface ResearchRunCheckpointDto {
+  id: string
+  runId: string
+  attemptId: string | null
+  sequence: number
+  checkpointKey: string
+  phase: string
+  status: ResearchCheckpointStatus
+  resumeCursor: ResearchCheckpointCursorDto
+  inputFingerprint: string
+  outputFingerprint: string | null
+  replayPolicy: ResearchCheckpointReplayPolicy
+  createdAt: number
+}
+
+export interface ResearchQuestionCoverageVerdictDto {
+  questionId: string
+  score: number
+  verdict: 'covered' | 'limited' | 'uncovered'
+  gapCodes: string[]
+  limitations: string[]
+}
+
+export interface ResearchCoverageAssessmentDto {
+  id: string
+  runId: string
+  iteration: number
+  policyVersion: string
+  inputFingerprint: string
+  aggregateScore: number
+  questionVerdicts: ResearchQuestionCoverageVerdictDto[]
+  limitations: string[]
+  createdAt: number
+}
+
+export interface ResearchLoopDecisionDto {
+  decision: ResearchLoopDecision
+  reason: string | null
+  limitationCodes: string[]
+}
+
+export interface ResearchIterationDto {
+  id: string
+  runId: string
+  ordinal: number
+  status: ResearchIterationStatus
+  decision: ResearchLoopDecision | null
+  targetQuestionIds: string[]
+  plannedQueryCount: number
+  executedQueryCount: number
+  newSourceCount: number
+  newEvidenceCount: number
+  stopReason: ResearchLoopDecisionDto | null
+  createdAt: number
+  completedAt: number | null
 }
 
 export interface ResearchRunDto {
@@ -108,11 +238,21 @@ export interface ResearchRunDto {
   usage: ResearchUsageDto
   quality: ResearchQualityDto | null
   reportArtifactId: string | null
+  /** V1 compatibility projection of checkpointCursor.nextPhase. */
   resumePhase: string | null
   error: ResearchRunErrorDto | null
   createdAt: number
   updatedAt: number
   completedAt: number | null
+
+  /** V2 fields are optional while historical Run rows and V1 clients are supported. */
+  stateVersion?: number
+  currentAttemptId?: string | null
+  checkpointCursor?: ResearchCheckpointCursorDto | null
+  execution?: ResearchRunExecutionDto | null
+  latestCheckpoint?: ResearchRunCheckpointDto | null
+  cancellation?: ResearchCancellationDto | null
+  capabilities?: ResearchRunCapabilitiesDto
 }
 
 export interface ResearchQuestionDto {
@@ -128,6 +268,7 @@ export interface ResearchQuestionDto {
   coverage: ResearchCoverageDto | null
 }
 
+/** V1 coverage projection retained for existing clients. */
 export interface ResearchCoverageDto {
   questionId: string
   score: number
@@ -282,4 +423,7 @@ export interface ResearchRunDetailDto extends ResearchRunDto {
   report: ResearchReportDto | null
   events: ResearchEventDto[]
   artifacts: ResearchArtifactDto[]
+  attempts?: ResearchRunAttemptDto[]
+  iterations?: ResearchIterationDto[]
+  coverageAssessments?: ResearchCoverageAssessmentDto[]
 }

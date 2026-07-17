@@ -226,11 +226,14 @@ describe('Deep Research service and executor', () => {
     const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
 
     await expect(service.cancelRun(run.id)).resolves.toMatchObject({ status: 'cancelling' })
-    researchRunRepo.transitionWithEvent(run.id, 'interrupted', { resumePhase: 'queued' })
-    const resumed = await service.resumeRun(run.id)
+    await expect(service.resumeRun(run.id)).rejects.toMatchObject({ code: 'RESEARCH_NOT_RUNNABLE' })
+
+    const interruptedRun = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+    researchRunRepo.transitionWithEvent(interruptedRun.id, 'interrupted', { resumePhase: 'queued' })
+    const resumed = await service.resumeRun(interruptedRun.id)
 
     expect(resumed).toMatchObject({ status: 'queued', error: null })
-    expect(runtime.start).toHaveBeenCalledWith(run.id)
+    expect(runtime.start).toHaveBeenCalledWith(interruptedRun.id)
 
     const retryableRun = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
     researchRunRepo.transitionWithEvent(retryableRun.id, 'failed', {

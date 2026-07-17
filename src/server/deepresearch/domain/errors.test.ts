@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { ResearchDomainError, isResearchDomainError } from './errors'
+﻿import { describe, expect, it } from 'vitest'
+import { classifyResearchError, ResearchDomainError, isResearchDomainError } from './errors'
 
 describe('ResearchDomainError', () => {
   it('carries a stable code, retryability, and message', () => {
@@ -15,5 +15,16 @@ describe('ResearchDomainError', () => {
 
   it('does not classify arbitrary errors as domain errors', () => {
     expect(isResearchDomainError(new Error('message'))).toBe(false)
+  })
+
+  it('classifies cancellation and retryable transport errors with stable semantics', () => {
+    expect(classifyResearchError(new ResearchDomainError('RESEARCH_CANCELLED', 'Cancelled', false))).toMatchObject({
+      category: 'cancelled',
+      retryable: false,
+    })
+    expect(classifyResearchError({ code: 'ETIMEDOUT', message: 'Timed out' })).toMatchObject({
+      category: 'timeout',
+      retryable: true,
+    })
   })
 })

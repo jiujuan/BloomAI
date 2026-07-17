@@ -7,6 +7,7 @@ import { researchReportRepo } from '../db/repositories/deepresearch/research-rep
 import { subscribeToResearchEvents } from './research-event-publisher'
 import { getResearchBudget } from './domain/budgets'
 import { ResearchDomainError } from './domain/errors'
+import { projectResearchRunCapabilities } from './domain/state-machine'
 import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
 import { recordDeepResearchCancellation, recordDeepResearchResume, type DeepResearchTelemetryContext } from '../telemetry/metrics'
 
@@ -111,8 +112,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
 
     async resumeRun(runId: string): Promise<ResearchRunDto> {
       const run = requireRun(runId)
-      const canResume = run.status === 'interrupted' || (run.status === 'failed' && run.error?.retryable === true)
-      if (!canResume) {
+      if (!projectResearchRunCapabilities({ status: run.status, error: run.error }).canResume) {
         throw new ResearchDomainError('RESEARCH_NOT_RUNNABLE', 'Deep Research Run is not resumable: ' + runId, false)
       }
 
