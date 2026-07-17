@@ -307,6 +307,9 @@ export const platform = {
       const { data } = await apiFetch('/deep-research/runs/' + encodeURIComponent(runId) + '/resume', { method: 'POST', body: '{}' })
       return data
     },
+    streamUrl(runId: string, after = 0): string {
+      return API_BASE + '/deep-research/runs/' + encodeURIComponent(runId) + '/stream?after=' + encodeURIComponent(String(after))
+    },
     artifactUrl(runId: string, artifactId: string): string {
       return API_BASE + '/deep-research/runs/' + encodeURIComponent(runId) + '/artifacts/' + encodeURIComponent(artifactId)
     },
