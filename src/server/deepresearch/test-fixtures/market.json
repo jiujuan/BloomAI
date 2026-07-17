@@ -1,0 +1,107 @@
+{
+  "input": {
+    "topic": "Synthetic workflow automation market",
+    "profile": "market",
+    "depth": "standard",
+    "objective": "Compare the fictional market structure, demand, and risks."
+  },
+  "planner": {
+    "title": "Synthetic workflow automation market",
+    "objective": "Compare the fictional market structure, demand, and risks.",
+    "audience": "Strategy team",
+    "scope": "Synthetic illustrative market evidence only",
+    "assumptions": [
+      "All sources are deterministic fixtures."
+    ],
+    "plannedSections": [
+      "executive-summary",
+      "scope-and-method",
+      "market-definition",
+      "market-sizing",
+      "growth-and-drivers",
+      "customer-segments",
+      "competitive-structure",
+      "risks-and-opportunities",
+      "limitations",
+      "references"
+    ],
+    "criticalClarifications": []
+  },
+  "searchResponses": [
+    {
+      "title": "Official synthetic measurement note",
+      "url": "https://standards.example/measurement",
+      "snippet": "Official methodology and synthetic observations for this fixture."
+    },
+    {
+      "title": "Synthetic dataset documentation",
+      "url": "https://data.example/dataset",
+      "snippet": "Dataset methodology and independently collected synthetic observations."
+    },
+    {
+      "title": "Synthetic analysis memorandum",
+      "url": "https://analysis.example/report",
+      "snippet": "Independent analysis of the same fictional subject and its limitations."
+    }
+  ],
+  "documents": [
+    {
+      "url": "https://standards.example/measurement",
+      "title": "Synthetic measurement note",
+      "headings": [
+        "Method"
+      ],
+      "text": "This synthetic source records that Synthetic workflow automation market is evaluated with an explicit method, defined scope, and reproducible observations. The shared fictional metric is 10 units, which is intentionally included only to exercise contradiction handling in acceptance tests."
+    },
+    {
+      "url": "https://data.example/dataset",
+      "title": "Synthetic dataset documentation",
+      "headings": [
+        "Dataset"
+      ],
+      "text": "This synthetic dataset describes a separate collection method, a stated population, and transparent limitations for Synthetic workflow automation market. The shared fictional metric is 12 units, which intentionally conflicts with another reserved-domain fixture source."
+    },
+    {
+      "url": "https://analysis.example/report",
+      "title": "Synthetic analysis memorandum",
+      "headings": [
+        "Analysis"
+      ],
+      "text": "This independent synthetic memorandum compares the available fictional observations for Synthetic workflow automation market, identifies uncertainty, and recommends documenting unresolved differences before drawing conclusions from the evidence."
+    }
+  ],
+  "requiredSections": [
+    "executive-summary",
+    "scope-and-method",
+    "market-definition",
+    "market-sizing",
+    "growth-and-drivers",
+    "customer-segments",
+    "competitive-structure",
+    "risks-and-opportunities",
+    "limitations",
+    "references"
+  ],
+  "expectedQuestionIntents": [
+    "market-definition",
+    "segmentation",
+    "market-sizing",
+    "growth",
+    "demand-drivers",
+    "value-chain",
+    "customer-segments",
+    "regulation"
+  ],
+  "minimumIndependentDomains": 3,
+  "expectedContradictions": [
+    {
+      "left": "10 units",
+      "right": "12 units",
+      "sourceUrls": [
+        "https://standards.example/measurement",
+        "https://data.example/dataset"
+      ]
+    }
+  ],
+  "expectedFinalStatus": "completed_with_limitations"
+}

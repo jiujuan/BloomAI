@@ -1,0 +1,104 @@
+{
+  "input": {
+    "topic": "Synthetic workflow platform comparison",
+    "profile": "competitor",
+    "depth": "standard",
+    "objective": "Compare fictional platforms without treating fixture data as real product information."
+  },
+  "planner": {
+    "title": "Synthetic workflow platform comparison",
+    "objective": "Compare fictional platforms without treating fixture data as real product information.",
+    "audience": "Product strategy team",
+    "scope": "Synthetic illustrative competitor evidence only",
+    "assumptions": [
+      "All sources are deterministic fixtures."
+    ],
+    "plannedSections": [
+      "executive-summary",
+      "scope-and-method",
+      "comparison-date",
+      "positioning",
+      "capability-comparison",
+      "pricing-and-packaging",
+      "channels-and-partners",
+      "strengths-and-weaknesses",
+      "strategic-risks",
+      "limitations",
+      "references"
+    ],
+    "criticalClarifications": []
+  },
+  "searchResponses": [
+    {
+      "title": "Official synthetic measurement note",
+      "url": "https://standards.example/measurement",
+      "snippet": "Official methodology and synthetic observations for this fixture."
+    },
+    {
+      "title": "Synthetic dataset documentation",
+      "url": "https://data.example/dataset",
+      "snippet": "Dataset methodology and independently collected synthetic observations."
+    },
+    {
+      "title": "Synthetic analysis memorandum",
+      "url": "https://analysis.example/report",
+      "snippet": "Independent analysis of the same fictional subject and its limitations."
+    }
+  ],
+  "documents": [
+    {
+      "url": "https://standards.example/measurement",
+      "title": "Synthetic measurement note",
+      "headings": [
+        "Method"
+      ],
+      "text": "This synthetic source records that Synthetic workflow platform comparison is evaluated with an explicit method, defined scope, and reproducible observations. The shared fictional metric is 10 units, which is intentionally included only to exercise contradiction handling in acceptance tests."
+    },
+    {
+      "url": "https://data.example/dataset",
+      "title": "Synthetic dataset documentation",
+      "headings": [
+        "Dataset"
+      ],
+      "text": "This synthetic dataset describes a separate collection method, a stated population, and transparent limitations for Synthetic workflow platform comparison. The shared fictional metric is 12 units, which intentionally conflicts with another reserved-domain fixture source."
+    },
+    {
+      "url": "https://analysis.example/report",
+      "title": "Synthetic analysis memorandum",
+      "headings": [
+        "Analysis"
+      ],
+      "text": "This independent synthetic memorandum compares the available fictional observations for Synthetic workflow platform comparison, identifies uncertainty, and recommends documenting unresolved differences before drawing conclusions from the evidence."
+    }
+  ],
+  "requiredSections": [
+    "executive-summary",
+    "scope-and-method",
+    "comparison-date",
+    "positioning",
+    "capability-comparison",
+    "pricing-and-packaging",
+    "channels-and-partners",
+    "strengths-and-weaknesses",
+    "strategic-risks",
+    "limitations",
+    "references"
+  ],
+  "expectedQuestionIntents": [
+    "positioning",
+    "product-capabilities",
+    "pricing"
+  ],
+  "minimumIndependentDomains": 3,
+  "expectedContradictions": [
+    {
+      "left": "10 units",
+      "right": "12 units",
+      "sourceUrls": [
+        "https://standards.example/measurement",
+        "https://data.example/dataset"
+      ]
+    }
+  ],
+  "expectedFinalStatus": "completed_with_limitations"
+}

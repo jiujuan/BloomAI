@@ -11,7 +11,6 @@ import type {
   StartResearchInput,
 } from '@shared/deepresearch/contracts'
 import { clarificationSchema, startResearchSchema } from '@shared/deepresearch/schemas'
-import { isDeepResearchV2Enabled } from '@server/config/config'
 import { getDeepResearchModule } from '@server/deepresearch'
 import { isResearchDomainError } from '@server/deepresearch/domain/errors'
 import { readJson } from '../util'
@@ -32,7 +31,6 @@ type DeepResearchHttpModule = {
 
 export interface CreateDeepResearchRoutesOptions {
   module?: DeepResearchHttpModule
-  isEnabled?: () => boolean
 }
 
 const listFilterSchema = z.object({
@@ -60,9 +58,6 @@ function routeError(c: any, error: unknown) {
   return errorResponse(c, 500, 'INTERNAL_ERROR', 'Internal server error')
 }
 
-function unavailable(c: any, isEnabled: () => boolean) {
-  return isEnabled() ? undefined : errorResponse(c, 404, 'DEEP_RESEARCH_DISABLED', 'Deep Research V2 is disabled.')
-}
 
 async function requireRun(c: any, module: DeepResearchHttpModule, runId: string): Promise<ResearchRunDetailDto | Response> {
   const run = await module.getRun(runId)
@@ -90,14 +85,11 @@ function isResponse(value: unknown): value is Response {
 
 export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOptions = {}): Hono {
   const module = options.module ?? getDeepResearchModule()
-  const isEnabled = options.isEnabled ?? isDeepResearchV2Enabled
   const routes = new Hono()
 
-  routes.get('/status', (c) => c.json({ data: { enabled: isEnabled(), version: 'v2' } }))
+  routes.get('/status', (c) => c.json({ data: { enabled: true, version: 'v2' } }))
 
   routes.post('/runs', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const input = startResearchSchema.parse(await readJson(c))
       return c.json({ data: await module.startResearch(input) }, 201)
@@ -105,14 +97,10 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.get('/runs', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try { return c.json({ data: await module.listRuns(buildFilter(c)) }) } catch (error) { return routeError(c, error) }
   })
 
   routes.get('/runs/:runId', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const run = await requireRun(c, module, c.req.param('runId'))
       return isResponse(run) ? run : c.json({ data: run })
@@ -120,8 +108,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.get('/runs/:runId/events', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
@@ -131,8 +117,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.get('/runs/:runId/stream', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
@@ -161,8 +145,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.post('/runs/:runId/clarifications', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
@@ -173,8 +155,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.post('/runs/:runId/cancel', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
@@ -184,8 +164,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.post('/runs/:runId/resume', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
@@ -195,8 +173,6 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   })
 
   routes.get('/runs/:runId/artifacts/:artifactId', async (c) => {
-    const disabled = unavailable(c, isEnabled)
-    if (disabled) return disabled
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)

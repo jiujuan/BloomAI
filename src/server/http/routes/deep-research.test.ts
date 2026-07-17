@@ -46,7 +46,6 @@ describe('Deep Research HTTP API', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-deep-research-http-'))
     originalEnv = { ...process.env }
-    process.env.DEEP_RESEARCH_V2_ENABLED = 'true'
   })
 
   afterEach(async () => {
@@ -57,17 +56,16 @@ describe('Deep Research HTTP API', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('always exposes status and blocks run endpoints when the feature is disabled', async () => {
-    process.env.DEEP_RESEARCH_V2_ENABLED = 'off'
+  it('always exposes the durable Deep Research API without a feature flag', async () => {
     const { app } = await loadApi()
 
     const status = await requestJson(app, '/status')
     expect(status.response.status).toBe(200)
-    expect(status.body).toEqual({ data: { enabled: false, version: 'v2' } })
+    expect(status.body).toEqual({ data: { enabled: true, version: 'v2' } })
 
-    const blocked = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
-    expect(blocked.response.status).toBe(404)
-    expect(blocked.body.error).toMatchObject({ code: 'DEEP_RESEARCH_DISABLED' })
+    const created = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
+    expect(created.response.status).toBe(201)
+    expect(created.body.data).toMatchObject({ status: 'queued' })
   })
 
   it('creates, lists, reads, validates, clarifies, cancels, resumes, and serves owned artifacts', async () => {

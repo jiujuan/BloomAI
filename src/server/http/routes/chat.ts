@@ -6,7 +6,6 @@ import {
   normalizePlanInput,
 } from '../../services/chat.service'
 import { readJson } from '../util'
-import { isDeepResearchV2Enabled } from '@server/config/config'
 
 export const chatRoutes = new Hono()
 
@@ -28,9 +27,8 @@ chatRoutes.post('/', async (c) => {
     return c.json({ error: { code: 'SESSION_REQUIRED', message: 'A chat session is required.' } }, 400)
   }
 
-  // A stale renderer must not start the retired shallow Research Agent after the durable
-  // Run API has been enabled. Disabled V2 deliberately keeps the legacy route working.
-  if (input.teamAgentId === 'research' && isDeepResearchV2Enabled()) {
+  // Stale clients must use the durable Runs API; the shallow Research Agent is retired.
+  if (input.teamAgentId === 'research') {
     return c.json({
       error: {
         code: 'RESEARCH_USE_DEEP_RESEARCH_API',

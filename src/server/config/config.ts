@@ -28,10 +28,6 @@ export function readConfigValue(key: string, fallback = ''): ConfigValue {
   return { value: fallback, source: 'default', key, filePath: envPath }
 }
 
-export function isDeepResearchV2Enabled(): boolean {
-  const value = readConfigValue('DEEP_RESEARCH_V2_ENABLED', 'false').value.toLowerCase()
-  return value === '1' || value === 'true' || value === 'on'
-}
 
 export function isDeepResearchAutoResumeEnabled(): boolean {
   const value = readConfigValue('DEEP_RESEARCH_AUTO_RESUME', 'false').value.trim().toLowerCase()

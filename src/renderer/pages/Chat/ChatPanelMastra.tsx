@@ -45,16 +45,16 @@ const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'coding', label: '编码' },
 ]
 
-export function isDeepResearchWorkbenchActive(team: TeamTab, enabled: boolean): boolean {
-  return team === 'research' && enabled
+export function isDeepResearchWorkbenchActive(team: TeamTab): boolean {
+  return team === 'research'
 }
 
-export function chatAgentHeaderForTab(team: TeamTab, deepResearchV2Enabled: boolean): TeamTab {
-  return team === 'research' && deepResearchV2Enabled ? '' : team
+export function chatAgentHeaderForTab(team: TeamTab): TeamTab {
+  return team === 'research' ? '' : team
 }
 
-export function isChatComposerVisible(team: TeamTab, deepResearchV2Enabled: boolean): boolean {
-  return !isDeepResearchWorkbenchActive(team, deepResearchV2Enabled)
+export function isChatComposerVisible(team: TeamTab): boolean {
+  return !isDeepResearchWorkbenchActive(team)
 }
 
 export function buildResearchRunAssistantMessage(data: ResearchRunPartData): { content: string; parts: any[] } {
@@ -142,7 +142,6 @@ export function ChatPanelMastra() {
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
-  const [deepResearchV2Enabled, setDeepResearchV2Enabled] = useState(false)
   // AI Writer parameters (type + dropdowns). Kept in memory so toggling the 写作 tab off and
   // back on restores the last selection (same lifetime as `team`/`mode` — component-scoped).
   const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
@@ -184,12 +183,10 @@ export function ChatPanelMastra() {
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   const teamRef = useRef(team)
-  const deepResearchV2EnabledRef = useRef(deepResearchV2Enabled)
   const writingRef = useRef(writing)
   modeRef.current = mode
   modelRef.current = model
   teamRef.current = team
-  deepResearchV2EnabledRef.current = deepResearchV2Enabled
   writingRef.current = writing
   sessionIdRef.current = activeSessionId
 
@@ -197,15 +194,6 @@ export function ChatPanelMastra() {
     loadTextModels()
   }, [loadTextModels])
 
-  // Older servers answer /status with a disabled fallback; keep the legacy Agent available until
-  // the server positively advertises the durable Deep Research API.
-  useEffect(() => {
-    let cancelled = false
-    void platform.deepResearch.getStatus()
-      .then((status) => { if (!cancelled) setDeepResearchV2Enabled(status.enabled) })
-      .catch(() => { if (!cancelled) setDeepResearchV2Enabled(false) })
-    return () => { cancelled = true }
-  }, [])
 
   // Reset per-session model override when switching sessions.
   useEffect(() => {
@@ -235,7 +223,7 @@ export function ChatPanelMastra() {
     if (next) setMode('chat')
   }
 
-  const deepResearchWorkbenchActive = isDeepResearchWorkbenchActive(team, deepResearchV2Enabled)
+  const deepResearchWorkbenchActive = isDeepResearchWorkbenchActive(team)
 
   const transport = useMemo(
     () =>
@@ -258,7 +246,7 @@ export function ChatPanelMastra() {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
             'x-bloom-session': pendingSessionIdRef.current || sessionIdRef.current || activeSessionId || '',
-            'x-bloom-agent': chatAgentHeaderForTab(teamRef.current, deepResearchV2EnabledRef.current),
+            'x-bloom-agent': chatAgentHeaderForTab(teamRef.current),
           },
         }),
       }),
@@ -324,7 +312,6 @@ export function ChatPanelMastra() {
   }
 
   const openResearchRun = (runId: string) => {
-    if (!deepResearchV2Enabled) return
     setTeam('research')
     setMode('chat')
     void useDeepResearchStore.getState().openRun(runId)
@@ -653,7 +640,7 @@ export function ChatPanelMastra() {
       </div>
 
       <div className="chat-footer">
-        {isChatComposerVisible(team, deepResearchV2Enabled) && (
+        {isChatComposerVisible(team) && (
         <div className="input-area">
           <div className="input-shell">
             {attachError && (

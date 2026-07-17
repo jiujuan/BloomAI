@@ -13,18 +13,15 @@ import { slimParts } from '../parts/tool-part'
 
 describe('Deep Research Chat routing', () => {
   it('routes the enabled Research tab to the durable workbench without a legacy agent header', () => {
-    expect(isDeepResearchWorkbenchActive('research', true)).toBe(true)
-    expect(chatAgentHeaderForTab('research', true)).toBe('')
-    expect(isChatComposerVisible('research', true)).toBe(false)
+    expect(isDeepResearchWorkbenchActive('research')).toBe(true)
+    expect(chatAgentHeaderForTab('research')).toBe('')
+    expect(isChatComposerVisible('research')).toBe(false)
   })
 
-  it('keeps legacy Research routing while V2 is disabled and preserves other tabs', () => {
-    expect(isDeepResearchWorkbenchActive('research', false)).toBe(false)
-    expect(chatAgentHeaderForTab('research', false)).toBe('research')
-    expect(isChatComposerVisible('research', false)).toBe(true)
-    expect(chatAgentHeaderForTab('writing', true)).toBe('writing')
-    expect(chatAgentHeaderForTab('coding', true)).toBe('coding')
-    expect(chatAgentHeaderForTab('', true)).toBe('')
+  it('keeps non-research tabs on their dedicated chat agents', () => {
+    expect(chatAgentHeaderForTab('writing')).toBe('writing')
+    expect(chatAgentHeaderForTab('coding')).toBe('coding')
+    expect(chatAgentHeaderForTab('')).toBe('')
   })
 
   it('persists, reloads, renders, and opens a compact research-run part without report text', () => {
