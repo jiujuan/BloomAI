@@ -57,6 +57,11 @@ export function isChatComposerVisible(team: TeamTab): boolean {
   return !isDeepResearchWorkbenchActive(team)
 }
 
+// Research is a session-specific workbench view. Do not carry it into another chat session.
+export function teamTabForSessionChange(team: TeamTab): TeamTab {
+  return team === 'research' ? '' : team
+}
+
 export function buildResearchRunAssistantMessage(data: ResearchRunPartData): { content: string; parts: any[] } {
   return { content: '', parts: slimParts([{ type: 'data-research-run', data }]) }
 }
@@ -142,6 +147,7 @@ export function ChatPanelMastra() {
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
+  const previousSessionIdRef = useRef<string | null>(activeSessionId)
   // AI Writer parameters (type + dropdowns). Kept in memory so toggling the 写作 tab off and
   // back on restores the last selection (same lifetime as `team`/`mode` — component-scoped).
   const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
@@ -323,6 +329,16 @@ export function ChatPanelMastra() {
     setDecidedApprovals((prev) => ({ ...prev, [approvalId]: approved }))
     addToolApprovalResponse({ id: approvalId, approved })
   }
+
+  // Switching a sidebar conversation must leave the session-specific research workbench.
+  // A null → id transition is a newly created session for an already-open workbench, so it stays open.
+  useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current
+    if (previousSessionId && activeSessionId && previousSessionId !== activeSessionId) {
+      setTeam((currentTeam) => teamTabForSessionChange(currentTeam))
+    }
+    previousSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
 
   // Load persisted history when the active session changes. Assistant rows restore their stored
   // UI parts (tool cards, reasoning, workflow steps); user rows and legacy rows fall back to text.

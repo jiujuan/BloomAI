@@ -6,6 +6,7 @@ import {
   chatAgentHeaderForTab,
   isDeepResearchWorkbenchActive,
   isChatComposerVisible,
+  teamTabForSessionChange,
   restoreParts,
 } from '../ChatPanelMastra'
 import { ResearchRunPart } from './ResearchRunPart'
@@ -22,6 +23,11 @@ describe('Deep Research Chat routing', () => {
     expect(chatAgentHeaderForTab('writing')).toBe('writing')
     expect(chatAgentHeaderForTab('coding')).toBe('coding')
     expect(chatAgentHeaderForTab('')).toBe('')
+  })
+
+  it('leaves the research workbench when the user switches to another chat session', () => {
+    expect(teamTabForSessionChange('research')).toBe('')
+    expect(teamTabForSessionChange('writing')).toBe('writing')
   })
 
   it('persists, reloads, renders, and opens a compact research-run part without report text', () => {
