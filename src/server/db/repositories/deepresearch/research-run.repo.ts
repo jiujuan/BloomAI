@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type {
   JsonObject,
@@ -55,6 +55,11 @@ export interface TransitionResearchRunOptions {
   error?: ResearchRunErrorDto | null
   eventType?: ResearchEventType
   eventPayload?: JsonObject
+}
+
+export interface TransitionResearchRunCasResult {
+  run: ResearchRunDto
+  event: ResearchEventDto
 }
 
 function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
@@ -215,6 +220,7 @@ export const researchRunRepo = {
         status: to,
         phase,
         updated_at: now,
+        state_version: sql`${research_runs.state_version} + 1`,
       }
       if (options.progress !== undefined) updates.progress = options.progress
       if (options.resumePhase !== undefined) updates.resume_phase = options.resumePhase
@@ -242,6 +248,60 @@ export const researchRunRepo = {
         event,
       }
     })
+    publishResearchEvent(result.event)
+    return result.run
+  },
+
+  /**
+   * Atomically applies a legal Run transition only when the caller still owns the
+   * observed state version. The status event is appended only after the CAS update wins.
+   */
+  transitionWithEventCas(id: string, expectedStateVersion: number, to: ResearchRunStatus, options: TransitionResearchRunOptions = {}): ResearchRunDto | null {
+    const result = getOrmDb().transaction((tx) => {
+      const currentRow = tx.select().from(research_runs).where(eq(research_runs.id, id)).get()
+      if (!currentRow || currentRow.state_version !== expectedStateVersion) return null
+
+      const current = mapRun(currentRow)
+      assertResearchTransition(current.status, to, { error: current.error })
+      const now = Date.now()
+      const phase = options.phase ?? to
+      const updates: Record<string, unknown> = {
+        status: to,
+        phase,
+        updated_at: now,
+        state_version: expectedStateVersion + 1,
+      }
+      if (options.progress !== undefined) updates.progress = options.progress
+      if (options.resumePhase !== undefined) updates.resume_phase = options.resumePhase
+      if (options.error === null) {
+        updates.error_code = null
+        updates.error_message = null
+        updates.error_retryable = null
+      } else if (options.error) {
+        updates.error_code = options.error.code
+        updates.error_message = options.error.message
+        updates.error_retryable = Number(options.error.retryable)
+      }
+      if (isTerminal(to)) updates.completed_at = now
+
+      const updated = tx.update(research_runs).set(updates as typeof research_runs.$inferInsert).where(and(
+        eq(research_runs.id, id),
+        eq(research_runs.state_version, expectedStateVersion),
+      )).run()
+      if (updated.changes !== 1) return null
+
+      const event = appendResearchEventInTransaction(tx, {
+        runId: id,
+        type: options.eventType ?? 'research.run.status_changed',
+        phase,
+        payload: options.eventPayload ?? { from: current.status, to },
+      })
+      return {
+        run: mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!),
+        event,
+      } satisfies TransitionResearchRunCasResult
+    })
+    if (!result) return null
     publishResearchEvent(result.event)
     return result.run
   },

@@ -20,6 +20,10 @@ async function loadRepositories() {
   const { researchEvidenceRepo } = await import('./research-evidence.repo')
   const { researchReportRepo } = await import('./research-report.repo')
   const { researchEventRepo } = await import('./research-event.repo')
+  const { researchAttemptRepo } = await import('./research-attempt.repo')
+  const { researchCheckpointRepo } = await import('./research-checkpoint.repo')
+  const { researchIterationRepo } = await import('./research-iteration.repo')
+  const { researchCoverageAssessmentRepo } = await import('./research-coverage-assessment.repo')
 
   return {
     client,
@@ -29,6 +33,10 @@ async function loadRepositories() {
     researchEvidenceRepo,
     researchReportRepo,
     researchEventRepo,
+    researchAttemptRepo,
+    researchCheckpointRepo,
+    researchIterationRepo,
+    researchCoverageAssessmentRepo,
   }
 }
 
@@ -366,4 +374,188 @@ describe('Deep Research repositories', () => {
     expect(researchReportRepo.listSections(run.id)).toEqual([])
     expect(researchEventRepo.list(run.id)).toEqual([])
   })
+
+  it('persists attempts, idempotent checkpoints, iteration budget snapshots, and assessments through domain APIs', async () => {
+    const {
+      researchRunRepo,
+      researchAttemptRepo,
+      researchCheckpointRepo,
+      researchIterationRepo,
+      researchCoverageAssessmentRepo,
+    } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', createdAt: 1_000 })
+
+    const checkpoint = researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: attempt.id,
+      checkpointKey: 'questions_planned',
+      phase: 'planning',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'researching', iteration: 0, pendingQueryIds: ['q-1'] },
+      inputFingerprint: 'input:v1',
+      outputFingerprint: 'questions:q-1',
+      replayPolicy: 'reuse',
+      createdAt: 1_001,
+    })
+    const duplicate = researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: attempt.id,
+      checkpointKey: 'questions_planned',
+      phase: 'planning',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'planning', iteration: 0 },
+      inputFingerprint: 'input:v1',
+      replayPolicy: 'reuse',
+      createdAt: 1_002,
+    })
+
+    expect(duplicate).toEqual(checkpoint)
+    const resumedAttempt = researchAttemptRepo.create({ runId: run.id, trigger: 'manual_resume', createdAt: 1_002 })
+    const laterCheckpoint = researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: resumedAttempt.id,
+      checkpointKey: 'sources_curated',
+      phase: 'researching',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'synthesizing', iteration: 0 },
+      inputFingerprint: 'input:v1',
+      replayPolicy: 'reuse',
+      createdAt: 1_003,
+    })
+    expect(researchCheckpointRepo.findLatestCompatibleCursor(run.id, 'input:v1')).toMatchObject({
+      id: laterCheckpoint.id,
+      resumeCursor: { nextPhase: 'synthesizing' },
+    })
+    expect(() => researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: attempt.id,
+      sequence: checkpoint.sequence,
+      checkpointKey: 'different_checkpoint',
+      phase: 'planning',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'researching', iteration: 0 },
+      inputFingerprint: 'input:v2',
+      replayPolicy: 'reuse',
+    })).toThrow(/unique|constraint/i)
+
+    const iteration = researchIterationRepo.create({
+      runId: run.id,
+      targetQuestionIds: ['q-1'],
+      budgetBefore: { remainingQueries: 3 },
+      plan: { queryIds: ['query-1'] },
+      createdAt: 1_003,
+    })
+    const updatedIteration = researchIterationRepo.update(iteration.id, {
+      status: 'assessed',
+      executedQueryCount: 1,
+      newSourceCount: 2,
+      newEvidenceCount: 1,
+      coverageAfter: { aggregateScore: 0.8 },
+      budgetAfter: { remainingQueries: 2 },
+    })
+    expect(updatedIteration).toMatchObject({ status: 'assessed', newEvidenceCount: 1, budgetAfter: { remainingQueries: 2 } })
+
+    const assessment = researchCoverageAssessmentRepo.save({
+      runId: run.id,
+      iterationId: iteration.id,
+      iteration: iteration.ordinal,
+      policyVersion: 'coverage-v2',
+      inputFingerprint: 'evidence:v1',
+      aggregateScore: 0.8,
+      questionVerdicts: [{ questionId: 'q-1', score: 0.8, verdict: 'covered', gapCodes: [], limitations: [] }],
+      limitations: ['one caveat'],
+      createdAt: 1_004,
+    })
+    expect(researchCoverageAssessmentRepo.save({ ...assessment, iterationId: iteration.id })).toEqual(assessment)
+    expect(researchCoverageAssessmentRepo.getLatest(run.id, iteration.ordinal)).toEqual(assessment)
+  })
+
+  it('allows only one matching-state CAS transition and writes its event in the same transaction', async () => {
+    const { researchRunRepo, researchEventRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+
+    const first = researchRunRepo.transitionWithEventCas(run.id, run.stateVersion ?? 0, 'planning')
+    const stale = researchRunRepo.transitionWithEventCas(run.id, run.stateVersion ?? 0, 'planning')
+
+    expect(first).toMatchObject({ status: 'planning', stateVersion: 1 })
+    expect(stale).toBeNull()
+    expect(researchEventRepo.list(run.id)).toHaveLength(1)
+    expect(researchEventRepo.list(run.id)[0]).toMatchObject({ type: 'research.run.status_changed', payload: { from: 'queued', to: 'planning' } })
+  })
+
+  it('rejects checkpoint completion without a live attempt ownership lease and leaves no half update', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', status: 'running', createdAt: 2_000 })
+    expect(researchAttemptRepo.acquireLease(attempt.id, 'worker-a', 10_000, 2_000)).toBe(true)
+
+    expect(researchCheckpointRepo.completeWithOwnership({
+      runId: run.id,
+      attemptId: attempt.id,
+      executorId: 'worker-b',
+      checkpointKey: 'owned_checkpoint',
+      phase: 'planning',
+      resumeCursor: { version: 1, nextPhase: 'researching', iteration: 0 },
+      inputFingerprint: 'input:v1',
+      replayPolicy: 'reuse',
+      now: 2_001,
+    })).toBeNull()
+    expect(researchCheckpointRepo.list(run.id)).toEqual([])
+    expect(researchEventRepo.list(run.id)).toHaveLength(2)
+    expect(researchRunRepo.get(run.id)?.currentAttemptId).toBe(attempt.id)
+
+    const completed = researchCheckpointRepo.completeWithOwnership({
+      runId: run.id,
+      attemptId: attempt.id,
+      executorId: 'worker-a',
+      checkpointKey: 'owned_checkpoint',
+      phase: 'planning',
+      resumeCursor: { version: 1, nextPhase: 'researching', iteration: 0 },
+      inputFingerprint: 'input:v1',
+      replayPolicy: 'reuse',
+      now: 2_002,
+    })
+    expect(completed).toMatchObject({ status: 'completed', sequence: 1 })
+    expect(researchRunRepo.get(run.id)).toMatchObject({ currentAttemptId: attempt.id, resumePhase: 'researching' })
+    expect(researchEventRepo.list(run.id).map((event) => event.type)).toEqual(['research.attempt.created', 'research.attempt.started', 'research.checkpoint.completed'])
+
+    expect(() => researchCheckpointRepo.completeWithOwnership({
+      runId: run.id,
+      attemptId: attempt.id,
+      executorId: 'worker-a',
+      sequence: completed!.sequence,
+      checkpointKey: 'conflicting_checkpoint',
+      phase: 'planning',
+      resumeCursor: { version: 1, nextPhase: 'synthesizing', iteration: 0 },
+      inputFingerprint: 'input:v2',
+      replayPolicy: 'reuse',
+      now: 2_003,
+    })).toThrow(/unique|constraint/i)
+    expect(researchCheckpointRepo.list(run.id)).toHaveLength(1)
+    expect(researchRunRepo.get(run.id)).toMatchObject({ resumePhase: 'researching' })
+    expect(researchEventRepo.list(run.id).map((event) => event.type)).toEqual(['research.attempt.created', 'research.attempt.started', 'research.checkpoint.completed'])
+  })
+
+  it('chooses the planning fallback cursor used by migrated legacy Runs', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: attempt.id,
+      checkpointKey: 'legacy:resume_from_planning',
+      phase: 'planning',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'planning', iteration: 0 },
+      inputFingerprint: 'legacy:unknown',
+      replayPolicy: 'retry_incomplete',
+    })
+    expect(researchCheckpointRepo.findLatestCompatibleCursor(run.id, 'current:v2')).toMatchObject({
+      checkpointKey: 'legacy:resume_from_planning',
+      phase: 'planning',
+      resumeCursor: { nextPhase: 'planning', iteration: 0 },
+    })
+  })
+
 })
