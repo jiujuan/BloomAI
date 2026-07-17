@@ -14,6 +14,19 @@ function markdownTitle(markdown: string): string | null {
   return match?.[1]?.trim() || null
 }
 
+
+export function buildReportReferences(
+  citations: ResearchCitationDto[],
+  evidenceById: Record<string, ResearchEvidenceDto>,
+  snapshotsById: Record<string, ResearchSourceSnapshotDto>,
+  sources: ResearchSourceDto[],
+) {
+  return citations
+    .map((citation) => ({ citation, evidence: evidenceById[citation.evidenceId] }))
+    .map(({ citation, evidence }) => ({ citation, context: evidence ? getEvidenceSourceContext(evidence, snapshotsById, sources) : null }))
+    .sort((left, right) => left.citation.ordinal - right.citation.ordinal)
+}
+
 export function ResearchReportView({
   report,
   evidenceById,
@@ -65,10 +78,7 @@ export function ResearchReportView({
 
   if (!report) return <section className="research-section"><p className="research-empty">报告完成后会在这里显示可核验正文与引用。</p></section>
 
-  const references = report.citations
-    .map((citation) => ({ citation, evidence: evidenceById[citation.evidenceId] }))
-    .map(({ citation, evidence }) => ({ citation, context: evidence ? getEvidenceSourceContext(evidence, snapshotsById, sources) : null }))
-    .sort((left, right) => left.citation.ordinal - right.citation.ordinal)
+  const references = buildReportReferences(report.citations, evidenceById, snapshotsById, sources)
   const displayTitle = language === 'zh' && translatedMarkdown ? (markdownTitle(translatedMarkdown) ?? report.title) : report.title
 
   return (

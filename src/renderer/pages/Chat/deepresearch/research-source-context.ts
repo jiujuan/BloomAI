@@ -27,7 +27,7 @@ export function getEvidenceSourceContext(
   const href = snapshot?.finalUrl || source?.canonicalUrl || null
   const domain = source?.domain ?? (href ? (() => { try { return new URL(href).hostname } catch { return null } })() : null)
   return {
-    title: source?.title?.trim() || metadataTitle || domain || href || '?????',
+    title: metadataTitle || source?.title?.trim() || domain || href || 'Untitled source',
     href,
     domain,
   }

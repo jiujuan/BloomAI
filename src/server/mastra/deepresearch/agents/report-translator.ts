@@ -24,7 +24,7 @@ function assertProtectedTokens(source: string, translation: string): void {
 export function isPredominantlyEnglish(markdown: string): boolean {
   const latin = (markdown.match(/[A-Za-z]/g) ?? []).length
   const han = (markdown.match(/\p{Script=Han}/gu) ?? []).length
-  return latin >= 80 && latin > han * 2
+  return latin >= 12 && latin > han * 2
 }
 
 export function createMastraReportTranslator(): ReportTranslator {

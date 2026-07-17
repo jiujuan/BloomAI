@@ -6,6 +6,7 @@ import type { CitationService } from '@server/services/deepresearch/citation-ser
 import { reportSectionJobSchema } from './build-outline'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { loadRunnableRun } from '../workflow-context'
+import { selectEvidenceForSection } from './section-evidence'
 
 export function createExtractClaimsStep({ repositories, extractor, citationService }: { repositories: DeepResearchRepositories; extractor: ClaimExtractor; citationService: CitationService }) {
   return createStep({
