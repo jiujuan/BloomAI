@@ -4,6 +4,7 @@ import { DefaultChatTransport } from 'ai'
 import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
+import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 import { platform } from '@renderer/api'
 import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
@@ -17,13 +18,16 @@ import { WriterParams, defaultWritingConfig } from './WriterParams'
 import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, PasteMenu, useSelectionMenu } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 import { AttachmentChips, type ChipItem } from './parts/AttachmentChips'
+import { DeepResearchWorkbench } from './deepresearch/DeepResearchWorkbench'
+import { ResearchRunPart, type ResearchRunPartData } from './deepresearch/ResearchRunPart'
+import { useDeepResearchStore } from './deepresearch/deep-research.store'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_MAX_SIZE, extOf, isAllowedExt, type Attachment } from '@shared/attachments'
 
 // A composer chip plus the resolved server metadata once its upload finishes (`att`).
 type ComposerAttachment = ChipItem & { att?: Attachment }
 
 type ChatMode = 'chat' | 'plan' | 'deep'
-type TeamTab = '' | 'research' | 'writing' | 'coding'
+export type TeamTab = '' | 'research' | 'writing' | 'coding'
 // One plan proposal in the current turn. Stable `id` keeps its card in a fixed position.
 type PlanEntry = { id: number; query: string; tasks: string[]; status: PlanStatus }
 type PendingChatMessage = { sessionId: string; parts: any[]; attachments: Attachment[] }
@@ -41,9 +45,25 @@ const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'coding', label: '编码' },
 ]
 
+export function isDeepResearchWorkbenchActive(team: TeamTab, enabled: boolean): boolean {
+  return team === 'research' && enabled
+}
+
+export function chatAgentHeaderForTab(team: TeamTab, deepResearchV2Enabled: boolean): TeamTab {
+  return team === 'research' && deepResearchV2Enabled ? '' : team
+}
+
+export function isChatComposerVisible(team: TeamTab, deepResearchV2Enabled: boolean): boolean {
+  return !isDeepResearchWorkbenchActive(team, deepResearchV2Enabled)
+}
+
+export function buildResearchRunAssistantMessage(data: ResearchRunPartData): { content: string; parts: any[] } {
+  return { content: '', parts: slimParts([{ type: 'data-research-run', data }]) }
+}
+
 // Rebuild a stored message's UI parts. Assistant rows persist their full parts JSON; user rows
 // and legacy/pre-parts rows fall back to a single text part. Never throws — bad JSON → text.
-function restoreParts(m: { content?: string; parts?: string | null }): any[] {
+export function restoreParts(m: { content?: string; parts?: string | null }): any[] {
   if (m.parts) {
     try {
       const parsed = JSON.parse(m.parts)
@@ -62,7 +82,7 @@ function hasRenderableContent(parts: any[]): boolean {
   return parts.some((p) => {
     if (!p) return false
     if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
-    if (p.type === 'data-workflow') return !!p.data
+    if (p.type === 'data-workflow' || p.type === 'data-research-run') return !!p.data
     if (p.type === 'data-plan') return true
     if (p.type === 'data-tool-call-approval') return true
     return isToolPart(p)
@@ -76,7 +96,7 @@ function hasAnswerContent(parts: any[]): boolean {
   return parts.some((p) => {
     if (!p) return false
     if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
-    if (p.type === 'data-workflow') return !!p.data
+    if (p.type === 'data-workflow' || p.type === 'data-research-run') return !!p.data
     if (p.type === 'data-tool-call-approval') return true
     return isToolPart(p)
   })
@@ -122,6 +142,7 @@ export function ChatPanelMastra() {
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
+  const [deepResearchV2Enabled, setDeepResearchV2Enabled] = useState(false)
   // AI Writer parameters (type + dropdowns). Kept in memory so toggling the 写作 tab off and
   // back on restores the last selection (same lifetime as `team`/`mode` — component-scoped).
   const [writing, setWriting] = useState<WritingConfig>(defaultWritingConfig)
@@ -163,16 +184,28 @@ export function ChatPanelMastra() {
   const modeRef = useRef(mode)
   const modelRef = useRef(model)
   const teamRef = useRef(team)
+  const deepResearchV2EnabledRef = useRef(deepResearchV2Enabled)
   const writingRef = useRef(writing)
   modeRef.current = mode
   modelRef.current = model
   teamRef.current = team
+  deepResearchV2EnabledRef.current = deepResearchV2Enabled
   writingRef.current = writing
   sessionIdRef.current = activeSessionId
 
   useEffect(() => {
     loadTextModels()
   }, [loadTextModels])
+
+  // Older servers answer /status with a disabled fallback; keep the legacy Agent available until
+  // the server positively advertises the durable Deep Research API.
+  useEffect(() => {
+    let cancelled = false
+    void platform.deepResearch.getStatus()
+      .then((status) => { if (!cancelled) setDeepResearchV2Enabled(status.enabled) })
+      .catch(() => { if (!cancelled) setDeepResearchV2Enabled(false) })
+    return () => { cancelled = true }
+  }, [])
 
   // Reset per-session model override when switching sessions.
   useEffect(() => {
@@ -202,6 +235,8 @@ export function ChatPanelMastra() {
     if (next) setMode('chat')
   }
 
+  const deepResearchWorkbenchActive = isDeepResearchWorkbenchActive(team, deepResearchV2Enabled)
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -223,7 +258,7 @@ export function ChatPanelMastra() {
             'x-bloom-mode': modeRef.current,
             'x-bloom-model': modelRef.current,
             'x-bloom-session': pendingSessionIdRef.current || sessionIdRef.current || activeSessionId || '',
-            'x-bloom-agent': teamRef.current,
+            'x-bloom-agent': chatAgentHeaderForTab(teamRef.current, deepResearchV2EnabledRef.current),
           },
         }),
       }),
@@ -272,6 +307,27 @@ export function ChatPanelMastra() {
     } finally {
       if (pendingSessionIdRef.current === sessionId) pendingSessionIdRef.current = null
     }
+  }
+
+  // Research runs are durable domain objects. The Chat message stores only a compact link part;
+  // report prose remains in the Run artifact and is never duplicated into the chat timeline.
+  const persistResearchRun = (run: ResearchRunDto) => {
+    const sid = run.sessionId || sessionIdRef.current || activeSessionId
+    if (!sid) return
+    const message = buildResearchRunAssistantMessage({
+      runId: run.id,
+      title: run.topic,
+      status: run.status,
+      artifactId: run.reportArtifactId,
+    })
+    void platform.saveAssistantMessage({ sessionId: sid, content: message.content, parts: message.parts, model: modelRef.current }).catch(() => {})
+  }
+
+  const openResearchRun = (runId: string) => {
+    if (!deepResearchV2Enabled) return
+    setTeam('research')
+    setMode('chat')
+    void useDeepResearchStore.getState().openRun(runId)
   }
 
   // Tracks decided approvals (id -> approved) so the card shows the outcome after a click.
@@ -462,6 +518,13 @@ export function ChatPanelMastra() {
     await sendChatMessage(outgoing)
   }
 
+  // A Deep Research Run needs a session link so the compact data-research-run part can be
+  // persisted with the Chat transcript. Create it as soon as the enabled workbench is opened.
+  useEffect(() => {
+    if (!deepResearchWorkbenchActive || activeSessionId) return
+    void ensureActiveSessionId().catch(() => {})
+  }, [activeSessionId, deepResearchWorkbenchActive])
+
   // Reflect the first question in the sidebar title immediately. In normal mode the server sets
   // the title on the first persisted user message, but a plan proposal persists nothing until the
   // user confirms — so set it optimistically here (updates the store live and persists to DB).
@@ -523,6 +586,9 @@ export function ChatPanelMastra() {
       </div>
 
       <div className="timeline" ref={timelineRef} role="log" aria-live="polite">
+        {deepResearchWorkbenchActive ? (
+          <DeepResearchWorkbench sessionId={activeSessionId || undefined} onRunStarted={persistResearchRun} />
+        ) : <>
         {messages.length === 0 && !isStreaming && plans.length === 0 && (
           <div className="timeline-empty">
             <h2 className="timeline-empty-title">BloomAI</h2>
@@ -538,6 +604,7 @@ export function ChatPanelMastra() {
             streaming={isStreaming && idx === messages.length - 1}
             decidedApprovals={decidedApprovals}
             onDecide={handleDecide}
+            onOpenResearchRun={openResearchRun}
           />
         ))}
 
@@ -582,10 +649,11 @@ export function ChatPanelMastra() {
             <div className="timeline-error-message">{friendlyError(error)}</div>
           </div>
         )}
-
+        </>}
       </div>
 
       <div className="chat-footer">
+        {isChatComposerVisible(team, deepResearchV2Enabled) && (
         <div className="input-area">
           <div className="input-shell">
             {attachError && (
@@ -670,6 +738,31 @@ export function ChatPanelMastra() {
             </div>
           </div>
         </div>
+        )}
+        {deepResearchWorkbenchActive && (
+          <div className="input-area deep-research-switcher">
+            <div className="input-shell">
+              <div className="input-toolbar">
+                <div className="input-toolbar-left">
+                  <div className="team-tabs" role="tablist" aria-label="Agent">
+                    {TEAM_TABS.map((t) => (
+                      <button
+                        key={t.id}
+                        role="tab"
+                        aria-selected={team === t.id}
+                        className={cn('team-tab', team === t.id && 'active')}
+                        onClick={() => handleTeamToggle(t.id)}
+                        title={t.id === 'coding' ? '编码：可读写文件/执行命令，危险操作需你确认' : undefined}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -765,7 +858,7 @@ type ApprovalProps = {
   onDecide: (approvalId: string, approved: boolean) => void
 }
 
-function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { role: string; parts: any[]; streaming?: boolean } & ApprovalProps) {
+function MessageView({ role, parts, streaming, decidedApprovals, onDecide, onOpenResearchRun }: { role: string; parts: any[]; streaming?: boolean; onOpenResearchRun?: (runId: string) => void } & ApprovalProps) {
   if (role === 'user') {
     return <UserMessageView parts={parts} />
   }
@@ -800,7 +893,7 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide }: { r
             <p className="msg-text msg-fallback">本次未能生成回答，请稍后重试。</p>
           ) : (
             <>
-              {renderAssistantParts(parts, { decidedApprovals, onDecide })}
+              {renderAssistantParts(parts, { decidedApprovals, onDecide }, onOpenResearchRun)}
               {waitingAfterParts && <WaitingIndicator />}
             </>
           )}
@@ -844,7 +937,7 @@ function UserMessageView({ parts }: { parts: any[] }) {
 }
 
 // Render assistant parts in order, collapsing consecutive same-tool calls into one group card.
-function renderAssistantParts(parts: any[], approval: ApprovalProps): React.ReactNode[] {
+function renderAssistantParts(parts: any[], approval: ApprovalProps, onOpenResearchRun?: (runId: string) => void): React.ReactNode[] {
   const items: React.ReactNode[] = []
   let i = 0
   while (i < parts.length) {
@@ -869,6 +962,8 @@ function renderAssistantParts(parts: any[], approval: ApprovalProps): React.Reac
       items.push(<AssistantMarkdown key={`t-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
     } else if (part.type === 'data-workflow' && part.data) {
       items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
+    } else if (part.type === 'data-research-run' && part.data) {
+      items.push(<ResearchRunPart key={`research-run-${i}`} data={part.data} onOpen={onOpenResearchRun || (() => {})} />)
     } else if (part.type === 'data-plan' && part.data) {
       const tasks = Array.isArray(part.data.tasks) ? part.data.tasks : []
       items.push(<PlanCard key={`plan-${i}`} tasks={tasks} status="done" />)
