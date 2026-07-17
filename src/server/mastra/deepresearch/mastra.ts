@@ -121,5 +121,9 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
       const workflowRun = await loadWorkflowRun(run.workflowRunId)
       return workflowRun.resume({ resumeData: parsed, label: 'planning' })
     },
+    async getWorkflowRunState(workflowRunId: string) {
+      const state = await workflow.getWorkflowRunById(workflowRunId, { fields: ['suspendedPaths', 'resumeLabels'] })
+      return state ? { status: state.status } : null
+    },
   })
 }

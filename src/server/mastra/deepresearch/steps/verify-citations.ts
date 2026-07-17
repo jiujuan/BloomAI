@@ -2,7 +2,8 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { CitationVerifier } from '../agents/citation-verifier'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchClaimVerification } from '@server/telemetry/metrics'
 
 export function createVerifyCitationsStep({ repositories, verifier }: { repositories: DeepResearchRepositories; verifier: CitationVerifier }) {
   return createStep({
@@ -20,6 +21,7 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
         current.push(citation)
         citationsByClaim.set(citation.claimId, current)
       }
+      let verifiedClaimCount = 0
       for (const claim of claims) {
         const citations = citationsByClaim.get(claim.id) ?? []
         if (claim.kind !== 'factual') continue
@@ -34,7 +36,9 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
         const status = statuses.includes('supported') ? 'supported' : statuses.includes('partially_supported') ? 'partially_supported' : 'unsupported'
         repositories.researchReportRepo.updateClaim(claim.id, { verificationStatus: status })
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.claim.verified', phase: 'verifying_citations', payload: { id: claim.id, status } })
+        verifiedClaimCount += 1
       }
+      recordDeepResearchClaimVerification(verifiedClaimCount, deepResearchTelemetryContext(run, { claims: verifiedClaimCount }))
       return { runId: run.id }
     },
   })

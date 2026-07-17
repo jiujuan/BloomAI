@@ -112,6 +112,7 @@ describe('database migrations', () => {
         'research_citations',
         'research_quality_assessments',
         'research_events',
+        'research_recovery_commands',
         'research_artifacts',
       ])
     )
@@ -124,10 +125,12 @@ describe('database migrations', () => {
       '006-skill-run-commands',
       '007-article-illustration-jobs',
       '008-deep-research-core',
+      '009-deep-research-recovery-commands',
     ])
 
     expect(uniqueIndexColumnSets('research_events')).toContainEqual(['run_id', 'sequence'])
     expect(uniqueIndexColumnSets('research_sources')).toContainEqual(['run_id', 'canonical_url'])
+    expect(uniqueIndexColumnSets('research_recovery_commands')).toContainEqual(['run_id', 'command_key'])
 
     for (const tableName of [
       'research_search_queries',
@@ -151,6 +154,7 @@ describe('database migrations', () => {
       'research_citations',
       'research_quality_assessments',
       'research_events',
+      'research_recovery_commands',
       'research_artifacts',
     ]) {
       expect(foreignKeyActions(tableName)).toContainEqual({

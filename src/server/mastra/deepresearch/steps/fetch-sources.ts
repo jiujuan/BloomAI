@@ -2,7 +2,8 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { ReturnTypeOfContentService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchFetchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
 const briefSchema = z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) })
 const inputSchema = z.object({ runId: z.string().min(1), brief: briefSchema, sourceIds: z.array(z.string()) })
@@ -14,9 +15,15 @@ export function createFetchSourcesStep({ repositories, contentService }: { repos
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
       const sources = inputData.sourceIds.map((id) => repositories.researchSourceRepo.getSource(id)).filter((source): source is NonNullable<typeof source> => Boolean(source))
-      const outcomes = await contentService.fetch(run, sources, {
-        isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+      const startedAt = Date.now()
+      const outcomes = await traceDeepResearchPhase('fetching', deepResearchTelemetryContext(run, { sources: sources.length }), async (span) => {
+        const result = await contentService.fetch(run, sources, {
+          isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+        })
+        setDeepResearchSpanCounts(span, { sources: sources.length, fetched: result.filter((outcome) => outcome.status === 'fetched').length })
+        return result
       })
+      recordDeepResearchFetchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { sources: sources.length }))
       const fetchedCount = outcomes.filter((outcome) => outcome.status === 'fetched').length
       repositories.researchRunRepo.setUsage(run.id, { ...run.usage, fetchedSources: run.usage.fetchedSources + fetchedCount })
       repositories.researchEventRepo.append({

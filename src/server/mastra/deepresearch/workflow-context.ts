@@ -6,6 +6,7 @@ import { researchQuestionRepo } from '@server/db/repositories/deepresearch/resea
 import { researchReportRepo } from '@server/db/repositories/deepresearch/research-report.repo'
 import { researchRunRepo } from '@server/db/repositories/deepresearch/research-run.repo'
 import { researchSourceRepo } from '@server/db/repositories/deepresearch/research-source.repo'
+import { deepResearchTraceAttributes, type DeepResearchTelemetryContext } from '@server/telemetry/metrics'
 
 export interface DeepResearchRepositories {
   researchRunRepo: typeof researchRunRepo
@@ -23,6 +24,21 @@ export const defaultDeepResearchRepositories: DeepResearchRepositories = {
   researchEventRepo,
   researchEvidenceRepo,
   researchSourceRepo,
+}
+
+export function deepResearchTelemetryContext(run: ResearchRunDto, counts?: DeepResearchTelemetryContext['counts']): DeepResearchTelemetryContext {
+  return {
+    researchRunId: run.id,
+    workflowRunId: run.workflowRunId,
+    profile: run.profile,
+    depth: run.depth,
+    phase: run.phase,
+    counts,
+  }
+}
+
+export function deepResearchRunTraceAttributes(run: ResearchRunDto, counts?: DeepResearchTelemetryContext['counts']) {
+  return deepResearchTraceAttributes(deepResearchTelemetryContext(run, counts))
 }
 
 export function assertRunnable(run: ResearchRunDto, allowedStatuses: readonly ResearchRunStatus[]): void {

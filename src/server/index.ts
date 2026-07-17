@@ -4,6 +4,7 @@ import { loadDotEnv } from './config/load-env'
 import { createHonoApp } from './http/app'
 import { runMigrations } from './db/client'
 import { SkillRunCoordinator } from './skills/runtime'
+import { getDeepResearchModule } from './deepresearch'
 import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
 import { serverLogger } from './logger/logger'
 import { initTracing, shutdownTracing } from './telemetry/tracer'
@@ -24,9 +25,12 @@ const PORT = parseInt(process.env[BLOOMAI_PORT_ENV] || String(DEFAULT_SERVER_POR
 serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT })
 
 runMigrations()
-  .then(() => {
+  .then(async () => {
     const interrupted = new SkillRunCoordinator().markInterruptedRuns()
     if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
+    const recovered = await getDeepResearchModule().recoverInterruptedRuns()
+    if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })
+    if (recovered.skipped.length > 0) serverLogger.warn('Skipped Deep Research recovery conflicts after restart', { count: recovered.skipped.length })
     const app = createHonoApp()
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)

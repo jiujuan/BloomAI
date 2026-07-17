@@ -2,7 +2,8 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchEvidenceCount } from '@server/telemetry/metrics'
 
 const briefSchema = z.object({
   title: z.string(),
@@ -29,6 +30,7 @@ export function createExtractEvidenceStep({ repositories, evidenceService }: { r
         phase: 'extracting_evidence',
         payload: { count: result.createdCount },
       })
+      recordDeepResearchEvidenceCount(result.createdCount, deepResearchTelemetryContext(run, { evidence: result.createdCount }))
       return inputData
     },
   })

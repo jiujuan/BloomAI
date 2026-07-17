@@ -528,6 +528,18 @@ export const research_events = sqliteTable('research_events', {
   runSequenceIdx: uniqueIndex('idx_research_events_run_sequence').on(table.run_id, table.sequence),
 }))
 
+export const research_recovery_commands = sqliteTable('research_recovery_commands', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  command_key: text('command_key').notNull(),
+  status: text('status').notNull().default('claimed'),
+  dispatch_token: text('dispatch_token'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runCommandKeyIdx: uniqueIndex('idx_research_recovery_commands_run_key').on(table.run_id, table.command_key),
+}))
+
 export const research_artifacts = sqliteTable('research_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),

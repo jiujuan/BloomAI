@@ -7,6 +7,16 @@ import type { ReturnTypeOfContentService, ReturnTypeOfSearchService } from './ty
 import { areHighPriorityQuestionsCovered } from '@server/services/deepresearch/evidence-service'
 import { gapLoopStateSchema } from './assess-coverage'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { deepResearchTelemetryContext } from '../workflow-context'
+import {
+  recordDeepResearchEvidenceCount,
+  recordDeepResearchFetchLatency,
+  recordDeepResearchGapIterations,
+  recordDeepResearchSearchLatency,
+  recordDeepResearchSourcesSelected,
+  setDeepResearchSpanCounts,
+  traceDeepResearchPhase,
+} from '@server/telemetry/metrics'
 
 export interface GapFillStopState {
   coverageComplete: boolean
@@ -72,6 +82,7 @@ export function createGapFillIterationStep({
         phase: 'gap_filling',
         payload: { iteration },
       })
+      recordDeepResearchGapIterations(iteration, deepResearchTelemetryContext(run, { iterations: iteration }))
       const queryRecords = uniquePlans.map((plan, index) => repositories.researchQuestionRepo.createSearchQuery({
         runId: run.id,
         questionId: plan.questionId,
@@ -82,11 +93,17 @@ export function createGapFillIterationStep({
       for (const query of queryRecords) {
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.query.started', phase: 'gap_filling', payload: { id: query.id } })
       }
-      const executions: SearchExecution[] = await searchService.search(
-        run,
-        queryRecords.map((query) => ({ id: query.id, query: query.query })),
-        { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' },
-      )
+      const searchStartedAt = Date.now()
+      const executions: SearchExecution[] = await traceDeepResearchPhase('gap_filling.search', deepResearchTelemetryContext(run, { queries: queryRecords.length, iterations: iteration }), async (span) => {
+        const result = await searchService.search(
+          run,
+          queryRecords.map((query) => ({ id: query.id, query: query.query })),
+          { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' },
+        )
+        setDeepResearchSpanCounts(span, { queries: queryRecords.length, candidates: result.reduce((count, execution) => count + execution.candidates.length, 0), iterations: iteration })
+        return result
+      })
+      recordDeepResearchSearchLatency(Date.now() - searchStartedAt, deepResearchTelemetryContext(run, { queries: queryRecords.length, iterations: iteration }))
       for (const execution of executions) {
         repositories.researchQuestionRepo.updateSearchQuery(execution.queryId, {
           provider: execution.provider,
@@ -123,12 +140,19 @@ export function createGapFillIterationStep({
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.discovered', phase: 'gap_filling', payload: { id: source.id } })
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.selected', phase: 'gap_filling', payload: { id: source.id } })
       }
+      recordDeepResearchSourcesSelected(sourceIds.length, deepResearchTelemetryContext(run, { sources: sourceIds.length, iterations: iteration }))
       const sources = sourceIds
         .map((id) => repositories.researchSourceRepo.getSource(id))
         .filter((source): source is NonNullable<typeof source> => Boolean(source))
-      const fetched = await contentService.fetch(run, sources, {
-        isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+      const fetchStartedAt = Date.now()
+      const fetched = await traceDeepResearchPhase('gap_filling.fetch', deepResearchTelemetryContext(run, { sources: sources.length, iterations: iteration }), async (span) => {
+        const result = await contentService.fetch(run, sources, {
+          isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+        })
+        setDeepResearchSpanCounts(span, { sources: sources.length, fetched: result.filter((item) => item.status === 'fetched').length, iterations: iteration })
+        return result
       })
+      recordDeepResearchFetchLatency(Date.now() - fetchStartedAt, deepResearchTelemetryContext(run, { sources: sources.length, iterations: iteration }))
       const fetchedCount = fetched.filter((item) => item.status === 'fetched').length
       repositories.researchEventRepo.append({
         runId: run.id,
@@ -143,6 +167,7 @@ export function createGapFillIterationStep({
 
       const extraction = await evidenceService.extract(run, repositories.researchQuestionRepo.list(run.id))
       repositories.researchEventRepo.append({ runId: run.id, type: 'research.evidence.extracted', phase: 'gap_filling', payload: { count: extraction.createdCount } })
+      recordDeepResearchEvidenceCount(extraction.createdCount, deepResearchTelemetryContext(run, { evidence: extraction.createdCount, iterations: iteration }))
       for (const coverage of extraction.coverage) {
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.coverage.assessed', phase: 'gap_filling', payload: { id: coverage.questionId, score: coverage.score } })
       }

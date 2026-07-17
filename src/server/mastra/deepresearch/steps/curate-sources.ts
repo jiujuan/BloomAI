@@ -2,7 +2,8 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { SourceCurator } from '@server/services/deepresearch/source-curator'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchSourcesSelected } from '@server/telemetry/metrics'
 
 const briefSchema = z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) })
 const candidateSchema = z.object({ queryId: z.string(), title: z.string(), url: z.string(), snippet: z.string() })
@@ -28,6 +29,7 @@ export function createCurateSourcesStep({ repositories, curator }: { repositorie
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.discovered', phase: 'curating_sources', payload: { id: sourceId } })
         repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.selected', phase: 'curating_sources', payload: { id: sourceId } })
       }
+      recordDeepResearchSourcesSelected(sourceIds.length, deepResearchTelemetryContext(run, { sources: sourceIds.length }))
       return { runId: run.id, brief: inputData.brief, sourceIds }
     },
   })

@@ -33,6 +33,11 @@ export function isDeepResearchV2Enabled(): boolean {
   return value === '1' || value === 'true' || value === 'on'
 }
 
+export function isDeepResearchAutoResumeEnabled(): boolean {
+  const value = readConfigValue('DEEP_RESEARCH_AUTO_RESUME', 'false').value.trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'on'
+}
+
 export function setConfigValue(key: string, value: string, filePath = getDefaultEnvPath()): void {
   const current = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : ''
   const next = writeDotEnvValue(current, key, value)

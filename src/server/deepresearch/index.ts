@@ -19,6 +19,10 @@ function getDefaultRuntime(): DeepResearchRuntimeAdapter {
       const runtime = await loadDefaultRuntime()
       return runtime.resume(runId, resumeData)
     },
+    async getWorkflowRunState(workflowRunId) {
+      const runtime = await loadDefaultRuntime()
+      return runtime.getWorkflowRunState?.(workflowRunId) ?? null
+    },
   }
   return defaultRuntime
 }

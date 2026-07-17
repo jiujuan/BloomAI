@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ResearchClarificationInput, ResearchRunErrorDto } from '@shared/deepresearch/contracts'
 import { isResearchDomainError } from './domain/errors'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
+import type { DeepResearchWorkflowRunState } from './recovery'
+import { recordDeepResearchFailure } from '../telemetry/metrics'
 
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_LEASE_RENEWAL_MS = 10_000
@@ -9,11 +11,13 @@ const DEFAULT_LEASE_RENEWAL_MS = 10_000
 export interface DeepResearchRuntimeAdapter {
   start(runId: string): Promise<unknown>
   resume(runId: string, resumeData: ResearchClarificationInput): Promise<unknown>
+  getWorkflowRunState?(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null>
 }
 
 export interface DeepResearchExecutor {
   start(runId: string): Promise<boolean>
   resume(runId: string, resumeData: ResearchClarificationInput): Promise<boolean>
+  getWorkflowRunState?(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null>
   readonly executorId: string
 }
 
@@ -63,6 +67,13 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
           eventType: 'research.run.failed',
           eventPayload: { errorCode: runError.code, retryable: runError.retryable },
         })
+        recordDeepResearchFailure({
+          researchRunId: current.id,
+          workflowRunId: current.workflowRunId,
+          profile: current.profile,
+          depth: current.depth,
+          phase: current.phase,
+        })
       }
     } finally {
       clearInterval(renewalTimer)
@@ -79,6 +90,9 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
     },
     resume(runId: string, resumeData: ResearchClarificationInput): Promise<boolean> {
       return execute(runId, () => options.runtime.resume(runId, resumeData))
+    },
+    getWorkflowRunState(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null> {
+      return options.runtime.getWorkflowRunState?.(workflowRunId) ?? Promise.resolve(null)
     },
   })
 }

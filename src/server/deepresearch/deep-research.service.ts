@@ -1,6 +1,5 @@
 import fs from 'node:fs'
-import { v4 as uuidv4 } from 'uuid'
-import type { ResearchArtifactContent, ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, ResearchRunStatus, StartResearchInput } from '@shared/deepresearch/contracts'
+import type { ResearchArtifactContent, ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
 import { clarificationSchema, startResearchSchema } from '@shared/deepresearch/schemas'
 import { researchEventRepo } from '../db/repositories/deepresearch/research-event.repo'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
@@ -8,18 +7,18 @@ import { researchReportRepo } from '../db/repositories/deepresearch/research-rep
 import { subscribeToResearchEvents } from './research-event-publisher'
 import { getResearchBudget } from './domain/budgets'
 import { ResearchDomainError } from './domain/errors'
+import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
+import { recordDeepResearchCancellation, recordDeepResearchResume, type DeepResearchTelemetryContext } from '../telemetry/metrics'
 
 export interface DeepResearchScheduler {
   start(runId: string): Promise<unknown>
   resume(runId: string, resumeData: ResearchClarificationInput): Promise<unknown>
+  getWorkflowRunState?(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null>
 }
 
 export interface CreateDeepResearchServiceOptions {
   runtime: DeepResearchScheduler
 }
-
-const RECOVERY_LEASE_MS = 30_000
-const RECOVERABLE_ACTIVE_STATUSES: ResearchRunStatus[] = ['planning', 'researching', 'synthesizing', 'verifying']
 
 function requireRun(runId: string): ResearchRunDto {
   const run = researchRunRepo.get(runId)
@@ -32,7 +31,32 @@ function schedule(operation: () => Promise<unknown>): void {
   void operation().catch(() => undefined)
 }
 
+function telemetryContext(run: ResearchRunDto): DeepResearchTelemetryContext {
+  return {
+    researchRunId: run.id,
+    workflowRunId: run.workflowRunId,
+    profile: run.profile,
+    depth: run.depth,
+    phase: run.phase,
+  }
+}
+
 export function createDeepResearchService({ runtime }: CreateDeepResearchServiceOptions) {
+  async function enqueueResume(runId: string, commandKey?: string): Promise<ResearchRunDto> {
+    const run = requireRun(runId)
+    if (run.status === 'queued') {
+      if (commandKey) schedule(() => runtime.start(runId))
+      return run
+    }
+    const resumed = researchRunRepo.transitionWithEvent(runId, 'queued', {
+      phase: 'queued',
+      error: null,
+    })
+    recordDeepResearchResume(telemetryContext(resumed))
+    schedule(() => runtime.start(runId))
+    return resumed
+  }
+
   return Object.freeze({
     async startResearch(input: StartResearchInput): Promise<ResearchRunDto> {
       const parsed = startResearchSchema.safeParse(input)
@@ -80,7 +104,9 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
 
     async cancelRun(runId: string): Promise<ResearchRunDto> {
       requireRun(runId)
-      return researchRunRepo.transitionWithEvent(runId, 'cancelling', { phase: 'cancelling' })
+      const cancelling = researchRunRepo.transitionWithEvent(runId, 'cancelling', { phase: 'cancelling' })
+      recordDeepResearchCancellation(telemetryContext(cancelling))
+      return cancelling
     },
 
     async resumeRun(runId: string): Promise<ResearchRunDto> {
@@ -90,12 +116,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
         throw new ResearchDomainError('RESEARCH_NOT_RUNNABLE', 'Deep Research Run is not resumable: ' + runId, false)
       }
 
-      const resumed = researchRunRepo.transitionWithEvent(runId, 'queued', {
-        phase: 'queued',
-        error: null,
-      })
-      schedule(() => runtime.start(runId))
-      return resumed
+      return enqueueResume(runId)
     },
 
     async answerClarification(runId: string, input: ResearchClarificationInput): Promise<ResearchRunDto> {
@@ -122,24 +143,12 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       return researchRunRepo.get(runId)!
     },
 
-    async recoverInterruptedRuns(now = Date.now()): Promise<ResearchRunDto[]> {
-      const recoveryExecutorId = 'deepresearch-recovery-' + uuidv4()
-      const interrupted: ResearchRunDto[] = []
-
-      for (const run of researchRunRepo.list({ statuses: RECOVERABLE_ACTIVE_STATUSES })) {
-        if (!researchRunRepo.acquireLease(run.id, recoveryExecutorId, RECOVERY_LEASE_MS, now)) continue
-
-        try {
-          interrupted.push(researchRunRepo.transitionWithEvent(run.id, 'interrupted', {
-            phase: 'interrupted',
-            resumePhase: run.phase,
-          }))
-        } finally {
-          researchRunRepo.releaseLease(run.id, recoveryExecutorId)
-        }
-      }
-
-      return interrupted
+    async recoverInterruptedRuns(now = Date.now()): Promise<DeepResearchRecoveryResult> {
+      const recovery = createDeepResearchRecoveryCoordinator({
+        getWorkflowRunState: runtime.getWorkflowRunState?.bind(runtime),
+        enqueueResume: async (runId, commandKey) => enqueueResume(runId, commandKey),
+      })
+      return recovery.recoverInterruptedRuns(now)
     },
   })
 }

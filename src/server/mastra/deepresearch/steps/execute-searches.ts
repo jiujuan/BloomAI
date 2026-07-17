@@ -3,7 +3,8 @@ import { z } from 'zod'
 import type { SearchExecution } from '@server/services/deepresearch/search-service'
 import type { ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchSearchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
 const briefSchema = z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) })
 const inputSchema = z.object({ runId: z.string().min(1), brief: briefSchema })
@@ -16,11 +17,17 @@ export function createExecuteSearchesStep({ repositories, searchService }: { rep
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
       const queries = repositories.researchQuestionRepo.listSearchQueries(run.id).filter((query) => query.status === 'queued')
-      const executions: SearchExecution[] = await searchService.search(
-        run,
-        queries.map((query) => ({ id: query.id, query: query.query })),
-        { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' },
-      )
+      const startedAt = Date.now()
+      const executions: SearchExecution[] = await traceDeepResearchPhase('searching', deepResearchTelemetryContext(run, { queries: queries.length }), async (span) => {
+        const result = await searchService.search(
+          run,
+          queries.map((query) => ({ id: query.id, query: query.query })),
+          { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' },
+        )
+        setDeepResearchSpanCounts(span, { queries: queries.length, candidates: result.reduce((count, execution) => count + execution.candidates.length, 0) })
+        return result
+      })
+      recordDeepResearchSearchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { queries: queries.length }))
       const candidates = executions.flatMap((execution) => execution.candidates)
       for (const execution of executions) {
         repositories.researchQuestionRepo.updateSearchQuery(execution.queryId, { provider: execution.provider, status: execution.error ? 'failed' : 'completed', resultCount: execution.candidates.length, error: execution.error, completedAt: Date.now() })
