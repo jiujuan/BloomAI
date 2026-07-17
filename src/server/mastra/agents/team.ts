@@ -5,27 +5,16 @@ import { buildWriterInstructions } from './writer-prompt'
 import type { WritingConfig } from '@shared/writing'
 
 /**
- * Specialist agent team (P6d). The chat UI tabs (研究/写作/编码) route a message to one
- * of these by id. Each gets a curated tool set: research = web tools, writing = none,
- * coding = file/shell/exec tools (dangerous ones require approval, see tools.ts).
+ * Specialist chat agent team (P6d). Writing and coding tabs route a message to these
+ * agents by id; the Research tab uses the durable Deep Research workbench. Writing has no
+ * tools; coding receives curated file and shell tools
+ * whose mutating capabilities require approval (see tools.ts).
  * Model resolves from RequestContext, same as the general chat agent.
  */
 
 function dynamicModel({ requestContext }: any) {
   return resolveMastraModel(requestContext?.get('model') as string | undefined)
 }
-
-export const researchAgent = new Agent({
-  id: 'research',
-  name: 'BloomAI Research',
-  instructions: `
-You are a research specialist. Use the web tools (search/fetch/extract) to gather current,
-factual information, then answer in clear paragraphs with inline source links. Prefer primary
-sources. If you cannot verify something, say so.
-`.trim(),
-  model: dynamicModel,
-  tools: ({ requestContext }) => buildToolsForRole('research', requestContext?.get('sessionId') as string | undefined),
-})
 
 export const writerAgent = new Agent({
   id: 'writer',
@@ -53,7 +42,6 @@ If the user declines an action, do not attempt it again or work around it; stop 
 
 // Maps the x-bloom-agent header value (UI tab) to a registered agent id.
 export const TEAM_AGENT_BY_TAB: Record<string, string> = {
-  research: 'research',
   writing: 'writer',
   coding: 'coder',
 }

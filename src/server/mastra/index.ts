@@ -6,10 +6,7 @@ import { serverLogger } from '../logger/logger'
 import { readConfigValue } from '../config/config'
 import { chatAgent } from './chat-agent'
 import { planAgent } from './plan-agent'
-import { researchWriterAgent } from './agents/research-writer-agent'
-import { researchPlannerAgent } from './agents/research-planner-agent'
-import { researchAgent, writerAgent, coderAgent } from './agents/team'
-import { deepResearchWorkflow } from './workflows/deep-research'
+import { writerAgent, coderAgent } from './agents/team'
 
 // Wire Mastra spans into the global OTel TracerProvider (registered by initTracing in index.ts).
 // OtelBridge.createSpan() calls trace.getTracer() at request time, so the provider only needs to
@@ -38,14 +35,8 @@ export const mastra = new Mastra({
   agents: {
     chat: chatAgent,
     'plan-planner': planAgent,
-    'research-writer': researchWriterAgent,
-    'research-planner': researchPlannerAgent,
-    research: researchAgent,
     writer: writerAgent,
     coder: coderAgent,
-  },
-  workflows: {
-    'deep-research': deepResearchWorkflow,
   },
 })
 

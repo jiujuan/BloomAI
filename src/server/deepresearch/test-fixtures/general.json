@@ -1,0 +1,96 @@
+{
+  "input": {
+    "topic": "Synthetic public policy question",
+    "profile": "general",
+    "depth": "standard",
+    "objective": "Assess the fictional policy question with explicit uncertainty."
+  },
+  "planner": {
+    "title": "Synthetic public policy question",
+    "objective": "Assess the fictional policy question with explicit uncertainty.",
+    "audience": "Policy review team",
+    "scope": "Synthetic illustrative evidence only",
+    "assumptions": [
+      "All sources are deterministic fixtures."
+    ],
+    "plannedSections": [
+      "executive-summary",
+      "scope-and-method",
+      "findings-by-question",
+      "alternative-explanations",
+      "implications",
+      "limitations",
+      "references"
+    ],
+    "criticalClarifications": []
+  },
+  "searchResponses": [
+    {
+      "title": "Official synthetic measurement note",
+      "url": "https://standards.example/measurement",
+      "snippet": "Official methodology and synthetic observations for this fixture."
+    },
+    {
+      "title": "Synthetic dataset documentation",
+      "url": "https://data.example/dataset",
+      "snippet": "Dataset methodology and independently collected synthetic observations."
+    },
+    {
+      "title": "Synthetic analysis memorandum",
+      "url": "https://analysis.example/report",
+      "snippet": "Independent analysis of the same fictional subject and its limitations."
+    }
+  ],
+  "documents": [
+    {
+      "url": "https://standards.example/measurement",
+      "title": "Synthetic measurement note",
+      "headings": [
+        "Method"
+      ],
+      "text": "This synthetic source records that Synthetic public policy question is evaluated with an explicit method, defined scope, and reproducible observations. The shared fictional metric is 10 units, which is intentionally included only to exercise contradiction handling in acceptance tests."
+    },
+    {
+      "url": "https://data.example/dataset",
+      "title": "Synthetic dataset documentation",
+      "headings": [
+        "Dataset"
+      ],
+      "text": "This synthetic dataset describes a separate collection method, a stated population, and transparent limitations for Synthetic public policy question. The shared fictional metric is 12 units, which intentionally conflicts with another reserved-domain fixture source."
+    },
+    {
+      "url": "https://analysis.example/report",
+      "title": "Synthetic analysis memorandum",
+      "headings": [
+        "Analysis"
+      ],
+      "text": "This independent synthetic memorandum compares the available fictional observations for Synthetic public policy question, identifies uncertainty, and recommends documenting unresolved differences before drawing conclusions from the evidence."
+    }
+  ],
+  "requiredSections": [
+    "executive-summary",
+    "scope-and-method",
+    "findings-by-question",
+    "alternative-explanations",
+    "implications",
+    "limitations",
+    "references"
+  ],
+  "expectedQuestionIntents": [
+    "definition",
+    "current-state",
+    "disagreement"
+  ],
+  "minimumIndependentDomains": 3,
+  "expectedContradictions": [
+    {
+      "left": "10 units",
+      "right": "12 units",
+      "sourceUrls": [
+        "https://standards.example/measurement",
+        "https://data.example/dataset"
+      ]
+    }
+  ],
+  "expectedFinalStatus": "completed_with_limitations"
+}

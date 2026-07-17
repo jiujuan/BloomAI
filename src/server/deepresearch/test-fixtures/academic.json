@@ -1,0 +1,105 @@
+{
+  "input": {
+    "topic": "Synthetic evidence synthesis method",
+    "profile": "academic",
+    "depth": "standard",
+    "objective": "Review fictional methods, findings, and unresolved limitations."
+  },
+  "planner": {
+    "title": "Synthetic evidence synthesis method",
+    "objective": "Review fictional methods, findings, and unresolved limitations.",
+    "audience": "Research methods group",
+    "scope": "Synthetic illustrative academic evidence only",
+    "assumptions": [
+      "All sources are deterministic fixtures."
+    ],
+    "plannedSections": [
+      "executive-summary",
+      "scope-and-method",
+      "terminology",
+      "literature-review",
+      "methodology-review",
+      "findings",
+      "consensus-and-controversies",
+      "limitations-and-gaps",
+      "references"
+    ],
+    "criticalClarifications": []
+  },
+  "searchResponses": [
+    {
+      "title": "Official synthetic measurement note",
+      "url": "https://standards.example/measurement",
+      "snippet": "Official methodology and synthetic observations for this fixture."
+    },
+    {
+      "title": "Synthetic dataset documentation",
+      "url": "https://data.example/dataset",
+      "snippet": "Dataset methodology and independently collected synthetic observations."
+    },
+    {
+      "title": "Synthetic analysis memorandum",
+      "url": "https://analysis.example/report",
+      "snippet": "Independent analysis of the same fictional subject and its limitations."
+    }
+  ],
+  "documents": [
+    {
+      "url": "https://standards.example/measurement",
+      "title": "Synthetic measurement note",
+      "headings": [
+        "Method"
+      ],
+      "text": "This synthetic source records that Synthetic evidence synthesis method is evaluated with an explicit method, defined scope, and reproducible observations. The shared fictional metric is 10 units, which is intentionally included only to exercise contradiction handling in acceptance tests."
+    },
+    {
+      "url": "https://data.example/dataset",
+      "title": "Synthetic dataset documentation",
+      "headings": [
+        "Dataset"
+      ],
+      "text": "This synthetic dataset describes a separate collection method, a stated population, and transparent limitations for Synthetic evidence synthesis method. The shared fictional metric is 12 units, which intentionally conflicts with another reserved-domain fixture source."
+    },
+    {
+      "url": "https://analysis.example/report",
+      "title": "Synthetic analysis memorandum",
+      "headings": [
+        "Analysis"
+      ],
+      "text": "This independent synthetic memorandum compares the available fictional observations for Synthetic evidence synthesis method, identifies uncertainty, and recommends documenting unresolved differences before drawing conclusions from the evidence."
+    }
+  ],
+  "requiredSections": [
+    "executive-summary",
+    "scope-and-method",
+    "terminology",
+    "literature-review",
+    "methodology-review",
+    "findings",
+    "consensus-and-controversies",
+    "limitations-and-gaps",
+    "references"
+  ],
+  "expectedQuestionIntents": [
+    "research-question",
+    "terminology",
+    "theoretical-lineage",
+    "foundational-work",
+    "recent-work",
+    "methods",
+    "datasets",
+    "findings"
+  ],
+  "minimumIndependentDomains": 3,
+  "expectedContradictions": [
+    {
+      "left": "10 units",
+      "right": "12 units",
+      "sourceUrls": [
+        "https://standards.example/measurement",
+        "https://data.example/dataset"
+      ]
+    }
+  ],
+  "expectedFinalStatus": "completed_with_limitations"
+}
