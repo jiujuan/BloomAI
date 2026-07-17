@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { platform } from '@renderer/api'
 import type {
+  ResearchArtifactDto,
   ResearchClarificationInput,
   ResearchEventDto,
   ResearchQuestionDto,
@@ -8,6 +9,7 @@ import type {
   ResearchRunDetailDto,
   ResearchRunDto,
   ResearchSourceDto,
+  ResearchSourceSnapshotDto,
   StartResearchInput,
 } from '@shared/deepresearch/contracts'
 import type { ResearchEventType } from '@shared/deepresearch/events'
@@ -90,7 +92,9 @@ export interface DeepResearchStoreState {
   run: ResearchRunDto | null
   questions: ResearchQuestionDto[]
   sources: ResearchSourceDto[]
+  snapshotsById: Record<string, ResearchSourceSnapshotDto>
   report: ResearchReportDto | null
+  artifacts: ResearchArtifactDto[]
   evidenceById: Record<string, import('@shared/deepresearch/contracts').ResearchEvidenceDto>
   events: ResearchEventDto[]
   lastSequence: number
@@ -120,7 +124,9 @@ function initialState(): Omit<DeepResearchStoreState, 'setDraft' | 'setSelectedV
     run: null,
     questions: [],
     sources: [],
+    snapshotsById: {},
     report: null,
+    artifacts: [],
     evidenceById: {},
     events: [],
     lastSequence: 0,
@@ -156,7 +162,9 @@ function detailCollections(detail: ResearchRunDetailDto) {
     run: toRun(detail),
     questions: detail.questions,
     sources: detail.sources,
+    snapshotsById: Object.fromEntries(detail.snapshots.map((snapshot) => [snapshot.id, snapshot])),
     report: detail.report,
+    artifacts: detail.artifacts,
     evidenceById: Object.fromEntries(detail.evidence.map((evidence) => [evidence.id, evidence])),
   }
 }

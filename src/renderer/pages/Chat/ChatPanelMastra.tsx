@@ -40,7 +40,7 @@ const MODE_ICON: Record<ChatMode, LucideIcon> = {
 }
 const MODE_ORDER: ChatMode[] = ['chat', 'plan', 'deep']
 const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
-  { id: 'research', label: '研究' },
+  { id: 'research', label: '深度研究' },
   { id: 'writing', label: 'AI写作' },
   { id: 'coding', label: '编码' },
 ]

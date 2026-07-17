@@ -261,7 +261,7 @@ export interface ResearchEventDto {
 export interface ResearchArtifactDto {
   id: string
   runId: string
-  type: 'report_markdown' | 'report_json' | 'evidence_appendix' | 'references' | 'run_manifest'
+  type: 'report_markdown' | 'report_markdown_zh_cn' | 'report_json' | 'evidence_appendix' | 'references' | 'run_manifest'
   fileName: string
   contentType: string
   sizeBytes: number

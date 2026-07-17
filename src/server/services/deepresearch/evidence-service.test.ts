@@ -7,6 +7,7 @@ import type {
   ResearchSourceSnapshotDto,
 } from '@shared/deepresearch/contracts'
 import { EvidenceService, type EvidenceAnalyst } from './evidence-service'
+import { createDeterministicEvidenceAnalyst } from '@server/mastra/deepresearch/agents/evidence-analyst'
 import { createDeterministicGapAnalyst } from '@server/mastra/deepresearch/agents/gap-analyst'
 import { shouldStopGapFill } from '@server/mastra/deepresearch/steps/gap-fill-iteration'
 
@@ -130,6 +131,22 @@ function createService(analyst: EvidenceAnalyst) {
 }
 
 describe('EvidenceService', () => {
+  it('creates evidence-specific deterministic summaries for different passages from one source', async () => {
+    const analyst = createDeterministicEvidenceAnalyst()
+    const packets = [
+      { snapshotId: snapshot.id, sourceId: source.id, sourceUrl: source.canonicalUrl, sourceTitle: source.title, sourceType: source.sourceType, domain: source.domain, publishedAt: source.publishedAt, heading: 'Market overview', startOffset: 0, endOffset: 150, text: 'The enterprise AI assistant market grew by twenty percent in the most recent reporting period, according to the official methodology published alongside the dataset.' },
+      { snapshotId: snapshot.id, sourceId: source.id, sourceUrl: source.canonicalUrl, sourceTitle: source.title, sourceType: source.sourceType, domain: source.domain, publishedAt: source.publishedAt, heading: 'Alternative estimate', startOffset: 151, endOffset: 320, text: 'A separate audited release reports that comparable revenue growth was lower because it excludes embedded assistant features from the addressable market definition.' },
+    ]
+
+    const analyses = await analyst.analyze({ run, questions: [question], packets })
+
+    expect(new Set(analyses.map((item) => item.summary)).size).toBe(2)
+    expect(analyses.map((item) => item.summary)).toEqual(expect.arrayContaining([
+      expect.stringContaining('twenty percent'),
+      expect.stringContaining('audited release'),
+    ]))
+  })
+
   it('rejects snippets and emits only bounded evidence packets', async () => {
     const { service, evidence } = createService({
       analyze: async () => [{

@@ -15,6 +15,7 @@ import { createDeterministicSectionWriter, sectionWriterAgent, type SectionWrite
 import { claimExtractorAgent, createDeterministicClaimExtractor, type ClaimExtractor } from './agents/claim-extractor'
 import { citationVerifierAgent, createDeterministicCitationVerifier, type CitationVerifier } from './agents/citation-verifier'
 import { createDeterministicReportCritic, reportCriticAgent, type ReportCritic } from './agents/report-critic'
+import { createMastraReportTranslator, reportTranslatorAgent, type ReportTranslator } from './agents/report-translator'
 import { createContentService } from '@server/services/deepresearch/content-service'
 import { ArtifactService } from '@server/services/deepresearch/artifact-service'
 import { CitationService } from '@server/services/deepresearch/citation-service'
@@ -34,6 +35,7 @@ export interface CreateDeepResearchMastraRuntimeOptions {
   evidenceService?: EvidenceService
   citationService?: CitationService
   artifactService?: ArtifactService
+  reportTranslator?: ReportTranslator
   sectionWriter?: SectionWriter
   claimExtractor?: ClaimExtractor
   citationVerifier?: CitationVerifier
@@ -63,6 +65,7 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
   })
   const citationService = options.citationService ?? new CitationService({ reportRepo: repositories.researchReportRepo, listClaims: (runId) => repositories.researchReportRepo.listClaims(runId), listEvidence: (runId) => repositories.researchEvidenceRepo.list(runId) })
   const artifactService = options.artifactService ?? new ArtifactService({ reportRepo: repositories.researchReportRepo, dataDir: options.dataDir })
+  const reportTranslator = options.reportTranslator ?? createMastraReportTranslator()
   const sectionWriter = options.sectionWriter ?? createDeterministicSectionWriter()
   const claimExtractor = options.claimExtractor ?? createDeterministicClaimExtractor()
   const citationVerifier = options.citationVerifier ?? createDeterministicCitationVerifier()
@@ -74,7 +77,7 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
     id: 'bloomai-deep-research-runtime',
     url: resolveDeepResearchRuntimeUrl(options.dataDir),
   })
-  const workflow = createDeepResearchWorkflow({ repositories, planner, queryPlanner, gapAnalyst, evidenceService, citationService, artifactService, sectionWriter, claimExtractor, citationVerifier, reportCritic, searchService, sourceCurator, contentService })
+  const workflow = createDeepResearchWorkflow({ repositories, planner, queryPlanner, gapAnalyst, evidenceService, citationService, artifactService, reportTranslator, sectionWriter, claimExtractor, citationVerifier, reportCritic, searchService, sourceCurator, contentService })
   const mastra = new Mastra({
     storage,
     logger: serverLogger,
@@ -87,6 +90,7 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
       'deep-research-claim-extractor': claimExtractorAgent,
       'deep-research-citation-verifier': citationVerifierAgent,
       'deep-research-report-critic': reportCriticAgent,
+      'deep-research-report-translator': reportTranslatorAgent,
     },
     workflows: { 'deep-research-v1': workflow },
   })

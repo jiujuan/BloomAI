@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Ban, Download, RotateCcw, Play, X } from 'lucide-react'
-import type { ResearchEventDto, ResearchEvidenceDto, ResearchQuestionDto, ResearchReportDto, ResearchRunDto, ResearchSourceDto } from '@shared/deepresearch/contracts'
+import type { ResearchArtifactDto, ResearchEventDto, ResearchEvidenceDto, ResearchQuestionDto, ResearchReportDto, ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
 import { DEEP_RESEARCH_VIEWS, type DeepResearchView } from './deep-research.types'
 import { ResearchEvidencePanel } from './ResearchEvidencePanel'
 import { ResearchProgress } from './ResearchProgress'
@@ -25,7 +25,9 @@ export interface DeepResearchRunViewProps {
   run: ResearchRunDto
   questions: ResearchQuestionDto[]
   sources: ResearchSourceDto[]
+  snapshotsById: Record<string, ResearchSourceSnapshotDto>
   report: ResearchReportDto | null
+  artifacts: ResearchArtifactDto[]
   evidenceById: Record<string, ResearchEvidenceDto>
   events: ResearchEventDto[]
   selectedView: DeepResearchView
@@ -71,11 +73,11 @@ export function DeepResearchRunView(props: DeepResearchRunViewProps) {
           {props.selectedView === 'overview' && <section className="research-section"><div className="research-section-heading"><h3>研究摘要</h3></div><p>{props.run.brief?.scope ?? '正在根据研究主题规划范围与证据要求。'}</p>{props.run.quality && <p>高优先级问题覆盖：{Math.round(props.run.quality.highPriorityQuestionCoverage * 100)}%</p>}</section>}
           {props.selectedView === 'questions' && <ResearchQuestionTree questions={props.questions} />}
           {props.selectedView === 'sources' && <ResearchSourcesPanel sources={props.sources} />}
-          {props.selectedView === 'report' && <ResearchReportView report={props.report} onSelectEvidence={props.onSelectEvidence} />}
-          {props.selectedView === 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
+          {props.selectedView === 'report' && <ResearchReportView report={props.report} evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} artifacts={props.artifacts} onSelectEvidence={props.onSelectEvidence} />}
+          {props.selectedView === 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
           {props.selectedView === 'activity' && <section className="research-section" aria-labelledby="research-activity-heading"><div className="research-section-heading"><h3 id="research-activity-heading">活动</h3><span>{props.events.length} 项</span></div><ol className="research-activity-list">{props.events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.type}</strong><small>{event.phase}</small></li>)}</ol></section>}
         </div>
-        {props.selectedView !== 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
+        {props.selectedView !== 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
       </div>
     </section>
   )
