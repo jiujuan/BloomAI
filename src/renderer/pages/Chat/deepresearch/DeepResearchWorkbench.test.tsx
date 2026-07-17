@@ -1,7 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { ResearchEventDto, ResearchEvidenceDto, ResearchReportDto, ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
+import type { ResearchEventDto, ResearchEvidenceDto, ResearchReportDto, ResearchRunDto, ResearchSourceDto } from '@shared/deepresearch/contracts'
 import { DeepResearchLauncher, isResearchDraftValid, RESEARCH_DEPTH_OPTIONS, RESEARCH_PROFILE_OPTIONS } from './DeepResearchLauncher'
 import { DeepResearchRunView, getRunActionKinds } from './DeepResearchRunView'
 import { ResearchProgress } from './ResearchProgress'
@@ -24,9 +24,6 @@ const sources: ResearchSourceDto[] = [
 ]
 
 const evidence: ResearchEvidenceDto = { id: 'evidence-1', runId: 'run-1', questionId: 'question-1', snapshotId: 'snapshot-1', passage: 'The market is expanding.', summary: 'Market expansion', stance: 'supporting', confidence: 0.91, startOffset: 0, endOffset: 24 }
-const snapshotsById: Record<string, ResearchSourceSnapshotDto> = {
-  'snapshot-1': { id: 'snapshot-1', runId: 'run-1', sourceId: 'selected', contentHash: 'hash', content: evidence.passage, metadata: {}, fetchedAt: 2, parserVersion: 'test', finalUrl: 'https://selected.example/article', httpStatus: 200 },
-}
 const report: ResearchReportDto = {
   runId: 'run-1', title: 'Market report', generatedAt: 2,
   sections: [{ id: 'section-1', runId: 'run-1', ordinal: 1, title: 'Market', purpose: 'Size', draft: 'Draft', verifiedText: 'Verified market analysis.', status: 'verified' }],
@@ -77,9 +74,7 @@ describe('Deep Research workbench', () => {
       run={clarificationRun}
       questions={[{ id: 'question-1', runId: 'run-1', parentQuestionId: null, ordinal: 1, question: 'What is the market size?', intent: 'market size', requiredEvidenceTypes: ['primary'], priority: 'high', status: 'covered', coverage: { questionId: 'question-1', score: 0.76, independentDomainCount: 2, evidenceCategories: [], primarySourceCount: 1, recentSourceCount: 1, supportingEvidenceCount: 2, contradictingEvidenceCount: 0, hasSingleSourceDependency: false, gaps: [] } }]}
       sources={sources}
-      snapshotsById={snapshotsById}
       report={report}
-      artifacts={[{ id: 'artifact-zh', runId: 'run-1', type: 'report_markdown_zh_cn', fileName: 'report.zh-CN.md', contentType: 'text/markdown', sizeBytes: 42, createdAt: 2 }]}
       evidenceById={{ 'evidence-1': evidence }}
       events={events}
       selectedView="report"
@@ -97,10 +92,6 @@ describe('Deep Research workbench', () => {
     expect(markup).toContain('aria-label="取消研究"')
     expect(markup).toContain('aria-label="导出报告"')
     expect(markup).toContain('aria-label="查看证据 evidence-1"')
-    expect(markup).toContain('Selected source')
-    expect(markup).toContain('href="https://selected.example/article"')
-    expect(markup).toContain('\u4e2d CN')
-    expect(markup).toContain('\u82f1 EN')
     expect(getRunActionKinds({ ...run, status: 'interrupted' })).toContain('resume')
     expect(getRunActionKinds({ ...run, status: 'failed', error: { code: 'TIMEOUT', message: 'Retry later', retryable: true } })).toContain('retry')
     expect(getRunActionKinds({ ...run, status: 'failed', error: { code: 'INVALID_SCOPE', message: 'Cannot retry', retryable: false } })).not.toContain('retry')

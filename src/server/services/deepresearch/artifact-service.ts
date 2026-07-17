@@ -40,7 +40,7 @@ function atomicWrite(filePath: string, content: string): void {
   fs.renameSync(temporaryPath, filePath)
 }
 
-export function createReportMarkdown(input: ArtifactWriteInput): string {
+function markdown(input: ArtifactWriteInput): string {
   const brief = input.run.brief
   const evidenceById = new Map(input.evidence.map((item) => [item.id, item]))
   const citationsByClaim = new Map<string, ResearchCitationDto[]>()
@@ -98,24 +98,6 @@ export class ArtifactService {
     this.dataDir = options.dataDir ?? getDataDir()
   }
 
-  writeChineseMarkdown(runId: string, markdown: string): ResearchArtifactDto {
-    const directory = path.join(this.dataDir, 'deepresearch', 'runs', runId)
-    const fileName = 'report.zh-CN.md'
-    const storagePath = path.join(directory, fileName)
-    atomicWrite(storagePath, markdown)
-    return this.options.reportRepo.upsertArtifact({
-      runId,
-      type: 'report_markdown_zh_cn',
-      fileName,
-      contentType: 'text/markdown',
-      storagePath,
-      sizeBytes: Buffer.byteLength(markdown),
-      contentHash: createHash('sha256').update(markdown).digest('hex'),
-      metadata: { generated: true, language: 'zh-CN', sourceLanguage: 'en' },
-      idempotencyKey: 'report-artifact:v1:report_markdown_zh_cn',
-    })
-  }
-
   write(input: ArtifactWriteInput): ResearchArtifactDto[] {
     const directory = path.join(this.dataDir, 'deepresearch', 'runs', input.run.id)
     const report = {
@@ -128,7 +110,7 @@ export class ArtifactService {
       questions: input.questions,
     }
     const files: Array<{ type: ResearchArtifactDto['type']; fileName: string; contentType: string; content: string }> = [
-      { type: 'report_markdown', fileName: 'report.md', contentType: 'text/markdown', content: createReportMarkdown(input) },
+      { type: 'report_markdown', fileName: 'report.md', contentType: 'text/markdown', content: markdown(input) },
       { type: 'report_json', fileName: 'report.json', contentType: 'application/json', content: JSON.stringify(report, null, 2) + '\n' },
       { type: 'evidence_appendix', fileName: 'evidence-appendix.md', contentType: 'text/markdown', content: input.evidence.map((item) => '## ' + item.id + '\n\n' + item.passage + '\n').join('\n') },
       { type: 'references', fileName: 'references.md', contentType: 'text/markdown', content: referenceList(input) },

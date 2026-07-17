@@ -10,7 +10,6 @@ import type { ReportCritic } from './agents/report-critic'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { CitationService } from '@server/services/deepresearch/citation-service'
 import type { ArtifactService } from '@server/services/deepresearch/artifact-service'
-import type { ReportTranslator } from './agents/report-translator'
 import type { ReturnTypeOfContentService, ReturnTypeOfSearchService } from './steps/types'
 import type { SourceCurator } from '@server/services/deepresearch/source-curator'
 import type { DeepResearchRepositories } from './workflow-context'
@@ -43,7 +42,6 @@ export interface CreateDeepResearchWorkflowOptions {
   evidenceService: EvidenceService
   citationService: CitationService
   artifactService: ArtifactService
-  reportTranslator: ReportTranslator
   sectionWriter: SectionWriter
   claimExtractor: ClaimExtractor
   citationVerifier: CitationVerifier
@@ -70,7 +68,7 @@ export function createDeepResearchWorkflow(options: CreateDeepResearchWorkflowOp
   const verifyCitations = createVerifyCitationsStep({ repositories: options.repositories, verifier: options.citationVerifier })
   const repairReport = createRepairReportStep({ repositories: options.repositories, critic: options.reportCritic })
   const assessQuality = createAssessQualityStep(options.repositories)
-  const finalizeArtifacts = createFinalizeArtifactsStep({ repositories: options.repositories, artifactService: options.artifactService, reportTranslator: options.reportTranslator })
+  const finalizeArtifacts = createFinalizeArtifactsStep({ repositories: options.repositories, artifactService: options.artifactService })
 
   return createWorkflow({ id: 'deep-research-v1', inputSchema: workflowInputSchema, outputSchema: workflowOutputSchema })
     .then(loadRun)

@@ -121,14 +121,11 @@ describe('Deep Research workflow telemetry wiring', () => {
       researchSourceRepo: { listSources: vi.fn(() => []), listSnapshots: vi.fn(() => []) },
       researchEventRepo: { append: vi.fn() },
     } as any
-    const artifactService = { write: vi.fn(() => [{ id: 'artifact-1', type: 'report_markdown' }]), writeChineseMarkdown: vi.fn(() => ({ id: 'artifact-zh', type: 'report_markdown_zh_cn' })) }
-    const reportTranslator = { translate: vi.fn(async () => '# \u4e2d\u6587\u62a5\u544a\n') }
-    const step = createFinalizeArtifactsStep({ repositories, artifactService, reportTranslator } as any)
+    const artifactService = { write: vi.fn(() => [{ id: 'artifact-1', type: 'report_markdown' }]) }
+    const step = createFinalizeArtifactsStep({ repositories, artifactService } as any)
 
     await (step as any).execute({ inputData: { runId: currentRun.id } })
 
-    expect(reportTranslator.translate).toHaveBeenCalledOnce()
-    expect(artifactService.writeChineseMarkdown).toHaveBeenCalledWith('final-run', '# \u4e2d\u6587\u62a5\u544a\n')
     expect(recordDeepResearchCompletion).toHaveBeenCalledWith('completed_with_limitations', expect.objectContaining({ researchRunId: 'final-run', workflowRunId: 'workflow-1', counts: { limitations: 1 } }))
     expect(recordDeepResearchE2EDuration).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ researchRunId: 'final-run', workflowRunId: 'workflow-1' }))
   })

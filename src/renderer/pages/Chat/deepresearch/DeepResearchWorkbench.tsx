@@ -36,9 +36,7 @@ export function DeepResearchWorkbench({ sessionId, onRunStarted }: DeepResearchW
       run={state.run}
       questions={state.questions}
       sources={state.sources}
-      snapshotsById={state.snapshotsById}
       report={state.report}
-      artifacts={state.artifacts}
       evidenceById={state.evidenceById}
       events={state.events}
       selectedView={state.selectedView}
