@@ -1,6 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getResearchBudget } from '@server/deepresearch/domain/budgets'
 
@@ -78,6 +79,26 @@ describe('Deep Research repositories', () => {
     expect(() => researchRunRepo.transitionWithEvent(run.id, 'completed')).toThrowError('RESEARCH_INVALID_TRANSITION')
   })
 
+  it('maps additive resilience Run fields without fabricating a checkpoint', async () => {
+    const { client, researchRunRepo } = await loadRepositories()
+    const { research_runs } = await import('../../schema')
+    const run = createRun(researchRunRepo)
+
+    client.getOrmDb().update(research_runs).set({
+      state_version: 3,
+      current_attempt_id: 'attempt-3',
+      cancel_requested_at: 1_700_000_000_000,
+      cancel_reason: 'User stopped the run.',
+      resume_phase: 'planning',
+    }).where(eq(research_runs.id, run.id)).run()
+
+    expect(researchRunRepo.get(run.id)).toMatchObject({
+      stateVersion: 3,
+      currentAttemptId: 'attempt-3',
+      checkpointCursor: { version: 1, nextPhase: 'planning', iteration: 0 },
+      cancellation: { requestedAt: 1_700_000_000_000, reason: 'User stopped the run.' },
+    })
+  })
   it('does not let two executors own one run and permits takeover after expiry', async () => {
     const { researchRunRepo } = await loadRepositories()
     const run = createRun(researchRunRepo)

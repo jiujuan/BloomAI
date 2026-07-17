@@ -17,7 +17,8 @@ import type {
   StartResearchInput,
 } from '@shared/deepresearch/contracts'
 import type { ResearchEventType } from '@shared/deepresearch/events'
-import { assertResearchTransition } from '@server/deepresearch/domain/state-machine'
+import { assertResearchTransition, projectResearchRunCapabilities } from '@server/deepresearch/domain/state-machine'
+import { cursorFromLegacyResumePhase } from '@server/deepresearch/domain/checkpoint-types'
 import { getOrmDb } from '../../client'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
 import {
@@ -58,7 +59,11 @@ export interface TransitionResearchRunOptions {
 
 function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
   const error = row.error_code
-    ? { code: row.error_code, message: row.error_message ?? row.error_code, retryable: Boolean(row.error_retryable) }
+    ? {
+      code: row.error_code,
+      message: row.error_message ?? row.error_code,
+      retryable: Boolean(row.error_retryable),
+    }
     : null
 
   return {
@@ -90,6 +95,13 @@ function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    stateVersion: row.state_version,
+    currentAttemptId: row.current_attempt_id,
+    checkpointCursor: cursorFromLegacyResumePhase(row.resume_phase),
+    cancellation: row.cancel_requested_at != null || row.cancel_reason != null
+      ? { requestedAt: row.cancel_requested_at, reason: row.cancel_reason }
+      : null,
+    capabilities: projectResearchRunCapabilities({ status: row.status as ResearchRunStatus, error }),
   }
 }
 

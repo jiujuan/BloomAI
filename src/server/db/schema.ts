@@ -1,4 +1,5 @@
-﻿import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { desc } from 'drizzle-orm'
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const personas = sqliteTable('personas', {
   id: text('id').primaryKey(),
@@ -358,9 +359,109 @@ export const research_runs = sqliteTable('research_runs', {
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
   completed_at: integer('completed_at'),
+  state_version: integer('state_version').notNull().default(0),
+  current_attempt_id: text('current_attempt_id'),
+  cancel_requested_at: integer('cancel_requested_at'),
+  cancel_reason: text('cancel_reason'),
+  stop_reason_json: text('stop_reason_json'),
+  limitations_json: text('limitations_json').notNull().default('[]'),
+  workflow_version: text('workflow_version'),
+  coverage_policy_version: text('coverage_policy_version'),
+  parser_version: text('parser_version'),
+  model_contract_version: text('model_contract_version'),
+  last_checkpoint_sequence: integer('last_checkpoint_sequence'),
 }, (table) => ({
   statusUpdatedIdx: index('idx_research_runs_status_updated').on(table.status, table.updated_at),
+  currentAttemptIdx: index('idx_research_runs_current_attempt').on(table.current_attempt_id),
+  cancellationIdx: index('idx_research_runs_cancellation').on(table.cancel_requested_at),
 }))
+
+export const research_run_attempts = sqliteTable('research_run_attempts', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  trigger: text('trigger').notNull(),
+  status: text('status').notNull().default('queued'),
+  workflow_run_id: text('workflow_run_id'),
+  executor_id: text('executor_id'),
+  lease_expires_at: integer('lease_expires_at'),
+  heartbeat_at: integer('heartbeat_at'),
+  start_checkpoint_key: text('start_checkpoint_key'),
+  end_checkpoint_key: text('end_checkpoint_key'),
+  error_code: text('error_code'),
+  error_category: text('error_category'),
+  error_message: text('error_message'),
+  error_retryable: integer('error_retryable'),
+  started_at: integer('started_at'),
+  ended_at: integer('ended_at'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runOrdinalIdx: uniqueIndex('idx_research_run_attempts_run_ordinal').on(table.run_id, table.ordinal),
+  runStatusIdx: index('idx_research_run_attempts_run_status').on(table.run_id, table.status, table.created_at),
+  leaseIdx: index('idx_research_run_attempts_lease').on(table.lease_expires_at),
+}))
+
+export const research_run_checkpoints = sqliteTable('research_run_checkpoints', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  attempt_id: text('attempt_id').notNull(),
+  sequence: integer('sequence').notNull(),
+  checkpoint_key: text('checkpoint_key').notNull(),
+  phase: text('phase').notNull(),
+  status: text('status').notNull().default('started'),
+  resume_cursor_json: text('resume_cursor_json').notNull().default('{}'),
+  input_fingerprint: text('input_fingerprint').notNull(),
+  output_fingerprint: text('output_fingerprint'),
+  replay_policy: text('replay_policy').notNull().default('reuse'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  attemptSequenceIdx: uniqueIndex('idx_research_run_checkpoints_attempt_sequence').on(table.attempt_id, table.sequence),
+  runCheckpointInputIdx: uniqueIndex('idx_research_run_checkpoints_run_key_input').on(table.run_id, table.checkpoint_key, table.input_fingerprint),
+  runSequenceIdx: index('idx_research_run_checkpoints_run_sequence').on(table.run_id, desc(table.sequence)),
+  attemptStatusIdx: index('idx_research_run_checkpoints_attempt_status').on(table.attempt_id, table.status, desc(table.sequence)),
+}))
+
+export const research_iterations = sqliteTable('research_iterations', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  status: text('status').notNull().default('planned'),
+  decision: text('decision'),
+  target_question_ids_json: text('target_question_ids_json').notNull().default('[]'),
+  coverage_before_json: text('coverage_before_json').notNull().default('{}'),
+  coverage_after_json: text('coverage_after_json').notNull().default('{}'),
+  plan_json: text('plan_json').notNull().default('{}'),
+  planned_query_count: integer('planned_query_count').notNull().default(0),
+  executed_query_count: integer('executed_query_count').notNull().default(0),
+  new_source_count: integer('new_source_count').notNull().default(0),
+  new_evidence_count: integer('new_evidence_count').notNull().default(0),
+  budget_before_json: text('budget_before_json').notNull().default('{}'),
+  budget_after_json: text('budget_after_json').notNull().default('{}'),
+  stop_reason_json: text('stop_reason_json'),
+  limitations_json: text('limitations_json').notNull().default('[]'),
+  created_at: integer('created_at').notNull(),
+  completed_at: integer('completed_at'),
+}, (table) => ({
+  runOrdinalIdx: uniqueIndex('idx_research_iterations_run_ordinal').on(table.run_id, table.ordinal),
+  runStatusIdx: index('idx_research_iterations_run_status').on(table.run_id, table.status, table.ordinal),
+}))
+
+export const research_coverage_assessments = sqliteTable('research_coverage_assessments', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  iteration_id: text('iteration_id'),
+  iteration_ordinal: integer('iteration_ordinal').notNull().default(0),
+  policy_version: text('policy_version').notNull(),
+  input_fingerprint: text('input_fingerprint').notNull(),
+  aggregate_score: real('aggregate_score').notNull().default(0),
+  question_verdicts_json: text('question_verdicts_json').notNull().default('[]'),
+  limitations_json: text('limitations_json').notNull().default('[]'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runIterationPolicyInputIdx: uniqueIndex('idx_research_coverage_assessments_run_iteration_policy_input').on(table.run_id, table.iteration_ordinal, table.policy_version, table.input_fingerprint),
+  runIterationIdx: index('idx_research_coverage_assessments_run_iteration').on(table.run_id, table.iteration_ordinal, desc(table.created_at)),
+}))
+
 
 export const research_questions = sqliteTable('research_questions', {
   id: text('id').primaryKey(),
