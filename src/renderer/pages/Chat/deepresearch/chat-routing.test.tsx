@@ -6,6 +6,7 @@ import {
   chatAgentHeaderForTab,
   isDeepResearchWorkbenchActive,
   isChatComposerVisible,
+  shouldStartNewResearchFromTab,
   teamTabForSessionChange,
   restoreParts,
 } from '../ChatPanelMastra'
@@ -23,6 +24,13 @@ describe('Deep Research Chat routing', () => {
     expect(chatAgentHeaderForTab('writing')).toBe('writing')
     expect(chatAgentHeaderForTab('coding')).toBe('coding')
     expect(chatAgentHeaderForTab('')).toBe('')
+  })
+
+  it('opens a fresh research workbench only from the Research tab, not from a historical run bubble', () => {
+    expect(shouldStartNewResearchFromTab('', 'research')).toBe(true)
+    expect(shouldStartNewResearchFromTab('writing', 'research')).toBe(true)
+    expect(shouldStartNewResearchFromTab('research', 'research')).toBe(false)
+    expect(shouldStartNewResearchFromTab('', 'writing')).toBe(false)
   })
 
   it('leaves the research workbench when the user switches to another chat session', () => {

@@ -62,6 +62,11 @@ export function teamTabForSessionChange(team: TeamTab): TeamTab {
   return team === 'research' ? '' : team
 }
 
+// The Research tab starts a new workbench; historical research bubbles open a specific run.
+export function shouldStartNewResearchFromTab(currentTeam: TeamTab, selectedTeam: Exclude<TeamTab, ''>): boolean {
+  return currentTeam !== 'research' && selectedTeam === 'research'
+}
+
 export function buildResearchRunAssistantMessage(data: ResearchRunPartData): { content: string; parts: any[] } {
   return { content: '', parts: slimParts([{ type: 'data-research-run', data }]) }
 }
@@ -225,6 +230,9 @@ export function ChatPanelMastra() {
 
   const handleTeamToggle = (id: Exclude<TeamTab, ''>) => {
     const next: TeamTab = team === id ? '' : id
+    if (shouldStartNewResearchFromTab(team, id)) {
+      useDeepResearchStore.getState().reset()
+    }
     setTeam(next)
     if (next) setMode('chat')
   }
