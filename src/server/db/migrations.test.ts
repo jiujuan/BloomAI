@@ -1,6 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,6 +19,15 @@ async function loadClient() {
 
 function openRawDb() {
   return new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+}
+
+function runMigrationCli(dataDirOverride?: string) {
+  const { DATA_DIR: _ignoredDataDir, ...environment } = originalEnv
+  return spawnSync(process.execPath, [path.resolve(process.cwd(), 'scripts', 'db-migrate.js')], {
+    cwd: process.cwd(),
+    env: dataDirOverride ? { ...environment, DATA_DIR: dataDirOverride } : environment,
+    encoding: 'utf8',
+  })
 }
 
 function tableNames() {
@@ -83,6 +93,37 @@ describe('database migrations', () => {
     vi.resetModules()
     process.env = originalEnv
     fs.rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  it('runs the CLI only against an explicit data directory and is idempotent', () => {
+    const withoutTarget = runMigrationCli()
+    expect(withoutTarget.status).toBe(1)
+    expect(withoutTarget.stderr).toContain('DATA_DIR')
+
+    const firstRun = runMigrationCli(dataDir)
+    expect(firstRun.status).toBe(0)
+    expect(migrationVersions()).toHaveLength(9)
+
+    const secondRun = runMigrationCli(dataDir)
+    expect(secondRun.status).toBe(0)
+    expect(secondRun.stdout).toContain('up to date')
+    expect(migrationVersions()).toHaveLength(9)
+  })
+
+  it('orders SQL migration files by numeric prefix', async () => {
+    const { loadSqlMigrations } = await import('./migrations')
+    const migrationsPath = path.join(dataDir, 'migration-order')
+    fs.mkdirSync(migrationsPath)
+    fs.writeFileSync(path.join(migrationsPath, '10-tenth.sql'), 'SELECT 10;')
+    fs.writeFileSync(path.join(migrationsPath, '2-second.sql'), 'SELECT 2;')
+    fs.writeFileSync(path.join(migrationsPath, '1-first.sql'), 'SELECT 1;')
+    fs.writeFileSync(path.join(migrationsPath, 'notes.txt'), 'ignore')
+
+    expect(loadSqlMigrations(migrationsPath).map((migration) => migration.version)).toEqual([
+      '1-first',
+      '2-second',
+      '10-tenth',
+    ])
   })
 
   it('migrates an empty database and records each migration once', async () => {
@@ -195,6 +236,56 @@ describe('database migrations', () => {
     expect(tableNames()).toContain('skill_runs_v2')
   })
 
+  it('keeps first-phase research fixture records readable after a migration upgrade', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const firstPhaseMigrations = loadSqlMigrations().filter((migration) =>
+        ['008-deep-research-core', '009-deep-research-recovery-commands'].includes(migration.version)
+      )
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, persona_id TEXT, model TEXT NOT NULL,
+          status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+      `)
+      runSqlMigrations(db, firstPhaseMigrations)
+      db.exec(`
+        INSERT INTO research_runs (
+          id, topic, profile, depth, status, phase, input_json, budget_json, created_at, updated_at
+        ) VALUES ('run-legacy', 'Legacy topic', 'standard', 'standard', 'completed', 'completed', '{}', '{}', 1, 1);
+        INSERT INTO research_questions (
+          id, run_id, ordinal, question, intent, priority, status, created_at, updated_at
+        ) VALUES ('question-legacy', 'run-legacy', 1, 'What happened?', 'fact', 'high', 'covered', 1, 1);
+        INSERT INTO research_sources (
+          id, run_id, canonical_url, domain, source_type, selection_status, created_at, updated_at
+        ) VALUES ('source-legacy', 'run-legacy', 'https://example.com/legacy', 'example.com', 'web', 'selected', 1, 1);
+        INSERT INTO research_source_snapshots (
+          id, run_id, source_id, content_hash, content, fetched_at, parser_version, final_url, idempotency_key, created_at
+        ) VALUES ('snapshot-legacy', 'run-legacy', 'source-legacy', 'hash', 'legacy source content', 1, 'v1', 'https://example.com/legacy', 'snapshot-legacy', 1);
+        INSERT INTO research_evidence (
+          id, run_id, question_id, snapshot_id, passage, summary, stance, confidence, start_offset, end_offset, idempotency_key, created_at
+        ) VALUES ('evidence-legacy', 'run-legacy', 'question-legacy', 'snapshot-legacy', 'legacy passage', 'legacy summary', 'supports', 0.9, 0, 14, 'evidence-legacy', 1);
+      `)
+    } finally {
+      db.close()
+    }
+
+    const client = await loadClient()
+    await client.runMigrations()
+
+    const upgraded = openRawDb()
+    try {
+      expect(upgraded.prepare('SELECT topic FROM research_runs WHERE id = ?').get('run-legacy')).toEqual({ topic: 'Legacy topic' })
+      expect(upgraded.prepare('SELECT canonical_url FROM research_sources WHERE id = ?').get('source-legacy')).toEqual({ canonical_url: 'https://example.com/legacy' })
+      expect(upgraded.prepare('SELECT passage FROM research_evidence WHERE id = ?').get('evidence-legacy')).toEqual({ passage: 'legacy passage' })
+      expect(migrationVersions()).toEqual(loadSqlMigrations().map((migration) => migration.version))
+    } finally {
+      upgraded.close()
+    }
+  })
+
   it('rolls back a failed migration and does not record it', async () => {
     const { runSqlMigrations } = await import('./migrations')
     fs.mkdirSync(dataDir, { recursive: true })
@@ -210,7 +301,7 @@ describe('database migrations', () => {
             `,
           },
         ])
-      ).toThrow()
+      ).toThrow('[db:migrate] Failed to apply 999-fails:')
 
       const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row: any) => row.name)
       expect(names).not.toContain('rollback_probe')

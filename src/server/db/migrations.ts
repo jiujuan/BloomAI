@@ -20,7 +20,11 @@ export function loadSqlMigrations(dir = migrationsDir): SqlMigration[] {
   if (!fs.existsSync(dir)) return []
   return fs.readdirSync(dir)
     .filter((file) => file.endsWith('.sql'))
-    .sort((a, b) => a.localeCompare(b))
+    .sort((left, right) => {
+      const leftPrefix = Number(/^\d+/.exec(left)?.[0] ?? Number.MAX_SAFE_INTEGER)
+      const rightPrefix = Number(/^\d+/.exec(right)?.[0] ?? Number.MAX_SAFE_INTEGER)
+      return leftPrefix - rightPrefix || left.localeCompare(right)
+    })
     .map((file) => ({
       version: path.basename(file, '.sql'),
       sql: fs.readFileSync(path.join(dir, file), 'utf8'),
@@ -54,7 +58,8 @@ export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations
       console.info(`[db:migrate] Applied ${migration.version}`)
     } catch (err) {
       db.exec('ROLLBACK')
-      throw err
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`[db:migrate] Failed to apply ${migration.version}: ${message}`, { cause: err })
     }
   }
 
