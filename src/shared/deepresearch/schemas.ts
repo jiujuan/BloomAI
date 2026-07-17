@@ -275,6 +275,61 @@ export const researchCoverageSchema = z.object({
   gaps: z.array(z.string()),
 })
 
+export const researchCoverageGapV2Schema = z.object({
+  code: z.enum([
+    'NO_EVIDENCE',
+    'SINGLE_DOMAIN',
+    'MISSING_REQUIRED_TYPE',
+    'NO_AUTHORITATIVE_SOURCE',
+    'STALE_EVIDENCE',
+    'UNRESOLVED_CONTRADICTION',
+    'INSUFFICIENT_CONFIDENCE',
+  ]),
+  severity: z.enum(['critical', 'high', 'medium', 'low']),
+  remediable: z.boolean(),
+  remediation: z.enum(['search_primary', 'search_independent', 'search_recent', 'search_counterevidence', 'disclose_limitation']),
+  recommendedSearchIntent: z.string().nullable(),
+})
+
+export const researchCoverageAssessmentV2Schema = z.object({
+  policyVersion: z.literal('v2'),
+  profile: z.enum(['general', 'market', 'competitor', 'academic']),
+  questionId: z.string().min(1),
+  inputFingerprint: z.string().min(1),
+  score: z.number().min(0).max(1),
+  verdict: z.enum(['covered', 'limited', 'uncovered', 'blocked']),
+  dimensions: z.object({
+    evidenceSufficiency: z.number().min(0).max(1),
+    independentCorroboration: z.number().min(0).max(1),
+    authority: z.number().min(0).max(1),
+    recency: z.number().min(0).max(1),
+    requiredEvidenceTypes: z.number().min(0).max(1),
+    contradictionHandling: z.number().min(0).max(1),
+  }),
+  sourceCounts: z.object({
+    evidence: z.number().int().nonnegative(),
+    distinctSources: z.number().int().nonnegative(),
+    independentDomains: z.number().int().nonnegative(),
+    primaryOrAuthoritative: z.number().int().nonnegative(),
+    recent: z.number().int().nonnegative(),
+  }),
+  support: z.object({
+    supporting: z.number().int().nonnegative(),
+    contradicting: z.number().int().nonnegative(),
+    contextual: z.number().int().nonnegative(),
+  }),
+  gaps: z.array(researchCoverageGapV2Schema),
+  limitation: z.string().nullable(),
+  suggestedSearchIntents: z.array(z.string()),
+  materialGain: z.object({
+    scoreDelta: z.number(),
+    verdictImproved: z.boolean(),
+    material: z.boolean(),
+    reason: z.string(),
+  }).nullable(),
+  assessedAt: z.number(),
+})
+
 export const researchEventSchema = z.object({
   runId: z.string().min(1),
   sequence: z.number().int().nonnegative(),

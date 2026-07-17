@@ -100,7 +100,7 @@ const snapshot: ResearchSourceSnapshotDto = {
   httpStatus: 200,
 }
 
-function createService(analyst: EvidenceAnalyst) {
+function createService(analyst: EvidenceAnalyst, clock?: () => number) {
   const evidence: ResearchEvidenceDto[] = []
   const coverage: Array<{ id: string; status: ResearchQuestionDto['status']; value: ResearchQuestionDto['coverage'] }> = []
   const service = new EvidenceService({
@@ -120,6 +120,7 @@ function createService(analyst: EvidenceAnalyst) {
       },
       list: () => evidence,
     },
+    clock,
     questionRepo: {
       updateCoverage: (id, data) => {
         coverage.push({ id, status: data.status, value: data.coverage })
@@ -221,9 +222,37 @@ describe('EvidenceService', () => {
         supportingEvidenceCount: 1,
         contradictingEvidenceCount: 1,
         hasSingleSourceDependency: true,
-        gaps: ['independent sources'],
+        gaps: ['independent sources', 'primary or authoritative source', 'unresolved contradiction'],
       }),
     })])
+  })
+
+  it('adapts persisted evidence into a versioned V2 assessment with an injected deterministic clock', async () => {
+    const { service } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: snapshot.id,
+        passage: content.slice(0, 150),
+        summary: 'The official source supplies a citable market-growth statement.',
+        stance: 'supporting',
+        confidence: 0.9,
+        startOffset: 0,
+        endOffset: 150,
+      }],
+    }, () => Date.UTC(2026, 6, 17))
+
+    await service.extract(run, [question])
+    const [assessment] = service.assessCoverageV2(run, [question])
+
+    expect(assessment).toMatchObject({
+      policyVersion: 'v2',
+      profile: 'market',
+      questionId: question.id,
+      assessedAt: Date.UTC(2026, 6, 17),
+      verdict: 'limited',
+    })
+    expect(assessment.inputFingerprint).toMatch(/^[a-f0-9]{64}$/)
+    expect(assessment.gaps.map((gap) => gap.code)).toEqual(expect.arrayContaining(['SINGLE_DOMAIN', 'NO_AUTHORITATIVE_SOURCE']))
   })
 
   it('generates follow-up queries only for high-priority uncovered questions', async () => {

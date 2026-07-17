@@ -1,6 +1,7 @@
 ﻿import { describe, expect, it } from 'vitest'
 import {
   clarificationSchema,
+  researchCoverageAssessmentV2Schema,
   researchCoverageSchema,
   researchEventSchema,
   researchRunDtoSchema,
@@ -130,6 +131,38 @@ describe('deep research schemas', () => {
     expect(parsed.error?.category).toBe('timeout')
     expect(parsed.capabilities).toMatchObject({ canResume: true, canRetry: true, canCancel: false })
     expect(parsed.checkpointCursor?.nextPhase).toBe('assessing_coverage')
+  })
+
+  it('parses a versioned Coverage Policy V2 assessment alongside the V1 projection', () => {
+    expect(researchCoverageAssessmentV2Schema.parse({
+      policyVersion: 'v2',
+      profile: 'market',
+      questionId: 'question-1',
+      inputFingerprint: 'a'.repeat(64),
+      score: 0.72,
+      verdict: 'limited',
+      dimensions: {
+        evidenceSufficiency: 1,
+        independentCorroboration: 0.5,
+        authority: 0.5,
+        recency: 1,
+        requiredEvidenceTypes: 1,
+        contradictionHandling: 1,
+      },
+      sourceCounts: { evidence: 2, distinctSources: 1, independentDomains: 1, primaryOrAuthoritative: 1, recent: 1 },
+      support: { supporting: 2, contradicting: 0, contextual: 0 },
+      gaps: [{
+        code: 'SINGLE_DOMAIN',
+        severity: 'high',
+        remediable: true,
+        remediation: 'search_independent',
+        recommendedSearchIntent: 'growth: find an independent domain that corroborates the conclusion',
+      }],
+      limitation: null,
+      suggestedSearchIntents: ['growth: find an independent domain that corroborates the conclusion'],
+      materialGain: null,
+      assessedAt: 1,
+    })).toMatchObject({ policyVersion: 'v2', verdict: 'limited' })
   })
 
   it('keeps V1 coverage and event payloads parseable when V2 fields are absent', () => {

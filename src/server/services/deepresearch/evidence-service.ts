@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import type {
+  ResearchCoverageAssessmentV2Dto,
   ResearchCoverageDto,
   ResearchEvidenceDto,
   ResearchQuestionDto,
@@ -9,6 +10,7 @@ import type {
   ResearchSourceSnapshotDto,
 } from '@shared/deepresearch/contracts'
 import type { UpsertResearchEvidenceInput } from '@server/db/repositories/deepresearch/research-evidence.repo'
+import { assessCoveragePolicyV2, type CoveragePolicyEvidence } from '@server/deepresearch/domain/coverage-policy'
 
 export const EVIDENCE_PACKET_CHARACTER_BUDGET = 1_200
 export const EVIDENCE_PASSAGE_MIN_CHARACTERS = 80
@@ -72,6 +74,8 @@ export interface EvidenceServiceOptions {
   evidenceRepo: EvidenceServiceEvidenceRepository
   questionRepo: EvidenceServiceQuestionRepository
   packetCharacterBudget?: number
+  /** Injected only for deterministic service-level coverage tests. */
+  clock?: () => number
 }
 
 export interface EvidenceExtractionResult {
@@ -80,18 +84,21 @@ export interface EvidenceExtractionResult {
   coverage: ResearchCoverageDto[]
 }
 
-const primarySourceTypePattern = /(primary|official|regulatory|filing|peer-reviewed|paper|dataset|survey)/i
-const recentSourceAgeMs = 18 * 30 * 24 * 60 * 60 * 1_000
-
-function limitScore(score: number): number {
-  return Math.max(0, Math.min(1, Math.round(score * 100) / 100))
-}
+const LEGACY_GAP_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  NO_EVIDENCE: 'no citable evidence',
+  SINGLE_DOMAIN: 'independent sources',
+  MISSING_REQUIRED_TYPE: 'required evidence category',
+  NO_AUTHORITATIVE_SOURCE: 'primary or authoritative source',
+  STALE_EVIDENCE: 'recent source',
+  UNRESOLVED_CONTRADICTION: 'unresolved contradiction',
+  INSUFFICIENT_CONFIDENCE: 'insufficient confidence',
+})
 
 function coverageThreshold(priority: ResearchQuestionDto['priority']): number {
-  if (priority === 'critical') return 0.8
-  if (priority === 'high') return 0.7
-  if (priority === 'medium') return 0.6
-  return 0.5
+  if (priority === 'critical') return 0.85
+  if (priority === 'high') return 0.8
+  if (priority === 'medium') return 0.7
+  return 0.6
 }
 
 export function isQuestionCovered(question: ResearchQuestionDto): boolean {
@@ -230,63 +237,79 @@ export class EvidenceService {
     return { createdCount, rejectedCount, coverage }
   }
 
-  assessCoverage(run: ResearchRunDto, questions: ResearchQuestionDto[]): ResearchCoverageDto[] {
+  assessCoverageV2(run: ResearchRunDto, questions: ResearchQuestionDto[]): ResearchCoverageAssessmentV2Dto[] {
     const sources = new Map(this.options.sourceRepo.listSources(run.id).map((source) => [source.id, source]))
     const snapshots = new Map(this.options.sourceRepo.listSnapshots(run.id).map((snapshot) => [snapshot.id, snapshot]))
     const evidence = this.options.evidenceRepo.list(run.id)
-    const now = Date.now()
+    const assessedAt = (this.options.clock ?? Date.now)()
 
     return questions
       .filter((question) => question.runId === run.id)
       .map((question) => {
-        const questionEvidence = evidence.filter((item) => item.questionId === question.id && snapshots.has(item.snapshotId))
-        const associatedSources = questionEvidence
-          .map((item) => snapshots.get(item.snapshotId))
-          .filter((snapshot): snapshot is ResearchSourceSnapshotDto => Boolean(snapshot))
-          .map((snapshot) => sources.get(snapshot.sourceId))
-          .filter((source): source is ResearchSourceDto => Boolean(source))
-        const distinctSources = [...new Map(associatedSources.map((source) => [source.id, source])).values()]
-        const domains = new Set(distinctSources.map((source) => source.domain))
-        const categories = [...new Set(distinctSources.map((source) => source.sourceType))].sort()
-        const primarySourceCount = distinctSources.filter((source) => primarySourceTypePattern.test(source.sourceType)).length
-        const recentSourceCount = distinctSources.filter((source) => source.publishedAt !== null && now - source.publishedAt <= recentSourceAgeMs).length
-        const supportingEvidenceCount = questionEvidence.filter((item) => item.stance === 'supporting').length
-        const contradictingEvidenceCount = questionEvidence.filter((item) => item.stance === 'contradicting').length
-        const hasSingleSourceDependency = questionEvidence.length > 0 && domains.size < 2
-        const requiredTypesCovered = question.requiredEvidenceTypes.length === 0
-          || question.requiredEvidenceTypes.some((type) => categories.includes(type))
-        const score = limitScore(
-          (questionEvidence.length > 0 ? 0.2 : 0)
-          + (supportingEvidenceCount > 0 ? 0.15 : 0)
-          + (requiredTypesCovered ? 0.15 : 0)
-          + (domains.size >= 2 ? 0.2 : 0)
-          + (primarySourceCount > 0 ? 0.15 : 0)
-          + (recentSourceCount > 0 ? 0.1 : 0)
-          + (contradictingEvidenceCount > 0 ? 0.05 : 0),
-        )
-        const gaps: string[] = []
-        if (questionEvidence.length === 0) gaps.push('no citable evidence')
-        if (!requiredTypesCovered) gaps.push('required evidence category')
-        if (domains.size < 2) gaps.push('independent sources')
-        if (primarySourceCount === 0) gaps.push('primary or authoritative source')
-        if (recentSourceCount === 0) gaps.push('recent source')
+        const questionEvidence = evidence.filter((item) => item.questionId === question.id)
+        const policyEvidence: CoveragePolicyEvidence[] = questionEvidence.flatMap((item) => {
+          const snapshot = snapshots.get(item.snapshotId)
+          const source = snapshot ? sources.get(snapshot.sourceId) : undefined
+          if (!snapshot || !source || snapshot.runId !== run.id || source.runId !== run.id) return []
+          return [{
+            id: item.id,
+            sourceId: source.id,
+            domain: source.domain,
+            sourceType: source.sourceType,
+            publishedAt: source.publishedAt,
+            stance: item.stance,
+            confidence: item.confidence,
+          }]
+        })
+        return assessCoveragePolicyV2({
+          questionId: question.id,
+          question: question.question,
+          intent: question.intent,
+          profile: run.profile,
+          priority: question.priority,
+          requiredEvidenceTypes: question.requiredEvidenceTypes,
+          evidence: policyEvidence,
+          assessedAt,
+        })
+      })
+  }
+
+  assessCoverage(run: ResearchRunDto, questions: ResearchQuestionDto[]): ResearchCoverageDto[] {
+    const sources = new Map(this.options.sourceRepo.listSources(run.id).map((source) => [source.id, source]))
+    const snapshots = new Map(this.options.sourceRepo.listSnapshots(run.id).map((snapshot) => [snapshot.id, snapshot]))
+    const assessments = this.assessCoverageV2(run, questions)
+    const assessmentByQuestionId = new Map(assessments.map((assessment) => [assessment.questionId, assessment]))
+    const evidence = this.options.evidenceRepo.list(run.id)
+
+    return questions
+      .filter((question) => question.runId === run.id)
+      .map((question) => {
+        const assessment = assessmentByQuestionId.get(question.id)!
+        const associatedSources = evidence
+          .filter((item) => item.questionId === question.id)
+          .flatMap((item) => {
+            const snapshot = snapshots.get(item.snapshotId)
+            const source = snapshot ? sources.get(snapshot.sourceId) : undefined
+            return source && snapshot?.runId === run.id && source.runId === run.id ? [source] : []
+          })
+        const evidenceCategories = [...new Set(associatedSources.map((source) => source.sourceType))].sort()
         const coverage: ResearchCoverageDto = {
           questionId: question.id,
-          score,
-          independentDomainCount: domains.size,
-          evidenceCategories: categories,
-          primarySourceCount,
-          recentSourceCount,
-          supportingEvidenceCount,
-          contradictingEvidenceCount,
-          hasSingleSourceDependency,
-          gaps,
+          score: assessment.score,
+          independentDomainCount: assessment.sourceCounts.independentDomains,
+          evidenceCategories,
+          primarySourceCount: assessment.sourceCounts.primaryOrAuthoritative,
+          recentSourceCount: assessment.sourceCounts.recent,
+          supportingEvidenceCount: assessment.support.supporting,
+          contradictingEvidenceCount: assessment.support.contradicting,
+          hasSingleSourceDependency: assessment.sourceCounts.evidence > 0 && assessment.sourceCounts.independentDomains < 2,
+          gaps: assessment.gaps.map((gap) => LEGACY_GAP_LABELS[gap.code]),
         }
-        const status: ResearchQuestionDto['status'] = score >= coverageThreshold(question.priority) && !hasSingleSourceDependency
+        const status: ResearchQuestionDto['status'] = assessment.verdict === 'covered'
           ? 'covered'
-          : questionEvidence.length > 0
-            ? 'limited'
-            : 'researching'
+          : assessment.verdict === 'uncovered'
+            ? 'researching'
+            : 'limited'
         this.options.questionRepo.updateCoverage(question.id, { coverage, status })
         return coverage
       })

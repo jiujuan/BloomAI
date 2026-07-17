@@ -181,6 +181,72 @@ export interface ResearchRunCheckpointDto {
   createdAt: number
 }
 
+export type CoveragePolicyV2GapCode =
+  | 'NO_EVIDENCE'
+  | 'SINGLE_DOMAIN'
+  | 'MISSING_REQUIRED_TYPE'
+  | 'NO_AUTHORITATIVE_SOURCE'
+  | 'STALE_EVIDENCE'
+  | 'UNRESOLVED_CONTRADICTION'
+  | 'INSUFFICIENT_CONFIDENCE'
+
+export type CoveragePolicyV2Remediation =
+  | 'search_primary'
+  | 'search_independent'
+  | 'search_recent'
+  | 'search_counterevidence'
+  | 'disclose_limitation'
+
+/** Versioned, deterministic coverage-policy output. It is deliberately separate from the V1 UI projection below. */
+export interface ResearchCoverageGapV2Dto {
+  code: CoveragePolicyV2GapCode
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  remediable: boolean
+  remediation: CoveragePolicyV2Remediation
+  recommendedSearchIntent: string | null
+}
+
+export interface ResearchCoverageMaterialGainDto {
+  scoreDelta: number
+  verdictImproved: boolean
+  material: boolean
+  reason: string
+}
+
+export interface ResearchCoverageAssessmentV2Dto {
+  policyVersion: 'v2'
+  profile: ResearchProfile
+  questionId: string
+  inputFingerprint: string
+  score: number
+  verdict: 'covered' | 'limited' | 'uncovered' | 'blocked'
+  dimensions: {
+    evidenceSufficiency: number
+    independentCorroboration: number
+    authority: number
+    recency: number
+    requiredEvidenceTypes: number
+    contradictionHandling: number
+  }
+  sourceCounts: {
+    evidence: number
+    distinctSources: number
+    independentDomains: number
+    primaryOrAuthoritative: number
+    recent: number
+  }
+  support: {
+    supporting: number
+    contradicting: number
+    contextual: number
+  }
+  gaps: ResearchCoverageGapV2Dto[]
+  limitation: string | null
+  suggestedSearchIntents: string[]
+  materialGain: ResearchCoverageMaterialGainDto | null
+  assessedAt: number
+}
+
 export interface ResearchQuestionCoverageVerdictDto {
   questionId: string
   score: number
