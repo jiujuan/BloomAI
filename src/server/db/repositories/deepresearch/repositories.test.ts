@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { eq } from 'drizzle-orm'
@@ -375,6 +375,36 @@ describe('Deep Research repositories', () => {
     expect(researchEventRepo.list(run.id)).toEqual([])
   })
 
+  it('rolls back initial attempt, checkpoint, and events if the initial checkpoint event cannot be persisted', async () => {
+    const { client, researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    client.db!.exec(`
+      CREATE TRIGGER fail_initial_checkpoint_event
+      BEFORE INSERT ON research_events
+      WHEN NEW.run_id = '${run.id}' AND NEW.type = 'research.checkpoint.completed'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced initial checkpoint event failure');
+      END;
+    `)
+
+    expect(() => researchAttemptRepo.createWithInitialCheckpoint({
+      runId: run.id,
+      trigger: 'initial',
+      checkpoint: {
+        checkpointKey: 'run:queued',
+        phase: 'queued',
+        status: 'completed',
+        resumeCursor: { version: 1, nextPhase: 'planning', iteration: 0 },
+        inputFingerprint: 'run:initial',
+        replayPolicy: 'reuse',
+      },
+    })).toThrow('forced initial checkpoint event failure')
+
+    expect(researchAttemptRepo.findActive(run.id)).toBeUndefined()
+    expect(researchCheckpointRepo.list(run.id)).toEqual([])
+    expect(researchEventRepo.list(run.id)).toEqual([])
+    expect(researchRunRepo.get(run.id)).toMatchObject({ currentAttemptId: null, resumePhase: null })
+  })
   it('persists attempts, idempotent checkpoints, iteration budget snapshots, and assessments through domain APIs', async () => {
     const {
       researchRunRepo,

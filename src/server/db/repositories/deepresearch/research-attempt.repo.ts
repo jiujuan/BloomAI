@@ -1,11 +1,13 @@
-import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+﻿import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchAttemptStatus, ResearchAttemptTrigger, ResearchRunAttemptDto, ResearchRunErrorDto } from '@shared/deepresearch/contracts'
+import type { ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunErrorDto } from '@shared/deepresearch/contracts'
 import type { AppendResearchEventInput } from './research-event.repo'
 import { getOrmDb } from '../../client'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
-import { research_run_attempts, research_runs } from '../../schema'
+import { research_run_attempts, research_run_checkpoints, research_runs } from '../../schema'
 import { appendResearchEventInTransaction } from './research-event.repo'
+import { mapResearchCheckpoint } from './research-checkpoint.repo'
+import { encodeJson } from './repository-utils'
 
 type TransactionExecutor = any
 
@@ -18,6 +20,21 @@ export interface CreateResearchAttemptInput {
   createdAt?: number
 }
 
+export interface CreateResearchAttemptWithInitialCheckpointInput {
+  runId: string
+  trigger: ResearchAttemptTrigger
+  workflowRunId?: string | null
+  createdAt?: number
+  checkpoint: {
+    checkpointKey: string
+    phase: string
+    status: ResearchCheckpointStatus
+    resumeCursor: ResearchCheckpointCursorDto
+    inputFingerprint: string
+    outputFingerprint?: string | null
+    replayPolicy: ResearchCheckpointReplayPolicy
+  }
+}
 export interface EndResearchAttemptInput {
   attemptId: string
   status: Extract<ResearchAttemptStatus, 'cancelled' | 'succeeded' | 'failed' | 'interrupted'>
@@ -106,6 +123,69 @@ export const researchAttemptRepo = {
     return result.attempt
   },
 
+  /**
+   * Creates the first queued Attempt, its durable resume cursor, and both
+   * events in one transaction.  Publishing happens only after commit.
+   */
+  createWithInitialCheckpoint(input: CreateResearchAttemptWithInitialCheckpointInput): { attempt: ResearchRunAttemptDto; checkpoint: ResearchRunCheckpointDto } {
+    const result = getOrmDb().transaction((tx) => {
+      const now = input.createdAt ?? Date.now()
+      const attemptId = uuidv4()
+      const ordinal = nextOrdinal(tx, input.runId)
+      const checkpointId = uuidv4()
+      const checkpointSequence = 1
+      tx.insert(research_run_attempts).values({
+        id: attemptId,
+        run_id: input.runId,
+        ordinal,
+        trigger: input.trigger,
+        status: 'queued',
+        workflow_run_id: input.workflowRunId ?? null,
+        start_checkpoint_key: input.checkpoint.checkpointKey,
+        created_at: now,
+      }).run()
+      tx.update(research_runs).set({
+        current_attempt_id: attemptId,
+        last_checkpoint_sequence: checkpointSequence,
+        resume_phase: input.checkpoint.resumeCursor.nextPhase,
+        updated_at: now,
+      }).where(eq(research_runs.id, input.runId)).run()
+
+      const attemptEvent = appendResearchEventInTransaction(tx, {
+        runId: input.runId,
+        type: 'research.attempt.created',
+        phase: 'queued',
+        timestamp: now,
+        payload: { id: attemptId, ordinal, trigger: input.trigger },
+      })
+      tx.insert(research_run_checkpoints).values({
+        id: checkpointId,
+        run_id: input.runId,
+        attempt_id: attemptId,
+        sequence: checkpointSequence,
+        checkpoint_key: input.checkpoint.checkpointKey,
+        phase: input.checkpoint.phase,
+        status: input.checkpoint.status,
+        resume_cursor_json: encodeJson(input.checkpoint.resumeCursor),
+        input_fingerprint: input.checkpoint.inputFingerprint,
+        output_fingerprint: input.checkpoint.outputFingerprint ?? null,
+        replay_policy: input.checkpoint.replayPolicy,
+        created_at: now,
+      }).run()
+      const checkpoint = mapResearchCheckpoint(tx.select().from(research_run_checkpoints).where(eq(research_run_checkpoints.id, checkpointId)).get()!)
+      const checkpointEvent = appendResearchEventInTransaction(tx, {
+        runId: input.runId,
+        type: 'research.checkpoint.completed',
+        phase: checkpoint.phase,
+        timestamp: now,
+        payload: { id: checkpoint.id, checkpointKey: checkpoint.checkpointKey, sequence: checkpoint.sequence },
+      })
+      const attempt = mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()!)
+      return { attempt, checkpoint, events: [attemptEvent, checkpointEvent] }
+    })
+    for (const event of result.events) publishResearchEvent(event)
+    return { attempt: result.attempt, checkpoint: result.checkpoint }
+  },
   get(id: string): ResearchRunAttemptDto | undefined {
     const row = getOrmDb().select().from(research_run_attempts).where(eq(research_run_attempts.id, id)).get()
     return row ? mapAttempt(row) : undefined

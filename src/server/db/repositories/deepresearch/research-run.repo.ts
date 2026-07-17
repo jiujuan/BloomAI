@@ -62,6 +62,10 @@ export interface TransitionResearchRunCasResult {
   event: ResearchEventDto
 }
 
+export interface RequestResearchRunCancellationOptions {
+  reason?: string | null
+}
+
 function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
   const error = row.error_code
     ? {
@@ -300,6 +304,47 @@ export const researchRunRepo = {
         run: mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!),
         event,
       } satisfies TransitionResearchRunCasResult
+    })
+    if (!result) return null
+    publishResearchEvent(result.event)
+    return result.run
+  },
+
+  /**
+   * Records the cancellation request and moves the Run to cancelling with one
+   * state-version compare-and-swap.  A losing writer emits no event.
+   */
+  requestCancellationWithEventCas(id: string, expectedStateVersion: number, options: RequestResearchRunCancellationOptions = {}): ResearchRunDto | null {
+    const result = getOrmDb().transaction((tx) => {
+      const currentRow = tx.select().from(research_runs).where(eq(research_runs.id, id)).get()
+      if (!currentRow || currentRow.state_version !== expectedStateVersion) return null
+
+      const current = mapRun(currentRow)
+      assertResearchTransition(current.status, 'cancelling', { error: current.error })
+      const now = Date.now()
+      const updated = tx.update(research_runs).set({
+        status: 'cancelling',
+        phase: 'cancelling',
+        cancel_requested_at: now,
+        cancel_reason: options.reason ?? null,
+        updated_at: now,
+        state_version: expectedStateVersion + 1,
+      }).where(and(
+        eq(research_runs.id, id),
+        eq(research_runs.state_version, expectedStateVersion),
+      )).run()
+      if (updated.changes !== 1) return null
+
+      const event = appendResearchEventInTransaction(tx, {
+        runId: id,
+        type: 'research.run.cancellation_requested',
+        phase: 'cancelling',
+        payload: { reason: options.reason ?? null },
+      })
+      return {
+        run: mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!),
+        event,
+      }
     })
     if (!result) return null
     publishResearchEvent(result.event)

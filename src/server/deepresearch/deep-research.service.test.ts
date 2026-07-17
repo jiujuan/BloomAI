@@ -1,4 +1,4 @@
-import fs from 'fs'
+﻿import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,9 +23,11 @@ async function loadTestContext() {
   const client = await import('../db/client')
   await client.runMigrations()
   const { researchRunRepo } = await import('../db/repositories/deepresearch/research-run.repo')
+  const { researchAttemptRepo } = await import('../db/repositories/deepresearch/research-attempt.repo')
+  const { researchCheckpointRepo } = await import('../db/repositories/deepresearch/research-checkpoint.repo')
   const { researchEventRepo } = await import('../db/repositories/deepresearch/research-event.repo')
 
-  return { client, researchRunRepo, researchEventRepo }
+  return { client, researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo }
 }
 
 describe('Deep Research service and executor', () => {
@@ -59,6 +61,79 @@ describe('Deep Research service and executor', () => {
 
     expect(run.status).toBe('queued')
     expect(runtime.start).toHaveBeenCalledWith(run.id)
+  })
+
+  it('deduplicates replayed start commands into one initial attempt, checkpoint, and dispatch', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchEventRepo } = await loadTestContext()
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
+    const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+
+    const [first, replay] = await Promise.all([
+      service.startRun(run.id, { commandKey: 'client:start:1' }),
+      service.startRun(run.id, { commandKey: 'client:start:1' }),
+    ])
+
+    expect(first).toMatchObject({ id: run.id, status: 'queued', currentAttemptId: expect.any(String) })
+    expect(replay.currentAttemptId).toBe(first.currentAttemptId)
+    expect(researchAttemptRepo.findActive(run.id)).toMatchObject({ id: first.currentAttemptId, trigger: 'initial', startCheckpointKey: 'run:queued' })
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.attempt.created')).toHaveLength(1)
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.checkpoint.completed')).toHaveLength(1)
+    expect(runtime.start).toHaveBeenCalledTimes(1)
+    expect(runtime.start).toHaveBeenCalledWith(run.id)
+  })
+
+  it('scopes client command keys by command kind so cancellation cannot replay a start', async () => {
+    const { researchRunRepo, researchEventRepo } = await loadTestContext()
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
+    const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+
+    await service.startRun(run.id, { commandKey: 'request-1' })
+    const cancelled = await service.cancelRun(run.id, { commandKey: 'request-1', reason: 'user-requested' })
+
+    expect(cancelled).toMatchObject({ status: 'cancelling', cancellation: { reason: 'user-requested' } })
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.run.cancellation_requested')).toHaveLength(1)
+  })
+  it('resumes from the legacy fallback once, deduplicates cancellation, and rejects cancelled runs', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo } = await loadTestContext()
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
+    const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+    const legacyAttempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', status: 'interrupted', startCheckpointKey: 'legacy:resume_from_planning' })
+    researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: legacyAttempt.id,
+      checkpointKey: 'legacy:resume_from_planning',
+      phase: 'planning',
+      status: 'completed',
+      resumeCursor: { version: 1, nextPhase: 'planning', iteration: 0 },
+      inputFingerprint: 'legacy:unknown',
+      replayPolicy: 'retry_incomplete',
+    })
+    researchRunRepo.transitionWithEvent(run.id, 'interrupted', { phase: 'interrupted', resumePhase: 'planning' })
+
+    const [resumed, replay] = await Promise.all([
+      service.resumeRun(run.id, { commandKey: 'client:resume:1' }),
+      service.resumeRun(run.id, { commandKey: 'client:resume:1' }),
+    ])
+
+    expect(resumed).toMatchObject({ status: 'queued', currentAttemptId: expect.any(String) })
+    expect(replay.currentAttemptId).toBe(resumed.currentAttemptId)
+    expect(researchAttemptRepo.findActive(run.id)).toMatchObject({ id: resumed.currentAttemptId, trigger: 'manual_resume', startCheckpointKey: 'legacy:resume_from_planning' })
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.run.resumed')).toHaveLength(1)
+    expect(runtime.start).toHaveBeenCalledTimes(1)
+
+    const [cancelled, cancelReplay] = await Promise.all([
+      service.cancelRun(run.id, { commandKey: 'client:cancel:1', reason: 'user-requested' }),
+      service.cancelRun(run.id, { commandKey: 'client:cancel:1', reason: 'ignored-replay-reason' }),
+    ])
+    expect(cancelled).toMatchObject({ status: 'cancelling', cancellation: { reason: 'user-requested' } })
+    expect(cancelReplay.cancellation?.reason).toBe('user-requested')
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.run.cancellation_requested')).toHaveLength(1)
+
+    researchRunRepo.transitionWithEvent(run.id, 'cancelled', { eventType: 'research.run.cancelled' })
+    await expect(service.resumeRun(run.id)).rejects.toMatchObject({ code: 'RESEARCH_CANCELLED' })
   })
 
   it('marks stale active runs interrupted and preserves their resume phase during recovery', async () => {
