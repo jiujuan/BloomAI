@@ -63,14 +63,16 @@ function detail(overrides: Partial<ResearchRunDetailDto> = {}): ResearchRunDetai
       id: 'source-1', runId: 'run-1', canonicalUrl: 'https://example.com', domain: 'example.com', title: 'Source',
       author: null, publisher: null, publishedAt: null, sourceType: 'web', selectionStatus: 'selected', scores: {},
     }],
-    snapshots: [],
+    snapshots: [{
+      id: 'snapshot-1', runId: 'run-1', sourceId: 'source-1', contentHash: 'hash-1', content: 'Evidence', metadata: {}, fetchedAt: 2, parserVersion: 'test', finalUrl: 'https://example.com/final', httpStatus: 200,
+    }],
     evidence: [{
       id: 'evidence-1', runId: 'run-1', questionId: 'question-1', snapshotId: 'snapshot-1', passage: 'Evidence',
       summary: 'Summary', stance: 'supporting', confidence: 0.9, startOffset: 0, endOffset: 8,
     }],
     report: null,
     events: [],
-    artifacts: [],
+    artifacts: [{ id: 'artifact-zh', runId: 'run-1', type: 'report_markdown_zh_cn', fileName: 'report.zh-CN.md', contentType: 'text/markdown', sizeBytes: 42, createdAt: 2 }],
     ...overrides,
   }
 }
@@ -141,6 +143,8 @@ describe('deep research store', () => {
       sources: [expect.objectContaining({ id: 'source-1' })],
       report: null,
       evidenceById: { 'evidence-1': expect.objectContaining({ id: 'evidence-1' }) },
+      snapshotsById: { 'snapshot-1': expect.objectContaining({ sourceId: 'source-1', finalUrl: 'https://example.com/final' }) },
+      artifacts: [expect.objectContaining({ type: 'report_markdown_zh_cn' })],
     })
   })
 

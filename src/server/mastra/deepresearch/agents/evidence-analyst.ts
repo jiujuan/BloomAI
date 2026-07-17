@@ -23,6 +23,13 @@ function firstCitableSentence(packet: EvidencePacket): { passage: string; startO
   }
 }
 
+function evidenceSummary(packet: EvidencePacket, passage: string): string {
+  const sourceLabel = packet.heading ?? packet.sourceTitle ?? packet.domain
+  const normalized = passage.replace(/\s+/g, ' ').trim()
+  const preview = normalized.length <= 180 ? normalized : normalized.slice(0, 179).trimEnd() + '?'
+  return sourceLabel + ': ' + preview
+}
+
 export function createDeterministicEvidenceAnalyst(): EvidenceAnalyst {
   return {
     async analyze({ questions, packets }) {
@@ -35,7 +42,7 @@ export function createDeterministicEvidenceAnalyst(): EvidenceAnalyst {
             questionId: question.id,
             snapshotId: packet.snapshotId,
             passage: excerpt.passage,
-            summary: 'A bounded passage from ' + (packet.sourceTitle ?? packet.domain) + ' relevant to ' + question.intent + '.',
+            summary: evidenceSummary(packet, excerpt.passage),
             stance: 'supporting',
             confidence: 0.75,
             startOffset: excerpt.startOffset,

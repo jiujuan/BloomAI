@@ -354,5 +354,8 @@ describe('Deep Research report quality', () => {
     const artifactDirectory = path.join(dataDir, 'deepresearch', 'runs', runId)
     expect(fs.readFileSync(path.join(artifactDirectory, 'report.md'), 'utf8')).toContain('# Enterprise AI assistant market research')
     expect(JSON.parse(fs.readFileSync(path.join(artifactDirectory, 'report.json'), 'utf8'))).toMatchObject({ runId, quality: { releaseStatus: 'completed' } })
+    const chinese = new ArtifactService({ reportRepo, dataDir }).writeChineseMarkdown(runId, '# \u4e2d\u6587\u62a5\u544a\n')
+    expect(chinese.type).toBe('report_markdown_zh_cn')
+    expect(fs.readFileSync(path.join(artifactDirectory, 'report.zh-CN.md'), 'utf8')).toContain('\u4e2d\u6587\u62a5\u544a')
   })
 })
