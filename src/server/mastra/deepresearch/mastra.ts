@@ -17,7 +17,7 @@ import { createDeterministicClaimExtractor, type ClaimExtractor } from './agents
 import { createDeterministicCitationVerifier, type CitationVerifier } from './agents/citation-verifier'
 import { createDeterministicReportCritic, type ReportCritic } from './agents/report-critic'
 import type { ReportTranslator } from './agents/report-translator'
-import { createLlmDeepResearchAdapters, type LlmDeepResearchAdapters, type ResearchLlmUsage } from './llm-adapters'
+import { createLlmDeepResearchAdapters, type LlmDeepResearchAdapters, type ResearchLlmTrace, type ResearchLlmUsage } from './llm-adapters'
 import { resolveResearchMastraModel } from '../model-resolver'
 import { createContentService } from '@server/services/deepresearch/content-service'
 import { ArtifactService } from '@server/services/deepresearch/artifact-service'
@@ -58,6 +58,32 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
       serverLogger.warn('Deep Research model response reported zero tokens.', { runId, attemptId, stage: entry.stage })
     }
   }
+  function reportTrace(runId: string, attemptId: string, iteration: number, entry: ResearchLlmTrace) {
+    repositories.researchAttemptRepo.appendModelTrace(attemptId, {
+      stage: entry.stage,
+      callAttempt: entry.attempt,
+      iteration,
+      inputHash: entry.inputHash,
+      outputHash: entry.outputHash,
+      inputCharacters: entry.inputCharacters,
+      outputCharacters: entry.outputCharacters,
+      durationMs: entry.durationMs,
+      parseStatus: entry.parseStatus,
+      retryReason: entry.retryReason,
+      errorCode: entry.errorCode,
+      errorCategory: entry.errorCategory,
+    })
+    if (entry.parseStatus !== 'valid') {
+      serverLogger.warn('Deep Research structured model output needs attention.', {
+        runId,
+        attemptId,
+        stage: entry.stage,
+        parseStatus: entry.parseStatus,
+        errorCode: entry.errorCode,
+        errorCategory: entry.errorCategory,
+      })
+    }
+  }
   async function workflowFor(run: ResearchRunDto, context: DeepResearchAttemptExecutionContext): Promise<{ workflow: ReturnType<typeof createDeepResearchWorkflow> }> {
     let adapters: LlmDeepResearchAdapters
     if (testComposition) {
@@ -66,7 +92,11 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
     } else {
       if (!run.modelSelectionSnapshot) throw new Error('RESEARCH_MODEL_UNAVAILABLE: Deep Research Run has no model selection snapshot.')
       const model = await researchModelResolver(run.modelSelectionSnapshot)
-      adapters = llmAdapterFactory({ model, usageReporter: (entry) => reportUsage(run.id, context.attemptId, entry) })
+      adapters = llmAdapterFactory({
+        model,
+        usageReporter: (entry) => reportUsage(run.id, context.attemptId, entry),
+        traceReporter: (entry) => reportTrace(run.id, context.attemptId, context.resumeCursor?.iteration ?? 0, entry),
+      })
     }
     const evidenceService = options.evidenceService ?? new EvidenceService({ analyst: adapters.evidenceAnalyst, sourceRepo: repositories.researchSourceRepo, evidenceRepo: repositories.researchEvidenceRepo, questionRepo: repositories.researchQuestionRepo })
     const workflow = createDeepResearchWorkflow({ repositories, planner: adapters.planner, queryPlanner: adapters.queryPlanner, gapAnalyst: adapters.gapAnalyst, evidenceService, citationService, artifactService, reportTranslator: adapters.reportTranslator, sectionWriter: adapters.sectionWriter, claimExtractor: adapters.claimExtractor, citationVerifier: adapters.citationVerifier, reportCritic: adapters.reportCritic, searchService, sourceCurator, contentService })

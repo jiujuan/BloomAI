@@ -395,6 +395,7 @@ export const research_run_attempts = sqliteTable('research_run_attempts', {
   error_message: text('error_message'),
   error_retryable: integer('error_retryable'),
   model_usage_json: text('model_usage_json').notNull().default('{}'),
+  model_trace_json: text('model_trace_json').notNull().default('[]'),
   started_at: integer('started_at'),
   ended_at: integer('ended_at'),
   created_at: integer('created_at').notNull(),

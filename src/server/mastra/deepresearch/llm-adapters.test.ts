@@ -50,7 +50,7 @@ describe('createLlmDeepResearchAdapters', () => {
           startOffset: 0,
           endOffset: 55,
         }])
-        : 'Section draft',
+        : JSON.stringify({ markdown: 'Section draft' }),
     }))
     const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
 
@@ -85,3 +85,29 @@ describe('createLlmDeepResearchAdapters', () => {
   })
 
 })
+
+  it('uses the shared structured invoker for adapter output repair and safe trace reporting', async () => {
+    const generate = vi.fn()
+      .mockResolvedValueOnce({ text: '{truncated', usage: { totalTokens: 3 } })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        title: run.topic,
+        objective: run.topic,
+        audience: null,
+        scope: 'Global enterprise market',
+        assumptions: ['Public sources only'],
+        plannedSections: ['executive-summary'],
+        criticalClarifications: [],
+      }), usage: { totalTokens: 4 } })
+    const traceReporter = vi.fn()
+    const adapters = createLlmDeepResearchAdapters({
+      model: {} as MastraModelConfig,
+      generate,
+      traceReporter,
+    })
+
+    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic })
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(traceReporter).toHaveBeenCalledWith(expect.objectContaining({
+      stage: 'brief_planning', parseStatus: 'invalid_json', retryReason: 'invalid_json',
+    }))
+  })

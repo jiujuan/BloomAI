@@ -5,7 +5,7 @@ import { LibSQLStore } from '@mastra/libsql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResearchModelSelectionSnapshot, StartResearchInput } from '@shared/deepresearch/contracts'
 import type { MastraModelConfig } from '@mastra/core/llm'
-import type { LlmDeepResearchAdapters } from './llm-adapters'
+import { createLlmDeepResearchAdapters, type LlmDeepResearchAdapters } from './llm-adapters'
 import { createDeepResearchExecutor } from '../../deepresearch/executor'
 import { createDeepResearchService } from '../../deepresearch/deep-research.service'
 import { createDeepResearchMastraRuntime } from './mastra'
@@ -127,7 +127,7 @@ describe('Deep Research Mastra report workflow', () => {
         requiredEvidenceTypes: ['official-statistics'],
       }],
     })) }
-    const llmAdapterFactory = vi.fn(() => ({ planner }) as unknown as LlmDeepResearchAdapters)
+    const llmAdapterFactory = vi.fn((_: Parameters<typeof createLlmDeepResearchAdapters>[0]) => ({ planner }) as unknown as LlmDeepResearchAdapters)
     const researchModelResolver = vi.fn(async () => ({}) as MastraModelConfig)
     const runtime = createDeepResearchMastraRuntime({
       dataDir,
@@ -153,16 +153,26 @@ describe('Deep Research Mastra report workflow', () => {
       modelSelectionSnapshot: snapshot,
     })
 
+    const attempt = repositories.researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
     await runtime.start({
       runId: run.id,
-      attemptId: 'production-composition:' + run.id,
+      attemptId: attempt.id,
       ownershipToken: 'production-composition-token',
       signal: new AbortController().signal,
-      resumeCursor: null,
+      resumeCursor: { version: 1, nextPhase: 'research', iteration: 3 },
     })
 
     expect(researchModelResolver).toHaveBeenCalledWith(snapshot)
-    expect(llmAdapterFactory).toHaveBeenCalledWith(expect.objectContaining({ model: {}, usageReporter: expect.any(Function) }))
+    expect(llmAdapterFactory).toHaveBeenCalledWith(expect.objectContaining({ model: {}, usageReporter: expect.any(Function), traceReporter: expect.any(Function) }))
+    const factoryOptions = llmAdapterFactory.mock.calls[0]?.[0] as Parameters<typeof createLlmDeepResearchAdapters>[0]
+    await factoryOptions.traceReporter?.({
+      stage: 'brief_planning', attempt: 1,
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), inputCharacters: 120, outputCharacters: 40,
+      durationMs: 30, parseStatus: 'valid', retryReason: null, errorCode: null, errorCategory: null,
+    })
+    expect(repositories.researchAttemptRepo.get(attempt.id)?.modelTraces).toEqual([expect.objectContaining({
+      stage: 'brief_planning', iteration: 3, inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64),
+    })])
     expect(planner.plan).toHaveBeenCalledTimes(1)
     expect(repositories.researchRunRepo.get(run.id)).toMatchObject({
       status: 'awaiting_input',

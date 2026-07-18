@@ -193,6 +193,25 @@ export interface ResearchModelUsageDto {
   providerCostUsd: number
 }
 
+export type ResearchModelTraceParseStatus = 'valid' | 'invalid_json' | 'invalid_schema' | 'provider_error'
+export type ResearchModelTraceErrorCategory = 'timeout' | 'rate_limit' | 'provider_unavailable' | 'invalid_structured_output' | null
+
+/** Safe structured-model diagnostics: hashes and metadata only, never prompts or raw provider responses. */
+export interface ResearchModelTraceDto {
+  stage: string
+  callAttempt: number
+  iteration: number
+  inputHash: string
+  outputHash: string | null
+  inputCharacters: number
+  outputCharacters: number
+  durationMs: number
+  parseStatus: ResearchModelTraceParseStatus
+  retryReason: 'invalid_json' | 'invalid_schema' | null
+  errorCode: string | null
+  errorCategory: ResearchModelTraceErrorCategory
+}
+
 export interface ResearchUsageDto {
   questions: number
   iterations: number
@@ -254,6 +273,7 @@ export interface ResearchRunAttemptDto {
   endCheckpointKey: string | null
   error: ResearchRunErrorDto | null
   modelUsage: ResearchModelUsageDto
+  modelTraces: ResearchModelTraceDto[]
   startedAt: number | null
   endedAt: number | null
   createdAt: number

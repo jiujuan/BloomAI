@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchModelUsageDto, ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
+import type { ResearchModelTraceDto, ResearchModelUsageDto, ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
 import type { AppendResearchEventInput } from './research-event.repo'
 import { getOrmDb } from '../../client'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
@@ -23,6 +23,69 @@ function readModelUsage(raw: string): ResearchModelUsageDto {
     tokens: Number.isFinite(parsed.tokens) ? parsed.tokens! : fallback.tokens,
     providerCostUsd: Number.isFinite(parsed.providerCostUsd) ? parsed.providerCostUsd! : fallback.providerCostUsd,
   }
+}
+
+const MODEL_TRACE_LIMIT = 200
+const traceStatuses = new Set<ResearchModelTraceDto['parseStatus']>(['valid', 'invalid_json', 'invalid_schema', 'provider_error'])
+const traceRetryReasons = new Set<NonNullable<ResearchModelTraceDto['retryReason']>>(['invalid_json', 'invalid_schema'])
+const traceErrorCategories = new Set<NonNullable<ResearchModelTraceDto['errorCategory']>>(['timeout', 'rate_limit', 'provider_unavailable', 'invalid_structured_output'])
+const sha256Pattern = /^[a-f0-9]{64}$/
+const stagePattern = /^[a-z][a-z0-9_-]{0,63}$/
+const errorCodePattern = /^[A-Z0-9_:-]{1,128}$/
+
+/**
+ * Keeps persisted model telemetry deliberately non-sensitive. This projection
+ * accepts hashes and bounded metadata only; raw prompts and model responses
+ * cannot be recovered from the JSON column even if a caller supplies extras.
+ */
+function normalizeModelTrace(value: unknown): ResearchModelTraceDto | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const trace = value as Record<string, unknown>
+  const integerAtLeast = (field: string, minimum: number) => {
+    const number = trace[field]
+    return typeof number === 'number' && Number.isInteger(number) && number >= minimum ? number : undefined
+  }
+  const nullableHash = trace.outputHash === null || (typeof trace.outputHash === 'string' && sha256Pattern.test(trace.outputHash))
+  const nullableRetryReason = trace.retryReason === null || (typeof trace.retryReason === 'string' && traceRetryReasons.has(trace.retryReason as NonNullable<ResearchModelTraceDto['retryReason']>))
+  const nullableErrorCode = trace.errorCode === null || (typeof trace.errorCode === 'string' && errorCodePattern.test(trace.errorCode))
+  const nullableErrorCategory = trace.errorCategory === null || (typeof trace.errorCategory === 'string' && traceErrorCategories.has(trace.errorCategory as NonNullable<ResearchModelTraceDto['errorCategory']>))
+  const callAttempt = integerAtLeast('callAttempt', 1)
+  const iteration = integerAtLeast('iteration', 0)
+  const inputCharacters = integerAtLeast('inputCharacters', 0)
+  const outputCharacters = integerAtLeast('outputCharacters', 0)
+  const durationMs = integerAtLeast('durationMs', 0)
+  if (
+    typeof trace.stage !== 'string' || !stagePattern.test(trace.stage) ||
+    typeof trace.inputHash !== 'string' || !sha256Pattern.test(trace.inputHash) ||
+    !nullableHash || !nullableRetryReason || !nullableErrorCode || !nullableErrorCategory ||
+    !traceStatuses.has(trace.parseStatus as ResearchModelTraceDto['parseStatus']) ||
+    callAttempt === undefined || iteration === undefined || inputCharacters === undefined ||
+    outputCharacters === undefined || durationMs === undefined
+  ) return undefined
+
+  return {
+    stage: trace.stage,
+    callAttempt,
+    iteration,
+    inputHash: trace.inputHash,
+    outputHash: trace.outputHash as string | null,
+    inputCharacters,
+    outputCharacters,
+    durationMs,
+    parseStatus: trace.parseStatus as ResearchModelTraceDto['parseStatus'],
+    retryReason: trace.retryReason as ResearchModelTraceDto['retryReason'],
+    errorCode: trace.errorCode as string | null,
+    errorCategory: trace.errorCategory as ResearchModelTraceDto['errorCategory'],
+  }
+}
+
+function readModelTraces(raw: string): ResearchModelTraceDto[] {
+  const parsed = decodeJson<unknown>(raw, [])
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .map(normalizeModelTrace)
+    .filter((trace): trace is ResearchModelTraceDto => trace !== undefined)
+    .slice(-MODEL_TRACE_LIMIT)
 }
 
 type TransactionExecutor = any
@@ -100,6 +163,7 @@ function mapAttempt(row: typeof research_run_attempts.$inferSelect): ResearchRun
     endCheckpointKey: row.end_checkpoint_key,
     error,
     modelUsage: readModelUsage(row.model_usage_json),
+    modelTraces: readModelTraces(row.model_trace_json),
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
@@ -321,6 +385,18 @@ export const researchAttemptRepo = {
       return mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()!)
     })
     return result
+  },
+
+  appendModelTrace(attemptId: string, trace: ResearchModelTraceDto): ResearchRunAttemptDto {
+    const safeTrace = normalizeModelTrace(trace)
+    if (!safeTrace) throw new Error('Invalid Deep Research model trace.')
+    return getOrmDb().transaction((tx) => {
+      const row = tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()
+      if (!row) throw new Error('Deep Research Attempt not found: ' + attemptId)
+      const modelTraces = [...readModelTraces(row.model_trace_json), safeTrace].slice(-MODEL_TRACE_LIMIT)
+      tx.update(research_run_attempts).set({ model_trace_json: encodeJson(modelTraces) }).where(eq(research_run_attempts.id, attemptId)).run()
+      return mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()!)
+    })
   },
 
   finishOwned(input: FinishOwnedResearchAttemptInput): ResearchRunAttemptDto | null {

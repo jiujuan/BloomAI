@@ -756,3 +756,24 @@ describe('Deep Research repositories', () => {
   })
 
 })
+
+  it('persists safe structured-model traces for Run, iteration, and workflow stage aggregation', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    const traces = researchAttemptRepo as typeof researchAttemptRepo & { appendModelTrace: (attemptId: string, trace: unknown) => unknown }
+
+    traces.appendModelTrace(attempt.id, {
+      stage: 'evidence_analysis', callAttempt: 1, iteration: 2,
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), inputCharacters: 1200, outputCharacters: 300,
+      durationMs: 84, parseStatus: 'valid', retryReason: null, errorCode: null, errorCategory: null,
+      prompt: 'do not persist this prompt', rawResponse: 'do not persist this response',
+    })
+
+    const persisted = researchAttemptRepo.get(attempt.id)?.modelTraces
+    expect(persisted).toEqual([expect.objectContaining({
+      stage: 'evidence_analysis', iteration: 2, parseStatus: 'valid', inputHash: 'a'.repeat(64),
+    })])
+    expect(persisted?.[0]).not.toHaveProperty('prompt')
+    expect(persisted?.[0]).not.toHaveProperty('rawResponse')
+  })
