@@ -59,6 +59,9 @@ async function loadTestContext() {
   const client = await import('../db/client')
   await client.runMigrations()
   const { researchRunRepo } = await import('../db/repositories/deepresearch/research-run.repo')
+  const { researchAttemptRepo } = await import('../db/repositories/deepresearch/research-attempt.repo')
+  const { researchCheckpointRepo } = await import('../db/repositories/deepresearch/research-checkpoint.repo')
+  const { researchCoverageAssessmentRepo } = await import('../db/repositories/deepresearch/research-coverage-assessment.repo')
   const { researchQuestionRepo } = await import('../db/repositories/deepresearch/research-question.repo')
   const { researchReportRepo } = await import('../db/repositories/deepresearch/research-report.repo')
   const { researchEventRepo } = await import('../db/repositories/deepresearch/research-event.repo')
@@ -70,6 +73,9 @@ async function loadTestContext() {
     client,
     createDeepResearchService,
     researchRunRepo,
+    researchAttemptRepo,
+    researchCheckpointRepo,
+    researchCoverageAssessmentRepo,
     researchQuestionRepo,
     researchReportRepo,
     researchEventRepo,
@@ -222,7 +228,7 @@ describe('Deep Research deterministic acceptance fixtures', () => {
 
     await expect(service.cancelRun(run.id)).resolves.toMatchObject({ status: 'cancelling', phase: 'cancelling' })
     expect(repositories.researchRunRepo.getDetail(run.id)!.events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'research.run.status_changed', phase: 'cancelling', payload: { from: 'queued', to: 'cancelling' } }),
+      expect.objectContaining({ type: 'research.run.cancellation_requested', phase: 'cancelling', payload: { reason: null } }),
     ]))
   })
 

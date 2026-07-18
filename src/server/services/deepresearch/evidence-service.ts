@@ -78,6 +78,14 @@ export interface EvidenceServiceOptions {
   clock?: () => number
 }
 
+export interface CoverageAssessmentProjectionV2 {
+  policyVersion: 'v2'
+  inputFingerprint: string
+  aggregateScore: number
+  questionAssessments: ResearchCoverageAssessmentV2Dto[]
+  coverageProjections: ResearchCoverageDto[]
+  limitations: string[]
+}
 export interface EvidenceExtractionResult {
   createdCount: number
   rejectedCount: number
@@ -273,15 +281,13 @@ export class EvidenceService {
         })
       })
   }
-
-  assessCoverage(run: ResearchRunDto, questions: ResearchQuestionDto[]): ResearchCoverageDto[] {
+  assessCoverageProjectionV2(run: ResearchRunDto, questions: ResearchQuestionDto[]): CoverageAssessmentProjectionV2 {
     const sources = new Map(this.options.sourceRepo.listSources(run.id).map((source) => [source.id, source]))
     const snapshots = new Map(this.options.sourceRepo.listSnapshots(run.id).map((snapshot) => [snapshot.id, snapshot]))
-    const assessments = this.assessCoverageV2(run, questions)
-    const assessmentByQuestionId = new Map(assessments.map((assessment) => [assessment.questionId, assessment]))
+    const questionAssessments = this.assessCoverageV2(run, questions)
+    const assessmentByQuestionId = new Map(questionAssessments.map((assessment) => [assessment.questionId, assessment]))
     const evidence = this.options.evidenceRepo.list(run.id)
-
-    return questions
+    const coverageProjections = questions
       .filter((question) => question.runId === run.id)
       .map((question) => {
         const assessment = assessmentByQuestionId.get(question.id)!
@@ -292,26 +298,43 @@ export class EvidenceService {
             const source = snapshot ? sources.get(snapshot.sourceId) : undefined
             return source && snapshot?.runId === run.id && source.runId === run.id ? [source] : []
           })
-        const evidenceCategories = [...new Set(associatedSources.map((source) => source.sourceType))].sort()
-        const coverage: ResearchCoverageDto = {
+        return {
           questionId: question.id,
           score: assessment.score,
           independentDomainCount: assessment.sourceCounts.independentDomains,
-          evidenceCategories,
+          evidenceCategories: [...new Set(associatedSources.map((source) => source.sourceType))].sort(),
           primarySourceCount: assessment.sourceCounts.primaryOrAuthoritative,
           recentSourceCount: assessment.sourceCounts.recent,
           supportingEvidenceCount: assessment.support.supporting,
           contradictingEvidenceCount: assessment.support.contradicting,
           hasSingleSourceDependency: assessment.sourceCounts.evidence > 0 && assessment.sourceCounts.independentDomains < 2,
           gaps: assessment.gaps.map((gap) => LEGACY_GAP_LABELS[gap.code]),
-        }
-        const status: ResearchQuestionDto['status'] = assessment.verdict === 'covered'
-          ? 'covered'
-          : assessment.verdict === 'uncovered'
-            ? 'researching'
-            : 'limited'
-        this.options.questionRepo.updateCoverage(question.id, { coverage, status })
-        return coverage
+        } satisfies ResearchCoverageDto
       })
+    const limitations = [...new Set(questionAssessments.flatMap((item) => item.limitation ? [item.limitation] : []))].sort()
+    const aggregateScore = questionAssessments.length === 0
+      ? 0
+      : questionAssessments.reduce((total, item) => total + item.score, 0) / questionAssessments.length
+    const inputFingerprint = createHash('sha256').update(JSON.stringify({
+      policyVersion: 'v2', runId: run.id, profile: run.profile,
+      questionInputs: questionAssessments.map((item) => ({ questionId: item.questionId, inputFingerprint: item.inputFingerprint }))
+        .sort((left, right) => left.questionId.localeCompare(right.questionId)),
+    })).digest('hex')
+    return { policyVersion: 'v2', inputFingerprint, aggregateScore, questionAssessments, coverageProjections, limitations }
+  }
+
+  assessCoverage(run: ResearchRunDto, questions: ResearchQuestionDto[]): ResearchCoverageDto[] {
+    const projection = this.assessCoverageProjectionV2(run, questions)
+    const assessmentByQuestionId = new Map(projection.questionAssessments.map((assessment) => [assessment.questionId, assessment]))
+    for (const coverage of projection.coverageProjections) {
+      const assessment = assessmentByQuestionId.get(coverage.questionId)!
+      const status: ResearchQuestionDto['status'] = assessment.verdict === 'covered'
+        ? 'covered'
+        : assessment.verdict === 'uncovered'
+          ? 'researching'
+          : 'limited'
+      this.options.questionRepo.updateCoverage(coverage.questionId, { coverage, status })
+    }
+    return projection.coverageProjections
   }
 }

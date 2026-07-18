@@ -84,7 +84,12 @@ describe('Deep Research HTTP API', () => {
     expect(listed.body.data).toEqual([expect.objectContaining({ id: runId })])
 
     const detail = await requestJson(app, '/runs/' + runId)
-    expect(detail.body.data).toMatchObject({ id: runId, events: [expect.objectContaining({ type: 'research.run.created' })] })
+    expect(detail.body.data).toMatchObject({ id: runId })
+    expect(detail.body.data.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'research.run.created' }),
+      expect.objectContaining({ type: 'research.attempt.created' }),
+      expect.objectContaining({ type: 'research.checkpoint.completed', payload: expect.objectContaining({ checkpointKey: 'run:queued' }) }),
+    ]))
 
     researchRunRepo.transitionWithEvent(runId, 'planning', { phase: 'planning' })
     researchRunRepo.transitionWithEvent(runId, 'awaiting_input', { phase: 'awaiting_input' })
@@ -132,12 +137,12 @@ describe('Deep Research HTTP API', () => {
     const runId = created.body.data.id as string
     researchEventRepo.append({ runId, type: 'research.questions.planned', phase: 'planning', payload: { count: 2 } })
 
-    const page = await requestJson(app, '/runs/' + runId + '/events?after=1')
-    expect(page.body.data).toEqual([expect.objectContaining({ runId, sequence: 2, type: 'research.questions.planned' })])
+    const page = await requestJson(app, '/runs/' + runId + '/events?after=3')
+    expect(page.body.data).toEqual([expect.objectContaining({ runId, sequence: 4, type: 'research.questions.planned' })])
 
     const controller = new AbortController()
     const streamed = await app.request(new Request(new URL('/api/v1/deep-research/runs/' + runId + '/stream', 'http://localhost'), {
-      headers: { 'Last-Event-ID': '1' },
+      headers: { 'Last-Event-ID': '3' },
       signal: controller.signal,
     }))
     expect(streamed.status).toBe(200)
@@ -145,13 +150,13 @@ describe('Deep Research HTTP API', () => {
     const reader = streamed.body!.getReader()
     const first = await reader.read()
     const payload = new TextDecoder().decode(first.value)
-    expect(payload).toContain('id: 2')
+    expect(payload).toContain('id: 4')
     expect(payload).toContain('research.questions.planned')
 
     researchEventRepo.append({ runId, type: 'research.coverage.assessed', phase: 'researching', payload: { coverage: 0.5 } })
     const next = await reader.read()
     const nextPayload = new TextDecoder().decode(next.value)
-    expect(nextPayload).toContain('id: 3')
+    expect(nextPayload).toContain('id: 5')
     expect(nextPayload).toContain('research.coverage.assessed')
 
     controller.abort()

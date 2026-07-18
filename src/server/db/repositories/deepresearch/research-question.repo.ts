@@ -65,6 +65,18 @@ export function mapResearchSearchQuery(row: typeof research_search_queries.$infe
   }
 }
 
+export function updateResearchQuestionCoverageInTransaction(
+  executor: any,
+  id: string,
+  data: { coverage: ResearchCoverageDto; status: ResearchQuestionDto['status']; updatedAt: number },
+): void {
+  const result = executor.update(research_questions).set({
+    coverage_json: encodeJson(data.coverage),
+    status: data.status,
+    updated_at: data.updatedAt,
+  }).where(eq(research_questions.id, id)).run()
+  if (result.changes !== 1) throw new Error('Deep Research Question not found: ' + id)
+}
 export const researchQuestionRepo = {
   create(input: CreateResearchQuestionInput): ResearchQuestionDto {
     const id = uuidv4()

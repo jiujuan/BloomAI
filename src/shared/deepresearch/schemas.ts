@@ -117,17 +117,6 @@ export const researchQuestionCoverageVerdictSchema = z.object({
   limitations: z.array(z.string()),
 })
 
-export const researchCoverageAssessmentSchema = z.object({
-  id: z.string().min(1),
-  runId: z.string().min(1),
-  iteration: z.number().int().nonnegative(),
-  policyVersion: z.string().min(1),
-  inputFingerprint: z.string().min(1),
-  aggregateScore: z.number().min(0).max(1),
-  questionVerdicts: z.array(researchQuestionCoverageVerdictSchema),
-  limitations: z.array(z.string()),
-  createdAt: z.number(),
-})
 
 export const researchLoopDecisionDtoSchema = z.object({
   decision: researchLoopDecisionSchema,
@@ -328,6 +317,22 @@ export const researchCoverageAssessmentV2Schema = z.object({
     reason: z.string(),
   }).nullable(),
   assessedAt: z.number(),
+})
+
+export const researchCoverageAssessmentSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  attemptId: z.string().min(1).nullable(),
+  iterationId: z.string().min(1).nullable(),
+  iteration: z.number().int().nonnegative(),
+  policyVersion: z.string().min(1),
+  inputFingerprint: z.string().min(1),
+  aggregateScore: z.number().min(0).max(1),
+  questionVerdicts: z.array(researchQuestionCoverageVerdictSchema),
+  questionAssessments: z.array(researchCoverageAssessmentV2Schema),
+  coverageProjections: z.array(researchCoverageSchema),
+  limitations: z.array(z.string()),
+  createdAt: z.number(),
 })
 
 export const researchEventSchema = z.object({

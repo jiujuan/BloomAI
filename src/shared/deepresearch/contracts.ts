@@ -255,14 +255,20 @@ export interface ResearchQuestionCoverageVerdictDto {
   limitations: string[]
 }
 
+/** Persisted audit record: V1 projections stay compatible while complete V2 policy outputs stay queryable. */
 export interface ResearchCoverageAssessmentDto {
   id: string
   runId: string
+  /** Null only for pre-DR2-06 historical records. */
+  attemptId: string | null
+  iterationId: string | null
   iteration: number
   policyVersion: string
   inputFingerprint: string
   aggregateScore: number
   questionVerdicts: ResearchQuestionCoverageVerdictDto[]
+  questionAssessments: ResearchCoverageAssessmentV2Dto[]
+  coverageProjections: ResearchCoverageDto[]
   limitations: string[]
   createdAt: number
 }

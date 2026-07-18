@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(10)
+    expect(migrationVersions()).toHaveLength(11)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(10)
+    expect(migrationVersions()).toHaveLength(11)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -181,6 +181,7 @@ describe('database migrations', () => {
       '008-deep-research-core',
       '009-deep-research-recovery-commands',
       '010-deep-research-resilience',
+      '011-deep-research-coverage-assessments',
     ])
     const emptyDb = openRawDb()
     try {

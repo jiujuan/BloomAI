@@ -449,12 +449,15 @@ export const research_iterations = sqliteTable('research_iterations', {
 export const research_coverage_assessments = sqliteTable('research_coverage_assessments', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
+  attempt_id: text('attempt_id'),
   iteration_id: text('iteration_id'),
   iteration_ordinal: integer('iteration_ordinal').notNull().default(0),
   policy_version: text('policy_version').notNull(),
   input_fingerprint: text('input_fingerprint').notNull(),
   aggregate_score: real('aggregate_score').notNull().default(0),
   question_verdicts_json: text('question_verdicts_json').notNull().default('[]'),
+  assessment_v2_json: text('assessment_v2_json').notNull().default('[]'),
+  coverage_projections_json: text('coverage_projections_json').notNull().default('[]'),
   limitations_json: text('limitations_json').notNull().default('[]'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({

@@ -29,13 +29,27 @@ async function loadTestContext() {
   const client = await import('../../db/client')
   await client.runMigrations()
   const { researchRunRepo } = await import('../../db/repositories/deepresearch/research-run.repo')
+  const { researchAttemptRepo } = await import('../../db/repositories/deepresearch/research-attempt.repo')
+  const { researchCheckpointRepo } = await import('../../db/repositories/deepresearch/research-checkpoint.repo')
+  const { researchCoverageAssessmentRepo } = await import('../../db/repositories/deepresearch/research-coverage-assessment.repo')
   const { researchQuestionRepo } = await import('../../db/repositories/deepresearch/research-question.repo')
   const { researchReportRepo } = await import('../../db/repositories/deepresearch/research-report.repo')
   const { researchEventRepo } = await import('../../db/repositories/deepresearch/research-event.repo')
   const { researchEvidenceRepo } = await import('../../db/repositories/deepresearch/research-evidence.repo')
   const { researchSourceRepo } = await import('../../db/repositories/deepresearch/research-source.repo')
 
-  return { client, researchRunRepo, researchQuestionRepo, researchReportRepo, researchEventRepo, researchEvidenceRepo, researchSourceRepo }
+  return {
+    client,
+    researchRunRepo,
+    researchAttemptRepo,
+    researchCheckpointRepo,
+    researchCoverageAssessmentRepo,
+    researchQuestionRepo,
+    researchReportRepo,
+    researchEventRepo,
+    researchEvidenceRepo,
+    researchSourceRepo,
+  }
 }
 
 function createRetrievalServices(repositories: Awaited<ReturnType<typeof loadTestContext>>) {
@@ -137,7 +151,7 @@ describe('Deep Research Mastra report workflow', () => {
     const detail = repositories.researchRunRepo.getDetail(run.id)!
     expect(planner.plan).toHaveBeenCalledTimes(1)
     expect(detail).toMatchObject({
-      status: 'completed',
+      status: 'completed_with_limitations',
       phase: 'report_complete',
       workflowRunId: expect.any(String),
       brief: {
@@ -151,11 +165,22 @@ describe('Deep Research Mastra report workflow', () => {
       expect.objectContaining({ type: 'research.artifact.created' }),
     ]))
     expect(detail.questions.length).toBeGreaterThan(0)
+    expect(detail.coverageAssessments).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attemptId: expect.any(String),
+        iterationId: null,
+        policyVersion: 'v2',
+        questionAssessments: expect.arrayContaining([expect.objectContaining({ dimensions: expect.any(Object), gaps: expect.any(Array) })]),
+        coverageProjections: expect.arrayContaining([expect.objectContaining({ questionId: expect.any(String) })]),
+      }),
+    ]))
     expect(detail.searchQueries.length).toBeGreaterThan(0)
     expect(detail.sources.length).toBeGreaterThan(0)
     expect(detail.snapshots.length).toBeGreaterThan(0)
     expect(detail.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'research.evidence.extracted' }),
+      expect.objectContaining({ type: 'research.coverage.assessment_completed' }),
+      expect.objectContaining({ type: 'research.checkpoint.completed', payload: expect.objectContaining({ checkpointKey: 'coverage:assessment:v2' }) }),
       expect.objectContaining({ type: 'research.coverage.assessed' }),
       expect.objectContaining({ type: 'research.section.drafted' }),
       expect.objectContaining({ type: 'research.claim.verified' }),
@@ -235,7 +260,7 @@ describe('Deep Research Mastra report workflow', () => {
     })
     await vi.waitFor(() => {
       expect(repositories.researchRunRepo.get(run.id)).toMatchObject({
-        status: 'completed',
+        status: 'completed_with_limitations',
         phase: 'report_complete',
       })
     })

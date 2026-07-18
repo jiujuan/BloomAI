@@ -63,7 +63,7 @@ function findIdempotent(executor: TransactionExecutor, input: Pick<AppendResearc
   )).get()
 }
 
-function appendInTransaction(executor: TransactionExecutor, input: AppendResearchCheckpointInput): { checkpoint: ResearchRunCheckpointDto; created: boolean } {
+export function appendResearchCheckpointInTransaction(executor: TransactionExecutor, input: AppendResearchCheckpointInput): { checkpoint: ResearchRunCheckpointDto; created: boolean } {
   const existing = findIdempotent(executor, input)
   if (existing) return { checkpoint: mapResearchCheckpoint(existing), created: false }
   const id = uuidv4()
@@ -88,7 +88,7 @@ function appendInTransaction(executor: TransactionExecutor, input: AppendResearc
 
 export const researchCheckpointRepo = {
   append(input: AppendResearchCheckpointInput): ResearchRunCheckpointDto {
-    return getOrmDb().transaction((tx) => appendInTransaction(tx, input).checkpoint)
+    return getOrmDb().transaction((tx) => appendResearchCheckpointInTransaction(tx, input).checkpoint)
   },
 
   list(runId: string): ResearchRunCheckpointDto[] {
@@ -121,7 +121,7 @@ export const researchCheckpointRepo = {
       )).get()
       if (!owner) return null
 
-      const appended = appendInTransaction(tx, { ...input, status: 'completed', createdAt: now })
+      const appended = appendResearchCheckpointInTransaction(tx, { ...input, status: 'completed', createdAt: now })
       const checkpoint = appended.checkpoint
       tx.update(research_runs).set({
         current_attempt_id: input.attemptId,

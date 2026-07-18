@@ -20,6 +20,7 @@ import type { ResearchEventType } from '@shared/deepresearch/events'
 import { assertResearchTransition, projectResearchRunCapabilities } from '@server/deepresearch/domain/state-machine'
 import { cursorFromLegacyResumePhase } from '@server/deepresearch/domain/checkpoint-types'
 import { getOrmDb } from '../../client'
+import { researchCoverageAssessmentRepo } from './research-coverage-assessment.repo'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
 import {
   research_artifacts,
@@ -408,6 +409,7 @@ export const researchRunRepo = {
         : null,
       events,
       artifacts,
+      coverageAssessments: researchCoverageAssessmentRepo.list(id),
     }
   },
 }
