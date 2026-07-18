@@ -30,7 +30,8 @@ import { subscribeToResearchEvents } from './research-event-publisher'
 import { claimDeepResearchCommand, deepResearchCommandKey, markDeepResearchCommandDispatched } from './commands'
 import { getResearchBudget } from './domain/budgets'
 import { createCheckpointCursor, createCheckpointReplayFingerprint } from './domain/checkpoint-replay'
-import { ResearchDomainError } from './domain/errors'
+import { isResearchDomainError, ResearchDomainError } from './domain/errors'
+import { resolveResearchModelSnapshot, resolveResearchRuntimeModel } from './domain/model-selection'
 import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
 import { abortActiveDeepResearchExecution } from './executor'
 import { recordDeepResearchCancellation, recordDeepResearchCheckpointReuse, recordDeepResearchResume, recordDeepResearchResumeOutcome, type DeepResearchTelemetryContext } from '../telemetry/metrics'
@@ -243,6 +244,38 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       throw new ResearchDomainError('RESEARCH_NOT_RESUMABLE', 'Deep Research Run is not resumable: ' + runId, false)
     }
 
+    if (observed.modelSelectionSnapshot) {
+      try {
+        await resolveResearchModelSnapshot(observed.modelSelectionSnapshot)
+      } catch (error) {
+        if (!isResearchDomainError(error) || error.code !== 'RESEARCH_MODEL_UNAVAILABLE') throw error
+
+        const failed = researchRunRepo.transitionWithEventCas(runId, observed.stateVersion ?? 0, 'failed', {
+          phase: 'awaiting_model_configuration',
+          error: {
+            code: error.code,
+            message: error.message,
+            retryable: true,
+            category: 'provider',
+          },
+          eventType: 'research.run.status_changed',
+          eventPayload: {
+            id: runId,
+            action: error.details?.action ?? 'test_model',
+            selectedModelId: observed.modelSelectionSnapshot.selectedModelId,
+          },
+        })
+        if (failed) {
+          recordDeepResearchResumeOutcome('rejected', telemetryContext(failed))
+          return commandResult(failed)
+        }
+
+        const current = requireRun(runId)
+        const existing = activeCommandResult(current)
+        return existing ?? commandResult(current)
+      }
+    }
+
     const trigger = options.trigger === 'auto_resume'
       ? 'auto_resume'
       : observed.status === 'failed'
@@ -315,9 +348,13 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
         throw new ResearchDomainError('RESEARCH_VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid Deep Research input.', false)
       }
 
+      const runtimeModel = await resolveResearchRuntimeModel({
+        requestedModelId: parsed.data.model,
+      })
       const run = researchRunRepo.create({
         input: parsed.data,
         budget: { ...getResearchBudget(parsed.data.depth) },
+        modelSelectionSnapshot: runtimeModel.snapshot,
       })
       researchEventRepo.append({
         runId: run.id,

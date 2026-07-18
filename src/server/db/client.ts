@@ -199,7 +199,7 @@ function seedSettings() {
   const database = getOrmDb()
   const now = Date.now()
   const settings = [
-    ['model', 'claude-3-5-sonnet-20241022'], ['theme', 'system'],
+    ['model', 'claude-3-5-sonnet-20241022'], ['deep_research_model', ''], ['theme', 'system'],
     ['shortcut_overlay', 'Alt+Space'], ['anthropic_api_key', ''],
     ['openai_api_key', ''], ['agnes_api_key', ''], ['deepseek_api_key', ''],
     ['ollama_base_url', 'http://127.0.0.1:11434'],

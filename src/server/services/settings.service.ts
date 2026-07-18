@@ -19,6 +19,7 @@ const SECRET_WRITABLE: SettingFieldDefinition = { category: 'secret', writable: 
  */
 const SETTING_FIELDS: Readonly<Record<string, SettingFieldDefinition>> = {
   model: PUBLIC_WRITABLE,
+  deep_research_model: PUBLIC_WRITABLE,
   theme: PUBLIC_WRITABLE,
   shortcut_overlay: PUBLIC_WRITABLE,
   ollama_base_url: PUBLIC_WRITABLE,

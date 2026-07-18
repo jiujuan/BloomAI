@@ -83,7 +83,7 @@ describe('Deep Research cancellation step boundaries', () => {
     const run = createRun({ status: 'researching', phase: 'gap_filling' })
     const repositories = {
       researchRunRepo: { get: vi.fn(() => run) },
-      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1 })), update: vi.fn() },
+      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1, plan: { reservation: { fetchedSources: 1 } } })), update: vi.fn() },
       researchQuestionRepo: {
         listSearchQueries: vi.fn(() => [{ id: 'query-1', iteration: 1, query: 'safe fixture query', status: 'queued', idempotencyKey: 'query-key', candidates: [] }]),
         updateSearchQuery: vi.fn(),
@@ -130,7 +130,7 @@ describe('Deep Research cancellation step boundaries', () => {
     const source = { id: 'source-1', runId: run.id, canonicalUrl: 'https://fixture.example/source', originalUrl: 'https://fixture.example/source', domain: 'fixture.example', title: 'Frozen source' }
     const repositories = {
       researchRunRepo: { get: vi.fn(() => run) },
-      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1 })), update: vi.fn() },
+      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1, plan: { reservation: { fetchedSources: 1 } } })), update: vi.fn() },
       researchQuestionRepo: {
         listSearchQueries: vi.fn(() => [{ id: 'query-1', iteration: 1, query: 'frozen query', status: 'completed', candidates: [{ title: source.title, url: source.originalUrl, snippet: 'fixture' }] }]),
         updateSearchQuery: vi.fn(),

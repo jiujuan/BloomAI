@@ -40,13 +40,13 @@ describe('settings route contract', () => {
     await app.request('/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ openai_api_key: 'secret-openai-key', theme: 'dark' }),
+      body: JSON.stringify({ openai_api_key: 'secret-openai-key', theme: 'dark', deep_research_model: 'deepseek-chat' }),
     })
 
     const listResponse = await app.request('/settings')
     expect(listResponse.status).toBe(200)
     await expect(listResponse.json()).resolves.toMatchObject({
-      data: { openai_api_key: '***masked***', theme: 'dark' },
+      data: { openai_api_key: '***masked***', theme: 'dark', deep_research_model: 'deepseek-chat' },
     })
 
     const getResponse = await app.request('/settings/openai_api_key')
