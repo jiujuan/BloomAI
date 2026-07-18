@@ -1,11 +1,12 @@
-import { and, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
+import type { ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
 import type { AppendResearchEventInput } from './research-event.repo'
 import { getOrmDb } from '../../client'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
 import { assertResearchTransition } from '@server/deepresearch/domain/state-machine'
 import { research_run_attempts, research_run_checkpoints, research_runs } from '../../schema'
+import { mapRun } from './research-run.repo'
 import { appendResearchEventInTransaction } from './research-event.repo'
 import { mapResearchCheckpoint } from './research-checkpoint.repo'
 import { encodeJson } from './repository-utils'
@@ -44,6 +45,11 @@ export interface EndResearchAttemptInput {
   error?: ResearchRunErrorDto | null
   endedAt?: number
   event?: Omit<AppendResearchEventInput, 'runId'>
+}
+
+export interface InterruptExpiredResearchAttemptInput {
+  attemptId: string
+  now?: number
 }
 
 export interface FinishOwnedResearchAttemptInput {
@@ -186,6 +192,61 @@ export const researchAttemptRepo = {
     return row ? mapAttempt(row) : undefined
   },
 
+  listForRun(runId: string): ResearchRunAttemptDto[] {
+    return getOrmDb().select().from(research_run_attempts)
+      .where(eq(research_run_attempts.run_id, runId))
+      .orderBy(desc(research_run_attempts.ordinal)).all().map(mapAttempt)
+  },
+
+  listExpiredActive(now = Date.now()): ResearchRunAttemptDto[] {
+    return getOrmDb().select({ attempt: research_run_attempts }).from(research_run_attempts)
+      .innerJoin(research_runs, and(
+        eq(research_runs.id, research_run_attempts.run_id),
+        eq(research_runs.current_attempt_id, research_run_attempts.id),
+      ))
+      .where(and(
+        inArray(research_run_attempts.status, ['running']),
+        lte(research_run_attempts.lease_expires_at, now),
+        inArray(research_runs.status, ['planning', 'researching', 'synthesizing', 'verifying']),
+      ))
+      .orderBy(asc(research_run_attempts.created_at)).all().map((row) => mapAttempt(row.attempt))
+  },
+
+  interruptExpired(input: InterruptExpiredResearchAttemptInput): ResearchRunDto | undefined {
+    const result = getOrmDb().transaction((tx) => {
+      const now = input.now ?? Date.now()
+      const attempt = tx.select().from(research_run_attempts).where(and(
+        eq(research_run_attempts.id, input.attemptId),
+        eq(research_run_attempts.status, 'running'),
+        lte(research_run_attempts.lease_expires_at, now),
+      )).get()
+      if (!attempt) return undefined
+      const run = tx.select().from(research_runs).where(and(
+        eq(research_runs.id, attempt.run_id),
+        eq(research_runs.current_attempt_id, attempt.id),
+        inArray(research_runs.status, ['planning', 'researching', 'synthesizing', 'verifying']),
+      )).get()
+      if (!run) return undefined
+
+      assertResearchTransition(run.status as ResearchRunStatus, 'interrupted')
+      tx.update(research_run_attempts).set({
+        status: 'interrupted', executor_id: null, ownership_token: null,
+        lease_expires_at: null, heartbeat_at: now, ended_at: now,
+      }).where(eq(research_run_attempts.id, attempt.id)).run()
+      tx.update(research_runs).set({
+        status: 'interrupted', phase: 'interrupted', resume_phase: run.phase,
+        updated_at: now, state_version: sql`${research_runs.state_version} + 1`,
+      }).where(and(eq(research_runs.id, run.id), eq(research_runs.current_attempt_id, attempt.id))).run()
+      const event = appendResearchEventInTransaction(tx, {
+        runId: run.id, type: 'research.run.interrupted', phase: 'interrupted', timestamp: now,
+        payload: { reason: 'attempt_lease_expired', attemptId: attempt.id },
+      })
+      return { run: mapRun(tx.select().from(research_runs).where(eq(research_runs.id, run.id)).get()!), event }
+    })
+    if (result?.event) publishResearchEvent(result.event)
+    return result?.run
+  },
+
   acquireLease(attemptId: string, executorId: string, ownershipToken: string, leaseMs: number, now = Date.now()): boolean {
     if (!ownershipToken || leaseMs <= 0) return false
     const result = getOrmDb().transaction((tx) => {
@@ -259,19 +320,25 @@ export const researchAttemptRepo = {
         ended_at: now,
       }).where(eq(research_run_attempts.id, attempt.id)).run()
 
-      let event = null
+      const events = [appendResearchEventInTransaction(tx, {
+        runId: run.id,
+        type: 'research.attempt.completed',
+        phase: run.phase,
+        timestamp: now,
+        payload: { id: attempt.id, status, endCheckpointKey: input.endCheckpointKey ?? null },
+      })]
       if (status === 'failed' && !['failed', 'cancelled', 'completed', 'completed_with_limitations'].includes(run.status)) {
         assertResearchTransition(run.status as ResearchRunStatus, 'failed', { error })
         tx.update(research_runs).set({ status: 'failed', error_code: error!.code, error_message: error!.message, error_retryable: Number(error!.retryable), updated_at: now, completed_at: now, state_version: sql`${research_runs.state_version} + 1` }).where(eq(research_runs.id, run.id)).run()
-        event = appendAttemptEvent(tx, run.id, 'research.run.failed', run.phase, now, error)
+        events.push(appendAttemptEvent(tx, run.id, 'research.run.failed', run.phase, now, error))
       } else if (status === 'cancelled' && run.status !== 'cancelled') {
         assertResearchTransition(run.status as ResearchRunStatus, 'cancelled')
         tx.update(research_runs).set({ status: 'cancelled', phase: 'cancelled', error_code: null, error_message: null, error_retryable: null, updated_at: now, completed_at: now, state_version: sql`${research_runs.state_version} + 1` }).where(eq(research_runs.id, run.id)).run()
-        event = appendAttemptEvent(tx, run.id, 'research.run.cancelled', 'cancelled', now)
+        events.push(appendAttemptEvent(tx, run.id, 'research.run.cancelled', 'cancelled', now))
       }
-      return { attempt: mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attempt.id)).get()!), event }
+      return { attempt: mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attempt.id)).get()!), events }
     })
-    if (result?.event) publishResearchEvent(result.event)
+    for (const event of result?.events ?? []) publishResearchEvent(event)
     return result?.attempt ?? null
   },
 

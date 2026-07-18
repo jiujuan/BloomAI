@@ -421,7 +421,51 @@ export const researchCoverageAssessmentSchema = z.object({
   createdAt: z.number(),
 })
 
+export const researchRunAttemptSummarySchema = z.object({
+  id: z.string().min(1),
+  ordinal: z.number().int().positive(),
+  trigger: researchAttemptTriggerSchema,
+  status: researchAttemptStatusSchema,
+  startCheckpointKey: z.string().min(1).nullable(),
+  endCheckpointKey: z.string().min(1).nullable(),
+  error: researchRunErrorSchema.nullable(),
+  startedAt: z.number().nullable(),
+  endedAt: z.number().nullable(),
+  createdAt: z.number(),
+})
+
+export const researchRunCheckpointSummarySchema = z.object({
+  id: z.string().min(1),
+  attemptId: z.string().min(1).nullable(),
+  sequence: z.number().int().positive(),
+  checkpointKey: z.string().min(1),
+  phase: z.string().min(1),
+  status: researchCheckpointStatusSchema,
+  resumeCursor: researchCheckpointCursorSchema,
+  replayPolicy: researchCheckpointReplayPolicySchema,
+  createdAt: z.number(),
+})
+
+export const researchHistoryPageSchema = <T extends z.ZodTypeAny>(item: T) => z.object({
+  items: z.array(item),
+  nextCursor: z.string().min(1).nullable(),
+})
+
+export const researchRunLifecycleSchema = z.object({
+  currentAttempt: researchRunAttemptSummarySchema.nullable(),
+  resumeCheckpoint: researchRunCheckpointSummarySchema.nullable(),
+  assessment: researchCoverageAssessmentSchema.nullable(),
+  attemptHistory: researchHistoryPageSchema(researchRunAttemptSummarySchema),
+  iterationHistory: researchHistoryPageSchema(researchIterationSchema),
+  budget: z.object({ limit: researchBudgetSchema, usage: researchUsageSchema }),
+  stopReason: researchLoopDecisionDtoSchema.nullable(),
+  limitations: z.array(z.string()),
+  cancellation: researchCancellationSchema.nullable(),
+  capabilities: researchRunCapabilitiesSchema,
+})
+
 export const researchEventSchema = z.object({
+  eventId: z.string().min(1).optional(),
   runId: z.string().min(1),
   sequence: z.number().int().nonnegative(),
   type: z.string().min(1),

@@ -33,6 +33,49 @@ export interface ArtifactServiceOptions {
   dataDir?: string
 }
 
+export interface ArtifactReconciliationManifest {
+  version: 1
+  runId: string
+  attemptId: string
+  type: ResearchArtifactDto['type']
+  fileName: string
+  contentHash: string
+  fingerprint: string
+  generatedAt: number
+  registrationState: 'pending' | 'registered'
+}
+
+export function artifactReconciliationFingerprint(input: Pick<ArtifactReconciliationManifest, 'runId' | 'attemptId' | 'type' | 'fileName' | 'contentHash' | 'generatedAt'>): string {
+  return createHash('sha256').update([input.runId, input.attemptId, input.type, input.fileName, input.contentHash, String(input.generatedAt)].join('\n')).digest('hex')
+}
+
+export function artifactManifestPath(storagePath: string): string {
+  return storagePath + '.reconciliation.json'
+}
+
+export function readArtifactReconciliationManifest(storagePath: string): ArtifactReconciliationManifest | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(artifactManifestPath(storagePath), 'utf8')) as Partial<ArtifactReconciliationManifest>
+    if (parsed.version !== 1 || typeof parsed.runId !== 'string' || typeof parsed.attemptId !== 'string' || typeof parsed.type !== 'string' || typeof parsed.fileName !== 'string' || typeof parsed.contentHash !== 'string' || typeof parsed.fingerprint !== 'string' || typeof parsed.generatedAt !== 'number' || (parsed.registrationState !== 'pending' && parsed.registrationState !== 'registered')) return null
+    return parsed as ArtifactReconciliationManifest
+  } catch {
+    return null
+  }
+}
+
+export function verifyArtifactReconciliationManifest(storagePath: string, manifest: ArtifactReconciliationManifest): boolean {
+  try {
+    const stat = fs.statSync(storagePath)
+    if (!stat.isFile() || stat.size <= 0 || path.basename(storagePath) !== manifest.fileName) return false
+    const contentHash = createHash('sha256').update(fs.readFileSync(storagePath)).digest('hex')
+    return contentHash === manifest.contentHash
+      && manifest.fingerprint === artifactReconciliationFingerprint(manifest)
+  } catch {
+    return false
+  }
+}
+
+
 function atomicWrite(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   const temporaryPath = filePath + '.tmp-' + process.pid + '-' + Date.now()
@@ -98,6 +141,30 @@ export class ArtifactService {
     this.dataDir = options.dataDir ?? getDataDir()
   }
 
+  private persistArtifactWithManifest(input: UpsertResearchArtifactInput, content: string, attemptId: string | null): ResearchArtifactDto {
+    const contentHash = createHash('sha256').update(content).digest('hex')
+    const generatedAt = Date.now()
+    const manifest = attemptId ? {
+      version: 1 as const,
+      runId: input.runId,
+      attemptId,
+      type: input.type,
+      fileName: input.fileName,
+      contentHash,
+      generatedAt,
+      fingerprint: artifactReconciliationFingerprint({ runId: input.runId, attemptId, type: input.type, fileName: input.fileName, contentHash, generatedAt }),
+      registrationState: 'pending' as const,
+    } : null
+    if (manifest) atomicWrite(artifactManifestPath(input.storagePath), JSON.stringify(manifest) + '\n')
+    const artifact = this.options.reportRepo.upsertArtifact({
+      ...input,
+      contentHash,
+      metadata: { ...input.metadata, generated: true, reconciliation: manifest ? { attemptId: manifest.attemptId, fingerprint: manifest.fingerprint, generatedAt: manifest.generatedAt, registrationState: 'registered' } : undefined },
+    })
+    if (manifest) atomicWrite(artifactManifestPath(input.storagePath), JSON.stringify({ ...manifest, registrationState: 'registered' }) + '\n')
+    return artifact
+  }
+
   writeChineseMarkdown(runId: string, markdown: string): ResearchArtifactDto {
     const directory = path.join(this.dataDir, 'deepresearch', 'runs', runId)
     const fileName = 'report.zh-CN.md'
@@ -137,17 +204,16 @@ export class ArtifactService {
     return files.map((file) => {
       const storagePath = path.join(directory, file.fileName)
       atomicWrite(storagePath, file.content)
-      return this.options.reportRepo.upsertArtifact({
+      return this.persistArtifactWithManifest({
         runId: input.run.id,
         type: file.type,
         fileName: file.fileName,
         contentType: file.contentType,
         storagePath,
         sizeBytes: Buffer.byteLength(file.content),
-        contentHash: createHash('sha256').update(file.content).digest('hex'),
         metadata: { generated: true },
         idempotencyKey: 'report-artifact:v1:' + file.type,
-      })
+      }, file.content, input.run.currentAttemptId ?? null)
     })
   }
 }

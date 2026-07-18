@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 import { resolveMastraModel } from '../../model-resolver'
 
 export interface BriefClarificationPlan {
@@ -21,7 +22,7 @@ export interface BriefPlan {
 }
 
 export interface BriefPlanner {
-  plan(run: ResearchRunDto): Promise<BriefPlan>
+  plan(run: ResearchRunDto, options?: { signal?: AbortSignal }): Promise<BriefPlan>
 }
 
 /**
@@ -41,9 +42,10 @@ export const briefPlannerAgent = new Agent({
 
 export function createDeterministicBriefPlanner(): BriefPlanner {
   return {
-    async plan(run: ResearchRunDto): Promise<BriefPlan> {
+    async plan(run: ResearchRunDto, options = {}): Promise<BriefPlan> {
+      throwIfCancellationRequested(options)
       const policy = getResearchProfilePolicy(run.profile)
-      return {
+      const plan = {
         title: run.topic,
         objective: run.topic,
         audience: null,
@@ -52,6 +54,8 @@ export function createDeterministicBriefPlanner(): BriefPlanner {
         plannedSections: [...policy.requiredSections],
         criticalClarifications: [],
       }
+      throwIfCancellationRequested(options)
+      return plan
     },
   }
 }

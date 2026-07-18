@@ -274,7 +274,7 @@ describe('Deep Research deterministic acceptance fixtures', () => {
     ]))
   })
 
-  it('marks an expired active run interrupted during restart recovery', async () => {
+  it('marks an expired active Attempt and Run interrupted during restart recovery', async () => {
     const fixture = readFixture('general')
     const repositories = await loadTestContext()
     const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
@@ -282,14 +282,16 @@ describe('Deep Research deterministic acceptance fixtures', () => {
     const run = createRun(repositories, fixture.input)
     repositories.researchRunRepo.transitionWithEvent(run.id, 'planning', { phase: 'planning' })
     repositories.researchRunRepo.transitionWithEvent(run.id, 'researching', { phase: 'researching' })
-    expect(repositories.researchRunRepo.acquireLease(run.id, 'acceptance-worker', 1_000, 1_000)).toBe(true)
+    const attempt = repositories.researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    expect(repositories.researchAttemptRepo.acquireLease(attempt.id, 'acceptance-worker', 'acceptance-lease', 1_000, 1_000)).toBe(true)
 
     const recovery = await service.recoverInterruptedRuns(2_001)
 
     expect(recovery.interrupted).toEqual(expect.arrayContaining([expect.objectContaining({ id: run.id })]))
     expect(repositories.researchRunRepo.get(run.id)).toMatchObject({ status: 'interrupted', phase: 'interrupted' })
+    expect(repositories.researchAttemptRepo.get(attempt.id)).toMatchObject({ status: 'interrupted', leaseExpiresAt: null })
     expect(repositories.researchRunRepo.getDetail(run.id)!.events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'research.run.status_changed', payload: expect.objectContaining({ to: 'interrupted' }) }),
+      expect.objectContaining({ type: 'research.run.interrupted', payload: { reason: 'attempt_lease_expired', attemptId: attempt.id } }),
     ]))
   })
 })

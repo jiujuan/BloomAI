@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchEvidenceDto, ResearchReportSectionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { resolveMastraModel } from '../../model-resolver'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 
 export interface ExtractedClaim {
   text: string
@@ -11,7 +12,7 @@ export interface ExtractedClaim {
 }
 
 export interface ClaimExtractor {
-  extract(input: { run: ResearchRunDto; section: ResearchReportSectionDto; evidence: ResearchEvidenceDto[] }): Promise<ExtractedClaim[]>
+  extract(input: { run: ResearchRunDto; section: ResearchReportSectionDto; evidence: ResearchEvidenceDto[] }, options?: { signal?: AbortSignal }): Promise<ExtractedClaim[]>
 }
 
 export const claimExtractorAgent = new Agent({
@@ -23,17 +24,20 @@ export const claimExtractorAgent = new Agent({
 
 export function createDeterministicClaimExtractor(): ClaimExtractor {
   return {
-    async extract({ evidence }) {
+    async extract({ evidence }, options = {}) {
+      throwIfCancellationRequested(options)
       if (!evidence.length) {
         return [{ text: 'Evidence was insufficient for a verified finding in this section.', kind: 'limitation', importance: 'medium', confidence: 1, evidenceIds: [] }]
       }
-      return evidence.slice(0, 3).map((item) => ({
+      const claims = evidence.slice(0, 3).map((item) => ({
         text: item.summary,
         kind: 'factual' as const,
         importance: 'medium' as const,
         confidence: item.confidence,
         evidenceIds: [item.id],
       }))
+      throwIfCancellationRequested(options)
+      return claims
     },
   }
 }

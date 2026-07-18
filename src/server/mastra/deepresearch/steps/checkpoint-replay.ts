@@ -1,5 +1,7 @@
 import type { ResearchCheckpointCursorDto, ResearchRunDto } from '@shared/deepresearch/contracts'
-import type { DeepResearchRepositories } from '../workflow-context'
+import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
+import { recordDeepResearchCheckpointReuse } from '@server/telemetry/metrics'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 import {
   createCheckpointCursor,
   createCheckpointReplayFingerprint,
@@ -11,6 +13,7 @@ interface WorkflowExecutionContext {
   attemptId: string
   executorId?: string
   ownershipToken: string
+  signal?: AbortSignal
   resumeCursor: ResearchCheckpointCursorDto | null
 }
 
@@ -33,6 +36,18 @@ export function clearWorkflowExecution(runId: string): void {
 
 export function getWorkflowExecution(runId: string): WorkflowExecutionContext | undefined {
   return executionByRunId.get(runId)
+}
+
+
+export function assertWorkflowNotCancelled(repositories: DeepResearchRepositories, runId: string): void {
+  const execution = getWorkflowExecution(runId)
+  throwIfCancellationRequested({
+    signal: execution?.signal,
+    isCancellationRequested: () => {
+      const run = repositories.researchRunRepo.get(runId)
+      return run?.status === 'cancelling' || run?.status === 'cancelled' || run?.cancellation?.requestedAt != null
+    },
+  })
 }
 
 export function isReplayPastPhase(runId: string, phase: string): boolean {
@@ -78,7 +93,9 @@ export function resolveWorkflowResumeCursor(
   run: ResearchRunDto,
   cursor: ResearchCheckpointCursorDto | null,
 ): { cursor: ResearchCheckpointCursorDto; reused: boolean; reason: string | null } {
-  return resolveCheckpointReplay({ run, cursor, entities: entitiesFor(repositories, run) })
+  const result = resolveCheckpointReplay({ run, cursor, entities: entitiesFor(repositories, run) })
+  if (result.reused) recordDeepResearchCheckpointReuse(deepResearchTelemetryContext(run))
+  return result
 }
 
 export function checkpointWorkflowPhase(
@@ -88,6 +105,7 @@ export function checkpointWorkflowPhase(
   nextPhase: string,
   options: { iteration?: number; pendingQueryIds?: string[]; pendingSourceIds?: string[]; pendingSectionIds?: string[]; outputFingerprint?: string | null } = {},
 ): void {
+  assertWorkflowNotCancelled(repositories, run.id)
   const execution = getWorkflowExecution(run.id)
   const executionAttempt = execution && repositories.researchAttemptRepo.get(execution.attemptId)?.runId === run.id
     ? execution

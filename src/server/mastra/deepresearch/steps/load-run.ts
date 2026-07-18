@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import { researchCheckpointCursorSchema } from '@shared/deepresearch/schemas'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { bindWorkflowExecution, resolveWorkflowResumeCursor } from './checkpoint-replay'
+import { bindWorkflowExecution, getWorkflowExecution, resolveWorkflowResumeCursor } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const attemptSchema = z.object({
@@ -21,8 +21,9 @@ export function createLoadRunStep(repositories: DeepResearchRepositories) {
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['queued'])
       const resolution = resolveWorkflowResumeCursor(repositories, run, inputData.attempt?.resumeCursor ?? null)
+      const activeExecution = getWorkflowExecution(run.id)
       bindWorkflowExecution(run.id, inputData.attempt
-        ? { ...inputData.attempt, resumeCursor: resolution.cursor }
+        ? { ...inputData.attempt, signal: activeExecution?.signal, resumeCursor: resolution.cursor }
         : null)
       repositories.researchRunRepo.transitionWithEvent(run.id, 'planning', {
         phase: resolution.cursor.nextPhase === 'planning' ? 'planning' : `resuming:${resolution.cursor.nextPhase}`,

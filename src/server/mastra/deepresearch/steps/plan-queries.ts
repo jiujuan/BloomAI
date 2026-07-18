@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { QueryPlanner } from '../agents/query-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const inputSchema = z.object({ runId: z.string().min(1), brief: z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) }) })
@@ -18,7 +18,9 @@ export function createPlanQueriesStep({ repositories, planner }: { repositories:
       const questions = repositories.researchQuestionRepo.list(run.id)
       const existing = repositories.researchQuestionRepo.listSearchQueries(run.id)
       if (existing.length === 0) {
-        const plans = z.array(querySchema).parse(await planner.plan(run, questions))
+        assertWorkflowNotCancelled(repositories, run.id)
+        const plans = z.array(querySchema).parse(await planner.plan(run, questions, { signal: getWorkflowExecution(run.id)?.signal }))
+        assertWorkflowNotCancelled(repositories, run.id)
         const remaining = Math.max(0, run.budget.maxSearchQueries - run.usage.searchQueries)
         const created = plans.slice(0, remaining).map((plan, index) => repositories.researchQuestionRepo.createSearchQuery({
           runId: run.id,

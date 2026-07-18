@@ -1,7 +1,9 @@
 import { createStep } from '@mastra/core/workflows'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
-import type { DeepResearchRepositories } from '../workflow-context'
+import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
+import { recordDeepResearchAssessment, recordDeepResearchIteration } from '@server/telemetry/metrics'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
+import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
 
 export async function assessIteration(
   input: IterationContext,
@@ -13,7 +15,10 @@ export async function assessIteration(
   const iteration = repositories.researchIterationRepo!.get(input.iterationId)
   if (!run || !iteration) return input
   const questions = repositories.researchQuestionRepo.list(run.id)
-  const extraction = await evidenceService.extract(run, questions)
+  const previousScore = repositories.researchCoverageAssessmentRepo.getLatest(run.id)?.aggregateScore ?? null
+  assertWorkflowNotCancelled(repositories, run.id)
+  const extraction = await evidenceService.extract(run, questions, { signal: getWorkflowExecution(run.id)?.signal, isCancelled: () => { const current = repositories.researchRunRepo.get(run.id); return current?.status === 'cancelling' || current?.status === 'cancelled' || current?.cancellation?.requestedAt != null } })
+  assertWorkflowNotCancelled(repositories, run.id)
   repositories.researchEventRepo.append({ runId: run.id, type: 'research.evidence.extracted', phase: 'gap_filling', payload: { count: extraction.createdCount, iterationId: iteration.id } })
   for (const coverage of extraction.coverage) repositories.researchEventRepo.append({ runId: run.id, type: 'research.coverage.assessed', phase: 'gap_filling', payload: { id: coverage.questionId, score: coverage.score, iterationId: iteration.id } })
   const projection = evidenceService.assessCoverageProjectionV2(run, repositories.researchQuestionRepo.list(run.id))
@@ -27,6 +32,9 @@ export async function assessIteration(
     questionVerdicts: projection.questionAssessments.map((assessment) => ({ questionId: assessment.questionId, score: assessment.score, verdict: assessment.verdict === 'blocked' ? 'limited' : assessment.verdict, gapCodes: assessment.gaps.map((gap) => gap.code), limitations: assessment.limitation ? [assessment.limitation] : [] })),
     limitations: projection.limitations,
   })
+  for (const questionAssessment of projection.questionAssessments) {
+    recordDeepResearchAssessment(questionAssessment, deepResearchTelemetryContext(run))
+  }
   const fetchedCount = (input.sourceIds ?? []).filter((sourceId) => Boolean(repositories.researchSourceRepo.getLatestSnapshotForSource(run.id, sourceId))).length
   // The next loop decision must use Coverage Policy V2 gain semantics, never raw evidence count.
   const materialGain = projection.questionAssessments.some((assessment) => assessment.materialGain?.material === true)
@@ -36,6 +44,11 @@ export async function assessIteration(
     coverageAfter: { aggregateScore: projection.aggregateScore, materialGain },
     limitations: projection.limitations,
   })
+  recordDeepResearchIteration({
+    ordinal: iteration.ordinal,
+    evidenceDelta: extraction.createdCount,
+    scoreDelta: projection.aggregateScore - (previousScore ?? projection.aggregateScore),
+  }, deepResearchTelemetryContext(run))
   repositories.researchEventRepo.append({ runId: run.id, type: 'research.iteration.completed', phase: 'gap_filling', payload: { iteration: iteration.ordinal, iterationId: iteration.id, newEvidenceCount: extraction.createdCount, materialGain } })
   if (run.currentAttemptId) {
     repositories.researchCheckpointRepo.append({

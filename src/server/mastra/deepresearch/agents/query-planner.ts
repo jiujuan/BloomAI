@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchQuestionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { resolveMastraModel } from '../../model-resolver'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 
 export interface PlannedResearchQuery {
   questionId: string
@@ -8,7 +9,7 @@ export interface PlannedResearchQuery {
 }
 
 export interface QueryPlanner {
-  plan(run: ResearchRunDto, questions: ResearchQuestionDto[]): Promise<PlannedResearchQuery[]>
+  plan(run: ResearchRunDto, questions: ResearchQuestionDto[], options?: { signal?: AbortSignal }): Promise<PlannedResearchQuery[]>
 }
 
 export const queryPlannerAgent = new Agent({
@@ -20,8 +21,11 @@ export const queryPlannerAgent = new Agent({
 
 export function createDeterministicQueryPlanner(): QueryPlanner {
   return {
-    async plan(run, questions) {
-      return questions.map((question) => ({ questionId: question.id, query: run.topic + ' ' + question.question }))
+    async plan(run, questions, options = {}) {
+      throwIfCancellationRequested(options)
+      const plans = questions.map((question) => ({ questionId: question.id, query: run.topic + ' ' + question.question }))
+      throwIfCancellationRequested(options)
+      return plans
     },
   }
 }

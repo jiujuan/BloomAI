@@ -7,6 +7,7 @@ import { executeLegacyToolCapability } from '@server/skills/policy/capability-br
 import { researchSourceRepo } from '@server/db/repositories/deepresearch/research-source.repo'
 import { createSnapshotFingerprint } from '@server/deepresearch/domain/idempotency'
 import type { WorkflowToolExecutor } from './search-service'
+import { isCancellationRequested, throwIfCancellationRequested, type ResearchCancellationSignal } from '@server/deepresearch/domain/cancellation'
 
 export interface FetchOutcome {
   sourceId: string
@@ -83,18 +84,23 @@ function sanitizeContent(value: string): string {
     .trim()
 }
 
-async function retryWithinDeadline<T>(operation: () => Promise<T>, deadlineAt: number | null, sleep: (ms: number) => Promise<void>): Promise<T> {
+async function retryWithinDeadline<T>(operation: () => Promise<T>, deadlineAt: number | null, sleep: (ms: number) => Promise<void>, cancellation: ResearchCancellationSignal = {}): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    throwIfCancellationRequested(cancellation)
     if (deadlineAt !== null && Date.now() >= deadlineAt) break
     try {
-      return await operation()
+      const value = await operation()
+      throwIfCancellationRequested(cancellation)
+      return value
     } catch (error) {
       lastError = error
       if (!isRetryableError(error) || attempt === 2) throw error
       const delay = 100 * 2 ** attempt
       if (deadlineAt !== null && Date.now() + delay >= deadlineAt) break
+      throwIfCancellationRequested(cancellation)
       await sleep(delay)
+      throwIfCancellationRequested(cancellation)
     }
   }
   throw lastError ?? new Error('Deep Research fetch deadline exhausted.')
@@ -134,35 +140,42 @@ export function createContentService(options: {
   const isCancelled = options.isCancelled ?? (() => false)
 
   function failureOutcome(run: ResearchRunDto, source: ResearchSourceDto, error: { code: string; message: string; retryable: boolean }): FetchOutcome {
-    repositories.researchEventRepo.append({
-      runId: run.id,
-      type: 'research.source.fetch_failed',
-      phase: 'fetching',
-      payload: { sourceId: source.id, errorCode: error.code },
-    })
+    if (error.code !== 'RESEARCH_CANCELLED') {
+      repositories.researchEventRepo.append({
+        runId: run.id,
+        type: 'research.source.fetch_failed',
+        phase: 'fetching',
+        payload: { sourceId: source.id, errorCode: error.code },
+      })
+    }
     return { sourceId: source.id, status: 'failed', snapshot: null, error }
   }
 
-  async function fetchOne(run: ResearchRunDto, source: ResearchSourceDto): Promise<FetchOutcome> {
-    if (isCancelled(run.id)) return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
+  async function fetchOne(run: ResearchRunDto, source: ResearchSourceDto, signal?: AbortSignal, cancelled: () => boolean = () => isCancelled(run.id)): Promise<FetchOutcome> {
+    throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
+    if (cancelled()) return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
     const existingSnapshot = repositories.researchSourceRepo.getLatestSnapshotForSource(run.id, source.id)
     if (existingSnapshot) return { sourceId: source.id, status: 'fetched', snapshot: existingSnapshot, error: null }
     try {
       const initialUrl = await validatePublicResearchUrl(source.canonicalUrl, lookup)
       const fetched = await retryWithinDeadline(
-        () => executeTool({ caller: 'workflow', toolId: 'web_fetch', input: { url: initialUrl, render: false, maxChars: 50_000 }, sessionId: run.sessionId ?? run.id }),
+        () => executeTool({ caller: 'workflow', toolId: 'web_fetch', input: { url: initialUrl, render: false, maxChars: 50_000 }, sessionId: run.sessionId ?? run.id, signal }),
         run.usage.deadlineAt,
         sleep,
+        { signal, isCancellationRequested: cancelled },
       )
+      throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
       const fetchOutput = fetched.output as { finalUrl?: unknown; status?: unknown; content?: unknown }
       const fetchedFinalUrl = typeof fetchOutput.finalUrl === 'string' ? fetchOutput.finalUrl : initialUrl
       const safeFetchedFinalUrl = await validatePublicResearchUrl(fetchedFinalUrl, lookup)
-      if (isCancelled(run.id)) return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
+      if (cancelled()) return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
       const extracted = await retryWithinDeadline(
-        () => executeTool({ caller: 'workflow', toolId: 'web_extract', input: { url: safeFetchedFinalUrl, render: false, maxChars: 50_000 }, sessionId: run.sessionId ?? run.id }),
+        () => executeTool({ caller: 'workflow', toolId: 'web_extract', input: { url: safeFetchedFinalUrl, render: false, maxChars: 50_000 }, sessionId: run.sessionId ?? run.id, signal }),
         run.usage.deadlineAt,
         sleep,
+        { signal, isCancellationRequested: cancelled },
       )
+      throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
       const extractOutput = extracted.output as { finalUrl?: unknown; text?: unknown; title?: unknown; headings?: unknown }
       const finalUrl = await validatePublicResearchUrl(typeof extractOutput.finalUrl === 'string' ? extractOutput.finalUrl : safeFetchedFinalUrl, lookup)
       const content = sanitizeContent(typeof extractOutput.text === 'string' && extractOutput.text.trim()
@@ -170,6 +183,7 @@ export function createContentService(options: {
         : typeof fetchOutput.content === 'string' ? fetchOutput.content : '')
       if (!content) throw new Error('RESEARCH_FETCH_FAILED: no readable source content was returned.')
       const contentHash = crypto.createHash('sha256').update(content).digest('hex')
+      throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
       const snapshot = repositories.researchSourceRepo.createSnapshot({
         runId: run.id,
         sourceId: source.id,
@@ -187,19 +201,23 @@ export function createContentService(options: {
       })
       return { sourceId: source.id, status: 'fetched', snapshot, error: null }
     } catch (error) {
+      if (isCancellationRequested({ signal, isCancellationRequested: cancelled })) {
+        return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
+      }
       const message = error instanceof Error ? error.message : String(error)
       return failureOutcome(run, source, { code: message.startsWith('RESEARCH_UNSAFE_URL') ? 'RESEARCH_UNSAFE_URL' : 'RESEARCH_FETCH_FAILED', message, retryable: isRetryableError(error) })
     }
   }
 
   return {
-    fetch(run: ResearchRunDto, sources: ResearchSourceDto[], requestOptions: { isCancelled?: () => boolean } = {}): Promise<FetchOutcome[]> {
+    fetch(run: ResearchRunDto, sources: ResearchSourceDto[], requestOptions: { signal?: AbortSignal; isCancelled?: () => boolean } = {}): Promise<FetchOutcome[]> {
       const limited = sources.slice(0, Math.max(0, run.budget.maxFetchedSources - run.usage.fetchedSources))
-      const cancelled = requestOptions.isCancelled ?? (() => isCancelled(run.id))
+      const cancelled = () => isCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: requestOptions.isCancelled ?? (() => isCancelled(run.id)) })
+      throwIfCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: cancelled })
       return mapWithConcurrency(
         limited,
         options.maxConcurrency ?? run.budget.fetchConcurrency,
-        (source) => fetchOne(run, source),
+        (source) => fetchOne(run, source, requestOptions.signal, cancelled),
         cancelled,
         (source) => failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false }),
       )

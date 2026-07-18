@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { areHighPriorityQuestionsCovered, type EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
-import { loadRunnableRun } from '../workflow-context'
+import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
+import { recordDeepResearchAssessment } from '@server/telemetry/metrics'
 
 const briefSchema = z.object({
   title: z.string(),
@@ -73,6 +74,9 @@ export function createAssessCoverageStep({ repositories, evidenceService }: { re
           replayPolicy: 'reuse',
         },
       })
+      for (const questionAssessment of assessment.questionAssessments) {
+        recordDeepResearchAssessment(questionAssessment, deepResearchTelemetryContext(run))
+      }
       checkpointWorkflowPhase(repositories, run, 'assessing_coverage', 'gap_filling')
       const updatedQuestions = repositories.researchQuestionRepo.list(run.id)
       return {

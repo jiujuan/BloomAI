@@ -1,10 +1,12 @@
 import { createStep } from '@mastra/core/workflows'
 import type { GapAnalyst } from '../agents/gap-analyst'
-import type { DeepResearchRepositories } from '../workflow-context'
+import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
+import { recordDeepResearchBudgetExhausted, recordDeepResearchNoMaterialGain, recordDeepResearchStopReason } from '@server/telemetry/metrics'
 import { decideIteration } from '@server/deepresearch/domain/iteration-decision'
 import { createIterationQueryFingerprint } from '@server/deepresearch/domain/idempotency'
 import type { ResearchBudgetReservationDto, ResearchLoopDecisionDto } from '@shared/deepresearch/contracts'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
+import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
 
 function activeReservations(repositories: DeepResearchRepositories, runId: string): ResearchBudgetReservationDto[] {
   return repositories.researchIterationRepo!.list(runId)
@@ -37,6 +39,13 @@ function appendStopCheckpoint(repositories: DeepResearchRepositories, runId: str
     outputFingerprint: decision.reason,
     replayPolicy: 'reuse',
   })
+}
+
+function recordIterationStop(run: Parameters<typeof deepResearchTelemetryContext>[0], decision: ResearchLoopDecisionDto): void {
+  if (decision.decision === 'continue') return
+  recordDeepResearchStopReason(decision.decision, deepResearchTelemetryContext(run))
+  if (decision.decision === 'stop_budget') recordDeepResearchBudgetExhausted(deepResearchTelemetryContext(run))
+  if (decision.decision === 'stop_no_material_gain') recordDeepResearchNoMaterialGain(deepResearchTelemetryContext(run))
 }
 
 function appendPlanCheckpoint(repositories: DeepResearchRepositories, runId: string, attemptId: string | null | undefined, iteration: { id: string; ordinal: number }, queryIds: string[]): void {
@@ -127,15 +136,19 @@ export async function planIteration(
   const preflight = decideIteration({ ...decisionInput, queryCandidates: [] })
   if (preflight.decision.decision !== 'stop_no_actionable_gaps') {
     const persisted = persistStopDecision(repositories, run.id, preflight.decision)
+    recordIterationStop(run, persisted)
     appendStopCheckpoint(repositories, run.id, run.currentAttemptId, run.usage.iterations, persisted)
     return stoppedContext(input, run.id, run, persisted)
   }
 
   const questions = repositories.researchQuestionRepo.list(run.id)
-  const candidates = await gapAnalyst.plan(run, questions)
+  assertWorkflowNotCancelled(repositories, run.id)
+  const candidates = await gapAnalyst.plan(run, questions, { signal: getWorkflowExecution(run.id)?.signal })
+  assertWorkflowNotCancelled(repositories, run.id)
   const decision = decideIteration({ ...decisionInput, queryCandidates: candidates })
   if (!decision.shouldCreateIteration || !decision.plan) {
     const persisted = persistStopDecision(repositories, run.id, decision.decision)
+    recordIterationStop(run, persisted)
     appendStopCheckpoint(repositories, run.id, run.currentAttemptId, run.usage.iterations, persisted)
     return stoppedContext(input, run.id, run, persisted)
   }

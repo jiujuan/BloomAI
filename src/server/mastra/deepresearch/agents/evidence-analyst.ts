@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent'
 import type { ResearchQuestionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import type { EvidenceAnalysis, EvidenceAnalyst, EvidencePacket } from '@server/services/deepresearch/evidence-service'
 import { resolveMastraModel } from '../../model-resolver'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 
 export const evidenceAnalystAgent = new Agent({
   id: 'deep-research-evidence-analyst',
@@ -32,10 +33,12 @@ function evidenceSummary(packet: EvidencePacket, passage: string): string {
 
 export function createDeterministicEvidenceAnalyst(): EvidenceAnalyst {
   return {
-    async analyze({ questions, packets }) {
+    async analyze({ questions, packets }, options = {}) {
       const analyses: EvidenceAnalysis[] = []
       for (const question of questions) {
+        throwIfCancellationRequested(options)
         for (const packet of packets.slice(0, 3)) {
+          throwIfCancellationRequested(options)
           const excerpt = firstCitableSentence(packet)
           if (!excerpt) continue
           analyses.push({

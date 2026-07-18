@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDeepResearchExecutor } from './executor'
+import { createDeepResearchService } from './deep-research.service'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -14,7 +15,8 @@ async function loadTestContext() {
   await client.runMigrations()
   const { researchRunRepo } = await import('../db/repositories/deepresearch/research-run.repo')
   const { researchAttemptRepo } = await import('../db/repositories/deepresearch/research-attempt.repo')
-  return { client, researchRunRepo, researchAttemptRepo }
+  const { researchEventRepo } = await import('../db/repositories/deepresearch/research-event.repo')
+  return { client, researchRunRepo, researchAttemptRepo, researchEventRepo }
 }
 
 function createRun(researchRunRepo: Awaited<ReturnType<typeof loadTestContext>>['researchRunRepo']) {
@@ -204,6 +206,39 @@ describe('Deep Research attempt-aware executor', () => {
       })).toBeNull()
     }
     expect(researchAttemptRepo.get(attempt.id)).toMatchObject({ status: 'running', executorId: 'executor-a' })
+  })
+
+  it('aborts the active owner immediately and lets cancellation win a concurrent successful return', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchEventRepo } = await loadTestContext()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', createdAt: 1_000 })
+    let release!: () => void
+    const returned = new Promise<void>((resolve) => { release = resolve })
+    let activeSignal!: AbortSignal
+    const runtime = {
+      start: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+        activeSignal = signal
+        await returned
+      }),
+      resume: vi.fn(async () => undefined),
+    }
+    const executor = createDeepResearchExecutor({ runtime, executorId: 'cancel-race-worker', now: () => 1_000 } as any)
+    const service = createDeepResearchService({ runtime: executor })
+
+    const execution = executor.start(run.id)
+    await vi.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1))
+    expect(activeSignal.aborted).toBe(false)
+
+    const cancelling = await service.cancelRun(run.id, { reason: 'race-test' })
+    expect(cancelling).toMatchObject({ status: 'cancelling', cancellation: { reason: 'race-test' } })
+    expect(activeSignal.aborted).toBe(true)
+
+    release()
+    await expect(execution).resolves.toBe(true)
+    expect(researchAttemptRepo.get(attempt.id)).toMatchObject({ status: 'cancelled', executorId: null })
+    expect(researchRunRepo.get(run.id)).toMatchObject({ status: 'cancelled' })
+    const terminalEvents = researchEventRepo.list(run.id).filter((event) => ['research.run.cancelled', 'research.run.completed', 'research.run.failed'].includes(event.type))
+    expect(terminalEvents.map((event) => event.type)).toEqual(['research.run.cancelled'])
   })
 
   it('persists cancellation and retryable failure classifications on its owned attempt', async () => {

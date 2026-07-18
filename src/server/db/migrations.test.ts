@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(13)
+    expect(migrationVersions()).toHaveLength(14)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(13)
+    expect(migrationVersions()).toHaveLength(14)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -163,6 +163,7 @@ describe('database migrations', () => {
         'research_quality_assessments',
         'research_events',
         'research_recovery_commands',
+        'research_reconciliations',
         'research_artifacts',
         'research_run_attempts',
         'research_run_checkpoints',
@@ -184,6 +185,7 @@ describe('database migrations', () => {
       '011-deep-research-coverage-assessments',
       '012-deep-research-iteration-idempotency',
       '013-deep-research-attempt-lease-ownership',
+      '014-deep-research-reconciliation',
     ])
     const emptyDb = openRawDb()
     try {
@@ -200,6 +202,7 @@ describe('database migrations', () => {
     expect(uniqueIndexColumnSets('research_events')).toContainEqual(['run_id', 'sequence'])
     expect(uniqueIndexColumnSets('research_sources')).toContainEqual(['run_id', 'canonical_url'])
     expect(uniqueIndexColumnSets('research_recovery_commands')).toContainEqual(['run_id', 'command_key'])
+    expect(uniqueIndexColumnSets('research_reconciliations')).toContainEqual(['run_id', 'reconciliation_key'])
     expect(uniqueIndexColumnSets('research_run_attempts')).toContainEqual(['run_id', 'ordinal'])
     expect(uniqueIndexColumnSets('research_run_checkpoints')).toContainEqual(['attempt_id', 'sequence'])
     expect(uniqueIndexColumnSets('research_run_checkpoints')).toContainEqual(['run_id', 'checkpoint_key', 'input_fingerprint'])

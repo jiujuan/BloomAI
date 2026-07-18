@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { ReturnTypeOfContentService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchFetchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
@@ -23,11 +23,13 @@ export function createFetchSourcesStep({ repositories, contentService }: { repos
       const startedAt = Date.now()
       const outcomes = await traceDeepResearchPhase('fetching', deepResearchTelemetryContext(run, { sources: sources.length }), async (span) => {
         const result = await contentService.fetch(run, sources, {
-          isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+          signal: getWorkflowExecution(run.id)?.signal,
+          isCancelled: () => { const current = repositories.researchRunRepo.get(run.id); return current?.status === 'cancelling' || current?.status === 'cancelled' || current?.cancellation?.requestedAt != null },
         })
         setDeepResearchSpanCounts(span, { sources: sources.length, fetched: result.filter((outcome) => outcome.status === 'fetched').length })
         return result
       })
+      assertWorkflowNotCancelled(repositories, run.id)
       recordDeepResearchFetchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { sources: sources.length }))
       const fetchedCount = outcomes.filter((outcome) => outcome.status === 'fetched').length
       repositories.researchRunRepo.setUsage(run.id, { ...run.usage, fetchedSources: run.usage.fetchedSources + fetchedCount })

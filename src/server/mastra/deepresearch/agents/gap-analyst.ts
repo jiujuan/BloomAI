@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchQuestionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { isQuestionCovered } from '@server/services/deepresearch/evidence-service'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 import { resolveMastraModel } from '../../model-resolver'
 
 export interface FollowUpResearchQuery {
@@ -9,7 +10,7 @@ export interface FollowUpResearchQuery {
 }
 
 export interface GapAnalyst {
-  plan(run: ResearchRunDto, questions: ResearchQuestionDto[]): Promise<FollowUpResearchQuery[]>
+  plan(run: ResearchRunDto, questions: ResearchQuestionDto[], options?: { signal?: AbortSignal }): Promise<FollowUpResearchQuery[]>
 }
 
 export const gapAnalystAgent = new Agent({
@@ -21,8 +22,9 @@ export const gapAnalystAgent = new Agent({
 
 export function createDeterministicGapAnalyst(): GapAnalyst {
   return {
-    async plan(run, questions) {
-      return questions
+    async plan(run, questions, options = {}) {
+      throwIfCancellationRequested(options)
+      const plans = questions
         .filter((question) => (question.priority === 'high' || question.priority === 'critical') && !isQuestionCovered(question))
         .flatMap((question) => {
           const gap = question.coverage?.gaps[0] ?? 'citable evidence'
@@ -31,6 +33,8 @@ export function createDeterministicGapAnalyst(): GapAnalyst {
             query: run.topic + ' ' + question.question + ' ' + gap,
           }]
         })
+      throwIfCancellationRequested(options)
+      return plans
     },
   }
 }

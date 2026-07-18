@@ -239,7 +239,7 @@ describe('Deep Research retrieval services', () => {
     expect(outcomes.map((outcome) => outcome.snapshot?.id)).toEqual([outcomes[0].snapshot?.id, outcomes[0].snapshot?.id])
     expect(researchSourceRepo.listSnapshots(run.id)).toHaveLength(1)
   })
-  it('rejects hosts that resolve to private networks and stops scheduling after cancellation', async () => {
+  it('rejects hosts that resolve to private networks and stops scheduling after cancellation without recording cancellation as fetch failure', async () => {
     const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
     const run = researchRunRepo.create({
       input: { topic: 'Private target protection', profile: 'market', depth: 'deep', objective: undefined },
@@ -277,7 +277,7 @@ describe('Deep Research retrieval services', () => {
     expect(privateOutcome[0]).toMatchObject({ status: 'failed', error: { code: 'RESEARCH_UNSAFE_URL' } })
     expect(webFetches).toBe(1)
     expect(outcomes.map((outcome) => outcome.error?.code)).toEqual(['RESEARCH_CANCELLED', 'RESEARCH_CANCELLED'])
-    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.source.fetch_failed')).toHaveLength(3)
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.source.fetch_failed')).toHaveLength(1)
   })
 
   it('stops scheduling queued searches after cancellation while preserving result order', async () => {
@@ -300,5 +300,59 @@ describe('Deep Research retrieval services', () => {
     expect(calls).toBe(1)
     expect(results.map((result) => result.queryId)).toEqual(['q1', 'q2'])
     expect(results[1].error).toMatchObject({ code: 'RESEARCH_CANCELLED', retryable: false })
+  })
+  it('propagates AbortSignal to search and does not start queued provider calls after cancellation', async () => {
+    const controller = new AbortController()
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      expect(request.signal).toBe(controller.signal)
+      controller.abort()
+      return { output: { provider: 'fixture', results: [] } }
+    })
+    const search = createSearchService({ executeTool })
+
+    const results = await search.search(createRun({ budget: { ...createRun().budget, searchConcurrency: 1 } }), [
+      { id: 'q1', query: 'first' },
+      { id: 'q2', query: 'second' },
+    ], { signal: controller.signal })
+
+    expect(executeTool).toHaveBeenCalledTimes(1)
+    expect(results.map((result) => result.error?.code)).toEqual(['RESEARCH_CANCELLED', 'RESEARCH_CANCELLED'])
+  })
+
+  it('propagates AbortSignal to fetch and does not extract or persist a snapshot after cancellation', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Abort fetch propagation', profile: 'market', depth: 'deep', objective: undefined },
+      budget: getResearchBudget('deep'),
+    })
+    const source = researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: 'https://public.fixture.example/report',
+      domain: 'public.fixture.example',
+      title: 'Fixture',
+      sourceType: 'official-statistics',
+      selectionStatus: 'selected',
+      scores: {},
+    })
+    const controller = new AbortController()
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      expect(request.signal).toBe(controller.signal)
+      expect(request.toolId).toBe('web_fetch')
+      controller.abort()
+      return { output: { finalUrl: String(request.input.url), status: 200, content: 'provider returned after cancellation' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+      sleep: async () => {},
+    })
+
+    const outcomes = await contentService.fetch(createRun({ id: storedRun.id }), [source], { signal: controller.signal })
+
+    expect(executeTool).toHaveBeenCalledTimes(1)
+    expect(outcomes).toMatchObject([{ sourceId: source.id, status: 'failed', error: { code: 'RESEARCH_CANCELLED' } }])
+    expect(researchSourceRepo.listSnapshots(storedRun.id)).toHaveLength(0)
+    expect(researchEventRepo.list(storedRun.id).filter((event) => event.type === 'research.source.fetch_failed')).toHaveLength(0)
   })
 })

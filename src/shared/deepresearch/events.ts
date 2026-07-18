@@ -27,6 +27,7 @@ export type ResearchEventType =
   | 'research.run.cancelled'
   | 'research.attempt.created'
   | 'research.attempt.started'
+  | 'research.attempt.completed'
   | 'research.checkpoint.completed'
   | 'research.coverage.assessment_completed'
   | 'research.coverage.gap_detected'
@@ -77,6 +78,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.run.cancelled', JsonObject>
   | ResearchEventBase<'research.attempt.created', IdentifierPayload & { ordinal: number; trigger: string }>
   | ResearchEventBase<'research.attempt.started', IdentifierPayload>
+  | ResearchEventBase<'research.attempt.completed', IdentifierPayload & { status: string; endCheckpointKey: string | null }>
   | ResearchEventBase<'research.checkpoint.completed', IdentifierPayload & { checkpointKey: string; sequence: number }>
   | ResearchEventBase<'research.coverage.assessment_completed', IdentifierPayload & { policyVersion: string }>
   | ResearchEventBase<'research.coverage.gap_detected', JsonObject & { questionId: string; gapCodes: string[] }>

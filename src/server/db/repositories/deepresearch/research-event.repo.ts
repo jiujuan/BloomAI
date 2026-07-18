@@ -19,6 +19,7 @@ type EventExecutor = any
 
 export function mapResearchEvent(row: typeof research_events.$inferSelect): ResearchEventDto {
   return {
+    eventId: row.id,
     runId: row.run_id,
     sequence: row.sequence,
     type: row.type,
@@ -55,6 +56,7 @@ export function appendResearchEventInTransaction(executor: EventExecutor, input:
       }).run()
 
       return {
+        eventId: id,
         runId: input.runId,
         sequence,
         type: input.type,

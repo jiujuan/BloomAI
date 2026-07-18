@@ -4,6 +4,7 @@ import {
   researchCoverageAssessmentV2Schema,
   researchCoverageSchema,
   researchEventSchema,
+  researchRunLifecycleSchema,
   researchRunDtoSchema,
   startResearchSchema,
 } from './schemas'
@@ -163,6 +164,26 @@ describe('deep research schemas', () => {
       materialGain: null,
       assessedAt: 1,
     })).toMatchObject({ policyVersion: 'v2', verdict: 'limited' })
+  })
+
+  it('parses additive V2 lifecycle summaries and stable event IDs without requiring them from V1 clients', () => {
+    const run = researchRunDtoSchema.parse(legacyRun)
+    expect(researchRunLifecycleSchema.parse({
+      currentAttempt: null,
+      resumeCheckpoint: null,
+      assessment: null,
+      attemptHistory: { items: [], nextCursor: null },
+      iterationHistory: { items: [], nextCursor: null },
+      budget: { limit: run.budget, usage: run.usage },
+      stopReason: null,
+      limitations: [],
+      cancellation: null,
+      capabilities: run.capabilities,
+    })).toMatchObject({ attemptHistory: { items: [], nextCursor: null } })
+    expect(researchEventSchema.parse({
+      eventId: 'event-1', runId: 'run-1', sequence: 1, type: 'research.attempt.completed', phase: 'researching', timestamp: 1,
+      payload: { id: 'attempt-1', status: 'succeeded', endCheckpointKey: null },
+    }).eventId).toBe('event-1')
   })
 
   it('keeps V1 coverage and event payloads parseable when V2 fields are absent', () => {

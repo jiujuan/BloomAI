@@ -116,6 +116,7 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
 
       const workflowRun = await workflow.createRun()
       activeRuns.set(workflowRun.runId, workflowRun)
+      bindWorkflowExecution(context.runId, context)
       repositories.researchRunRepo.setWorkflowRunId(context.runId, workflowRun.runId)
       return workflowRun.start({
         inputData: {

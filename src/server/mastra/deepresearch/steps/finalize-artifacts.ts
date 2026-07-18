@@ -4,7 +4,7 @@ import { createReportMarkdown, type ArtifactService } from '@server/services/dee
 import { isPredominantlyEnglish, type ReportTranslator } from '../agents/report-translator'
 import { serverLogger } from '@server/logger/logger'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchCompletion, recordDeepResearchE2EDuration, recordDeepResearchFailure, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
@@ -15,6 +15,7 @@ export function createFinalizeArtifactsStep({ repositories, artifactService, rep
     outputSchema: z.object({ runId: z.string().min(1), artifactId: z.string().min(1) }),
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['verifying'])
+      assertWorkflowNotCancelled(repositories, run.id)
       return traceDeepResearchPhase('finalizing_artifacts', deepResearchTelemetryContext(run), async () => {
         const quality = run.quality
         if (!quality) throw new Error('Deep Research quality assessment is missing.')
@@ -31,15 +32,19 @@ export function createFinalizeArtifactsStep({ repositories, artifactService, rep
           quality,
         }
         const existingReport = repositories.researchReportRepo.listArtifacts(run.id).find((artifact) => artifact.type === 'report_markdown')
+        assertWorkflowNotCancelled(repositories, run.id)
         const artifacts = existingReport ? repositories.researchReportRepo.listArtifacts(run.id) : artifactService.write(artifactInput)
+        assertWorkflowNotCancelled(repositories, run.id)
         if (!existing.has('report_markdown_zh_cn')) {
           const englishMarkdown = createReportMarkdown(artifactInput)
           if (isPredominantlyEnglish(englishMarkdown)) {
             try {
-              const chineseMarkdown = await reportTranslator.translate({ markdown: englishMarkdown })
+              const chineseMarkdown = await reportTranslator.translate({ markdown: englishMarkdown }, { signal: getWorkflowExecution(run.id)?.signal })
+              assertWorkflowNotCancelled(repositories, run.id)
               const chineseArtifact = artifactService.writeChineseMarkdown(run.id, chineseMarkdown)
               artifacts.push(chineseArtifact)
             } catch (error) {
+              assertWorkflowNotCancelled(repositories, run.id)
               serverLogger.warn('Deep Research Chinese report translation failed; keeping the original report available.', { runId: run.id, error: error instanceof Error ? error.message : String(error) })
             }
           }

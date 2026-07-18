@@ -67,7 +67,7 @@ export interface RequestResearchRunCancellationOptions {
   reason?: string | null
 }
 
-function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
+export function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
   const error = row.error_code
     ? {
       code: row.error_code,

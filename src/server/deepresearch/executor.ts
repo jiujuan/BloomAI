@@ -5,10 +5,20 @@ import { researchCheckpointRepo } from '../db/repositories/deepresearch/research
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
 import type { DeepResearchWorkflowRunState } from './recovery'
 import { classifyResearchError } from './domain/errors'
-import { recordDeepResearchFailure } from '../telemetry/metrics'
+import { recordDeepResearchAttemptDuration, recordDeepResearchCancellationLatency, recordDeepResearchExternalCallsAfterCancellation, recordDeepResearchFailure, recordDeepResearchLeaseRejectedWrite } from '../telemetry/metrics'
 
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_LEASE_RENEWAL_MS = 10_000
+
+const activeAbortControllers = new Map<string, { attemptId: string; controller: AbortController }>()
+
+/** Signals an in-process owner immediately after durable cancellation is recorded. */
+export function abortActiveDeepResearchExecution(runId: string): boolean {
+  const active = activeAbortControllers.get(runId)
+  if (!active || active.controller.signal.aborted) return false
+  active.controller.abort()
+  return true
+}
 
 /**
  * Non-persisted capability handed to exactly one workflow invocation.  The
@@ -84,9 +94,15 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
     if (!attempt) return false
 
     const ownershipToken = uuidv4()
-    if (!researchAttemptRepo.acquireLease(attempt.id, executorId, ownershipToken, leaseMs, now())) return false
+    if (!researchAttemptRepo.acquireLease(attempt.id, executorId, ownershipToken, leaseMs, now())) {
+      const run = researchRunRepo.get(runId)
+      if (run) recordDeepResearchLeaseRejectedWrite({ profile: run.profile, depth: run.depth, phase: run.phase })
+      return false
+    }
+    const executionStartedAt = now()
 
     const controller = new AbortController()
+    activeAbortControllers.set(runId, { attemptId: attempt.id, controller })
     let leaseLost = false
     const heartbeat = () => {
       if (!researchAttemptRepo.heartbeat(attempt.id, executorId, ownershipToken, leaseMs, now())) {
@@ -120,6 +136,14 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
       }
 
       const result = await invoke(context)
+      // A provider that cannot abort may still resolve. Never let that result
+      // promote the Run or persist a downstream terminal outcome after cancel.
+      if (controller.signal.aborted || cancellationRequested(runId)) {
+        const completed = researchAttemptRepo.finishOwned({
+          attemptId: attempt.id, executorId, ownershipToken, status: 'cancelled', now: now(),
+        })
+        return completed !== null && !leaseLost
+      }
       // Suspending for clarification is not a terminal outcome. Release this
       // executor's short lease so the command-service resume path can claim
       // the same active Attempt with a fresh ownership token.
@@ -177,6 +201,18 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
       // This is a no-op after finishOwned; it only clears a still-owned lease
       // on an interruption path and cannot clear a replacement executor lease.
       researchAttemptRepo.releaseLease(attempt.id, executorId, ownershipToken)
+      const finalRun = researchRunRepo.get(runId)
+      if (finalRun) {
+        const telemetryContext = { profile: finalRun.profile, depth: finalRun.depth, phase: finalRun.phase }
+        recordDeepResearchAttemptDuration(now() - executionStartedAt, telemetryContext)
+        const cancellationRequestedAt = finalRun.cancellation?.requestedAt ?? null
+        if (cancellationRequestedAt != null || finalRun.status === 'cancelling' || finalRun.status === 'cancelled') {
+          if (cancellationRequestedAt != null) recordDeepResearchCancellationLatency(Math.max(0, now() - cancellationRequestedAt), telemetryContext)
+          // Every provider launch is guarded before invocation; a cancelled execution therefore contributes zero new calls.
+          recordDeepResearchExternalCallsAfterCancellation(0, telemetryContext)
+        }
+      }
+      if (activeAbortControllers.get(runId)?.attemptId === attempt.id) activeAbortControllers.delete(runId)
     }
   }
 

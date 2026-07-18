@@ -239,6 +239,20 @@ export interface ResearchRunExecutionDto {
   attempt: ResearchRunAttemptDto
 }
 
+/** HTTP-safe attempt projection. Lease ownership and executor internals never leave the server. */
+export interface ResearchRunAttemptSummaryDto {
+  id: string
+  ordinal: number
+  trigger: ResearchAttemptTrigger
+  status: ResearchAttemptStatus
+  startCheckpointKey: string | null
+  endCheckpointKey: string | null
+  error: ResearchRunErrorDto | null
+  startedAt: number | null
+  endedAt: number | null
+  createdAt: number
+}
+
 export interface ResearchRunCheckpointDto {
   id: string
   runId: string
@@ -252,6 +266,24 @@ export interface ResearchRunCheckpointDto {
   outputFingerprint: string | null
   replayPolicy: ResearchCheckpointReplayPolicy
   createdAt: number
+}
+
+/** HTTP-safe checkpoint projection. Fingerprints are internal replay/audit data. */
+export interface ResearchRunCheckpointSummaryDto {
+  id: string
+  attemptId: string | null
+  sequence: number
+  checkpointKey: string
+  phase: string
+  status: ResearchCheckpointStatus
+  resumeCursor: ResearchCheckpointCursorDto
+  replayPolicy: ResearchCheckpointReplayPolicy
+  createdAt: number
+}
+
+export interface ResearchHistoryPageDto<T> {
+  items: T[]
+  nextCursor: string | null
 }
 
 export type CoveragePolicyV2GapCode =
@@ -372,6 +404,23 @@ export interface ResearchIterationDto {
   plan?: ResearchIterationPlanDto
   createdAt: number
   completedAt: number | null
+}
+
+/** Additive V2 lifecycle projection used by detail and paginated history endpoints. */
+export interface ResearchRunLifecycleDto {
+  currentAttempt: ResearchRunAttemptSummaryDto | null
+  resumeCheckpoint: ResearchRunCheckpointSummaryDto | null
+  assessment: ResearchCoverageAssessmentDto | null
+  attemptHistory: ResearchHistoryPageDto<ResearchRunAttemptSummaryDto>
+  iterationHistory: ResearchHistoryPageDto<ResearchIterationDto>
+  budget: {
+    limit: ResearchBudgetDto
+    usage: ResearchUsageDto
+  }
+  stopReason: ResearchLoopDecisionDto | null
+  limitations: string[]
+  cancellation: ResearchCancellationDto | null
+  capabilities: ResearchRunCapabilitiesDto
 }
 
 export interface ResearchRunDto {
@@ -552,6 +601,8 @@ export interface ResearchQualityDto {
 }
 
 export interface ResearchEventDto {
+  /** Stable durable event identifier. Consumers can deduplicate replayed SSE events with it. */
+  eventId?: string
   runId: string
   sequence: number
   type: string
@@ -587,4 +638,6 @@ export interface ResearchRunDetailDto extends ResearchRunDto {
   attempts?: ResearchRunAttemptDto[]
   iterations?: ResearchIterationDto[]
   coverageAssessments?: ResearchCoverageAssessmentDto[]
+  /** V2 HTTP lifecycle summary. Existing V1 fields remain additive and readable. */
+  lifecycle?: ResearchRunLifecycleDto
 }

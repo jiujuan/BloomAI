@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchEvidenceCount } from '@server/telemetry/metrics'
 
@@ -28,7 +28,9 @@ export function createExtractEvidenceStep({ repositories, evidenceService }: { r
         checkpointWorkflowPhase(repositories, run, 'extracting_evidence', 'assessing_coverage')
         return inputData
       }
-      const result = await evidenceService.extract(run, repositories.researchQuestionRepo.list(run.id))
+      assertWorkflowNotCancelled(repositories, run.id)
+      const result = await evidenceService.extract(run, repositories.researchQuestionRepo.list(run.id), { signal: getWorkflowExecution(run.id)?.signal, isCancelled: () => { const current = repositories.researchRunRepo.get(run.id); return current?.status === 'cancelling' || current?.status === 'cancelled' || current?.cancellation?.requestedAt != null } })
+      assertWorkflowNotCancelled(repositories, run.id)
       repositories.researchEventRepo.append({
         runId: run.id,
         type: 'research.evidence.extracted',

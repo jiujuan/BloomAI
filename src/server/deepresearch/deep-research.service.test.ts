@@ -1,10 +1,11 @@
-﻿import fs from 'fs'
+import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StartResearchInput } from '@shared/deepresearch/contracts'
 import { createDeepResearchExecutor } from './executor'
 import { createDeepResearchService } from './deep-research.service'
+import { createCheckpointCursor, createCheckpointReplayFingerprint } from './domain/checkpoint-replay'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -136,13 +137,25 @@ describe('Deep Research service and executor', () => {
     await expect(service.resumeRun(run.id)).rejects.toMatchObject({ code: 'RESEARCH_CANCELLED' })
   })
 
-  it('marks stale active runs interrupted and preserves their resume phase during recovery', async () => {
-    const { researchRunRepo } = await loadTestContext()
+  it('marks an expired executing Attempt and Run interrupted while retaining its checkpoint', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo } = await loadTestContext()
     const service = createDeepResearchService({ runtime: { start: vi.fn(), resume: vi.fn() } })
     const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
     researchRunRepo.transitionWithEvent(run.id, 'planning')
     researchRunRepo.transitionWithEvent(run.id, 'researching')
-    expect(researchRunRepo.acquireLease(run.id, 'expired-worker', 1_000, 1_000)).toBe(true)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: attempt.id,
+      checkpointKey: 'workflow:extracting_evidence:v1',
+      phase: 'extracting_evidence',
+      status: 'completed',
+      resumeCursor: createCheckpointCursor(run, 'extracting_evidence', 0),
+      inputFingerprint: createCheckpointReplayFingerprint(run),
+      replayPolicy: 'reuse',
+      createdAt: 1_001,
+    })
+    expect(researchAttemptRepo.acquireLease(attempt.id, 'expired-worker', 'lease-token', 1_000, 1_000)).toBe(true)
 
     await service.recoverInterruptedRuns(2_001)
 
@@ -151,32 +164,46 @@ describe('Deep Research service and executor', () => {
       phase: 'interrupted',
       resumePhase: 'researching',
     })
+    expect(researchAttemptRepo.get(attempt.id)).toMatchObject({ status: 'interrupted', endCheckpointKey: null, leaseExpiresAt: null })
+    expect(researchCheckpointRepo.list(run.id)).toMatchObject([expect.objectContaining({ checkpointKey: 'workflow:extracting_evidence:v1' })])
   })
 
-  it('inspects Mastra workflow state through the executor during recovery', async () => {
-    const { researchRunRepo } = await loadTestContext()
-    const getWorkflowRunState = vi.fn(async () => ({ status: 'suspended' as const }))
-    const executor = createDeepResearchExecutor({
-      runtime: {
-        start: vi.fn(async () => undefined),
-        resume: vi.fn(async () => undefined),
-        getWorkflowRunState,
-      },
-      executorId: 'recovery-executor-test',
-    })
-    const service = createDeepResearchService({ runtime: executor })
+  it('replays an expired Attempt lease through one auto-resume command without duplicating its checkpoint', async () => {
+    const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo } = await loadTestContext()
+    process.env.DEEP_RESEARCH_AUTO_RESUME = 'true'
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
     const run = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
-    researchRunRepo.setWorkflowRunId(run.id, 'workflow-through-executor')
     researchRunRepo.transitionWithEvent(run.id, 'planning')
     researchRunRepo.transitionWithEvent(run.id, 'researching')
-    expect(researchRunRepo.acquireLease(run.id, 'expired-worker', 1_000, 1_000)).toBe(true)
+    const interruptedAttempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    researchCheckpointRepo.append({
+      runId: run.id,
+      attemptId: interruptedAttempt.id,
+      checkpointKey: 'workflow:extracting_evidence:v1',
+      phase: 'extracting_evidence',
+      status: 'completed',
+      resumeCursor: createCheckpointCursor(run, 'extracting_evidence', 0),
+      inputFingerprint: createCheckpointReplayFingerprint(run),
+      replayPolicy: 'reuse',
+      createdAt: 1_001,
+    })
+    expect(researchAttemptRepo.acquireLease(interruptedAttempt.id, 'expired-worker', 'lease-token', 1_000, 1_000)).toBe(true)
 
-    await service.recoverInterruptedRuns(2_001)
+    await Promise.all([service.recoverInterruptedRuns(2_001), service.recoverInterruptedRuns(2_001)])
 
-    expect(getWorkflowRunState).toHaveBeenCalledWith('workflow-through-executor')
-    expect(researchRunRepo.get(run.id)).toMatchObject({ status: 'interrupted' })
+    const attempts = researchAttemptRepo.listForRun(run.id)
+    expect(researchRunRepo.get(run.id)).toMatchObject({ status: 'queued' })
+    expect(attempts).toHaveLength(2)
+    expect(attempts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: interruptedAttempt.id, status: 'interrupted' }),
+      expect.objectContaining({ trigger: 'auto_resume', status: 'queued', startCheckpointKey: 'workflow:extracting_evidence:v1' }),
+    ]))
+    expect(researchCheckpointRepo.list(run.id)).toHaveLength(1)
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.run.interrupted')).toHaveLength(1)
+    expect(researchEventRepo.list(run.id).filter((event) => event.type === 'research.run.resumed')).toHaveLength(1)
+    expect(runtime.start).toHaveBeenCalledTimes(1)
   })
-
   it('persists auto-resume recovery command keys across coordinator instances', async () => {
     const { client, researchRunRepo } = await loadTestContext()
     const { createDeepResearchRecoveryCoordinator } = await import('./recovery')

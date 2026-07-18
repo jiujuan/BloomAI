@@ -522,3 +522,40 @@ describe('DEEP_RESEARCH_AUTO_RESUME config', () => {
     }
   })
 })
+
+describe('Deep Research attempt lease recovery', () => {
+  it('uses the attempt lease as the recovery authority and dispatches one idempotent auto-resume', async () => {
+    const repo = new MemoryResearchRunRepo([run({ id: 'attempt-expired', currentAttemptId: 'attempt-1' })])
+    const expired = [{ id: 'attempt-1', runId: 'attempt-expired', executorId: 'dead-worker', leaseExpiresAt: 1_000 }]
+    const attemptRepo = {
+      listExpiredActive: vi.fn(() => expired.splice(0)),
+      interruptExpired: vi.fn(() => repo.transitionWithEvent('attempt-expired', 'interrupted', { phase: 'interrupted', resumePhase: 'researching' })),
+    }
+    const enqueueResume = vi.fn(async (runId: string) => {
+      repo.transitionWithEvent(runId, 'queued', { phase: 'queued', resumePhase: 'researching' })
+    })
+    const reconciler = { reconcileRun: vi.fn((runId: string) => ({ runId, reconciled: true, diagnostics: { checkpointKey: 'workflow:researching:v1', queryCount: 0, sourceCount: 0, snapshotCount: 0, evidenceCount: 0, orphanSnapshotCount: 0, orphanEvidenceCount: 0, registeredArtifactTypes: [], artifactRebuildRequired: false } })) }
+
+    const options = { researchRunRepo: repo, attemptRepo, reconciler, enqueueResume, isAutoResumeEnabled: () => true, claimedCommandKeys: new Set<string>() }
+    const [first, second] = await Promise.all([
+      createDeepResearchRecoveryCoordinator(options).recoverInterruptedRuns(2_000),
+      createDeepResearchRecoveryCoordinator(options).recoverInterruptedRuns(2_000),
+    ])
+
+    expect(attemptRepo.interruptExpired).toHaveBeenCalledTimes(1)
+    expect(reconciler.reconcileRun).toHaveBeenCalledTimes(1)
+    expect(enqueueResume).toHaveBeenCalledTimes(1)
+    expect(first.interrupted.length + second.interrupted.length).toBe(1)
+    expect(repo.get('attempt-expired')).toMatchObject({ status: 'queued' })
+  })
+
+  it('does not route cancelled or non-retryable failed Runs into auto-resume', async () => {
+    const repo = new MemoryResearchRunRepo([
+      run({ id: 'cancelled', status: 'cancelled', phase: 'cancelled' }),
+      run({ id: 'failed', status: 'failed', phase: 'failed', error: { code: 'QUALITY', message: 'not retryable', retryable: false } }),
+    ])
+    const enqueueResume = vi.fn(async () => undefined)
+    await createDeepResearchRecoveryCoordinator({ researchRunRepo: repo, attemptRepo: { listExpiredActive: () => [], interruptExpired: () => undefined }, enqueueResume, isAutoResumeEnabled: () => true }).recoverInterruptedRuns(2_000)
+    expect(enqueueResume).not.toHaveBeenCalled()
+  })
+})

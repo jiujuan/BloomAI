@@ -1,9 +1,10 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchClaimDto, ResearchReportSectionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { resolveMastraModel } from '../../model-resolver'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 
 export interface RepairInstruction { sectionId: string; claimId: string; limitation: string }
-export interface ReportCritic { review(input: { run: ResearchRunDto; sections: ResearchReportSectionDto[]; claims: ResearchClaimDto[] }): Promise<RepairInstruction[]> }
+export interface ReportCritic { review(input: { run: ResearchRunDto; sections: ResearchReportSectionDto[]; claims: ResearchClaimDto[] }, options?: { signal?: AbortSignal }): Promise<RepairInstruction[]> }
 
 export const reportCriticAgent = new Agent({
   id: 'deep-research-report-critic',
@@ -13,11 +14,14 @@ export const reportCriticAgent = new Agent({
 })
 
 export function createDeterministicReportCritic(): ReportCritic {
-  return { async review({ claims }) {
-    return claims.filter((claim) => claim.verificationStatus === 'unsupported').map((claim) => ({
+  return { async review({ claims }, options = {}) {
+    throwIfCancellationRequested(options)
+    const repairs = claims.filter((claim) => claim.verificationStatus === 'unsupported').map((claim) => ({
       sectionId: claim.sectionId,
       claimId: claim.id,
       limitation: 'This claim could not be verified against the available evidence and is retained only as a disclosed limitation.',
     }))
+    throwIfCancellationRequested(options)
+    return repairs
   } }
 }

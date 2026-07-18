@@ -1,5 +1,6 @@
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 import { executeLegacyToolCapability } from '@server/skills/policy/capability-broker'
+import { isCancellationRequested, throwIfCancellationRequested, type ResearchCancellationSignal } from '@server/deepresearch/domain/cancellation'
 import type { DiscoveredResearchSource } from './source-curator'
 
 export interface SearchRequest {
@@ -20,6 +21,7 @@ export interface WorkflowToolRequest {
   toolId: string
   input: Record<string, unknown>
   sessionId?: string
+  signal?: AbortSignal
 }
 
 export type WorkflowToolExecutor = (request: WorkflowToolRequest) => Promise<{ output: unknown }>
@@ -29,18 +31,23 @@ function isRetryableError(error: unknown): boolean {
   return /timeout|timed out|rate.?limit|\b429\b|provider unavailable|\b503\b|temporar/i.test(message)
 }
 
-async function retryWithinDeadline<T>(operation: () => Promise<T>, deadlineAt: number | null, sleep: (ms: number) => Promise<void>): Promise<T> {
+async function retryWithinDeadline<T>(operation: () => Promise<T>, deadlineAt: number | null, sleep: (ms: number) => Promise<void>, cancellation: ResearchCancellationSignal = {}): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    throwIfCancellationRequested(cancellation)
     if (deadlineAt !== null && Date.now() >= deadlineAt) break
     try {
-      return await operation()
+      const value = await operation()
+      throwIfCancellationRequested(cancellation)
+      return value
     } catch (error) {
       lastError = error
       if (!isRetryableError(error) || attempt === 2) throw error
       const delay = 100 * 2 ** attempt
       if (deadlineAt !== null && Date.now() + delay >= deadlineAt) break
+      throwIfCancellationRequested(cancellation)
       await sleep(delay)
+      throwIfCancellationRequested(cancellation)
     }
   }
   throw lastError ?? new Error('Deep Research search deadline exhausted.')
@@ -86,9 +93,10 @@ export function createSearchService(options: { executeTool?: WorkflowToolExecuto
   const isCancelled = options.isCancelled ?? (() => false)
 
   return {
-    async search(run: ResearchRunDto, requests: SearchRequest[], requestOptions: { isCancelled?: () => boolean; onExecution?: (execution: SearchExecution) => Promise<void> | void } = {}): Promise<SearchExecution[]> {
+    async search(run: ResearchRunDto, requests: SearchRequest[], requestOptions: { signal?: AbortSignal; isCancelled?: () => boolean; onExecution?: (execution: SearchExecution) => Promise<void> | void } = {}): Promise<SearchExecution[]> {
       const remainingSourceBudget = Math.max(1, run.budget.maxNormalizedSources - run.usage.normalizedSources)
-      const cancelled = requestOptions.isCancelled ?? (() => isCancelled(run.id))
+      const cancelled = () => isCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: requestOptions.isCancelled ?? (() => isCancelled(run.id)) })
+      throwIfCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: cancelled })
       return mapWithConcurrency(
         requests,
         run.budget.searchConcurrency,
@@ -100,20 +108,24 @@ export function createSearchService(options: { executeTool?: WorkflowToolExecuto
                 toolId: 'web_search',
                 input: { query: request.query, limit: Math.min(8, remainingSourceBudget), idempotencyKey: request.idempotencyKey ?? request.id },
                 sessionId: run.sessionId ?? run.id,
+                signal: requestOptions.signal,
               }),
               run.usage.deadlineAt,
               sleep,
+              { signal: requestOptions.signal, isCancellationRequested: cancelled },
             )
+            throwIfCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: cancelled })
             const execution: SearchExecution = { ...parseSearchOutput(request.id, result.output), error: null }
             await requestOptions.onExecution?.(execution)
             return execution
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const wasCancelled = isCancellationRequested({ signal: requestOptions.signal, isCancellationRequested: cancelled })
+            const message = wasCancelled ? 'Deep Research run was cancelled.' : error instanceof Error ? error.message : String(error)
             const execution: SearchExecution = {
               queryId: request.id,
               provider: null,
               candidates: [],
-              error: { code: 'RESEARCH_SEARCH_FAILED', message, retryable: isRetryableError(error) },
+              error: { code: wasCancelled ? 'RESEARCH_CANCELLED' : 'RESEARCH_SEARCH_FAILED', message, retryable: wasCancelled ? false : isRetryableError(error) },
             }
             await requestOptions.onExecution?.(execution)
             return execution

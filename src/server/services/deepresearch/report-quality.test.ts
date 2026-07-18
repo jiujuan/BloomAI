@@ -332,7 +332,7 @@ describe('Deep Research report quality', () => {
     }
     const sections = [createSection('section-a', 'executive-summary', 1)]
     const artifacts = new ArtifactService({ reportRepo, dataDir }).write({
-      run: createRun({ brief }),
+      run: createRun({ brief, currentAttemptId: 'attempt-artifact-write' }),
       sections,
       claims: [createClaim('claim-a', 'section-a')],
       citations: [createCitation('citation-a', 'claim-a', 'evidence-a')],
@@ -354,6 +354,18 @@ describe('Deep Research report quality', () => {
     const artifactDirectory = path.join(dataDir, 'deepresearch', 'runs', runId)
     expect(fs.readFileSync(path.join(artifactDirectory, 'report.md'), 'utf8')).toContain('# Enterprise AI assistant market research')
     expect(JSON.parse(fs.readFileSync(path.join(artifactDirectory, 'report.json'), 'utf8'))).toMatchObject({ runId, quality: { releaseStatus: 'completed' } })
+    const reportManifest = JSON.parse(fs.readFileSync(path.join(artifactDirectory, 'report.md.reconciliation.json'), 'utf8'))
+    expect(reportManifest).toMatchObject({
+      version: 1,
+      runId,
+      attemptId: 'attempt-artifact-write',
+      type: 'report_markdown',
+      fileName: 'report.md',
+      registrationState: 'registered',
+      contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      generatedAt: expect.any(Number),
+    })
     const chinese = new ArtifactService({ reportRepo, dataDir }).writeChineseMarkdown(runId, '# \u4e2d\u6587\u62a5\u544a\n')
     expect(chinese.type).toBe('report_markdown_zh_cn')
     expect(fs.readFileSync(path.join(artifactDirectory, 'report.zh-CN.md'), 'utf8')).toContain('\u4e2d\u6587\u62a5\u544a')

@@ -2,7 +2,7 @@ import { Agent } from '@mastra/core/agent'
 import { resolveMastraModel } from '../../model-resolver'
 
 export interface ReportTranslator {
-  translate(input: { markdown: string }): Promise<string>
+  translate(input: { markdown: string }, options?: { signal?: AbortSignal }): Promise<string>
 }
 
 export const reportTranslatorAgent = new Agent({
@@ -29,7 +29,8 @@ export function isPredominantlyEnglish(markdown: string): boolean {
 
 export function createMastraReportTranslator(): ReportTranslator {
   return {
-    async translate({ markdown }) {
+    async translate({ markdown }, options = {}) {
+      if (options.signal?.aborted) throw Object.assign(new Error('Deep Research execution was cancelled.'), { name: 'AbortError', code: 'ABORT_ERR' })
       const response = await reportTranslatorAgent.generate([
         'Translate the following completed research report into Simplified Chinese.',
         'Return only the translated Markdown. Preserve every heading level, citation marker such as [1] or [^1], URL, Markdown link destination, number, date, qualifier, and limitation. Do not add, omit, reinterpret, or improve facts.',
@@ -38,6 +39,7 @@ export function createMastraReportTranslator(): ReportTranslator {
         markdown,
         '</report>',
       ].join('\n\n'))
+      if (options.signal?.aborted) throw Object.assign(new Error('Deep Research execution was cancelled.'), { name: 'AbortError', code: 'ABORT_ERR' })
       const translated = response.text.trim()
       if (!translated) throw new Error('Chinese report translation was empty.')
       assertProtectedTokens(markdown, translated)

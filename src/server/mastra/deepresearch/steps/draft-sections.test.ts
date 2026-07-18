@@ -62,6 +62,6 @@ describe('createDraftSectionsStep', () => {
     expect(writer.draft).toHaveBeenCalledWith(expect.objectContaining({
       section,
       evidence: [evidence[1]],
-    }))
+    }), { signal: undefined })
   })
 })

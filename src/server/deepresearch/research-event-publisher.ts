@@ -4,10 +4,19 @@ type ResearchEventListener = (event: ResearchEventDto) => void
 
 const listenersByRunId = new Map<string, Set<ResearchEventListener>>()
 
+/**
+ * Normalizes the additive V2 event ID even for in-process test or compatibility
+ * publishers that have not yet populated the durable database event ID.
+ */
+function withStableEventId(event: ResearchEventDto): ResearchEventDto {
+  return event.eventId ? event : { ...event, eventId: `${event.runId}:${event.sequence}` }
+}
+
 export function publishResearchEvent(event: ResearchEventDto): void {
-  for (const listener of listenersByRunId.get(event.runId) ?? []) {
+  const published = withStableEventId(event)
+  for (const listener of listenersByRunId.get(published.runId) ?? []) {
     try {
-      listener(event)
+      listener(published)
     } catch {
       // Listener failures must never affect durable event persistence.
     }

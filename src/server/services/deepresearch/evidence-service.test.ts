@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   ResearchEvidenceDto,
   ResearchQuestionDto,
@@ -270,5 +270,33 @@ describe('EvidenceService', () => {
 
     expect(shouldStopGapFill(state)).toBe(false)
     expect(shouldStopGapFill({ ...state, stopDecision: 'stop_no_material_gain' })).toBe(true)
+  })
+  it('does not persist evidence or coverage when an aborted analyst returns after extraction cancellation', async () => {
+    const controller = new AbortController()
+    const passage = 'The enterprise AI assistant market grew by twenty percent in the most recent reporting period, according to the official methodology published alongside the dataset.'
+    const startOffset = content.indexOf(passage)
+    const analyst: EvidenceAnalyst = {
+      analyze: vi.fn(async (_input, options) => {
+        expect(options?.signal).toBe(controller.signal)
+        controller.abort()
+        return [{
+          questionId: question.id,
+          snapshotId: snapshot.id,
+          passage,
+          summary: 'The source reports twenty percent growth using a published methodology.',
+          stance: 'supporting' as const,
+          confidence: 0.9,
+          startOffset,
+          endOffset: startOffset + passage.length,
+        }]
+      }),
+    }
+    const { service, evidence, coverage } = createService(analyst)
+
+    await expect(service.extract(run, [question], { signal: controller.signal })).rejects.toMatchObject({ code: 'RESEARCH_CANCELLED' })
+
+    expect(analyst.analyze).toHaveBeenCalledTimes(1)
+    expect(evidence).toHaveLength(0)
+    expect(coverage).toHaveLength(0)
   })
 })

@@ -1,9 +1,10 @@
 import { Agent } from '@mastra/core/agent'
 import type { ResearchEvidenceDto, ResearchReportSectionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { resolveMastraModel } from '../../model-resolver'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 
 export interface SectionWriter {
-  draft(input: { run: ResearchRunDto; section: ResearchReportSectionDto; evidence: ResearchEvidenceDto[] }): Promise<string>
+  draft(input: { run: ResearchRunDto; section: ResearchReportSectionDto; evidence: ResearchEvidenceDto[] }, options?: { signal?: AbortSignal }): Promise<string>
 }
 
 export const sectionWriterAgent = new Agent({
@@ -15,7 +16,8 @@ export const sectionWriterAgent = new Agent({
 
 export function createDeterministicSectionWriter(): SectionWriter {
   return {
-    async draft({ run, section, evidence }) {
+    async draft({ run, section, evidence }, options = {}) {
+      throwIfCancellationRequested(options)
       if (!evidence.length) {
         if (section.title === 'scope-and-method') {
           return 'Scope: ' + (run.brief?.scope ?? run.topic) + '.\n\nMethod: Findings are limited to the saved research questions and their collected evidence passages.'
@@ -25,7 +27,9 @@ export function createDeterministicSectionWriter(): SectionWriter {
         }
         return 'Evidence was insufficient to verify findings for the "' + section.title + '" section. This limitation is disclosed for the reader.'
       }
-      return evidence.map((item) => item.summary + ' ' + item.passage).join('\n\n')
+      const draft = evidence.map((item) => item.summary + ' ' + item.passage).join('\n\n')
+      throwIfCancellationRequested(options)
+      return draft
     },
   }
 }

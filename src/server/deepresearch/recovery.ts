@@ -4,6 +4,7 @@ import type { ResearchRunDto, ResearchRunFilter, ResearchRunStatus } from '@shar
 import { isDeepResearchAutoResumeEnabled } from '../config/config'
 import { getOrmDb } from '../db/client'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
+import { createDeepResearchReconciliationService, type ReconciliationResult } from './reconciliation'
 import { research_recovery_commands, research_runs } from '../db/schema'
 
 const RECOVERY_LEASE_MS = 30_000
@@ -54,6 +55,15 @@ export interface DeepResearchRecoverySkippedRun {
   run: ResearchRunDto
 }
 
+export interface DeepResearchRecoveryAttemptRepository {
+  listExpiredActive(now?: number): Array<{ id: string; runId: string; executorId: string | null; leaseExpiresAt: number | null }>
+  interruptExpired(input: { attemptId: string; now?: number }): ResearchRunDto | undefined
+}
+
+export interface DeepResearchRecoveryReconciler {
+  reconcileRun(runId: string): ReconciliationResult
+}
+
 export interface DeepResearchRecoveryRunRepository {
   list(filter?: ResearchRunFilter): ResearchRunDto[]
   get(id: string): ResearchRunDto | undefined
@@ -65,6 +75,9 @@ export interface DeepResearchRecoveryRunRepository {
 
 export interface DeepResearchRecoveryCoordinatorOptions {
   researchRunRepo?: DeepResearchRecoveryRunRepository
+  /** Attempt leases are authoritative when supplied by the DR2-10 executor repository. */
+  attemptRepo?: DeepResearchRecoveryAttemptRepository
+  reconciler?: DeepResearchRecoveryReconciler
   getWorkflowRunState?: (workflowRunId: string) => Promise<DeepResearchWorkflowRunState | null>
   enqueueResume?: (runId: string, commandKey: string) => Promise<unknown>
   claimCommandKey?: (runId: string, commandKey: string) => boolean | Promise<boolean>
@@ -81,6 +94,7 @@ export interface DeepResearchRecoveryResult {
   autoResumed: ResearchRunDto[]
   corrections: DeepResearchRecoveryCorrection[]
   skipped: DeepResearchRecoverySkippedRun[]
+  reconciliation: ReconciliationResult[]
 }
 
 const defaultClaimedRecoveryCommandKeys = new Set<string>()
@@ -192,6 +206,10 @@ function beginPersistedRecoveryCommandDispatch(runId: string, commandKey: string
 
 export function createDeepResearchRecoveryCoordinator(options: DeepResearchRecoveryCoordinatorOptions = {}) {
   const repository: DeepResearchRecoveryRunRepository = options.researchRunRepo ?? researchRunRepo
+  const attemptRepository = options.attemptRepo
+  const reconciler = options.reconciler ?? (options.researchRunRepo
+    ? { reconcileRun: (runId: string): ReconciliationResult => ({ runId, reconciled: false, diagnostics: { checkpointKey: null, queryCount: 0, sourceCount: 0, snapshotCount: 0, evidenceCount: 0, orphanSnapshotCount: 0, orphanEvidenceCount: 0, registeredArtifactTypes: [], artifactRebuildRequired: false } }) }
+    : createDeepResearchReconciliationService())
   const leaseMs = options.leaseMs ?? RECOVERY_LEASE_MS
   const isAutoResumeEnabled = options.isAutoResumeEnabled ?? isDeepResearchAutoResumeEnabled
   const recoveryExecutorId = options.recoveryExecutorId ?? 'deepresearch-recovery-' + uuidv4()
@@ -243,6 +261,31 @@ export function createDeepResearchRecoveryCoordinator(options: DeepResearchRecov
       workflowStatus,
       run: snapshot.run,
     }
+  }
+
+  async function interruptExpiredAttemptRuns(now: number): Promise<{ interrupted: ResearchRunDto[]; corrections: DeepResearchRecoveryCorrection[]; skipped: DeepResearchRecoverySkippedRun[] }> {
+    if (!attemptRepository) return interruptExpiredActiveRuns(now)
+    const interrupted: ResearchRunDto[] = []
+    const corrections: DeepResearchRecoveryCorrection[] = []
+    for (const attempt of attemptRepository.listExpiredActive(now)) {
+      const before = repository.get(attempt.runId)
+      if (!before || !RECOVERABLE_ACTIVE_STATUSES.includes(before.status)) continue
+      const corrected = attemptRepository.interruptExpired({ attemptId: attempt.id, now })
+      if (!corrected) continue
+      interrupted.push(corrected)
+      corrections.push({
+        runId: corrected.id,
+        fromStatus: before.status,
+        toStatus: 'interrupted',
+        leaseExpired: true,
+        leaseExpiresAt: attempt.leaseExpiresAt,
+        executorId: attempt.executorId,
+        workflowRunId: before.workflowRunId,
+        workflowStatus: null,
+        run: corrected,
+      })
+    }
+    return { interrupted, corrections, skipped: [] }
   }
 
   async function interruptExpiredActiveRuns(now: number): Promise<{ interrupted: ResearchRunDto[]; corrections: DeepResearchRecoveryCorrection[]; skipped: DeepResearchRecoverySkippedRun[] }> {
@@ -361,9 +404,12 @@ export function createDeepResearchRecoveryCoordinator(options: DeepResearchRecov
 
   return Object.freeze({
     async recoverInterruptedRuns(now = Date.now()): Promise<DeepResearchRecoveryResult> {
-      const { interrupted, corrections, skipped } = await interruptExpiredActiveRuns(now)
+      const { interrupted, corrections, skipped } = await interruptExpiredAttemptRuns(now)
+      // Reconciliation is deliberately completed before resume dispatch. It only
+      // touches idempotent repositories and does not expose report content or paths.
+      const reconciliation = interrupted.map((run) => reconciler.reconcileRun(run.id))
       const autoResumed = await autoResumeInterruptedRuns()
-      return { interrupted, autoResumed, corrections, skipped }
+      return { interrupted, autoResumed, corrections, skipped, reconciliation }
     },
   })
 }

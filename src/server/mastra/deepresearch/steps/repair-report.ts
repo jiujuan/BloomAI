@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { ReportCritic } from '../agents/report-critic'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 export function createRepairReportStep({ repositories, critic }: { repositories: DeepResearchRepositories; critic: ReportCritic }) {
@@ -15,7 +15,9 @@ export function createRepairReportStep({ repositories, critic }: { repositories:
       if (isReplayPastPhase(run.id, 'repair_report')) return { runId: run.id }
       const sections = repositories.researchReportRepo.listSections(run.id)
       const claims = repositories.researchReportRepo.listClaims(run.id)
-      const repairs = await critic.review({ run, sections, claims })
+      assertWorkflowNotCancelled(repositories, run.id)
+      const repairs = await critic.review({ run, sections, claims }, { signal: getWorkflowExecution(run.id)?.signal })
+      assertWorkflowNotCancelled(repositories, run.id)
       for (const section of sections) {
         const repair = repairs.find((item) => item.sectionId === section.id)
         const verifiedText = repair ? (section.draft ?? '') + '\n\n' + repair.limitation : (section.draft ?? '')

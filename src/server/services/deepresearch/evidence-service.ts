@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createEvidenceFingerprint } from '@server/deepresearch/domain/idempotency'
 import { z } from 'zod'
+import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 import type {
   ResearchCoverageAssessmentV2Dto,
   ResearchCoverageDto,
@@ -49,7 +50,7 @@ export interface EvidenceAnalyst {
     run: ResearchRunDto
     questions: ResearchQuestionDto[]
     packets: EvidencePacket[]
-  }): Promise<EvidenceAnalysis[]>
+  }, options?: { signal?: AbortSignal }): Promise<EvidenceAnalysis[]>
 }
 
 export interface EvidenceServiceSourceRepository {
@@ -177,7 +178,8 @@ export class EvidenceService {
       })
   }
 
-  async extract(run: ResearchRunDto, questions: ResearchQuestionDto[]): Promise<EvidenceExtractionResult> {
+  async extract(run: ResearchRunDto, questions: ResearchQuestionDto[], cancellation: { signal?: AbortSignal; isCancelled?: () => boolean } = {}): Promise<EvidenceExtractionResult> {
+    throwIfCancellationRequested(cancellation)
     const snapshots = new Map(this.options.sourceRepo.listSnapshots(run.id).map((snapshot) => [snapshot.id, snapshot]))
     // Evidence rows are the durable boundary for provider calls. A resume after
     // persistence but before coverage assessment must only analyse snapshots that
@@ -194,8 +196,9 @@ export class EvidenceService {
     const knownQuestionIds = new Set(questions.filter((question) => question.runId === run.id).map((question) => question.id))
     const existingEvidenceIds = new Set(persistedEvidence.map((evidence) => evidence.id))
     const analyses = packets.length > 0
-      ? await this.options.analyst.analyze({ run, questions, packets })
+      ? await this.options.analyst.analyze({ run, questions, packets }, { signal: cancellation.signal })
       : []
+    throwIfCancellationRequested(cancellation)
     let createdCount = 0
     let rejectedCount = 0
 

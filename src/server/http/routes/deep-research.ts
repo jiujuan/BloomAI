@@ -2,8 +2,14 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
 import type {
+  JsonObject,
   ResearchArtifactContent,
   ResearchClarificationInput,
+  ResearchCoverageAssessmentDto,
+  ResearchHistoryPageDto,
+  ResearchIterationDto,
+  ResearchRunAttemptSummaryDto,
+  ResearchRunCheckpointSummaryDto,
   ResearchEventDto,
   ResearchRunDetailDto,
   ResearchRunDto,
@@ -21,6 +27,10 @@ type DeepResearchHttpModule = {
   startResearch(input: StartResearchInput): Promise<ResearchRunDto>
   getRun(runId: string): MaybePromise<ResearchRunDetailDto | undefined>
   listRuns(filter?: ResearchRunFilter): MaybePromise<ResearchRunDto[]>
+  listAttemptHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchRunAttemptSummaryDto>>
+  listCheckpointHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchRunCheckpointSummaryDto>>
+  listIterationHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchIterationDto>>
+  listAssessmentHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchCoverageAssessmentDto>>
   listEvents(runId: string, afterSequence?: number): MaybePromise<ResearchEventDto[]>
   answerClarification(runId: string, input: ResearchClarificationInput): Promise<ResearchRunDto>
   cancelRun(runId: string): Promise<ResearchRunDto>
@@ -42,6 +52,12 @@ const listFilterSchema = z.object({
 })
 
 const afterSchema = z.coerce.number().int().min(0)
+const historyQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().min(1).max(200).optional(),
+})
+
+type HistoryQuery = z.infer<typeof historyQuerySchema>
 
 function errorResponse(c: any, status: 400 | 404 | 409 | 500, code: string, message: string) {
   return c.json({ error: { code, message } }, status)
@@ -52,7 +68,7 @@ function routeError(c: any, error: unknown) {
     return errorResponse(c, 400, 'RESEARCH_VALIDATION_ERROR', error.issues[0]?.message ?? 'Invalid Deep Research request.')
   }
   if (isResearchDomainError(error)) {
-    const status = error.code === 'RESEARCH_INVALID_TRANSITION' || error.code === 'RESEARCH_NOT_RUNNABLE' || error.code === 'RESEARCH_BUDGET_EXHAUSTED' ? 409 : 400
+    const status = ['RESEARCH_INVALID_TRANSITION', 'RESEARCH_NOT_RUNNABLE', 'RESEARCH_NOT_RESUMABLE', 'RESEARCH_BUDGET_EXHAUSTED', 'RESEARCH_CANCELLED'].includes(error.code) ? 409 : 400
     return errorResponse(c, status, error.code, error.message)
   }
   return errorResponse(c, 500, 'INTERNAL_ERROR', 'Internal server error')
@@ -83,6 +99,83 @@ function isResponse(value: unknown): value is Response {
   return value instanceof Response
 }
 
+const privatePayloadKey = /(?:token|secret|password|authorization|cookie|storage.?path|ownership|lease|executor|content|body|html|markdown|raw|answer)/i
+const absolutePath = /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/
+
+function publicUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return absolutePath.test(value) ? '[redacted]' : value
+  }
+}
+
+function redactJson(value: unknown, key = ''): unknown {
+  if (privatePayloadKey.test(key)) return undefined
+  if (typeof value === 'string') return publicUrl(value)
+  if (Array.isArray(value)) return value.map((item) => redactJson(item)).filter((item) => item !== undefined)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .map(([entryKey, entryValue]) => [entryKey, redactJson(entryValue, entryKey)] as const)
+      .filter(([, entryValue]) => entryValue !== undefined))
+  }
+  return value
+}
+
+/** One redaction boundary is shared by JSON replay and live SSE payloads. */
+export function toPublicResearchEvent(event: ResearchEventDto): ResearchEventDto {
+  return {
+    ...event,
+    eventId: event.eventId ?? `${event.runId}:${event.sequence}`,
+    payload: redactJson(event.payload) as JsonObject,
+  }
+}
+
+function toPublicResearchRun(run: ResearchRunDto): ResearchRunDto {
+  return {
+    ...run,
+    execution: run.execution ? {
+      attempt: {
+        ...run.execution.attempt,
+        workflowRunId: null,
+        executorId: null,
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+      },
+    } : null,
+  }
+}
+
+/** The long-lived detail route remains additive while hiding fetched bodies and sensitive URL components. */
+export function toPublicResearchRunDetail(run: ResearchRunDetailDto): ResearchRunDetailDto {
+  return {
+    ...run,
+    ...toPublicResearchRun(run),
+    sources: run.sources.map((source) => ({
+      ...source,
+      canonicalUrl: publicUrl(source.canonicalUrl),
+      originalUrl: source.originalUrl ? publicUrl(source.originalUrl) : undefined,
+      scores: redactJson(source.scores) as JsonObject,
+    })),
+    snapshots: run.snapshots.map((snapshot) => ({
+      ...snapshot,
+      content: '[redacted]',
+      metadata: redactJson(snapshot.metadata) as JsonObject,
+      finalUrl: publicUrl(snapshot.finalUrl),
+    })),
+    events: run.events.map(toPublicResearchEvent),
+  }
+}
+
+function parseHistoryQuery(c: any): HistoryQuery {
+  return historyQuerySchema.parse(c.req.query())
+}
+
 export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOptions = {}): Hono {
   const module = options.module ?? getDeepResearchModule()
   const routes = new Hono()
@@ -92,18 +185,18 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
   routes.post('/runs', async (c) => {
     try {
       const input = startResearchSchema.parse(await readJson(c))
-      return c.json({ data: await module.startResearch(input) }, 201)
+      return c.json({ data: toPublicResearchRun(await module.startResearch(input)) }, 201)
     } catch (error) { return routeError(c, error) }
   })
 
   routes.get('/runs', async (c) => {
-    try { return c.json({ data: await module.listRuns(buildFilter(c)) }) } catch (error) { return routeError(c, error) }
+    try { return c.json({ data: (await module.listRuns(buildFilter(c))).map(toPublicResearchRun) }) } catch (error) { return routeError(c, error) }
   })
 
   routes.get('/runs/:runId', async (c) => {
     try {
       const run = await requireRun(c, module, c.req.param('runId'))
-      return isResponse(run) ? run : c.json({ data: run })
+      return isResponse(run) ? run : c.json({ data: toPublicResearchRunDetail(run) })
     } catch (error) { return routeError(c, error) }
   })
 
@@ -112,7 +205,7 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
       if (isResponse(run)) return run
-      return c.json({ data: await module.listEvents(runId, parseAfter(c.req.query('after'))) })
+      return c.json({ data: (await module.listEvents(runId, parseAfter(c.req.query('after')))).map(toPublicResearchEvent) })
     } catch (error) { return routeError(c, error) }
   })
 
@@ -129,10 +222,12 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
         const enqueue = (event: ResearchEventDto) => {
           if (event.sequence <= cursor) return
           cursor = event.sequence
+          const publicEvent = toPublicResearchEvent(event)
           writeTail = writeTail.then(() => stream.writeSSE({
-            id: String(event.sequence),
-            event: event.type,
-            data: JSON.stringify(event),
+            // Numeric sequence keeps Last-Event-ID replay compatible; eventId in data is the V2 dedupe key.
+            id: String(publicEvent.sequence),
+            event: publicEvent.type,
+            data: JSON.stringify(publicEvent),
           }))
         }
         const unsubscribe = module.subscribeToEvents(runId, enqueue)
@@ -144,13 +239,49 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
     } catch (error) { return routeError(c, error) }
   })
 
+  routes.get('/runs/:runId/attempts', async (c) => {
+    try {
+      const runId = c.req.param('runId')
+      const run = await requireRun(c, module, runId)
+      if (isResponse(run)) return run
+      return c.json({ data: await module.listAttemptHistory(runId, parseHistoryQuery(c)) })
+    } catch (error) { return routeError(c, error) }
+  })
+
+  routes.get('/runs/:runId/checkpoints', async (c) => {
+    try {
+      const runId = c.req.param('runId')
+      const run = await requireRun(c, module, runId)
+      if (isResponse(run)) return run
+      return c.json({ data: await module.listCheckpointHistory(runId, parseHistoryQuery(c)) })
+    } catch (error) { return routeError(c, error) }
+  })
+
+  routes.get('/runs/:runId/iterations', async (c) => {
+    try {
+      const runId = c.req.param('runId')
+      const run = await requireRun(c, module, runId)
+      if (isResponse(run)) return run
+      return c.json({ data: await module.listIterationHistory(runId, parseHistoryQuery(c)) })
+    } catch (error) { return routeError(c, error) }
+  })
+
+  routes.get('/runs/:runId/assessments', async (c) => {
+    try {
+      const runId = c.req.param('runId')
+      const run = await requireRun(c, module, runId)
+      if (isResponse(run)) return run
+      return c.json({ data: await module.listAssessmentHistory(runId, parseHistoryQuery(c)) })
+    } catch (error) { return routeError(c, error) }
+  })
+
   routes.post('/runs/:runId/clarifications', async (c) => {
     try {
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
       if (isResponse(run)) return run
       const input = clarificationSchema.parse(await readJson(c))
-      return c.json({ data: await module.answerClarification(runId, input) })
+      return c.json({ data: toPublicResearchRun(await module.answerClarification(runId, input)) })
     } catch (error) { return routeError(c, error) }
   })
 
@@ -159,7 +290,7 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
       if (isResponse(run)) return run
-      return c.json({ data: await module.cancelRun(runId) })
+      return c.json({ data: toPublicResearchRun(await module.cancelRun(runId)) })
     } catch (error) { return routeError(c, error) }
   })
 
@@ -168,7 +299,7 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
       const runId = c.req.param('runId')
       const run = await requireRun(c, module, runId)
       if (isResponse(run)) return run
-      return c.json({ data: await module.resumeRun(runId) })
+      return c.json({ data: toPublicResearchRun(await module.resumeRun(runId)) })
     } catch (error) { return routeError(c, error) }
   })
 

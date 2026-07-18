@@ -5,7 +5,7 @@ import type { ClaimExtractor } from '../agents/claim-extractor'
 import type { CitationService } from '@server/services/deepresearch/citation-service'
 import { reportSectionJobSchema } from './build-outline'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 import { selectEvidenceForSection } from './section-evidence'
 
@@ -24,7 +24,9 @@ export function createExtractClaimsStep({ repositories, extractor, citationServi
       }
       const evidence = repositories.researchEvidenceRepo.list(run.id)
       for (const section of repositories.researchReportRepo.listSections(run.id)) {
-        const extracted = await extractor.extract({ run, section, evidence: evidence.slice(0, 3) })
+        assertWorkflowNotCancelled(repositories, run.id)
+        const extracted = await extractor.extract({ run, section, evidence: evidence.slice(0, 3) }, { signal: getWorkflowExecution(run.id)?.signal })
+        assertWorkflowNotCancelled(repositories, run.id)
         for (const [index, item] of extracted.entries()) {
           const claim = repositories.researchReportRepo.upsertClaim({
             runId: run.id,

@@ -1,7 +1,13 @@
-﻿import fs from 'node:fs'
+import fs from 'node:fs'
 import type {
   ResearchArtifactContent,
   ResearchAttemptTrigger,
+  ResearchCoverageAssessmentDto,
+  ResearchHistoryPageDto,
+  ResearchIterationDto,
+  ResearchRunAttemptSummaryDto,
+  ResearchRunCheckpointSummaryDto,
+  ResearchRunLifecycleDto,
   ResearchCheckpointCursorDto,
   ResearchClarificationInput,
   ResearchEventDto,
@@ -16,6 +22,8 @@ import { clarificationSchema, startResearchSchema } from '@shared/deepresearch/s
 import { researchAttemptRepo } from '../db/repositories/deepresearch/research-attempt.repo'
 import { researchCheckpointRepo } from '../db/repositories/deepresearch/research-checkpoint.repo'
 import { researchEventRepo } from '../db/repositories/deepresearch/research-event.repo'
+import { researchIterationRepo } from '../db/repositories/deepresearch/research-iteration.repo'
+import { researchCoverageAssessmentRepo } from '../db/repositories/deepresearch/research-coverage-assessment.repo'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
 import { researchReportRepo } from '../db/repositories/deepresearch/research-report.repo'
 import { subscribeToResearchEvents } from './research-event-publisher'
@@ -24,7 +32,8 @@ import { getResearchBudget } from './domain/budgets'
 import { createCheckpointCursor, createCheckpointReplayFingerprint } from './domain/checkpoint-replay'
 import { ResearchDomainError } from './domain/errors'
 import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
-import { recordDeepResearchCancellation, recordDeepResearchResume, type DeepResearchTelemetryContext } from '../telemetry/metrics'
+import { abortActiveDeepResearchExecution } from './executor'
+import { recordDeepResearchCancellation, recordDeepResearchCheckpointReuse, recordDeepResearchResume, recordDeepResearchResumeOutcome, type DeepResearchTelemetryContext } from '../telemetry/metrics'
 
 export interface DeepResearchScheduler {
   start(runId: string): Promise<unknown>
@@ -103,6 +112,76 @@ function activeCommandResult(run: ResearchRunDto): ResearchRunDto | null {
   return active ? commandResult(run, active) : null
 }
 
+export interface ResearchHistoryQuery {
+  limit?: number
+  cursor?: string
+}
+
+function attemptSummary(attempt: ResearchRunAttemptDto): ResearchRunAttemptSummaryDto {
+  return {
+    id: attempt.id,
+    ordinal: attempt.ordinal,
+    trigger: attempt.trigger,
+    status: attempt.status,
+    startCheckpointKey: attempt.startCheckpointKey,
+    endCheckpointKey: attempt.endCheckpointKey,
+    error: attempt.error,
+    startedAt: attempt.startedAt,
+    endedAt: attempt.endedAt,
+    createdAt: attempt.createdAt,
+  }
+}
+
+function checkpointSummary(checkpoint: ResearchRunCheckpointDto): ResearchRunCheckpointSummaryDto {
+  return {
+    id: checkpoint.id,
+    attemptId: checkpoint.attemptId,
+    sequence: checkpoint.sequence,
+    checkpointKey: checkpoint.checkpointKey,
+    phase: checkpoint.phase,
+    status: checkpoint.status,
+    resumeCursor: checkpoint.resumeCursor,
+    replayPolicy: checkpoint.replayPolicy,
+    createdAt: checkpoint.createdAt,
+  }
+}
+
+function pageHistory<T>(items: readonly T[], query: ResearchHistoryQuery, cursorOf: (item: T) => string): ResearchHistoryPageDto<T> {
+  const limit = Math.max(1, Math.min(query.limit ?? 20, 100))
+  const start = query.cursor ? Math.max(0, items.findIndex((item) => cursorOf(item) === query.cursor) + 1) : 0
+  const page = items.slice(start, start + limit)
+  const hasMore = start + page.length < items.length
+  return { items: page, nextCursor: hasMore && page.length > 0 ? cursorOf(page[page.length - 1]) : null }
+}
+
+function getLifecycle(run: ResearchRunDto): ResearchRunLifecycleDto {
+  const attempts = researchAttemptRepo.listForRun(run.id)
+  const checkpoints = researchCheckpointRepo.list(run.id)
+  const iterations = researchIterationRepo.list(run.id).slice().reverse()
+  const assessments = researchCoverageAssessmentRepo.list(run.id)
+  const currentAttempt = run.currentAttemptId ? attempts.find((item) => item.id === run.currentAttemptId) ?? null : null
+  const stopReason = iterations.find((item) => item.stopReason)?.stopReason ?? null
+  const limitations = [...new Set([
+    ...(run.quality?.limitations ?? []),
+    ...(assessments[0]?.limitations ?? []),
+    ...iterations.flatMap((item) => item.limitations),
+    ...(stopReason?.limitations ?? []),
+  ])]
+
+  return {
+    currentAttempt: currentAttempt ? attemptSummary(currentAttempt) : null,
+    resumeCheckpoint: checkpoints[0] ? checkpointSummary(checkpoints[0]) : null,
+    assessment: assessments[0] ?? null,
+    attemptHistory: pageHistory(attempts.map(attemptSummary), {}, (item) => String(item.ordinal)),
+    iterationHistory: pageHistory(iterations, {}, (item) => String(item.ordinal)),
+    budget: { limit: run.budget, usage: run.usage },
+    stopReason,
+    limitations,
+    cancellation: run.cancellation ?? null,
+    capabilities: run.capabilities!,
+  }
+}
+
 export function createDeepResearchService({ runtime }: CreateDeepResearchServiceOptions) {
   function dispatchStart(runId: string, commandKey: string): void {
     if (!markDeepResearchCommandDispatched(runId, commandKey)) return
@@ -151,13 +230,16 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       return startRun(runId, { ...options, trigger: 'auto_resume' })
     }
     if (observed.status === 'cancelled') {
+      recordDeepResearchResumeOutcome('rejected', telemetryContext(observed))
       throw new ResearchDomainError('RESEARCH_CANCELLED', 'Cancelled Deep Research Runs cannot be resumed: ' + runId, false)
     }
     if (observed.status === 'cancelling') {
+      recordDeepResearchResumeOutcome('rejected', telemetryContext(observed))
       throw new ResearchDomainError('RESEARCH_NOT_RUNNABLE', 'Deep Research Run is cancelling: ' + runId, false)
     }
     const canResume = observed.status === 'interrupted' || (observed.status === 'failed' && observed.error?.retryable === true)
     if (!canResume) {
+      recordDeepResearchResumeOutcome('rejected', telemetryContext(observed))
       throw new ResearchDomainError('RESEARCH_NOT_RESUMABLE', 'Deep Research Run is not resumable: ' + runId, false)
     }
 
@@ -179,6 +261,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       const current = requireRun(runId)
       const existing = activeCommandResult(current)
       if (existing || current.status === 'cancelling' || current.status === 'cancelled') return existing ?? commandResult(current)
+      recordDeepResearchResumeOutcome('rejected', telemetryContext(current))
       throw new ResearchDomainError('RESEARCH_NOT_RESUMABLE', 'Deep Research Run changed before it could resume: ' + runId, false)
     }
 
@@ -188,7 +271,10 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
       trigger,
       startCheckpointKey: checkpoint?.checkpointKey ?? (observed.resumePhase ? 'legacy:resume_from_planning' : null),
     })
-    recordDeepResearchResume(telemetryContext(resumed))
+    const resumeTelemetry = telemetryContext(resumed)
+    recordDeepResearchResume(resumeTelemetry)
+    recordDeepResearchResumeOutcome('succeeded', resumeTelemetry)
+    if (checkpoint) recordDeepResearchCheckpointReuse(resumeTelemetry)
     dispatchStart(runId, commandKey)
     return commandResult(requireRun(runId), attempt, checkpoint)
   }
@@ -208,6 +294,9 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
     for (let remaining = 1; remaining >= 0; remaining -= 1) {
       const cancelled = researchRunRepo.requestCancellationWithEventCas(runId, observed.stateVersion ?? 0, { reason: options.reason })
       if (cancelled) {
+        // Durable state is the truth; this only makes the current process react
+        // immediately instead of waiting for its next lease heartbeat.
+        abortActiveDeepResearchExecution(runId)
         recordDeepResearchCancellation(telemetryContext(cancelled))
         return commandResult(cancelled)
       }
@@ -242,11 +331,32 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
     startRun,
 
     getRun(runId: string): ResearchRunDetailDto | undefined {
-      return researchRunRepo.getDetail(runId)
+      const detail = researchRunRepo.getDetail(runId)
+      return detail ? { ...detail, lifecycle: getLifecycle(detail) } : undefined
     },
 
     listRuns(filter: ResearchRunFilter = {}): ResearchRunDto[] {
       return researchRunRepo.list(filter)
+    },
+
+    listAttemptHistory(runId: string, query: ResearchHistoryQuery = {}): ResearchHistoryPageDto<ResearchRunAttemptSummaryDto> {
+      requireRun(runId)
+      return pageHistory(researchAttemptRepo.listForRun(runId).map(attemptSummary), query, (item) => String(item.ordinal))
+    },
+
+    listCheckpointHistory(runId: string, query: ResearchHistoryQuery = {}): ResearchHistoryPageDto<ResearchRunCheckpointSummaryDto> {
+      requireRun(runId)
+      return pageHistory(researchCheckpointRepo.list(runId).map(checkpointSummary), query, (item) => String(item.sequence))
+    },
+
+    listIterationHistory(runId: string, query: ResearchHistoryQuery = {}): ResearchHistoryPageDto<ResearchIterationDto> {
+      requireRun(runId)
+      return pageHistory(researchIterationRepo.list(runId).slice().reverse(), query, (item) => String(item.ordinal))
+    },
+
+    listAssessmentHistory(runId: string, query: ResearchHistoryQuery = {}): ResearchHistoryPageDto<ResearchCoverageAssessmentDto> {
+      requireRun(runId)
+      return pageHistory(researchCoverageAssessmentRepo.list(runId), query, (item) => item.id)
     },
 
     listEvents(runId: string, afterSequence = 0): ResearchEventDto[] {
@@ -295,10 +405,11 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
 
     async recoverInterruptedRuns(now = Date.now()): Promise<DeepResearchRecoveryResult> {
       const recovery = createDeepResearchRecoveryCoordinator({
+        attemptRepo: researchAttemptRepo,
         getWorkflowRunState: runtime.getWorkflowRunState?.bind(runtime),
         // Recovery retains its persistent dispatch guard; the actual Run command
         // always enters through this same resume service path.
-        enqueueResume: async (runId) => resumeRun(runId, { trigger: 'auto_resume' }),
+        enqueueResume: async (runId, commandKey) => resumeRun(runId, { trigger: 'auto_resume', commandKey }),
       })
       return recovery.recoverInterruptedRuns(now)
     },

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { SearchExecution } from '@server/services/deepresearch/search-service'
 import type { ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchSearchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
@@ -38,13 +38,15 @@ export function createExecuteSearchesStep({ repositories, searchService }: { rep
           run,
           queries.map((query) => ({ id: query.id, query: query.query })),
           {
-            isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+            signal: getWorkflowExecution(run.id)?.signal,
+            isCancelled: () => { const current = repositories.researchRunRepo.get(run.id); return current?.status === 'cancelling' || current?.status === 'cancelled' || current?.cancellation?.requestedAt != null },
             onExecution: persistExecution,
           },
         )
         setDeepResearchSpanCounts(span, { queries: queries.length, candidates: result.reduce((count, execution) => count + execution.candidates.length, 0) })
         return result
       })
+      assertWorkflowNotCancelled(repositories, run.id)
       recordDeepResearchSearchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { queries: queries.length }))
       const candidates = executions.flatMap((execution) => execution.candidates)
       for (const execution of executions) {

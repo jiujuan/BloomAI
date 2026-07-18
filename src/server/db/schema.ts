@@ -648,6 +648,18 @@ export const research_recovery_commands = sqliteTable('research_recovery_command
   runCommandKeyIdx: uniqueIndex('idx_research_recovery_commands_run_key').on(table.run_id, table.command_key),
 }))
 
+export const research_reconciliations = sqliteTable('research_reconciliations', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  reconciliation_key: text('reconciliation_key').notNull(),
+  checkpoint_key: text('checkpoint_key'),
+  outcome_json: text('outcome_json').notNull().default('{}'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  runKeyIdx: uniqueIndex('idx_research_reconciliations_run_key').on(table.run_id, table.reconciliation_key),
+  runCreatedIdx: index('idx_research_reconciliations_run_created').on(table.run_id, table.created_at),
+}))
+
 export const research_artifacts = sqliteTable('research_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),

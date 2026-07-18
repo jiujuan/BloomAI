@@ -2,7 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { CitationVerifier } from '../agents/citation-verifier'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchClaimVerification } from '@server/telemetry/metrics'
 
@@ -13,6 +13,7 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
     outputSchema: z.object({ runId: z.string().min(1) }),
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['synthesizing'])
+      assertWorkflowNotCancelled(repositories, run.id)
       repositories.researchRunRepo.transitionWithEvent(run.id, 'verifying', { phase: 'verifying_citations', progress: 84 })
       if (isReplayPastPhase(run.id, 'verifying_citations')) return { runId: run.id }
       const claims = repositories.researchReportRepo.listClaims(run.id)
@@ -31,7 +32,9 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
         for (const citation of citations) {
           const evidence = evidenceById.get(citation.evidenceId)
           if (!evidence) continue
-          const result = await verifier.verify({ claim, evidence })
+          assertWorkflowNotCancelled(repositories, run.id)
+          const result = await verifier.verify({ claim, evidence }, { signal: getWorkflowExecution(run.id)?.signal })
+          assertWorkflowNotCancelled(repositories, run.id)
           repositories.researchReportRepo.updateCitation(citation.id, { entailmentStatus: result.status, rationale: result.rationale })
           statuses.push(result.status)
         }
