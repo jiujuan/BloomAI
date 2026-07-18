@@ -75,6 +75,7 @@ describe('Deep Research workbench', () => {
     const clarificationRun: ResearchRunDto = { ...run, status: 'awaiting_input', brief: { title: 'Brief', objective: null, audience: null, scope: 'US', assumptions: [], plannedSections: [], criticalClarificationIds: ['scope'] } }
     const markup = renderToStaticMarkup(<DeepResearchRunView
       run={clarificationRun}
+      lifecycle={{ currentAttempt: { id: 'attempt-1', ordinal: 1, trigger: 'initial', status: 'running', startCheckpointKey: null, endCheckpointKey: null, error: null, startedAt: 1, endedAt: null, createdAt: 1 }, resumeCheckpoint: null, assessment: null, attemptHistory: { items: [], nextCursor: null }, iterationHistory: { items: [], nextCursor: null }, budget: { limit: run.budget, usage: run.usage }, stopReason: null, limitations: [], cancellation: null, capabilities: { canCancel: true, canResume: false, canRetry: false, canProvideClarification: false } }}
       questions={[{ id: 'question-1', runId: 'run-1', parentQuestionId: null, ordinal: 1, question: 'What is the market size?', intent: 'market size', requiredEvidenceTypes: ['primary'], priority: 'high', status: 'covered', coverage: { questionId: 'question-1', score: 0.76, independentDomainCount: 2, evidenceCategories: [], primarySourceCount: 1, recentSourceCount: 1, supportingEvidenceCount: 2, contradictingEvidenceCount: 0, hasSingleSourceDependency: false, gaps: [] } }]}
       sources={sources}
       snapshotsById={snapshotsById}
@@ -94,15 +95,16 @@ describe('Deep Research workbench', () => {
     />)
 
     expect(markup).toContain('需要澄清')
-    expect(markup).toContain('aria-label="取消研究"')
+    expect(markup).toContain('研究生命周期')
+    expect(markup).toContain('取消研究')
     expect(markup).toContain('aria-label="导出报告"')
     expect(markup).toContain('aria-label="查看证据 evidence-1"')
     expect(markup).toContain('Selected source')
     expect(markup).toContain('href="https://selected.example/article"')
     expect(markup).toContain('\u4e2d CN')
     expect(markup).toContain('\u82f1 EN')
-    expect(getRunActionKinds({ ...run, status: 'interrupted' })).toContain('resume')
-    expect(getRunActionKinds({ ...run, status: 'failed', error: { code: 'TIMEOUT', message: 'Retry later', retryable: true } })).toContain('retry')
-    expect(getRunActionKinds({ ...run, status: 'failed', error: { code: 'INVALID_SCOPE', message: 'Cannot retry', retryable: false } })).not.toContain('retry')
+    expect(getRunActionKinds({ ...run, status: 'interrupted', capabilities: { canCancel: false, canResume: true, canRetry: false, canProvideClarification: false } })).toContain('resume')
+    expect(getRunActionKinds({ ...run, status: 'failed', error: { code: 'TIMEOUT', message: 'Retry later', retryable: true }, capabilities: { canCancel: false, canResume: false, canRetry: true, canProvideClarification: false } })).toContain('retry')
+    expect(getRunActionKinds({ ...run, status: 'cancelled', capabilities: { canCancel: false, canResume: true, canRetry: false, canProvideClarification: false } })).not.toContain('resume')
   })
 })

@@ -161,6 +161,58 @@ describe('deep research store', () => {
     expect(store.getState().error).toBe('A previous request failed')
   })
 
+  it('hydrates the additive V2 lifecycle projection without changing V1 collections', async () => {
+    const run = detail({
+      lifecycle: {
+        currentAttempt: { id: 'attempt-1', ordinal: 2, trigger: 'manual_resume', status: 'running', startCheckpointKey: null, endCheckpointKey: null, error: null, startedAt: 2, endedAt: null, createdAt: 1 },
+        resumeCheckpoint: null,
+        assessment: null,
+        attemptHistory: { items: [], nextCursor: null },
+        iterationHistory: { items: [], nextCursor: null },
+        budget: { limit: detail().budget, usage: detail().usage },
+        stopReason: null,
+        limitations: ['budget exhausted'],
+        cancellation: null,
+        capabilities: { canCancel: true, canResume: false, canRetry: false, canProvideClarification: false },
+      },
+    })
+    const { store, api } = createHarness({ eventSource: false })
+    api.get.mockResolvedValue(run)
+
+    await store.getState().openRun('run-1')
+
+    expect(store.getState().lifecycle).toMatchObject({ currentAttempt: { ordinal: 2 }, limitations: ['budget exhausted'], capabilities: { canCancel: true } })
+    expect(store.getState().questions).toHaveLength(1)
+    expect(store.getState().sources).toHaveLength(1)
+  })
+
+  it('deduplicates replayed V2 events by stable eventId while advancing the SSE cursor', () => {
+    const { store } = createHarness({ eventSource: false })
+    store.getState().applyEvent({ ...event(2), eventId: 'event-2' })
+    store.getState().applyEvent({ ...event(3, 'research.iteration.started'), eventId: 'event-3' })
+    store.getState().applyEvent({ ...event(4, 'research.iteration.started'), eventId: 'event-3' })
+
+    expect(store.getState().events.map((current) => current.eventId)).toEqual(['event-2', 'event-3'])
+    expect(store.getState().lastSequence).toBe(4)
+  })
+
+  it('does not dispatch lifecycle actions that are unavailable or cancelled', async () => {
+    const run = detail({ status: 'cancelled', lifecycle: {
+      currentAttempt: null, resumeCheckpoint: null, assessment: null,
+      attemptHistory: { items: [], nextCursor: null }, iterationHistory: { items: [], nextCursor: null },
+      budget: { limit: detail().budget, usage: detail().usage }, stopReason: null, limitations: [], cancellation: null,
+      capabilities: { canCancel: false, canResume: true, canRetry: false, canProvideClarification: false },
+    } })
+    const { store, api } = createHarness({ eventSource: false })
+    api.get.mockResolvedValue(run)
+    await store.getState().openRun('run-1')
+
+    await store.getState().cancel()
+    await store.getState().resume()
+
+    expect(api.cancel).not.toHaveBeenCalled()
+    expect(api.resume).not.toHaveBeenCalled()
+  })
   it('falls back to two-second polling after a live stream disconnect and reconnects from its cursor', async () => {
     const { store, api, sources } = createHarness()
     await store.getState().openRun('run-1')

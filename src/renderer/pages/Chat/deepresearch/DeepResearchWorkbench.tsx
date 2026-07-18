@@ -34,6 +34,7 @@ export function DeepResearchWorkbench({ sessionId, onRunStarted }: DeepResearchW
   return <main className="deep-research-workbench">
     {state.run ? <DeepResearchRunView
       run={state.run}
+      lifecycle={state.lifecycle}
       questions={state.questions}
       sources={state.sources}
       snapshotsById={state.snapshotsById}

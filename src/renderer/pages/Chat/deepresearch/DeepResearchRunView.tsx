@@ -1,28 +1,32 @@
 import React, { useState } from 'react'
-import { Ban, Download, RotateCcw, Play, X } from 'lucide-react'
+import { Download } from 'lucide-react'
 import type { ResearchArtifactDto, ResearchEventDto, ResearchEvidenceDto, ResearchQuestionDto, ResearchReportDto, ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
-import { DEEP_RESEARCH_VIEWS, type DeepResearchView } from './deep-research.types'
+import { DEEP_RESEARCH_VIEWS, type DeepResearchLifecycle, type DeepResearchView } from './deep-research.types'
 import { ResearchEvidencePanel } from './ResearchEvidencePanel'
 import { ResearchProgress } from './ResearchProgress'
 import { ResearchQuestionTree } from './ResearchQuestionTree'
 import { ResearchReportView } from './ResearchReportView'
+import { ResearchRunLifecyclePanel } from './ResearchRunLifecyclePanel'
 import { ResearchSourcesPanel } from './ResearchSourcesPanel'
 
 const VIEW_LABELS: Record<DeepResearchView, string> = { overview: '概览', questions: '问题', sources: '来源', report: '报告', evidence: '证据', activity: '活动' }
 
 export type ResearchRunActionKind = 'cancel' | 'resume' | 'retry' | 'export'
 
-export function getRunActionKinds(run: ResearchRunDto): ResearchRunActionKind[] {
+/** Server capabilities are authoritative; lifecycle status only supplies an extra cancelled safety guard. */
+export function getRunActionKinds(run: ResearchRunDto, lifecycle?: DeepResearchLifecycle): ResearchRunActionKind[] {
   const actions: ResearchRunActionKind[] = []
-  if (!['completed', 'completed_with_limitations', 'cancelled', 'failed', 'interrupted'].includes(run.status)) actions.push('cancel')
-  if (['interrupted', 'cancelled'].includes(run.status)) actions.push('resume')
-  if (run.status === 'failed' && run.error?.retryable) actions.push('retry')
+  const capabilities = lifecycle?.capabilities ?? run.capabilities
+  if (capabilities?.canCancel) actions.push('cancel')
+  if (capabilities?.canResume && run.status !== 'cancelled') actions.push('resume')
+  if (capabilities?.canRetry) actions.push('retry')
   if (run.reportArtifactId) actions.push('export')
   return actions
 }
 
 export interface DeepResearchRunViewProps {
   run: ResearchRunDto
+  lifecycle?: DeepResearchLifecycle
   questions: ResearchQuestionDto[]
   sources: ResearchSourceDto[]
   snapshotsById: Record<string, ResearchSourceSnapshotDto>
@@ -50,20 +54,18 @@ function ClarificationForm({ run, loading, onAnswer }: { run: ResearchRunDto; lo
 }
 
 export function DeepResearchRunView(props: DeepResearchRunViewProps) {
-  const actions = getRunActionKinds(props.run)
+  const actions = getRunActionKinds(props.run, props.lifecycle)
   return (
     <section className="deep-research-run" aria-live="polite">
       <header className="deep-research-run-header">
         <div><h2>{props.run.topic}</h2><span>{VIEW_LABELS[props.selectedView]}视图</span></div>
         <div className="deep-research-run-actions">
-          {actions.includes('cancel') && <button type="button" className="research-icon-button" aria-label="取消研究" title="取消研究" disabled={props.loading} onClick={props.onCancel}><Ban size={16} /></button>}
-          {actions.includes('resume') && <button type="button" className="research-icon-button" aria-label="恢复研究" title="恢复研究" disabled={props.loading} onClick={props.onResume}><Play size={16} /></button>}
-          {actions.includes('retry') && <button type="button" className="research-icon-button" aria-label="重试研究" title="重试研究" disabled={props.loading} onClick={props.onResume}><RotateCcw size={16} /></button>}
           {actions.includes('export') && <button type="button" className="research-icon-button" aria-label="导出报告" title="导出报告" disabled={props.loading} onClick={props.onExport}><Download size={16} /></button>}
         </div>
       </header>
       {(props.error ?? props.run.error?.message) && <p className="deep-research-error" role="alert">{props.error ?? props.run.error?.message}</p>}
       <ResearchProgress run={props.run} />
+      <ResearchRunLifecyclePanel run={props.run} lifecycle={props.lifecycle ?? null} loading={props.loading} onCancel={props.onCancel} onResume={props.onResume} />
       <ClarificationForm run={props.run} loading={props.loading} onAnswer={props.onAnswerClarification} />
       <nav className="deep-research-tabs" role="tablist" aria-label="研究视图">
         {DEEP_RESEARCH_VIEWS.map((view) => <button type="button" key={view} role="tab" aria-selected={props.selectedView === view} className="deep-research-tab" onClick={() => props.onSelectedViewChange(view)}>{VIEW_LABELS[view]}</button>)}
@@ -75,7 +77,7 @@ export function DeepResearchRunView(props: DeepResearchRunViewProps) {
           {props.selectedView === 'sources' && <ResearchSourcesPanel sources={props.sources} />}
           {props.selectedView === 'report' && <ResearchReportView report={props.report} evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} artifacts={props.artifacts} onSelectEvidence={props.onSelectEvidence} />}
           {props.selectedView === 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
-          {props.selectedView === 'activity' && <section className="research-section" aria-labelledby="research-activity-heading"><div className="research-section-heading"><h3 id="research-activity-heading">活动</h3><span>{props.events.length} 项</span></div><ol className="research-activity-list">{props.events.map((event) => <li key={event.sequence}><span>{event.sequence}</span><strong>{event.type}</strong><small>{event.phase}</small></li>)}</ol></section>}
+          {props.selectedView === 'activity' && <section className="research-section" aria-labelledby="research-activity-heading"><div className="research-section-heading"><h3 id="research-activity-heading">活动</h3><span>{props.events.length} 项</span></div><ol className="research-activity-list">{props.events.map((event) => <li key={event.eventId ?? `${event.runId}:${event.sequence}`}><span>{event.sequence}</span><strong>{event.type}</strong><small>{event.phase}</small></li>)}</ol></section>}
         </div>
         {props.selectedView !== 'evidence' && <ResearchEvidencePanel evidenceById={props.evidenceById} snapshotsById={props.snapshotsById} sources={props.sources} selectedEvidenceId={props.selectedEvidenceId} onSelectEvidence={props.onSelectEvidence} />}
       </div>

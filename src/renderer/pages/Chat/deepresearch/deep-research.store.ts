@@ -13,7 +13,7 @@ import type {
   StartResearchInput,
 } from '@shared/deepresearch/contracts'
 import type { ResearchEventType } from '@shared/deepresearch/events'
-import type { DeepResearchDraft, DeepResearchView } from './deep-research.types'
+import type { DeepResearchDraft, DeepResearchLifecycle, DeepResearchView } from './deep-research.types'
 
 const TERMINAL_STATUSES = new Set<ResearchRunDto['status']>([
   'completed',
@@ -34,6 +34,16 @@ const DETAIL_REFRESH_EVENT_TYPES = new Set<string>([
   'research.run.awaiting_input',
   'research.artifact.created',
   'research.clarification.answered',
+  'research.attempt.completed',
+  'research.checkpoint.completed',
+  'research.coverage.assessment_completed',
+  'research.iteration.planned',
+  'research.iteration.stopped',
+  'research.iteration.stop_decided',
+  'research.run.cancellation_requested',
+  'research.run.interrupted',
+  'research.run.resumed',
+  'research.recovery.reconciled',
 ])
 
 const RESEARCH_EVENT_TYPES: ResearchEventType[] = [
@@ -61,6 +71,19 @@ const RESEARCH_EVENT_TYPES: ResearchEventType[] = [
   'research.run.completed',
   'research.run.failed',
   'research.run.cancelled',
+  'research.attempt.created',
+  'research.attempt.started',
+  'research.attempt.completed',
+  'research.checkpoint.completed',
+  'research.coverage.assessment_completed',
+  'research.coverage.gap_detected',
+  'research.iteration.planned',
+  'research.iteration.stopped',
+  'research.iteration.stop_decided',
+  'research.run.cancellation_requested',
+  'research.run.interrupted',
+  'research.run.resumed',
+  'research.recovery.reconciled',
 ]
 
 export interface DeepResearchEventSource {
@@ -90,6 +113,7 @@ export interface DeepResearchStoreState {
   draft: DeepResearchDraft
   activeRunId: string | null
   run: ResearchRunDto | null
+  lifecycle: DeepResearchLifecycle
   questions: ResearchQuestionDto[]
   sources: ResearchSourceDto[]
   snapshotsById: Record<string, ResearchSourceSnapshotDto>
@@ -122,6 +146,7 @@ function initialState(): Omit<DeepResearchStoreState, 'setDraft' | 'setSelectedV
     draft: { topic: '', profile: 'general', depth: 'standard' },
     activeRunId: null,
     run: null,
+    lifecycle: null,
     questions: [],
     sources: [],
     snapshotsById: {},
@@ -138,7 +163,7 @@ function initialState(): Omit<DeepResearchStoreState, 'setDraft' | 'setSelectedV
 }
 
 function toRun(detail: ResearchRunDetailDto): ResearchRunDto {
-  const { questions, searchQueries, sources, snapshots, evidence, report, events, artifacts, ...run } = detail
+  const { questions, searchQueries, sources, snapshots, evidence, report, events, artifacts, lifecycle, ...run } = detail
   return run
 }
 
@@ -150,16 +175,20 @@ function isTerminal(run: ResearchRunDto): boolean {
   return TERMINAL_STATUSES.has(run.status)
 }
 
-function mergeEvents(current: ResearchEventDto[], incoming: ResearchEventDto[]): ResearchEventDto[] {
-  const bySequence = new Map<number, ResearchEventDto>()
-  for (const event of current) bySequence.set(event.sequence, event)
-  for (const event of incoming) bySequence.set(event.sequence, event)
-  return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence)
+function eventIdentity(event: ResearchEventDto): string {
+  return event.eventId ?? `${event.runId}:${event.sequence}`
 }
 
+function mergeEvents(current: ResearchEventDto[], incoming: ResearchEventDto[]): ResearchEventDto[] {
+  const byEventId = new Map<string, ResearchEventDto>()
+  for (const event of current) byEventId.set(eventIdentity(event), event)
+  for (const event of incoming) byEventId.set(eventIdentity(event), event)
+  return [...byEventId.values()].sort((left, right) => left.sequence - right.sequence)
+}
 function detailCollections(detail: ResearchRunDetailDto) {
   return {
     run: toRun(detail),
+    lifecycle: detail.lifecycle ?? null,
     questions: detail.questions,
     sources: detail.sources,
     snapshotsById: Object.fromEntries(detail.snapshots.map((snapshot) => [snapshot.id, snapshot])),
@@ -295,6 +324,10 @@ export function createDeepResearchStore(dependencies: DeepResearchStoreDependenc
       },
       applyEvent: (event) => {
         const state = get()
+        if (state.events.some((current) => eventIdentity(current) === eventIdentity(event))) {
+          if (event.sequence > state.lastSequence) set({ lastSequence: event.sequence })
+          return
+        }
         if (event.sequence <= state.lastSequence) return
         set({ events: [...state.events, event], lastSequence: event.sequence })
         if (DETAIL_REFRESH_EVENT_TYPES.has(event.type)) void get().refreshRun(event.runId)
@@ -324,8 +357,9 @@ export function createDeepResearchStore(dependencies: DeepResearchStoreDependenc
         }
       },
       cancel: async () => {
-        const runId = get().activeRunId
-        if (!runId) return
+        const { activeRunId: runId, run, lifecycle } = get()
+        const capabilities = lifecycle?.capabilities ?? run?.capabilities
+        if (!runId || !run || run.status === 'cancelling' || (capabilities && !capabilities.canCancel)) return
         set({ loading: true, error: null })
         try {
           await api.cancel(runId)
@@ -337,8 +371,9 @@ export function createDeepResearchStore(dependencies: DeepResearchStoreDependenc
         }
       },
       resume: async () => {
-        const runId = get().activeRunId
-        if (!runId) return
+        const { activeRunId: runId, run, lifecycle } = get()
+        const capabilities = lifecycle?.capabilities ?? run?.capabilities
+        if (!runId || !run || run.status === 'cancelled' || (capabilities && !capabilities.canResume && !capabilities.canRetry)) return
         set({ loading: true, error: null })
         try {
           await api.resume(runId)
