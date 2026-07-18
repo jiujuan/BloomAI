@@ -1,5 +1,6 @@
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
+import { canonicalizeResearchUrl } from '@server/deepresearch/domain/idempotency'
 
 export interface DiscoveredResearchSource {
   queryId: string
@@ -24,23 +25,7 @@ export interface SourceCurationResult {
   rejected: RejectedResearchSource[]
 }
 
-const TRACKING_PARAMETERS = /^(utm_[^=]*|fbclid|gclid|dclid|mc_[^=]*|ref)$/i
-
-export function canonicalizeResearchUrl(value: string): string {
-  const url = new URL(value)
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only HTTP(S) source URLs are supported.')
-  if (url.username || url.password) throw new Error('Source URLs must not include credentials.')
-  url.protocol = url.protocol.toLowerCase()
-  url.hostname = url.hostname.toLowerCase().replace(/^www\./, '')
-  if ((url.protocol === 'https:' && url.port === '443') || (url.protocol === 'http:' && url.port === '80')) url.port = ''
-  url.hash = ''
-  const parameters = [...url.searchParams.entries()]
-    .filter(([key]) => !TRACKING_PARAMETERS.test(key))
-    .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))
-  url.search = ''
-  for (const [key, parameterValue] of parameters) url.searchParams.append(key, parameterValue)
-  return url.toString()
-}
+export { canonicalizeResearchUrl } from '@server/deepresearch/domain/idempotency'
 
 function inferSourceType(url: URL): string {
   const host = url.hostname.replace(/^www\./, '')

@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import type { SectionWriter } from '../agents/section-writer'
 import { reportSectionJobSchema } from './build-outline'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 import { selectEvidenceForSection } from './section-evidence'
 
@@ -14,6 +15,7 @@ export function createDraftSectionsStep({ repositories, writer }: { repositories
       const run = loadRunnableRun(repositories, inputData.runId, ['researching'])
       const section = repositories.researchReportRepo.listSections(run.id).find((item) => item.id === inputData.sectionId)
       if (!section) throw new Error('Deep Research section not found: ' + inputData.sectionId)
+      if (isReplayPastPhase(run.id, 'drafting_sections') || section.status !== 'planned') return inputData
       const questions = repositories.researchQuestionRepo.list(run.id)
       const evidence = selectEvidenceForSection(section, questions, repositories.researchEvidenceRepo.list(run.id))
       const draft = await writer.draft({ run, section, evidence })

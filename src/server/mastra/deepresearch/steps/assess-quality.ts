@@ -14,6 +14,7 @@ import type {
 import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
 import { isQuestionCovered } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 export interface ReportQualityInput {
@@ -95,6 +96,7 @@ export function createAssessQualityStep(repositories: DeepResearchRepositories) 
       repositories.researchReportRepo.createQuality(run.id, quality)
       repositories.researchRunRepo.setQuality(run.id, quality)
       repositories.researchEventRepo.append({ runId: run.id, type: 'research.quality.assessed', phase: 'assessing_quality', payload: { releaseStatus: quality.releaseStatus } })
+      checkpointWorkflowPhase(repositories, run, 'assessing_quality', 'finalizing_artifacts')
       return { runId: run.id }
     },
   })

@@ -11,13 +11,13 @@ let defaultRuntimePromise: Promise<DeepResearchRuntimeAdapter> | undefined
 
 function getDefaultRuntime(): DeepResearchRuntimeAdapter {
   defaultRuntime ??= {
-    async start(runId: string): Promise<unknown> {
+    async start(context): Promise<unknown> {
       const runtime = await loadDefaultRuntime()
-      return runtime.start(runId)
+      return runtime.start(context)
     },
-    async resume(runId, resumeData): Promise<unknown> {
+    async resume(context, resumeData): Promise<unknown> {
       const runtime = await loadDefaultRuntime()
-      return runtime.resume(runId, resumeData)
+      return runtime.resume(context, resumeData)
     },
     async getWorkflowRunState(workflowRunId) {
       const runtime = await loadDefaultRuntime()

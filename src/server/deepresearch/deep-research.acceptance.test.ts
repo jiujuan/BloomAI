@@ -5,6 +5,7 @@ import { LibSQLStore } from '@mastra/libsql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResearchProfile, StartResearchInput } from '@shared/deepresearch/contracts'
 import { getResearchBudget } from './domain/budgets'
+import { createDeepResearchExecutor } from './executor'
 import { createDeepResearchMastraRuntime } from '../mastra/deepresearch/mastra'
 import { createContentService } from '../services/deepresearch/content-service'
 import { createSearchService } from '../services/deepresearch/search-service'
@@ -160,7 +161,13 @@ describe('Deep Research deterministic acceptance fixtures', () => {
     const { runtime, planner } = createFixtureRuntime(repositories, fixture)
     const run = createRun(repositories, fixture.input)
 
-    await runtime.start(run.id)
+    await runtime.start({
+      runId: run.id,
+      attemptId: 'acceptance:' + run.id,
+      ownershipToken: 'acceptance-token',
+      signal: new AbortController().signal,
+      resumeCursor: null,
+    })
 
     const detail = repositories.researchRunRepo.getDetail(run.id)!
     expect(detail).toMatchObject({
@@ -242,12 +249,14 @@ describe('Deep Research deterministic acceptance fixtures', () => {
     }]
     const repositories = await loadTestContext()
     const { runtime, planner } = createFixtureRuntime(repositories, fixture)
-    const service = repositories.createDeepResearchService({ runtime })
+    const executor = createDeepResearchExecutor({ runtime, executorId: 'acceptance-executor' })
+    const service = repositories.createDeepResearchService({ runtime: executor })
     const run = createRun(repositories, fixture.input)
+    repositories.researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
 
-    const suspended = await runtime.start(run.id)
+    const suspended = await executor.start(run.id)
     const waiting = repositories.researchRunRepo.getDetail(run.id)!
-    expect(suspended.status).toBe('suspended')
+    expect(suspended).toBe(true)
     expect(waiting).toMatchObject({ status: 'awaiting_input', phase: 'awaiting_clarification', resumePhase: 'planning' })
     const clarificationId = waiting.brief!.criticalClarificationIds[0]
 

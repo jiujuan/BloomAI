@@ -384,6 +384,7 @@ export const research_run_attempts = sqliteTable('research_run_attempts', {
   status: text('status').notNull().default('queued'),
   workflow_run_id: text('workflow_run_id'),
   executor_id: text('executor_id'),
+  ownership_token: text('ownership_token'),
   lease_expires_at: integer('lease_expires_at'),
   heartbeat_at: integer('heartbeat_at'),
   start_checkpoint_key: text('start_checkpoint_key'),
@@ -399,6 +400,7 @@ export const research_run_attempts = sqliteTable('research_run_attempts', {
   runOrdinalIdx: uniqueIndex('idx_research_run_attempts_run_ordinal').on(table.run_id, table.ordinal),
   runStatusIdx: index('idx_research_run_attempts_run_status').on(table.run_id, table.status, table.created_at),
   leaseIdx: index('idx_research_run_attempts_lease').on(table.lease_expires_at),
+  ownershipTokenIdx: index('idx_research_run_attempts_ownership_token').on(table.ownership_token),
 }))
 
 export const research_run_checkpoints = sqliteTable('research_run_checkpoints', {
@@ -498,6 +500,7 @@ export const research_search_queries = sqliteTable('research_search_queries', {
   idempotency_key: text('idempotency_key').notNull(),
   created_at: integer('created_at').notNull(),
   completed_at: integer('completed_at'),
+  result_json: text('result_json').notNull().default('[]'),
 }, (table) => ({
   runStatusIdx: index('idx_research_search_queries_run_status').on(table.run_id, table.status),
   runIdempotencyIdx: uniqueIndex('idx_research_search_queries_run_idempotency').on(table.run_id, table.idempotency_key),
@@ -507,6 +510,7 @@ export const research_sources = sqliteTable('research_sources', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   canonical_url: text('canonical_url').notNull(),
+  original_url: text('original_url').notNull().default(''),
   domain: text('domain').notNull(),
   title: text('title'),
   author: text('author'),

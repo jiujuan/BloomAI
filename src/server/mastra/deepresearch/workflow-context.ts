@@ -5,6 +5,7 @@ import { researchCheckpointRepo } from '@server/db/repositories/deepresearch/res
 import { researchCoverageAssessmentRepo } from '@server/db/repositories/deepresearch/research-coverage-assessment.repo'
 import { researchEvidenceRepo } from '@server/db/repositories/deepresearch/research-evidence.repo'
 import { researchEventRepo } from '@server/db/repositories/deepresearch/research-event.repo'
+import { researchIterationRepo } from '@server/db/repositories/deepresearch/research-iteration.repo'
 import { researchQuestionRepo } from '@server/db/repositories/deepresearch/research-question.repo'
 import { researchReportRepo } from '@server/db/repositories/deepresearch/research-report.repo'
 import { researchRunRepo } from '@server/db/repositories/deepresearch/research-run.repo'
@@ -19,6 +20,7 @@ export interface DeepResearchRepositories {
   researchQuestionRepo: typeof researchQuestionRepo
   researchReportRepo: typeof researchReportRepo
   researchEventRepo: typeof researchEventRepo
+  researchIterationRepo?: typeof researchIterationRepo
   researchEvidenceRepo: typeof researchEvidenceRepo
   researchSourceRepo: typeof researchSourceRepo
 }
@@ -31,6 +33,7 @@ export const defaultDeepResearchRepositories: DeepResearchRepositories = {
   researchQuestionRepo,
   researchReportRepo,
   researchEventRepo,
+  researchIterationRepo,
   researchEvidenceRepo,
   researchSourceRepo,
 }

@@ -4,6 +4,7 @@ import type { ResearchBriefDto } from '@shared/deepresearch/contracts'
 import { clarificationSchema } from '@shared/deepresearch/schemas'
 import type { BriefPlan, BriefPlanner } from '../agents/brief-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const runInputSchema = z.object({ runId: z.string().min(1) })
@@ -75,6 +76,7 @@ export function createBuildBriefStep({ repositories, planner }: { repositories: 
       }
 
       if (run.brief) {
+        checkpointWorkflowPhase(repositories, run, 'planning', 'plan_questions')
         return { runId: run.id, brief: run.brief }
       }
 
@@ -96,6 +98,7 @@ export function createBuildBriefStep({ repositories, planner }: { repositories: 
         phase: 'planning',
         payload: { id: run.id },
       })
+      checkpointWorkflowPhase(repositories, run, 'planning', 'plan_questions')
 
       if (criticalClarificationIds.length > 0) {
         repositories.researchRunRepo.transitionWithEvent(run.id, 'awaiting_input', {

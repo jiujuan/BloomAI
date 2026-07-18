@@ -1,16 +1,32 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchClarificationInput, ResearchRunErrorDto } from '@shared/deepresearch/contracts'
-import { isResearchDomainError } from './domain/errors'
+import type { ResearchCheckpointCursorDto, ResearchClarificationInput } from '@shared/deepresearch/contracts'
+import { researchAttemptRepo } from '../db/repositories/deepresearch/research-attempt.repo'
+import { researchCheckpointRepo } from '../db/repositories/deepresearch/research-checkpoint.repo'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
 import type { DeepResearchWorkflowRunState } from './recovery'
+import { classifyResearchError } from './domain/errors'
 import { recordDeepResearchFailure } from '../telemetry/metrics'
 
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_LEASE_RENEWAL_MS = 10_000
 
+/**
+ * Non-persisted capability handed to exactly one workflow invocation.  The
+ * token is deliberately not part of public Run/Attempt DTOs: it only proves
+ * this executor still owns the short-lived Attempt lease.
+ */
+export interface DeepResearchAttemptExecutionContext {
+  runId: string
+  attemptId: string
+  executorId?: string
+  ownershipToken: string
+  signal: AbortSignal
+  resumeCursor: ResearchCheckpointCursorDto | null
+}
+
 export interface DeepResearchRuntimeAdapter {
-  start(runId: string): Promise<unknown>
-  resume(runId: string, resumeData: ResearchClarificationInput): Promise<unknown>
+  start(context: DeepResearchAttemptExecutionContext): Promise<unknown>
+  resume(context: DeepResearchAttemptExecutionContext, resumeData: ResearchClarificationInput): Promise<unknown>
   getWorkflowRunState?(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null>
 }
 
@@ -26,70 +42,151 @@ export interface CreateDeepResearchExecutorOptions {
   executorId?: string
   leaseMs?: number
   leaseRenewalMs?: number
+  /** Injected only for deterministic lease tests. */
+  now?: () => number
+  setInterval?: (callback: () => void, delay: number) => ReturnType<typeof setInterval>
+  clearInterval?: (timer: ReturnType<typeof setInterval>) => void
 }
 
-function toResearchRunError(error: unknown): ResearchRunErrorDto {
-  if (isResearchDomainError(error)) {
-    return { code: error.code, message: error.message, retryable: error.retryable }
-  }
+function attemptResumeCursor(runId: string, startCheckpointKey: string | null): ResearchCheckpointCursorDto | null {
+  if (!startCheckpointKey) return researchRunRepo.get(runId)?.checkpointCursor ?? null
+  return researchCheckpointRepo.list(runId).find((checkpoint) => checkpoint.checkpointKey === startCheckpointKey)?.resumeCursor
+    ?? researchRunRepo.get(runId)?.checkpointCursor
+    ?? null
+}
 
-  const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown } | undefined
-  return {
-    code: typeof candidate?.code === 'string' ? candidate.code : 'RESEARCH_EXECUTION_FAILED',
-    message: typeof candidate?.message === 'string' ? candidate.message : 'Deep Research execution failed.',
-    retryable: candidate?.retryable === true,
-  }
+function cancellationRequested(runId: string): boolean {
+  const run = researchRunRepo.get(runId)
+  return Boolean(run && (run.status === 'cancelling' || run.status === 'cancelled' || run.cancellation?.requestedAt != null))
+}
+
+function abort(controller: AbortController): void {
+  if (!controller.signal.aborted) controller.abort()
+}
+
+function isSuspendedWorkflowResult(result: unknown): boolean {
+  return typeof result === 'object' && result !== null && 'status' in result
+    && (result as { status?: unknown }).status === 'suspended'
 }
 
 export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOptions): DeepResearchExecutor {
   const executorId = options.executorId ?? 'deepresearch-' + uuidv4()
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
   const leaseRenewalMs = options.leaseRenewalMs ?? DEFAULT_LEASE_RENEWAL_MS
+  const now = options.now ?? Date.now
+  const startInterval = options.setInterval ?? ((callback, delay) => setInterval(callback, delay))
+  const stopInterval = options.clearInterval ?? ((timer) => clearInterval(timer))
 
-  async function execute(runId: string, invoke: () => Promise<unknown>): Promise<boolean> {
-    if (!researchRunRepo.acquireLease(runId, executorId, leaseMs)) {
-      return false
+  async function execute(runId: string, invoke: (context: DeepResearchAttemptExecutionContext) => Promise<unknown>): Promise<boolean> {
+    // The command service chose the Attempt and its checkpoint.  The executor
+    // only claims that Attempt; it never guesses a recovery phase.
+    const attempt = researchAttemptRepo.findActive(runId)
+    if (!attempt) return false
+
+    const ownershipToken = uuidv4()
+    if (!researchAttemptRepo.acquireLease(attempt.id, executorId, ownershipToken, leaseMs, now())) return false
+
+    const controller = new AbortController()
+    let leaseLost = false
+    const heartbeat = () => {
+      if (!researchAttemptRepo.heartbeat(attempt.id, executorId, ownershipToken, leaseMs, now())) {
+        leaseLost = true
+        abort(controller)
+        return
+      }
+      if (cancellationRequested(runId)) abort(controller)
     }
-
-    const renewalTimer = setInterval(() => {
-      researchRunRepo.acquireLease(runId, executorId, leaseMs)
-    }, leaseRenewalMs)
+    const renewalTimer = startInterval(heartbeat, leaseRenewalMs)
+    const context: DeepResearchAttemptExecutionContext = {
+      runId,
+      attemptId: attempt.id,
+      executorId,
+      ownershipToken,
+      signal: controller.signal,
+      resumeCursor: attemptResumeCursor(runId, attempt.startCheckpointKey),
+    }
 
     try {
-      await invoke()
-    } catch (error) {
-      const current = researchRunRepo.get(runId)
-      if (current && current.status !== 'completed' && current.status !== 'completed_with_limitations' && current.status !== 'cancelled') {
-        const runError = toResearchRunError(error)
-        researchRunRepo.transitionWithEvent(runId, 'failed', {
-          phase: current.phase,
-          error: runError,
-          eventType: 'research.run.failed',
-          eventPayload: { errorCode: runError.code, retryable: runError.retryable },
+      if (cancellationRequested(runId)) abort(controller)
+      if (controller.signal.aborted) {
+        const completed = researchAttemptRepo.finishOwned({
+          attemptId: attempt.id,
+          executorId,
+          ownershipToken,
+          status: 'cancelled',
+          now: now(),
         })
-        recordDeepResearchFailure({
-          researchRunId: current.id,
-          workflowRunId: current.workflowRunId,
-          profile: current.profile,
-          depth: current.depth,
-          phase: current.phase,
-        })
+        return completed !== null
       }
-    } finally {
-      clearInterval(renewalTimer)
-      researchRunRepo.releaseLease(runId, executorId)
-    }
 
-    return true
+      const result = await invoke(context)
+      // Suspending for clarification is not a terminal outcome. Release this
+      // executor's short lease so the command-service resume path can claim
+      // the same active Attempt with a fresh ownership token.
+      if (isSuspendedWorkflowResult(result)) {
+        // A cancellation request still wins over suspension. finishOwned()
+        // rechecks both cancellation and ownership in one transaction.
+        if (!cancellationRequested(runId)) return !leaseLost
+        const completed = researchAttemptRepo.finishOwned({
+          attemptId: attempt.id,
+          executorId,
+          ownershipToken,
+          status: 'cancelled',
+          now: now(),
+        })
+        return completed !== null && !leaseLost
+      }
+      const completed = researchAttemptRepo.finishOwned({
+        attemptId: attempt.id,
+        executorId,
+        ownershipToken,
+        status: 'succeeded',
+        now: now(),
+      })
+      return completed !== null
+    } catch (error) {
+      const classification = classifyResearchError(error)
+      const status = classification.category === 'cancelled' || cancellationRequested(runId)
+        ? 'cancelled'
+        : 'failed'
+      const completed = researchAttemptRepo.finishOwned({
+        attemptId: attempt.id,
+        executorId,
+        ownershipToken,
+        status,
+        error: status === 'failed'
+          ? { code: classification.code, message: classification.message, retryable: classification.retryable, category: classification.category }
+          : null,
+        now: now(),
+      })
+      if (completed && status === 'failed') {
+        const run = researchRunRepo.get(runId)
+        if (run) {
+          recordDeepResearchFailure({
+            researchRunId: run.id,
+            workflowRunId: run.workflowRunId,
+            profile: run.profile,
+            depth: run.depth,
+            phase: run.phase,
+          })
+        }
+      }
+      return completed !== null && !leaseLost
+    } finally {
+      stopInterval(renewalTimer)
+      // This is a no-op after finishOwned; it only clears a still-owned lease
+      // on an interruption path and cannot clear a replacement executor lease.
+      researchAttemptRepo.releaseLease(attempt.id, executorId, ownershipToken)
+    }
   }
 
   return Object.freeze({
     executorId,
     start(runId: string): Promise<boolean> {
-      return execute(runId, () => options.runtime.start(runId))
+      return execute(runId, (context) => options.runtime.start(context))
     },
     resume(runId: string, resumeData: ResearchClarificationInput): Promise<boolean> {
-      return execute(runId, () => options.runtime.resume(runId, resumeData))
+      return execute(runId, (context) => options.runtime.resume(context, resumeData))
     },
     getWorkflowRunState(workflowRunId: string): Promise<DeepResearchWorkflowRunState | null> {
       return options.runtime.getWorkflowRunState?.(workflowRunId) ?? Promise.resolve(null)

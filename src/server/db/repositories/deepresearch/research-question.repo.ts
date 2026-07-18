@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchCoverageDto, ResearchQuestionDto, ResearchRunErrorDto, ResearchSearchQueryDto } from '@shared/deepresearch/contracts'
+import type { ResearchCoverageDto, ResearchQuestionDto, ResearchRunErrorDto, ResearchSearchQueryDto, ResearchSearchResultCandidateDto } from '@shared/deepresearch/contracts'
 import { getOrmDb } from '../../client'
 import { research_questions, research_search_queries } from '../../schema'
 import { decodeJson, EMPTY_JSON_OBJECT, encodeJson } from './repository-utils'
@@ -28,6 +28,7 @@ export interface CreateResearchSearchQueryInput {
   error?: ResearchRunErrorDto | null
   idempotencyKey: string
   completedAt?: number | null
+  candidates?: ResearchSearchResultCandidateDto[]
 }
 
 export function mapResearchQuestion(row: typeof research_questions.$inferSelect): ResearchQuestionDto {
@@ -62,6 +63,8 @@ export function mapResearchSearchQuery(row: typeof research_search_queries.$infe
     error,
     createdAt: row.created_at,
     completedAt: row.completed_at,
+    idempotencyKey: row.idempotency_key,
+    candidates: decodeJson<ResearchSearchResultCandidateDto[]>(row.result_json, []),
   }
 }
 
@@ -125,6 +128,8 @@ export const researchQuestionRepo = {
   },
 
   createSearchQuery(input: CreateResearchSearchQueryInput): ResearchSearchQueryDto {
+    const existing = this.getSearchQueryByIdempotencyKey(input.runId, input.idempotencyKey)
+    if (existing) return existing
     const id = uuidv4()
     const now = Date.now()
     getOrmDb().insert(research_search_queries).values({
@@ -142,12 +147,13 @@ export const researchQuestionRepo = {
       idempotency_key: input.idempotencyKey,
       created_at: now,
       completed_at: input.completedAt ?? null,
+      result_json: encodeJson(input.candidates ?? []),
     }).run()
 
     return this.getSearchQuery(id)!
   },
 
-  updateSearchQuery(id: string, data: { provider?: string | null; status: ResearchSearchQueryDto['status']; resultCount?: number; error?: ResearchRunErrorDto | null; completedAt?: number | null }): ResearchSearchQueryDto {
+  updateSearchQuery(id: string, data: { provider?: string | null; status: ResearchSearchQueryDto['status']; resultCount?: number; error?: ResearchRunErrorDto | null; completedAt?: number | null; candidates?: ResearchSearchResultCandidateDto[] }): ResearchSearchQueryDto {
     const result = getOrmDb().update(research_search_queries).set({
       provider: data.provider ?? null,
       status: data.status,
@@ -156,11 +162,20 @@ export const researchQuestionRepo = {
       error_message: data.error?.message ?? null,
       error_retryable: data.error ? Number(data.error.retryable) : null,
       completed_at: data.completedAt ?? null,
+      result_json: encodeJson(data.candidates ?? this.getSearchQuery(id)?.candidates ?? []),
     }).where(eq(research_search_queries.id, id)).run()
     if (result.changes !== 1) throw new Error('Deep Research Search Query not found: ' + id)
     return this.getSearchQuery(id)!
   },
 
+  getSearchQueryByIdempotencyKey(runId: string, idempotencyKey: string): ResearchSearchQueryDto | undefined {
+    const row = getOrmDb()
+      .select()
+      .from(research_search_queries)
+      .where(and(eq(research_search_queries.run_id, runId), eq(research_search_queries.idempotency_key, idempotencyKey)))
+      .get()
+    return row ? mapResearchSearchQuery(row) : undefined
+  },
   getSearchQuery(id: string): ResearchSearchQueryDto | undefined {
     const row = getOrmDb().select().from(research_search_queries).where(eq(research_search_queries.id, id)).get()
     return row ? mapResearchSearchQuery(row) : undefined

@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url'
 import { Mastra } from '@mastra/core/mastra'
 import { LibSQLStore } from '@mastra/libsql'
 import type { ResearchClarificationInput } from '@shared/deepresearch/contracts'
+import type { DeepResearchAttemptExecutionContext } from '@server/deepresearch/executor'
 import { clarificationSchema } from '@shared/deepresearch/schemas'
 import { getDataDir } from '@server/db/paths'
 import { serverLogger } from '@server/logger/logger'
@@ -24,6 +25,7 @@ import { createSearchService } from '@server/services/deepresearch/search-servic
 import { SourceCurator } from '@server/services/deepresearch/source-curator'
 import { defaultDeepResearchRepositories, type DeepResearchRepositories } from './workflow-context'
 import { createDeepResearchWorkflow } from './workflow'
+import { bindWorkflowExecution, resolveWorkflowResumeCursor } from './steps/checkpoint-replay'
 
 export interface CreateDeepResearchMastraRuntimeOptions {
   dataDir?: string
@@ -108,21 +110,33 @@ export function createDeepResearchMastraRuntime(options: CreateDeepResearchMastr
   return Object.freeze({
     mastra,
     workflow,
-    async start(runId: string) {
-      const run = repositories.researchRunRepo.get(runId)
-      if (!run) throw new Error('Deep Research Run not found: ' + runId)
+    async start(context: DeepResearchAttemptExecutionContext) {
+      const run = repositories.researchRunRepo.get(context.runId)
+      if (!run) throw new Error('Deep Research Run not found: ' + context.runId)
 
       const workflowRun = await workflow.createRun()
       activeRuns.set(workflowRun.runId, workflowRun)
-      repositories.researchRunRepo.setWorkflowRunId(runId, workflowRun.runId)
-      return workflowRun.start({ inputData: { runId } })
+      repositories.researchRunRepo.setWorkflowRunId(context.runId, workflowRun.runId)
+      return workflowRun.start({
+        inputData: {
+          runId: context.runId,
+          attempt: {
+            attemptId: context.attemptId,
+            executorId: context.executorId,
+            ownershipToken: context.ownershipToken,
+            resumeCursor: context.resumeCursor,
+          },
+        },
+      })
     },
-    async resume(runId: string, resumeData: ResearchClarificationInput) {
+    async resume(context: DeepResearchAttemptExecutionContext, resumeData: ResearchClarificationInput) {
       const parsed = clarificationSchema.parse(resumeData)
-      const run = repositories.researchRunRepo.get(runId)
-      if (!run?.workflowRunId) throw new Error('Deep Research workflow run not found: ' + runId)
+      const run = repositories.researchRunRepo.get(context.runId)
+      if (!run?.workflowRunId) throw new Error('Deep Research workflow run not found: ' + context.runId)
 
       const workflowRun = await loadWorkflowRun(run.workflowRunId)
+      const resolution = resolveWorkflowResumeCursor(repositories, run, context.resumeCursor)
+      bindWorkflowExecution(run.id, { ...context, resumeCursor: resolution.cursor })
       return workflowRun.resume({ resumeData: parsed, label: 'planning' })
     },
     async getWorkflowRunState(workflowRunId: string) {

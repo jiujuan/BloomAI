@@ -102,6 +102,21 @@ describe('iteration decisions', () => {
     expect(result.limitationCodes).toContain('BUDGET_EXHAUSTED')
   })
 
+  it('stops before asking an analyst or provider when a persisted hard query budget is exhausted', () => {
+    const result = decideIteration({
+      assessments: [assessment()],
+      previousAssessment: null,
+      iterations: [],
+      budget: { ...budget, maxSearchQueries: 1 },
+      usage: { ...usage, searchQueries: 1 },
+      reservations: [],
+      cancellationRequested: false,
+      queryCandidates: [],
+    })
+
+    expect(result.decision).toMatchObject({ decision: 'stop_budget', matchedRule: 'budget_exhausted' })
+  })
+
   it('stops after two consecutive completed iterations without material gain', () => {
     const result = decideIteration({
       assessments: [assessment()],

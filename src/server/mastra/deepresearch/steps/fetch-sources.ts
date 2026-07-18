@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { ReturnTypeOfContentService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchFetchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
@@ -14,6 +15,10 @@ export function createFetchSourcesStep({ repositories, contentService }: { repos
     id: 'deep-research-fetch-sources', inputSchema, outputSchema,
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
+      if (isReplayPastPhase(run.id, 'fetching')) {
+        checkpointWorkflowPhase(repositories, run, 'fetching', 'extracting_evidence')
+        return { runId: run.id, brief: inputData.brief }
+      }
       const sources = inputData.sourceIds.map((id) => repositories.researchSourceRepo.getSource(id)).filter((source): source is NonNullable<typeof source> => Boolean(source))
       const startedAt = Date.now()
       const outcomes = await traceDeepResearchPhase('fetching', deepResearchTelemetryContext(run, { sources: sources.length }), async (span) => {
@@ -36,6 +41,7 @@ export function createFetchSourcesStep({ repositories, contentService }: { repos
           failedCount: outcomes.length - fetchedCount,
         },
       })
+      checkpointWorkflowPhase(repositories, run, 'fetching', 'extracting_evidence')
       return { runId: run.id, brief: inputData.brief }
     },
   })

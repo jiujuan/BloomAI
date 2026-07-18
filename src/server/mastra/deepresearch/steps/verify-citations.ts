@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { CitationVerifier } from '../agents/citation-verifier'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchClaimVerification } from '@server/telemetry/metrics'
 
@@ -13,6 +14,7 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['synthesizing'])
       repositories.researchRunRepo.transitionWithEvent(run.id, 'verifying', { phase: 'verifying_citations', progress: 84 })
+      if (isReplayPastPhase(run.id, 'verifying_citations')) return { runId: run.id }
       const claims = repositories.researchReportRepo.listClaims(run.id)
       const evidenceById = new Map(repositories.researchEvidenceRepo.list(run.id).map((item) => [item.id, item]))
       const citationsByClaim = new Map<string, ReturnType<typeof repositories.researchReportRepo.listCitations>>()
@@ -39,6 +41,7 @@ export function createVerifyCitationsStep({ repositories, verifier }: { reposito
         verifiedClaimCount += 1
       }
       recordDeepResearchClaimVerification(verifiedClaimCount, deepResearchTelemetryContext(run, { claims: verifiedClaimCount }))
+      checkpointWorkflowPhase(repositories, run, 'verifying_citations', 'repair_report')
       return { runId: run.id }
     },
   })

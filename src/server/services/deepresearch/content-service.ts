@@ -5,6 +5,7 @@ import type { ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } fro
 import { researchEventRepo } from '@server/db/repositories/deepresearch/research-event.repo'
 import { executeLegacyToolCapability } from '@server/skills/policy/capability-broker'
 import { researchSourceRepo } from '@server/db/repositories/deepresearch/research-source.repo'
+import { createSnapshotFingerprint } from '@server/deepresearch/domain/idempotency'
 import type { WorkflowToolExecutor } from './search-service'
 
 export interface FetchOutcome {
@@ -144,6 +145,8 @@ export function createContentService(options: {
 
   async function fetchOne(run: ResearchRunDto, source: ResearchSourceDto): Promise<FetchOutcome> {
     if (isCancelled(run.id)) return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
+    const existingSnapshot = repositories.researchSourceRepo.getLatestSnapshotForSource(run.id, source.id)
+    if (existingSnapshot) return { sourceId: source.id, status: 'fetched', snapshot: existingSnapshot, error: null }
     try {
       const initialUrl = await validatePublicResearchUrl(source.canonicalUrl, lookup)
       const fetched = await retryWithinDeadline(
@@ -180,7 +183,7 @@ export function createContentService(options: {
         parserVersion: 'deepresearch-web-extract-v1',
         finalUrl,
         httpStatus: typeof fetchOutput.status === 'number' ? fetchOutput.status : null,
-        idempotencyKey: 'source-snapshot:v1:' + source.id + ':' + contentHash,
+        idempotencyKey: createSnapshotFingerprint({ runId: run.id, sourceId: source.id, finalUrl, parserVersion: 'deepresearch-web-extract-v1', contentHash }),
       })
       return { sourceId: source.id, status: 'fetched', snapshot, error: null }
     } catch (error) {

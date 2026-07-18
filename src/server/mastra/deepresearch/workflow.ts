@@ -1,5 +1,6 @@
 import { createWorkflow } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchCheckpointCursorSchema } from '@shared/deepresearch/schemas'
 import type { BriefPlanner } from './agents/brief-planner'
 import type { QueryPlanner } from './agents/query-planner'
 import type { GapAnalyst } from './agents/gap-analyst'
@@ -18,6 +19,7 @@ import { createAssessCoverageStep } from './steps/assess-coverage'
 import { createAssessQualityStep } from './steps/assess-quality'
 import { createBuildBriefStep } from './steps/build-brief'
 import { createBuildOutlineStep } from './steps/build-outline'
+import { createCheckpointDraftsStep } from './steps/checkpoint-drafts'
 import { createCurateSourcesStep } from './steps/curate-sources'
 import { createDraftSectionsStep } from './steps/draft-sections'
 import { createExecuteSearchesStep } from './steps/execute-searches'
@@ -25,14 +27,26 @@ import { createExtractClaimsStep } from './steps/extract-claims'
 import { createExtractEvidenceStep } from './steps/extract-evidence'
 import { createFetchSourcesStep } from './steps/fetch-sources'
 import { createFinalizeArtifactsStep } from './steps/finalize-artifacts'
-import { createGapFillIterationStep, shouldStopGapFill } from './steps/gap-fill-iteration'
+import { createBoundedPersistentIterationStep, shouldStopGapFill } from './steps/gap-fill-iteration'
 import { createLoadRunStep } from './steps/load-run'
 import { createPlanQuestionsStep } from './steps/plan-questions'
 import { createPlanQueriesStep } from './steps/plan-queries'
 import { createRepairReportStep } from './steps/repair-report'
 import { createVerifyCitationsStep } from './steps/verify-citations'
 
-const workflowInputSchema = z.object({ runId: z.string().min(1) })
+const attemptExecutionInputSchema = z.object({
+  attemptId: z.string().min(1),
+  executorId: z.string().min(1).optional(),
+  ownershipToken: z.string().min(1),
+  resumeCursor: researchCheckpointCursorSchema.nullable(),
+})
+const workflowInputSchema = z.object({
+  runId: z.string().min(1),
+  // The executor-only capability is accepted at workflow entry so a workflow
+  // invocation is unambiguously bound to the leased Attempt. Individual
+  // workflow steps remain run-scoped until DR2-11 checkpoint replay wiring.
+  attempt: attemptExecutionInputSchema.optional(),
+})
 const workflowOutputSchema = z.object({ runId: z.string().min(1), artifactId: z.string().min(1) })
 
 export interface CreateDeepResearchWorkflowOptions {
@@ -63,9 +77,10 @@ export function createDeepResearchWorkflow(options: CreateDeepResearchWorkflowOp
   const fetchSources = createFetchSourcesStep({ repositories: options.repositories, contentService: options.contentService })
   const extractEvidence = createExtractEvidenceStep({ repositories: options.repositories, evidenceService: options.evidenceService })
   const assessCoverage = createAssessCoverageStep({ repositories: options.repositories, evidenceService: options.evidenceService })
-  const gapFillIteration = createGapFillIterationStep({ repositories: options.repositories, gapAnalyst: options.gapAnalyst, searchService: options.searchService, sourceCurator: options.sourceCurator, contentService: options.contentService, evidenceService: options.evidenceService })
+  const boundedPersistentIteration = createBoundedPersistentIterationStep({ repositories: options.repositories, gapAnalyst: options.gapAnalyst, searchService: options.searchService, sourceCurator: options.sourceCurator, contentService: options.contentService, evidenceService: options.evidenceService })
   const buildOutline = createBuildOutlineStep(options.repositories)
   const draftSections = createDraftSectionsStep({ repositories: options.repositories, writer: options.sectionWriter })
+  const checkpointDrafts = createCheckpointDraftsStep(options.repositories)
   const extractClaims = createExtractClaimsStep({ repositories: options.repositories, extractor: options.claimExtractor, citationService: options.citationService })
   const verifyCitations = createVerifyCitationsStep({ repositories: options.repositories, verifier: options.citationVerifier })
   const repairReport = createRepairReportStep({ repositories: options.repositories, critic: options.reportCritic })
@@ -82,9 +97,10 @@ export function createDeepResearchWorkflow(options: CreateDeepResearchWorkflowOp
     .then(fetchSources)
     .then(extractEvidence)
     .then(assessCoverage)
-    .dountil(gapFillIteration, async ({ inputData }) => shouldStopGapFill(inputData))
+    .dountil(boundedPersistentIteration, async ({ inputData }) => shouldStopGapFill(inputData))
     .then(buildOutline)
     .foreach(draftSections, { concurrency: 4 })
+    .then(checkpointDrafts)
     .then(extractClaims)
     .then(verifyCitations)
     .then(repairReport)

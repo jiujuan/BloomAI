@@ -162,6 +162,20 @@ function planTargets(gaps: readonly ActionableGap[], candidates: readonly Resear
   ))
 }
 
+function exhaustedHardBudgetLimits(input: IterationDecisionInput): string[] {
+  const exhausted: string[] = []
+  // A persisted deadline is authoritative. Legacy/frozen fixtures may only have
+  // startedAt, so deriving a wall-clock deadline here would make this pure decision
+  // nondeterministic and could incorrectly stop historical runs.
+  if (input.usage.deadlineAt !== null && Date.now() >= input.usage.deadlineAt) exhausted.push('duration')
+  if (input.usage.searchQueries >= input.budget.maxSearchQueries) exhausted.push('searchQueries')
+  if (input.usage.normalizedSources >= input.budget.maxNormalizedSources) exhausted.push('normalizedSources')
+  if (input.usage.fetchedSources >= input.budget.maxFetchedSources) exhausted.push('fetchedSources')
+  if (input.budget.maxTokens !== undefined && input.usage.tokens >= input.budget.maxTokens) exhausted.push('modelTokens')
+  if (input.budget.maxProviderCostUsd !== undefined && input.usage.providerCostUsd >= input.budget.maxProviderCostUsd) exhausted.push('providerCostUsd')
+  return exhausted
+}
+
 function reservationFor(targets: readonly ResearchIterationPlanTargetDto[], estimates: IterationDecisionInput['estimates']): ResearchBudgetReservationDto {
   const fetchedSourcesPerQuery = estimates?.fetchedSourcesPerQuery ?? 1
   const modelTokensPerQuery = estimates?.modelTokensPerQuery ?? 100
@@ -195,6 +209,11 @@ export function decideIteration(input: IterationDecisionInput): IterationDecisio
   const historicalIterationCount = input.iterations.reduce((max, iteration) => Math.max(max, iteration.ordinal), 0)
   if (Math.max(input.usage.iterations, historicalIterationCount) + inputSummary.activeReservation.iterations >= input.budget.maxIterations) {
     return stopped('stop_max_iterations', 'max_iterations', 'The hard maximum iteration budget has been reached or reserved.', ['MAX_ITERATIONS_REACHED'], ['Further research was not dispatched because the maximum number of iterations was reached.'], inputSummary)
+  }
+
+  const hardBudgetLimits = exhaustedHardBudgetLimits(input)
+  if (hardBudgetLimits.length > 0) {
+    return stopped('stop_budget', 'budget_exhausted', `A hard budget was exhausted: ${hardBudgetLimits.join(', ')}.`, ['BUDGET_EXHAUSTED', ...hardBudgetLimits.map((item) => `BUDGET_${item}`)], ['Remaining gaps could not be researched within the available budget.'], inputSummary)
   }
 
   if (inputSummary.consecutiveNoMaterialGain >= 2) {

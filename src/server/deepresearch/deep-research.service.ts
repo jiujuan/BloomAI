@@ -21,6 +21,7 @@ import { researchReportRepo } from '../db/repositories/deepresearch/research-rep
 import { subscribeToResearchEvents } from './research-event-publisher'
 import { claimDeepResearchCommand, deepResearchCommandKey, markDeepResearchCommandDispatched } from './commands'
 import { getResearchBudget } from './domain/budgets'
+import { createCheckpointCursor, createCheckpointReplayFingerprint } from './domain/checkpoint-replay'
 import { ResearchDomainError } from './domain/errors'
 import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
 import { recordDeepResearchCancellation, recordDeepResearchResume, type DeepResearchTelemetryContext } from '../telemetry/metrics'
@@ -75,13 +76,11 @@ function scopedCommandKey(
   return `deepresearch:command:v1:${kind}:${run.id}:client:${suppliedKey}`
 }
 function commandFingerprint(run: ResearchRunDto): string {
-  // Versioned workflow/parser fingerprints will be added by the resume executor;
-  // this stable input identity lets the command layer reuse the initial cursor now.
-  return `run:${run.id}:profile:${run.profile}:depth:${run.depth}`
+  return createCheckpointReplayFingerprint(run)
 }
 
-function initialCursor(): ResearchCheckpointCursorDto {
-  return { version: 1, nextPhase: 'planning', iteration: 0 }
+function initialCursor(run: ResearchRunDto): ResearchCheckpointCursorDto {
+  return createCheckpointCursor(run, 'planning', 0)
 }
 
 function commandResult(run: ResearchRunDto, attempt?: ResearchRunAttemptDto | null, checkpoint?: ResearchRunCheckpointDto | null): ResearchRunDto {
@@ -134,7 +133,7 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
         checkpointKey: 'run:queued',
         phase: 'queued',
         status: 'completed',
-        resumeCursor: initialCursor(),
+        resumeCursor: initialCursor(current),
         inputFingerprint: commandFingerprint(current),
         replayPolicy: 'reuse',
       },

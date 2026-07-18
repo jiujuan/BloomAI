@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { QueryPlanner } from '../agents/query-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const inputSchema = z.object({ runId: z.string().min(1), brief: z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) }) })
@@ -36,6 +37,7 @@ export function createPlanQueriesStep({ repositories, planner }: { repositories:
           })
         }
       }
+      checkpointWorkflowPhase(repositories, run, 'plan_queries', 'searching')
       return inputData
     },
   })

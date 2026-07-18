@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type { JsonObject, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
 import { getOrmDb } from '../../client'
@@ -8,6 +8,7 @@ import { decodeJson, EMPTY_JSON_OBJECT, encodeJson } from './repository-utils'
 export interface CreateResearchSourceInput {
   runId: string
   canonicalUrl: string
+  originalUrl?: string
   domain: string
   title?: string | null
   author?: string | null
@@ -36,6 +37,7 @@ export function mapResearchSource(row: typeof research_sources.$inferSelect): Re
     id: row.id,
     runId: row.run_id,
     canonicalUrl: row.canonical_url,
+    originalUrl: row.original_url,
     domain: row.domain,
     title: row.title,
     author: row.author,
@@ -70,6 +72,7 @@ export const researchSourceRepo = {
       id,
       run_id: input.runId,
       canonical_url: input.canonicalUrl,
+      original_url: input.originalUrl ?? input.canonicalUrl,
       domain: input.domain,
       title: input.title ?? null,
       author: input.author ?? null,
@@ -111,7 +114,7 @@ export const researchSourceRepo = {
 
   createSnapshot(input: CreateResearchSnapshotInput): ResearchSourceSnapshotDto {
     return getOrmDb().transaction((tx) => {
-      const existing = tx
+      const existingByIdempotencyKey = tx
         .select()
         .from(research_source_snapshots)
         .where(and(
@@ -119,7 +122,18 @@ export const researchSourceRepo = {
           eq(research_source_snapshots.idempotency_key, input.idempotencyKey),
         ))
         .get()
-      if (existing) return mapResearchSnapshot(existing)
+      if (existingByIdempotencyKey) return mapResearchSnapshot(existingByIdempotencyKey)
+
+      const existingByContentHash = tx
+        .select()
+        .from(research_source_snapshots)
+        .where(and(
+          eq(research_source_snapshots.run_id, input.runId),
+          eq(research_source_snapshots.content_hash, input.contentHash),
+        ))
+        .orderBy(asc(research_source_snapshots.created_at))
+        .get()
+      if (existingByContentHash) return mapResearchSnapshot(existingByContentHash)
 
       const id = uuidv4()
       tx.insert(research_source_snapshots).values({
@@ -141,6 +155,25 @@ export const researchSourceRepo = {
     })
   },
 
+  getSnapshotByContentHash(runId: string, contentHash: string): ResearchSourceSnapshotDto | undefined {
+    const row = getOrmDb()
+      .select()
+      .from(research_source_snapshots)
+      .where(and(eq(research_source_snapshots.run_id, runId), eq(research_source_snapshots.content_hash, contentHash)))
+      .orderBy(asc(research_source_snapshots.created_at))
+      .get()
+    return row ? mapResearchSnapshot(row) : undefined
+  },
+
+  getLatestSnapshotForSource(runId: string, sourceId: string): ResearchSourceSnapshotDto | undefined {
+    const row = getOrmDb()
+      .select()
+      .from(research_source_snapshots)
+      .where(and(eq(research_source_snapshots.run_id, runId), eq(research_source_snapshots.source_id, sourceId)))
+      .orderBy(desc(research_source_snapshots.created_at))
+      .get()
+    return row ? mapResearchSnapshot(row) : undefined
+  },
   listSnapshots(runId: string): ResearchSourceSnapshotDto[] {
     return getOrmDb()
       .select()

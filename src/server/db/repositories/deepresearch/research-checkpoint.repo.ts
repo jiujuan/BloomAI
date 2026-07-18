@@ -25,6 +25,7 @@ export interface AppendResearchCheckpointInput {
 
 export interface CompleteCheckpointWithOwnershipInput extends Omit<AppendResearchCheckpointInput, 'status' | 'createdAt'> {
   executorId: string
+  ownershipToken?: string
   now?: number
 }
 
@@ -96,18 +97,19 @@ export const researchCheckpointRepo = {
       .orderBy(desc(research_run_checkpoints.sequence)).all().map(mapResearchCheckpoint)
   },
 
-  findLatestCompatibleCursor(runId: string, inputFingerprint: string): ResearchRunCheckpointDto | undefined {
-    const compatible = getOrmDb().select().from(research_run_checkpoints).where(and(
+  findLatestCompatibleCursor(runId: string, compatibilityFingerprint: string): ResearchRunCheckpointDto | undefined {
+    const completed = getOrmDb().select().from(research_run_checkpoints).where(and(
       eq(research_run_checkpoints.run_id, runId),
       eq(research_run_checkpoints.status, 'completed'),
-      eq(research_run_checkpoints.input_fingerprint, inputFingerprint),
-    )).orderBy(desc(research_run_checkpoints.created_at), desc(research_run_checkpoints.sequence)).get()
-    const row = compatible ?? getOrmDb().select().from(research_run_checkpoints).where(and(
-      eq(research_run_checkpoints.run_id, runId),
-      eq(research_run_checkpoints.status, 'completed'),
-      eq(research_run_checkpoints.checkpoint_key, 'legacy:resume_from_planning'),
-    )).orderBy(desc(research_run_checkpoints.created_at), desc(research_run_checkpoints.sequence)).get()
-    return row ? mapResearchCheckpoint(row) : undefined
+    )).orderBy(desc(research_run_checkpoints.created_at), desc(research_run_checkpoints.sequence)).all()
+    const compatible = completed.map(mapResearchCheckpoint).find((checkpoint) =>
+      checkpoint.resumeCursor.compatibilityFingerprint === compatibilityFingerprint
+      || checkpoint.inputFingerprint === compatibilityFingerprint,
+    )
+    if (compatible) return compatible
+
+    const legacy = completed.find((row) => row.checkpoint_key === 'legacy:resume_from_planning')
+    return legacy ? mapResearchCheckpoint(legacy) : undefined
   },
 
   completeWithOwnership(input: CompleteCheckpointWithOwnershipInput): ResearchRunCheckpointDto | null {
@@ -117,9 +119,12 @@ export const researchCheckpointRepo = {
         eq(research_run_attempts.id, input.attemptId),
         eq(research_run_attempts.run_id, input.runId),
         eq(research_run_attempts.executor_id, input.executorId),
+        ...(input.ownershipToken ? [eq(research_run_attempts.ownership_token, input.ownershipToken)] : []),
         gt(research_run_attempts.lease_expires_at, now),
       )).get()
       if (!owner) return null
+      const currentRun = tx.select().from(research_runs).where(and(eq(research_runs.id, input.runId), eq(research_runs.current_attempt_id, input.attemptId))).get()
+      if (!currentRun) return null
 
       const appended = appendResearchCheckpointInTransaction(tx, { ...input, status: 'completed', createdAt: now })
       const checkpoint = appended.checkpoint

@@ -664,7 +664,7 @@ describe('Deep Research repositories', () => {
     const { researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo } = await loadRepositories()
     const run = createRun(researchRunRepo)
     const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', status: 'running', createdAt: 2_000 })
-    expect(researchAttemptRepo.acquireLease(attempt.id, 'worker-a', 10_000, 2_000)).toBe(true)
+    expect(researchAttemptRepo.acquireLease(attempt.id, 'worker-a', 'checkpoint-owner-token', 10_000, 2_000)).toBe(true)
 
     expect(researchCheckpointRepo.completeWithOwnership({
       runId: run.id,

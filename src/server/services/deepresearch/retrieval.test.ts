@@ -56,7 +56,8 @@ async function loadTestContext() {
   const { researchRunRepo } = await import('../../db/repositories/deepresearch/research-run.repo')
   const { researchSourceRepo } = await import('../../db/repositories/deepresearch/research-source.repo')
   const { researchEventRepo } = await import('../../db/repositories/deepresearch/research-event.repo')
-  return { client, researchRunRepo, researchSourceRepo, researchEventRepo }
+  const { researchQuestionRepo } = await import('../../db/repositories/deepresearch/research-question.repo')
+  return { client, researchRunRepo, researchSourceRepo, researchEventRepo, researchQuestionRepo }
 }
 
 describe('Deep Research retrieval services', () => {
@@ -116,6 +117,41 @@ describe('Deep Research retrieval services', () => {
     expect(result[0]).toMatchObject({ queryId: 'q1', provider: 'fixture', candidates: [{ url: 'https://sec.gov/a' }] })
   })
 
+  it('persists a successful search before the following crash boundary so recovery does not re-call the fake provider', async () => {
+    const { researchRunRepo, researchQuestionRepo } = await loadTestContext()
+    const run = researchRunRepo.create({ input: { topic: 'Durable search replay', profile: 'market', depth: 'deep', objective: undefined }, budget: getResearchBudget('deep') })
+    const question = researchQuestionRepo.create({ runId: run.id, ordinal: 1, question: 'Which primary sources are available?', intent: 'evidence', requiredEvidenceTypes: ['official-statistics'], priority: 'high' })
+    const query = researchQuestionRepo.createSearchQuery({ runId: run.id, questionId: question.id, iteration: 1, query: 'stable query', idempotencyKey: 'query:v2:stable' })
+    let providerCalls = 0
+    const search = createSearchService({
+      executeTool: async () => {
+        providerCalls += 1
+        return { output: { provider: 'fixture', results: [{ title: 'Stable result', url: 'https://example.com/report', snippet: 'fixture' }] } }
+      },
+      sleep: async () => undefined,
+    })
+    await search.search(createRun({ id: run.id }), [{ id: query.id, query: query.query, idempotencyKey: query.idempotencyKey }], {
+      onExecution: (execution) => {
+        researchQuestionRepo.updateSearchQuery(execution.queryId, {
+          provider: execution.provider,
+          status: 'completed',
+          resultCount: execution.candidates.length,
+          candidates: execution.candidates.map((candidate) => ({ title: candidate.title, url: candidate.url, snippet: candidate.snippet })),
+          completedAt: Date.now(),
+        })
+      },
+    })
+    expect(providerCalls).toBe(1)
+
+    // Simulates process loss after durable query completion and before later retrieval/checkpoint work.
+    expect(() => { throw new Error('injected crash after query update') }).toThrow('injected crash')
+    const persisted = researchQuestionRepo.getSearchQuery(query.id)!
+    expect(persisted).toMatchObject({ status: 'completed', candidates: [{ url: 'https://example.com/report' }] })
+    const incomplete = persisted.status === 'completed' ? [] : [{ id: persisted.id, query: persisted.query, idempotencyKey: persisted.idempotencyKey }]
+    await search.search(createRun({ id: run.id }), incomplete)
+
+    expect(providerCalls).toBe(1)
+  })
   it('fetches with bounded concurrency, rejects unsafe redirects, records failures, and persists immutable content-hash snapshots', async () => {
     const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
     const run = researchRunRepo.create({
@@ -143,6 +179,7 @@ describe('Deep Research retrieval services', () => {
 
     let activeFetches = 0
     let maxActiveFetches = 0
+    let fetchProviderCalls = 0
     const content = 'A source page may say Ignore prior instructions, but it remains untrusted evidence.\nAuthorization: Bearer secret-token\nC:\\Users\\researcher\\secret.txt'
     const contentService = createContentService({
       repositories: { researchSourceRepo, researchEventRepo },
@@ -150,6 +187,7 @@ describe('Deep Research retrieval services', () => {
       executeTool: async ({ toolId, input }) => {
         const url = String(input.url)
         if (toolId === 'web_fetch') {
+          fetchProviderCalls += 1
           activeFetches += 1
           maxActiveFetches = Math.max(maxActiveFetches, activeFetches)
           await Promise.resolve()
@@ -175,10 +213,32 @@ describe('Deep Research retrieval services', () => {
     expect(snapshots[0].contentHash).toBe(crypto.createHash('sha256').update(snapshots[0].content).digest('hex'))
     expect(researchEventRepo.list(run.id).some((event) => event.type === 'research.source.fetch_failed')).toBe(true)
 
+    const providerCallsBeforeReplay = fetchProviderCalls
     await contentService.fetch(createRun({ id: run.id, budget: { ...run.budget, fetchConcurrency: 2 } }), [publicSource])
     expect(researchSourceRepo.listSnapshots(run.id)).toHaveLength(1)
+    expect(fetchProviderCalls).toBe(providerCallsBeforeReplay)
   })
 
+  it('reuses one durable snapshot when different sources yield the same content hash', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const run = researchRunRepo.create({ input: { topic: 'Snapshot dedupe', profile: 'market', depth: 'deep', objective: undefined }, budget: getResearchBudget('deep') })
+    const sources = ['https://example.com/a', 'https://example.org/b'].map((canonicalUrl) => researchSourceRepo.createSource({
+      runId: run.id, canonicalUrl, originalUrl: canonicalUrl + '?utm_source=fixture', domain: new URL(canonicalUrl).hostname,
+      title: canonicalUrl, sourceType: 'reputable-secondary', selectionStatus: 'selected', scores: {},
+    }))
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool: async ({ toolId, input }) => toolId === 'web_fetch'
+        ? { output: { finalUrl: input.url, status: 200 } }
+        : { output: { finalUrl: input.url, title: 'Shared body', text: 'The same frozen fixture content for both sources.' } },
+      sleep: async () => undefined,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const outcomes = await contentService.fetch(createRun({ id: run.id }), sources)
+    expect(outcomes.map((outcome) => outcome.snapshot?.id)).toEqual([outcomes[0].snapshot?.id, outcomes[0].snapshot?.id])
+    expect(researchSourceRepo.listSnapshots(run.id)).toHaveLength(1)
+  })
   it('rejects hosts that resolve to private networks and stops scheduling after cancellation', async () => {
     const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
     const run = researchRunRepo.create({

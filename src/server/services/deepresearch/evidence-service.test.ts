@@ -265,12 +265,10 @@ describe('EvidenceService', () => {
     ])
   })
 
-  it.each([
-    ['coverage is sufficient', { coverageComplete: true, marginalNewEvidenceCount: 1, cancelled: false, iterations: 0 }],
-    ['information gain is exhausted', { coverageComplete: false, marginalNewEvidenceCount: 0, cancelled: false, iterations: 0 }],
-    ['the run is cancelled', { coverageComplete: false, marginalNewEvidenceCount: 1, cancelled: true, iterations: 0 }],
-    ['the iteration budget is exhausted', { coverageComplete: false, marginalNewEvidenceCount: 1, cancelled: false, iterations: 3 }],
-  ])('stops gap filling when %s', (_reason, state) => {
-    expect(shouldStopGapFill({ ...state, maxIterations: run.budget.maxIterations })).toBe(true)
+  it('stops the bounded gap loop only after a persisted stop decision, not merely because no evidence was added', () => {
+    const state = { coverageComplete: false, marginalNewEvidenceCount: 0, cancelled: false, iterations: 0, maxIterations: run.budget.maxIterations }
+
+    expect(shouldStopGapFill(state)).toBe(false)
+    expect(shouldStopGapFill({ ...state, stopDecision: 'stop_no_material_gain' })).toBe(true)
   })
 })

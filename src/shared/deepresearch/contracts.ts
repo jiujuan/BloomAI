@@ -190,6 +190,11 @@ export interface ResearchCheckpointCursorDto {
   pendingQueryIds?: string[]
   pendingSourceIds?: string[]
   pendingSectionIds?: string[]
+  /** Compatibility metadata makes BloomAI DB checkpoints authoritative across workflow upgrades. */
+  workflowVersion?: string
+  profile?: ResearchProfile
+  policyVersion?: string
+  compatibilityFingerprint?: string
 }
 
 export interface ResearchRunErrorDto {
@@ -428,6 +433,12 @@ export interface ResearchCoverageDto {
   gaps: string[]
 }
 
+export interface ResearchSearchResultCandidateDto {
+  title: string
+  url: string
+  snippet: string
+}
+
 export interface ResearchSearchQueryDto {
   id: string
   runId: string
@@ -440,12 +451,16 @@ export interface ResearchSearchQueryDto {
   error: ResearchRunErrorDto | null
   createdAt: number
   completedAt: number | null
+  /** Durable domain fingerprint; legacy callers may omit it in fixture DTOs. */
+  idempotencyKey?: string
+  candidates: ResearchSearchResultCandidateDto[]
 }
 
 export interface ResearchSourceDto {
   id: string
   runId: string
   canonicalUrl: string
+  originalUrl?: string
   domain: string
   title: string | null
   author: string | null

@@ -4,11 +4,13 @@ import path from 'path'
 import { LibSQLStore } from '@mastra/libsql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StartResearchInput } from '@shared/deepresearch/contracts'
+import { createDeepResearchExecutor } from '../../deepresearch/executor'
 import { createDeepResearchService } from '../../deepresearch/deep-research.service'
 import { createDeepResearchMastraRuntime } from './mastra'
 import { createContentService } from '@server/services/deepresearch/content-service'
 import { createSearchService } from '@server/services/deepresearch/search-service'
 import { SourceCurator } from '@server/services/deepresearch/source-curator'
+import { planIteration } from './steps/plan-iteration'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -37,6 +39,7 @@ async function loadTestContext() {
   const { researchEventRepo } = await import('../../db/repositories/deepresearch/research-event.repo')
   const { researchEvidenceRepo } = await import('../../db/repositories/deepresearch/research-evidence.repo')
   const { researchSourceRepo } = await import('../../db/repositories/deepresearch/research-source.repo')
+  const { researchIterationRepo } = await import('../../db/repositories/deepresearch/research-iteration.repo')
 
   return {
     client,
@@ -49,6 +52,7 @@ async function loadTestContext() {
     researchEventRepo,
     researchEvidenceRepo,
     researchSourceRepo,
+    researchIterationRepo,
   }
 }
 
@@ -72,6 +76,7 @@ function createRetrievalServices(repositories: Awaited<ReturnType<typeof loadTes
     throw new Error('Unexpected tool: ' + toolId)
   })
   return {
+    executeTool,
     searchService: createSearchService({ executeTool, sleep: async () => {} }),
     sourceCurator: new SourceCurator(),
     contentService: createContentService({
@@ -110,6 +115,83 @@ describe('Deep Research Mastra report workflow', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
+  it('replays a persisted budget stop without invoking the follow-up planner or creating another audit record', async () => {
+    const repositories = await loadTestContext()
+    const run = repositories.researchRunRepo.create({
+      input,
+      budget: {
+        maxQuestions: 14,
+        maxIterations: 3,
+        maxSearchQueries: 0,
+        maxNormalizedSources: 50,
+        maxFetchedSources: 36,
+        searchConcurrency: 6,
+        fetchConcurrency: 5,
+        maxDurationMs: 30 * 60 * 1000,
+      },
+    })
+    const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute' }]) }
+    const state = {
+      runId: run.id,
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      coverageComplete: false,
+      marginalNewEvidenceCount: 0,
+      cancelled: false,
+      iterations: 0,
+      maxIterations: run.budget.maxIterations,
+    }
+
+    const first = await planIteration(state, { repositories, gapAnalyst })
+    const replay = await planIteration(first, { repositories, gapAnalyst })
+
+    expect(first.stopDecision).toBe('stop_budget')
+    expect(replay.stopDecision).toBe('stop_budget')
+    expect(gapAnalyst.plan).not.toHaveBeenCalled()
+    expect(repositories.researchIterationRepo.list(run.id)).toHaveLength(0)
+    expect(repositories.researchIterationRepo.listStopDecisions(run.id)).toHaveLength(1)
+    expect(repositories.researchIterationRepo.listStopDecisions(run.id)[0].decision).toMatchObject({
+      decision: 'stop_budget',
+      matchedRule: 'budget_exhausted',
+      limitations: expect.any(Array),
+    })
+  })
+
+  it('replays a persisted no-actionable-gaps stop without reinvoking the gap-planning provider', async () => {
+    const repositories = await loadTestContext()
+    const run = repositories.researchRunRepo.create({
+      input,
+      budget: {
+        maxQuestions: 14,
+        maxIterations: 3,
+        maxSearchQueries: 48,
+        maxNormalizedSources: 50,
+        maxFetchedSources: 36,
+        searchConcurrency: 6,
+        fetchConcurrency: 5,
+        maxDurationMs: 30 * 60 * 1000,
+      },
+    })
+    const gapAnalyst = { plan: vi.fn(async () => []) }
+    const state = {
+      runId: run.id,
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      coverageComplete: false,
+      marginalNewEvidenceCount: 0,
+      cancelled: false,
+      iterations: 0,
+      maxIterations: run.budget.maxIterations,
+    }
+
+    const first = await planIteration(state, { repositories, gapAnalyst })
+    const replay = await planIteration(first, { repositories, gapAnalyst })
+
+    expect(first.stopDecision).toBe('stop_no_actionable_gaps')
+    expect(replay.stopDecision).toBe('stop_no_actionable_gaps')
+    expect(gapAnalyst.plan).toHaveBeenCalledTimes(1)
+    expect(repositories.researchIterationRepo.list(run.id)).toHaveLength(0)
+    expect(repositories.researchIterationRepo.listStopDecisions(run.id)).toHaveLength(1)
+  })
+
   it('persists a verified cited report with Markdown and JSON artifacts', async () => {
     const repositories = await loadTestContext()
     const planner = {
@@ -124,10 +206,16 @@ describe('Deep Research Mastra report workflow', () => {
       })),
     }
     const retrieval = createRetrievalServices(repositories)
+    const gapAnalyst = {
+      plan: vi.fn(async (currentRun: { topic: string }, questions: Array<{ id: string; question: string; priority: string; coverage: { gaps: string[] } | null }>) => questions
+        .filter((question) => question.priority === 'high' || question.priority === 'critical')
+        .map((question) => ({ questionId: question.id, query: currentRun.topic + ' ' + question.question + ' follow-up ' + (question.coverage?.gaps[0] ?? 'official evidence') }))),
+    }
     const runtime = createDeepResearchMastraRuntime({
       dataDir,
       storage: createStorage(),
       planner,
+      gapAnalyst,
       repositories,
       ...retrieval,
     })
@@ -146,7 +234,13 @@ describe('Deep Research Mastra report workflow', () => {
       },
     })
 
-    await runtime.start(run.id)
+    await runtime.start({
+      runId: run.id,
+      attemptId: 'workflow-test:' + run.id,
+      ownershipToken: 'workflow-test-token',
+      signal: new AbortController().signal,
+      resumeCursor: null,
+    })
 
     const detail = repositories.researchRunRepo.getDetail(run.id)!
     expect(planner.plan).toHaveBeenCalledTimes(1)
@@ -175,6 +269,21 @@ describe('Deep Research Mastra report workflow', () => {
       }),
     ]))
     expect(detail.searchQueries.length).toBeGreaterThan(0)
+    const persistedIterations = repositories.researchIterationRepo.list(run.id)
+    expect(persistedIterations.length).toBeGreaterThanOrEqual(1)
+    expect(persistedIterations.length).toBeLessThanOrEqual(run.budget.maxIterations)
+    expect(persistedIterations.every((iteration) => iteration.status === 'completed' || iteration.status === 'stopped')).toBe(true)
+    expect(persistedIterations.every((iteration) => typeof iteration.coverageAfter.materialGain === 'boolean')).toBe(true)
+    const iterationCheckpoints = repositories.researchCheckpointRepo.list(run.id)
+    expect(iterationCheckpoints).toEqual(expect.arrayContaining([
+      expect.objectContaining({ checkpointKey: expect.stringMatching(/^iteration:\d+:retrieval-planned$/) }),
+      expect.objectContaining({ checkpointKey: expect.stringMatching(/^iteration:\d+:assessment-completed$/) }),
+      expect.objectContaining({ checkpointKey: expect.stringMatching(/^iteration:stop:/) }),
+    ]))
+    expect(repositories.researchIterationRepo.listStopDecisions(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ decision: expect.objectContaining({ matchedRule: expect.any(String), limitations: expect.any(Array) }) }),
+    ]))
+    expect(gapAnalyst.plan).toHaveBeenCalled()
     expect(detail.sources.length).toBeGreaterThan(0)
     expect(detail.snapshots.length).toBeGreaterThan(0)
     expect(detail.events).toEqual(expect.arrayContaining([
@@ -224,7 +333,8 @@ describe('Deep Research Mastra report workflow', () => {
       ...retrieval,
     })
     runtimes.push(runtime)
-    const service = createDeepResearchService({ runtime })
+    const executor = createDeepResearchExecutor({ runtime, executorId: 'workflow-test-executor' })
+    const service = createDeepResearchService({ runtime: executor })
     const run = repositories.researchRunRepo.create({
       input,
       budget: {
@@ -239,10 +349,11 @@ describe('Deep Research Mastra report workflow', () => {
       },
     })
 
-    const suspended = await runtime.start(run.id)
+    const attempt = repositories.researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    const suspended = await executor.start(run.id)
     const awaitingDetail = repositories.researchRunRepo.getDetail(run.id)!
 
-    expect(suspended.status).toBe('suspended')
+    expect(suspended).toBe(true)
     expect(awaitingDetail).toMatchObject({
       status: 'awaiting_input',
       phase: 'awaiting_clarification',
@@ -263,6 +374,7 @@ describe('Deep Research Mastra report workflow', () => {
         status: 'completed_with_limitations',
         phase: 'report_complete',
       })
+      expect(repositories.researchAttemptRepo.get(attempt.id)).toMatchObject({ status: 'succeeded' })
     })
 
     const resumedDetail = repositories.researchRunRepo.getDetail(run.id)!

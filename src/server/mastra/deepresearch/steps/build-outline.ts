@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const inputSchema = z.object({ runId: z.string().min(1), brief: z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) }) })
@@ -14,6 +15,12 @@ export function createBuildOutlineStep(repositories: DeepResearchRepositories) {
     outputSchema: z.array(reportSectionJobSchema),
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
+      if (isReplayPastPhase(run.id, 'building_outline')) {
+        const jobs = repositories.researchReportRepo.listSections(run.id).map((section) => ({ runId: run.id, sectionId: section.id }))
+        repositories.researchRunRepo.transitionWithEvent(run.id, 'researching', { phase: 'building_outline', progress: 68 })
+        checkpointWorkflowPhase(repositories, run, 'building_outline', 'drafting_sections', { pendingSectionIds: jobs.map((job) => job.sectionId) })
+        return jobs
+      }
       const required = getResearchProfilePolicy(run.profile).requiredSections
       const titles = [...new Set([...required, ...inputData.brief.plannedSections].map((title) => title.trim()).filter(Boolean))]
       const existing = repositories.researchReportRepo.listSections(run.id)
@@ -29,6 +36,7 @@ export function createBuildOutlineStep(repositories: DeepResearchRepositories) {
         return { runId: run.id, sectionId: section.id }
       })
       repositories.researchRunRepo.transitionWithEvent(run.id, 'researching', { phase: 'building_outline', progress: 68 })
+      checkpointWorkflowPhase(repositories, run, 'building_outline', 'drafting_sections', { pendingSectionIds: jobs.map((job) => job.sectionId) })
       return jobs
     },
   })

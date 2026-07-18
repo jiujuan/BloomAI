@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import { areHighPriorityQuestionsCovered, type EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
 const briefSchema = z.object({
@@ -72,6 +73,7 @@ export function createAssessCoverageStep({ repositories, evidenceService }: { re
           replayPolicy: 'reuse',
         },
       })
+      checkpointWorkflowPhase(repositories, run, 'assessing_coverage', 'gap_filling')
       const updatedQuestions = repositories.researchQuestionRepo.list(run.id)
       return {
         runId: run.id,

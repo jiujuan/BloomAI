@@ -136,6 +136,10 @@ export const researchCheckpointCursorSchema = z.object({
   pendingQueryIds: z.array(z.string().min(1)).optional(),
   pendingSourceIds: z.array(z.string().min(1)).optional(),
   pendingSectionIds: z.array(z.string().min(1)).optional(),
+  workflowVersion: z.string().min(1).optional(),
+  profile: z.enum(['general', 'market', 'competitor', 'academic']).optional(),
+  policyVersion: z.string().min(1).optional(),
+  compatibilityFingerprint: z.string().min(1).optional(),
 })
 
 export const researchRunCapabilitiesSchema = z.object({

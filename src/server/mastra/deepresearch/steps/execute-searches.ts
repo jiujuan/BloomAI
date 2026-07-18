@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { SearchExecution } from '@server/services/deepresearch/search-service'
 import type { ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchSearchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
@@ -16,22 +17,36 @@ export function createExecuteSearchesStep({ repositories, searchService }: { rep
     id: 'deep-research-execute-searches', inputSchema, outputSchema,
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
-      const queries = repositories.researchQuestionRepo.listSearchQueries(run.id).filter((query) => query.status === 'queued')
+      const allQueries = repositories.researchQuestionRepo.listSearchQueries(run.id)
+      if (isReplayPastPhase(run.id, 'searching')) {
+        checkpointWorkflowPhase(repositories, run, 'searching', 'curating_sources')
+        return { ...inputData, candidates: [] }
+      }
+      const queries = allQueries.filter((query) => query.status === 'queued')
+      const persistExecution = (execution: SearchExecution): void => {
+        repositories.researchQuestionRepo.updateSearchQuery(execution.queryId, {
+          provider: execution.provider,
+          status: execution.error ? 'failed' : 'completed',
+          resultCount: execution.candidates.length,
+          error: execution.error,
+          completedAt: Date.now(),
+        })
+      }
       const startedAt = Date.now()
       const executions: SearchExecution[] = await traceDeepResearchPhase('searching', deepResearchTelemetryContext(run, { queries: queries.length }), async (span) => {
         const result = await searchService.search(
           run,
           queries.map((query) => ({ id: query.id, query: query.query })),
-          { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' },
+          {
+            isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+            onExecution: persistExecution,
+          },
         )
         setDeepResearchSpanCounts(span, { queries: queries.length, candidates: result.reduce((count, execution) => count + execution.candidates.length, 0) })
         return result
       })
       recordDeepResearchSearchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { queries: queries.length }))
       const candidates = executions.flatMap((execution) => execution.candidates)
-      for (const execution of executions) {
-        repositories.researchQuestionRepo.updateSearchQuery(execution.queryId, { provider: execution.provider, status: execution.error ? 'failed' : 'completed', resultCount: execution.candidates.length, error: execution.error, completedAt: Date.now() })
-      }
       for (const execution of executions) {
         repositories.researchEventRepo.append(execution.error
           ? {
@@ -47,6 +62,7 @@ export function createExecuteSearchesStep({ repositories, searchService }: { rep
               payload: { id: execution.queryId, resultCount: execution.candidates.length },
             })
       }
+      checkpointWorkflowPhase(repositories, run, 'searching', 'curating_sources')
       return { ...inputData, candidates }
     },
   })

@@ -5,6 +5,7 @@ import type { DiscoveredResearchSource } from './source-curator'
 export interface SearchRequest {
   id: string
   query: string
+  idempotencyKey?: string
 }
 
 export interface SearchExecution {
@@ -85,7 +86,7 @@ export function createSearchService(options: { executeTool?: WorkflowToolExecuto
   const isCancelled = options.isCancelled ?? (() => false)
 
   return {
-    async search(run: ResearchRunDto, requests: SearchRequest[], requestOptions: { isCancelled?: () => boolean } = {}): Promise<SearchExecution[]> {
+    async search(run: ResearchRunDto, requests: SearchRequest[], requestOptions: { isCancelled?: () => boolean; onExecution?: (execution: SearchExecution) => Promise<void> | void } = {}): Promise<SearchExecution[]> {
       const remainingSourceBudget = Math.max(1, run.budget.maxNormalizedSources - run.usage.normalizedSources)
       const cancelled = requestOptions.isCancelled ?? (() => isCancelled(run.id))
       return mapWithConcurrency(
@@ -97,21 +98,25 @@ export function createSearchService(options: { executeTool?: WorkflowToolExecuto
               () => executeTool({
                 caller: 'workflow',
                 toolId: 'web_search',
-                input: { query: request.query, limit: Math.min(8, remainingSourceBudget) },
+                input: { query: request.query, limit: Math.min(8, remainingSourceBudget), idempotencyKey: request.idempotencyKey ?? request.id },
                 sessionId: run.sessionId ?? run.id,
               }),
               run.usage.deadlineAt,
               sleep,
             )
-            return { ...parseSearchOutput(request.id, result.output), error: null }
+            const execution: SearchExecution = { ...parseSearchOutput(request.id, result.output), error: null }
+            await requestOptions.onExecution?.(execution)
+            return execution
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            return {
+            const execution: SearchExecution = {
               queryId: request.id,
               provider: null,
               candidates: [],
               error: { code: 'RESEARCH_SEARCH_FAILED', message, retryable: isRetryableError(error) },
             }
+            await requestOptions.onExecution?.(execution)
+            return execution
           }
         },
         cancelled,

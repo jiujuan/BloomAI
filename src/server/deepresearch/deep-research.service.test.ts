@@ -346,24 +346,35 @@ describe('Deep Research service and executor', () => {
     })
   })
 
-  it('leases execution, releases the lease, and preserves retryable runtime failures', async () => {
-    const { researchRunRepo } = await loadTestContext()
+  it('executes the command-selected Attempt and preserves retryable runtime failures', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadTestContext()
     const successfulRun = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+    const successfulAttempt = researchAttemptRepo.create({ runId: successfulRun.id, trigger: 'initial' })
     const successRuntime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
     const executor = createDeepResearchExecutor({ runtime: successRuntime, executorId: 'executor-test' })
 
     await expect(executor.start(successfulRun.id)).resolves.toBe(true)
-    expect(successRuntime.start).toHaveBeenCalledWith(successfulRun.id)
-    expect(researchRunRepo.acquireLease(successfulRun.id, 'other-executor', 1_000, 2_000)).toBe(true)
+    expect(successRuntime.start).toHaveBeenCalledWith(expect.objectContaining({
+      runId: successfulRun.id,
+      attemptId: successfulAttempt.id,
+      ownershipToken: expect.any(String),
+      signal: expect.any(AbortSignal),
+    }))
+    expect(researchAttemptRepo.get(successfulAttempt.id)).toMatchObject({ status: 'succeeded', executorId: null, leaseExpiresAt: null })
 
     const failedRun = researchRunRepo.create({ input: validInput, budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 } })
+    const failedAttempt = researchAttemptRepo.create({ runId: failedRun.id, trigger: 'initial' })
     const retryableError = Object.assign(new Error('Provider timeout'), { code: 'PROVIDER_TIMEOUT', retryable: true })
     const failureRuntime = { start: vi.fn(async () => { throw retryableError }), resume: vi.fn(async () => undefined) }
 
     await expect(createDeepResearchExecutor({ runtime: failureRuntime, executorId: 'failure-test' }).start(failedRun.id)).resolves.toBe(true)
+    expect(researchAttemptRepo.get(failedAttempt.id)).toMatchObject({
+      status: 'failed',
+      error: { code: 'RESEARCH_PROVIDER_TIMEOUT', retryable: true, category: 'timeout' },
+    })
     expect(researchRunRepo.get(failedRun.id)).toMatchObject({
       status: 'failed',
-      error: { code: 'PROVIDER_TIMEOUT', retryable: true },
+      error: { code: 'RESEARCH_PROVIDER_TIMEOUT', retryable: true },
     })
   })
 })

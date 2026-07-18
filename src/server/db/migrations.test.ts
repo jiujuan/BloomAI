@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(11)
+    expect(migrationVersions()).toHaveLength(13)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(11)
+    expect(migrationVersions()).toHaveLength(13)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -182,6 +182,8 @@ describe('database migrations', () => {
       '009-deep-research-recovery-commands',
       '010-deep-research-resilience',
       '011-deep-research-coverage-assessments',
+      '012-deep-research-iteration-idempotency',
+      '013-deep-research-attempt-lease-ownership',
     ])
     const emptyDb = openRawDb()
     try {
@@ -208,6 +210,7 @@ describe('database migrations', () => {
     expect(indexNames('research_runs')).toContain('idx_research_runs_cancellation')
     expect(indexNames('research_run_attempts')).toContain('idx_research_run_attempts_run_status')
     expect(indexNames('research_run_attempts')).toContain('idx_research_run_attempts_lease')
+    expect(indexNames('research_run_attempts')).toContain('idx_research_run_attempts_ownership_token')
     expect(indexNames('research_run_checkpoints')).toContain('idx_research_run_checkpoints_run_sequence')
     expect(indexNames('research_run_checkpoints')).toContain('idx_research_run_checkpoints_attempt_status')
     expect(indexNames('research_iterations')).toContain('idx_research_iterations_run_status')

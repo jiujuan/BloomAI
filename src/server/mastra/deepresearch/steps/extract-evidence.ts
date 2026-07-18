@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
+import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchEvidenceCount } from '@server/telemetry/metrics'
 
@@ -23,6 +24,10 @@ export function createExtractEvidenceStep({ repositories, evidenceService }: { r
     outputSchema: inputSchema,
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
+      if (isReplayPastPhase(run.id, 'extracting_evidence')) {
+        checkpointWorkflowPhase(repositories, run, 'extracting_evidence', 'assessing_coverage')
+        return inputData
+      }
       const result = await evidenceService.extract(run, repositories.researchQuestionRepo.list(run.id))
       repositories.researchEventRepo.append({
         runId: run.id,
@@ -31,6 +36,7 @@ export function createExtractEvidenceStep({ repositories, evidenceService }: { r
         payload: { count: result.createdCount },
       })
       recordDeepResearchEvidenceCount(result.createdCount, deepResearchTelemetryContext(run, { evidence: result.createdCount }))
+      checkpointWorkflowPhase(repositories, run, 'extracting_evidence', 'assessing_coverage')
       return inputData
     },
   })

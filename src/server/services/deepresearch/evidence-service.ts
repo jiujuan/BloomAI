@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createEvidenceFingerprint } from '@server/deepresearch/domain/idempotency'
 import { z } from 'zod'
 import type {
   ResearchCoverageAssessmentV2Dto,
@@ -159,12 +160,6 @@ function createSnapshotPackets(
   return packets
 }
 
-function idempotencyKey(input: Pick<ResearchEvidenceDto, 'questionId' | 'snapshotId' | 'passage' | 'startOffset' | 'endOffset'>): string {
-  return 'evidence:v1:' + createHash('sha256')
-    .update([input.questionId, input.snapshotId, input.startOffset, input.endOffset, input.passage].join('\u0000'))
-    .digest('hex')
-}
-
 export class EvidenceService {
   private readonly packetCharacterBudget: number
 
@@ -184,7 +179,12 @@ export class EvidenceService {
 
   async extract(run: ResearchRunDto, questions: ResearchQuestionDto[]): Promise<EvidenceExtractionResult> {
     const snapshots = new Map(this.options.sourceRepo.listSnapshots(run.id).map((snapshot) => [snapshot.id, snapshot]))
-    const packets = this.createPackets(run)
+    // Evidence rows are the durable boundary for provider calls. A resume after
+    // persistence but before coverage assessment must only analyse snapshots that
+    // have not produced any stored evidence yet.
+    const persistedEvidence = this.options.evidenceRepo.list(run.id)
+    const processedSnapshotIds = new Set(persistedEvidence.map((evidence) => evidence.snapshotId))
+    const packets = this.createPackets(run).filter((packet) => !processedSnapshotIds.has(packet.snapshotId))
     const packetRanges = new Map<string, Array<Pick<EvidencePacket, 'startOffset' | 'endOffset'>>>()
     for (const packet of packets) {
       const ranges = packetRanges.get(packet.snapshotId) ?? []
@@ -192,8 +192,10 @@ export class EvidenceService {
       packetRanges.set(packet.snapshotId, ranges)
     }
     const knownQuestionIds = new Set(questions.filter((question) => question.runId === run.id).map((question) => question.id))
-    const existingEvidenceIds = new Set(this.options.evidenceRepo.list(run.id).map((evidence) => evidence.id))
-    const analyses = await this.options.analyst.analyze({ run, questions, packets })
+    const existingEvidenceIds = new Set(persistedEvidence.map((evidence) => evidence.id))
+    const analyses = packets.length > 0
+      ? await this.options.analyst.analyze({ run, questions, packets })
+      : []
     let createdCount = 0
     let rejectedCount = 0
 
@@ -233,7 +235,7 @@ export class EvidenceService {
         confidence: analysis.confidence,
         startOffset: analysis.startOffset,
         endOffset: analysis.endOffset,
-        idempotencyKey: idempotencyKey(analysis),
+        idempotencyKey: createEvidenceFingerprint(analysis),
       })
       if (!existingEvidenceIds.has(persisted.id)) {
         existingEvidenceIds.add(persisted.id)
