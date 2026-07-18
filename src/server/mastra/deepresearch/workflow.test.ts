@@ -3,7 +3,9 @@ import os from 'os'
 import path from 'path'
 import { LibSQLStore } from '@mastra/libsql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { StartResearchInput } from '@shared/deepresearch/contracts'
+import type { ResearchModelSelectionSnapshot, StartResearchInput } from '@shared/deepresearch/contracts'
+import type { MastraModelConfig } from '@mastra/core/llm'
+import type { LlmDeepResearchAdapters } from './llm-adapters'
 import { createDeepResearchExecutor } from '../../deepresearch/executor'
 import { createDeepResearchService } from '../../deepresearch/deep-research.service'
 import { createDeepResearchMastraRuntime } from './mastra'
@@ -98,6 +100,76 @@ function createStorage() {
 }
 
 describe('Deep Research Mastra report workflow', () => {
+  it('uses the snapshotted LLM factory by default while tests inject fakes explicitly', async () => {
+    const repositories = await loadTestContext()
+    const retrieval = createRetrievalServices(repositories)
+    const snapshot: ResearchModelSelectionSnapshot = {
+      requestedModelId: null,
+      selectedModelId: 'configured-text-model',
+      providerId: 'configured-provider',
+      providerKind: 'openai-compatible',
+      selectionSource: 'deep_research_setting',
+      settingsKey: 'deep_research_model',
+      modelContractVersion: 'v1',
+      resolvedAt: 1,
+    }
+    const planner = { plan: vi.fn(async () => ({
+      title: 'Enterprise AI assistant market research',
+      objective: 'Compare the market and leading vendors.',
+      audience: null,
+      scope: 'Enterprise market',
+      assumptions: [],
+      plannedSections: ['executive-summary'],
+      criticalClarifications: [{
+        question: 'Which geography should the comparison cover?',
+        intent: 'scope',
+        priority: 'critical' as const,
+        requiredEvidenceTypes: ['official-statistics'],
+      }],
+    })) }
+    const llmAdapterFactory = vi.fn(() => ({ planner }) as unknown as LlmDeepResearchAdapters)
+    const researchModelResolver = vi.fn(async () => ({}) as MastraModelConfig)
+    const runtime = createDeepResearchMastraRuntime({
+      dataDir,
+      storage: createStorage(),
+      repositories,
+      llmAdapterFactory,
+      researchModelResolver,
+      ...retrieval,
+    })
+    runtimes.push(runtime)
+    const run = repositories.researchRunRepo.create({
+      input,
+      budget: {
+        maxQuestions: 2,
+        maxIterations: 1,
+        maxSearchQueries: 2,
+        maxNormalizedSources: 2,
+        maxFetchedSources: 2,
+        searchConcurrency: 1,
+        fetchConcurrency: 1,
+        maxDurationMs: 60_000,
+      },
+      modelSelectionSnapshot: snapshot,
+    })
+
+    await runtime.start({
+      runId: run.id,
+      attemptId: 'production-composition:' + run.id,
+      ownershipToken: 'production-composition-token',
+      signal: new AbortController().signal,
+      resumeCursor: null,
+    })
+
+    expect(researchModelResolver).toHaveBeenCalledWith(snapshot)
+    expect(llmAdapterFactory).toHaveBeenCalledWith(expect.objectContaining({ model: {}, usageReporter: expect.any(Function) }))
+    expect(planner.plan).toHaveBeenCalledTimes(1)
+    expect(repositories.researchRunRepo.get(run.id)).toMatchObject({
+      status: 'awaiting_input',
+      phase: 'awaiting_clarification',
+    })
+  })
+
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-deepresearch-workflow-'))
     originalEnv = { ...process.env }

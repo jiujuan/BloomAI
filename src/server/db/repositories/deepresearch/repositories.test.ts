@@ -734,4 +734,25 @@ describe('Deep Research repositories', () => {
     })
   })
 
+
+  it('persists additive model usage on both a Run and its Attempt', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+
+    researchRunRepo.addModelUsage(run.id, { tokens: 11, providerCostUsd: 0.012 })
+    researchRunRepo.addModelUsage(run.id, { tokens: 7, providerCostUsd: 0.008 })
+    researchAttemptRepo.addModelUsage(attempt.id, { inputTokens: 9, outputTokens: 2, tokens: 11, providerCostUsd: 0.012 })
+    researchAttemptRepo.addModelUsage(attempt.id, { inputTokens: 5, outputTokens: 2, tokens: 7, providerCostUsd: 0.008 })
+
+    expect(researchRunRepo.get(run.id)?.usage).toMatchObject({ tokens: 18, providerCostUsd: 0.02 })
+    expect(researchAttemptRepo.get(attempt.id)?.modelUsage).toEqual({
+      calls: 2,
+      inputTokens: 14,
+      outputTokens: 4,
+      tokens: 18,
+      providerCostUsd: 0.02,
+    })
+  })
+
 })

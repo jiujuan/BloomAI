@@ -165,6 +165,8 @@ export const researchCancellationSchema = z.object({
   reason: z.string().nullable(),
 })
 
+export const researchModelUsageSchema = z.object({ calls: z.number().int().nonnegative(), inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), tokens: z.number().int().nonnegative(), providerCostUsd: z.number().nonnegative() })
+
 export const researchRunAttemptSchema = z.object({
   id: z.string().min(1),
   runId: z.string().min(1),
@@ -178,6 +180,7 @@ export const researchRunAttemptSchema = z.object({
   startCheckpointKey: z.string().nullable(),
   endCheckpointKey: z.string().nullable(),
   error: researchRunErrorSchema.nullable(),
+  modelUsage: researchModelUsageSchema,
   startedAt: z.number().nullable(),
   endedAt: z.number().nullable(),
   createdAt: z.number(),

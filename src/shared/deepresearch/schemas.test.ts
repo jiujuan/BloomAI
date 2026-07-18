@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   clarificationSchema,
   researchCoverageAssessmentV2Schema,
@@ -107,6 +107,13 @@ describe('deep research schemas', () => {
           startCheckpointKey: 'iteration:2:coverage_assessed',
           endCheckpointKey: null,
           error: { code: 'RESEARCH_PROVIDER_TIMEOUT', message: 'Timed out', retryable: true, category: 'timeout' },
+          modelUsage: {
+            calls: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            tokens: 0,
+            providerCostUsd: 0,
+          },
           startedAt: 2,
           endedAt: 3,
           createdAt: 2,

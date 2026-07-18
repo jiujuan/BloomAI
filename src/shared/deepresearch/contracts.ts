@@ -185,6 +185,14 @@ export interface ResearchBudgetDto {
   maxProviderCostUsd?: number
 }
 
+export interface ResearchModelUsageDto {
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  tokens: number
+  providerCostUsd: number
+}
+
 export interface ResearchUsageDto {
   questions: number
   iterations: number
@@ -245,6 +253,7 @@ export interface ResearchRunAttemptDto {
   startCheckpointKey: string | null
   endCheckpointKey: string | null
   error: ResearchRunErrorDto | null
+  modelUsage: ResearchModelUsageDto
   startedAt: number | null
   endedAt: number | null
   createdAt: number

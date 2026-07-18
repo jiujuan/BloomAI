@@ -8,6 +8,7 @@ import type {
   ResearchEventDto,
   ResearchProfile,
   ResearchQualityDto,
+  ResearchModelUsageDto,
   ResearchModelSelectionSnapshot,
   ResearchRunDetailDto,
   ResearchRunDto,
@@ -193,6 +194,18 @@ export const researchRunRepo = {
     const result = getOrmDb().update(research_runs).set({ report_artifact_id: artifactId, updated_at: Date.now() }).where(eq(research_runs.id, id)).run()
     if (result.changes !== 1) throw new Error('Deep Research Run not found: ' + id)
     return this.get(id)!
+  },
+
+  addModelUsage(id: string, entry: Pick<ResearchModelUsageDto, 'tokens' | 'providerCostUsd'>): ResearchRunDto {
+    const result = getOrmDb().transaction((tx) => {
+      const row = tx.select().from(research_runs).where(eq(research_runs.id, id)).get()
+      if (!row) throw new Error('Deep Research Run not found: ' + id)
+      const current = mapRun(row)
+      const usage = { ...current.usage, tokens: current.usage.tokens + entry.tokens, providerCostUsd: current.usage.providerCostUsd + entry.providerCostUsd }
+      tx.update(research_runs).set({ usage_json: encodeJson(usage), updated_at: Date.now() }).where(eq(research_runs.id, id)).run()
+      return mapRun(tx.select().from(research_runs).where(eq(research_runs.id, id)).get()!)
+    })
+    return result
   },
 
   setUsage(id: string, usage: ResearchUsageDto): ResearchRunDto {

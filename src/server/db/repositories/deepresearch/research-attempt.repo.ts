@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import type { ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
+import type { ResearchModelUsageDto, ResearchAttemptStatus, ResearchAttemptTrigger, ResearchCheckpointCursorDto, ResearchCheckpointReplayPolicy, ResearchCheckpointStatus, ResearchRunAttemptDto, ResearchRunCheckpointDto, ResearchRunDto, ResearchRunErrorDto, ResearchRunStatus } from '@shared/deepresearch/contracts'
 import type { AppendResearchEventInput } from './research-event.repo'
 import { getOrmDb } from '../../client'
 import { publishResearchEvent } from '@server/deepresearch/research-event-publisher'
@@ -9,7 +9,21 @@ import { research_run_attempts, research_run_checkpoints, research_runs } from '
 import { mapRun } from './research-run.repo'
 import { appendResearchEventInTransaction } from './research-event.repo'
 import { mapResearchCheckpoint } from './research-checkpoint.repo'
-import { encodeJson } from './repository-utils'
+import { decodeJson, encodeJson } from './repository-utils'
+
+const initialModelUsage = (): ResearchModelUsageDto => ({ calls: 0, inputTokens: 0, outputTokens: 0, tokens: 0, providerCostUsd: 0 })
+
+function readModelUsage(raw: string): ResearchModelUsageDto {
+  const parsed = decodeJson<Partial<ResearchModelUsageDto>>(raw, {})
+  const fallback = initialModelUsage()
+  return {
+    calls: Number.isFinite(parsed.calls) ? parsed.calls! : fallback.calls,
+    inputTokens: Number.isFinite(parsed.inputTokens) ? parsed.inputTokens! : fallback.inputTokens,
+    outputTokens: Number.isFinite(parsed.outputTokens) ? parsed.outputTokens! : fallback.outputTokens,
+    tokens: Number.isFinite(parsed.tokens) ? parsed.tokens! : fallback.tokens,
+    providerCostUsd: Number.isFinite(parsed.providerCostUsd) ? parsed.providerCostUsd! : fallback.providerCostUsd,
+  }
+}
 
 type TransactionExecutor = any
 
@@ -85,6 +99,7 @@ function mapAttempt(row: typeof research_run_attempts.$inferSelect): ResearchRun
     startCheckpointKey: row.start_checkpoint_key,
     endCheckpointKey: row.end_checkpoint_key,
     error,
+    modelUsage: readModelUsage(row.model_usage_json),
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,
@@ -294,6 +309,18 @@ export const researchAttemptRepo = {
     const result = getOrmDb().update(research_run_attempts).set({ executor_id: null, ownership_token: null, lease_expires_at: null, heartbeat_at: null })
       .where(and(eq(research_run_attempts.id, attemptId), eq(research_run_attempts.executor_id, executorId), eq(research_run_attempts.ownership_token, ownershipToken))).run()
     return result.changes === 1
+  },
+
+  addModelUsage(attemptId: string, entry: Pick<ResearchModelUsageDto, 'inputTokens' | 'outputTokens' | 'tokens' | 'providerCostUsd'>): ResearchRunAttemptDto {
+    const result = getOrmDb().transaction((tx) => {
+      const row = tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()
+      if (!row) throw new Error('Deep Research Attempt not found: ' + attemptId)
+      const current = readModelUsage(row.model_usage_json)
+      const modelUsage = { calls: current.calls + 1, inputTokens: current.inputTokens + entry.inputTokens, outputTokens: current.outputTokens + entry.outputTokens, tokens: current.tokens + entry.tokens, providerCostUsd: current.providerCostUsd + entry.providerCostUsd }
+      tx.update(research_run_attempts).set({ model_usage_json: encodeJson(modelUsage) }).where(eq(research_run_attempts.id, attemptId)).run()
+      return mapAttempt(tx.select().from(research_run_attempts).where(eq(research_run_attempts.id, attemptId)).get()!)
+    })
+    return result
   },
 
   finishOwned(input: FinishOwnedResearchAttemptInput): ResearchRunAttemptDto | null {

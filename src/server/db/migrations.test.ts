@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(15)
+    expect(migrationVersions()).toHaveLength(16)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(15)
+    expect(migrationVersions()).toHaveLength(16)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -187,6 +187,7 @@ describe('database migrations', () => {
       '013-deep-research-attempt-lease-ownership',
       '014-deep-research-reconciliation',
       '015-deep-research-model-selection-snapshot',
+      '016-deep-research-llm-runtime-usage',
     ])
     const emptyDb = openRawDb()
     try {
@@ -198,6 +199,9 @@ describe('database migrations', () => {
       `).get()).toEqual({ runs: 0, attempts: 0, checkpoints: 0 })
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_runs') WHERE name = 'model_selection_snapshot_json'").all()).toEqual([
         { name: 'model_selection_snapshot_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_run_attempts') WHERE name = 'model_usage_json'").all()).toEqual([
+        { name: 'model_usage_json' },
       ])
     } finally {
       emptyDb.close()
