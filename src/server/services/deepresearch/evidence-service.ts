@@ -136,17 +136,33 @@ function headingAt(content: string, position: number): string | null {
   return heading
 }
 
-function createSnapshotPackets(
+interface SnapshotParagraphRange {
+  startOffset: number
+  endOffset: number
+}
+
+function snapshotParagraphRanges(snapshot: ResearchSourceSnapshotDto): SnapshotParagraphRange[] {
+  const paragraphs = snapshot.metadata.paragraphs
+  if (!Array.isArray(paragraphs)) return []
+  const ranges = paragraphs.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const { startOffset, endOffset } = value as Record<string, unknown>
+    if (typeof startOffset !== 'number' || typeof endOffset !== 'number' || !Number.isInteger(startOffset) || !Number.isInteger(endOffset) || startOffset < 0 || endOffset <= startOffset || endOffset > snapshot.content.length) return []
+    return [{ startOffset, endOffset }]
+  }).sort((left, right) => left.startOffset - right.startOffset)
+  return ranges.every((range, index) => index === 0 || range.startOffset >= ranges[index - 1].endOffset) ? ranges : []
+}
+
+export function createSnapshotPackets(
   snapshot: ResearchSourceSnapshotDto,
   source: ResearchSourceDto,
   characterBudget: number,
 ): EvidencePacket[] {
   const packets: EvidencePacket[] = []
   const content = snapshot.content
-  for (let startOffset = 0; startOffset < content.length; startOffset += characterBudget) {
-    const endOffset = Math.min(content.length, startOffset + characterBudget)
+  const appendPacket = (startOffset: number, endOffset: number) => {
     const text = content.slice(startOffset, endOffset)
-    if (!text.trim()) continue
+    if (!text.trim()) return
     packets.push({
       snapshotId: snapshot.id,
       sourceId: source.id,
@@ -160,6 +176,32 @@ function createSnapshotPackets(
       endOffset,
       text,
     })
+  }
+  const paragraphs = snapshotParagraphRanges(snapshot)
+  if (paragraphs.length > 0) {
+    let packetStart = paragraphs[0].startOffset
+    let packetEnd = packetStart
+    for (const paragraph of paragraphs) {
+      if (paragraph.endOffset - paragraph.startOffset > characterBudget) {
+        if (packetEnd > packetStart) appendPacket(packetStart, packetEnd)
+        for (let startOffset = paragraph.startOffset; startOffset < paragraph.endOffset; startOffset += characterBudget) {
+          appendPacket(startOffset, Math.min(paragraph.endOffset, startOffset + characterBudget))
+        }
+        packetStart = paragraph.endOffset
+        packetEnd = paragraph.endOffset
+        continue
+      }
+      if (packetEnd > packetStart && paragraph.endOffset - packetStart > characterBudget) {
+        appendPacket(packetStart, packetEnd)
+        packetStart = paragraph.startOffset
+      }
+      packetEnd = paragraph.endOffset
+    }
+    if (packetEnd > packetStart) appendPacket(packetStart, packetEnd)
+    return packets
+  }
+  for (let startOffset = 0; startOffset < content.length; startOffset += characterBudget) {
+    appendPacket(startOffset, Math.min(content.length, startOffset + characterBudget))
   }
   return packets
 }

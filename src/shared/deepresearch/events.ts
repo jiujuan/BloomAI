@@ -63,7 +63,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.source.discovered', IdentifierPayload>
   | ResearchEventBase<'research.source.selected', IdentifierPayload>
   | ResearchEventBase<'research.source.rejected', JsonObject & { queryId: string; url: string; reason: string }>
-  | ResearchEventBase<'research.source.fetch_failed', IdentifierPayload & { errorCode: string }>
+  | ResearchEventBase<'research.source.fetch_failed', IdentifierPayload & { errorCode: string; rejectionReason?: string | null; finalUrl?: string | null; contentDiagnostics?: JsonObject | null }>
   | ResearchEventBase<'research.sources.fetched', JsonObject & { sourceIds: string[]; fetchedCount: number; failedCount: number }>
   | ResearchEventBase<'research.evidence.extracted', CountPayload>
   | ResearchEventBase<'research.coverage.assessed', IdentifierPayload & { score: number }>

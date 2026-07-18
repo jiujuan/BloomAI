@@ -6,7 +6,7 @@ import type {
   ResearchSourceDto,
   ResearchSourceSnapshotDto,
 } from '@shared/deepresearch/contracts'
-import { EvidenceService, type EvidenceAnalyst } from './evidence-service'
+import { EvidenceService, createSnapshotPackets, type EvidenceAnalyst } from './evidence-service'
 import { createDeterministicEvidenceAnalyst } from '@server/mastra/deepresearch/agents/evidence-analyst'
 import { createDeterministicGapAnalyst } from '@server/mastra/deepresearch/agents/gap-analyst'
 import { shouldStopGapFill } from '@server/mastra/deepresearch/steps/gap-fill-iteration'
@@ -132,6 +132,35 @@ function createService(analyst: EvidenceAnalyst, clock?: () => number) {
 }
 
 describe('EvidenceService', () => {
+
+  it('respects persisted main-content paragraph offsets when building evidence packets', () => {
+    const paragraphOne = 'The first paragraph states a traceable market finding with enough detail for an evidence review.'
+    const paragraphTwo = 'The second paragraph records an independently stated limitation so the evidence analyst can cite it precisely.'
+    const paragraphThree = 'The third paragraph provides a follow-up observation that should start a fresh packet instead of splitting a paragraph.'
+    const paragraphContent = [paragraphOne, paragraphTwo, paragraphThree].join('\n\n')
+    const paragraphSnapshot: ResearchSourceSnapshotDto = {
+      ...snapshot,
+      content: paragraphContent,
+      metadata: {
+        paragraphs: [
+          { ordinal: 0, startOffset: 0, endOffset: paragraphOne.length },
+          { ordinal: 1, startOffset: paragraphOne.length + 2, endOffset: paragraphOne.length + 2 + paragraphTwo.length },
+          { ordinal: 2, startOffset: paragraphOne.length + paragraphTwo.length + 4, endOffset: paragraphContent.length },
+        ],
+        offsetUnit: 'utf16_code_unit',
+      },
+    }
+
+    const packets = createSnapshotPackets(paragraphSnapshot, source, paragraphOne.length + paragraphTwo.length + 3)
+
+    expect(packets).toHaveLength(2)
+    expect(packets.map((packet) => [packet.startOffset, packet.endOffset])).toEqual([
+      [0, paragraphOne.length + paragraphTwo.length + 2],
+      [paragraphOne.length + paragraphTwo.length + 4, paragraphContent.length],
+    ])
+    expect(packets.every((packet) => packet.text === paragraphContent.slice(packet.startOffset, packet.endOffset))).toBe(true)
+  })
+
   it('creates evidence-specific deterministic summaries for different passages from one source', async () => {
     const analyst = createDeterministicEvidenceAnalyst()
     const packets = [

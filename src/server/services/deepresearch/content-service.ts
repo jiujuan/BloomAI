@@ -1,11 +1,12 @@
 import crypto from 'crypto'
 import { promises as dns } from 'node:dns'
 import { isIP } from 'node:net'
-import type { ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
+import type { JsonObject, ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
 import { researchEventRepo } from '@server/db/repositories/deepresearch/research-event.repo'
 import { executeLegacyToolCapability } from '@server/skills/policy/capability-broker'
 import { researchSourceRepo } from '@server/db/repositories/deepresearch/research-source.repo'
 import { createSnapshotFingerprint } from '@server/deepresearch/domain/idempotency'
+import { SOURCE_CONTENT_PARSER_VERSION, classifySourceFetchFailure, extractMainContent, type SourceContentDiagnostics, type SourceContentRejectionReason } from '@server/deepresearch/domain/source-content'
 import type { WorkflowToolExecutor } from './search-service'
 import { isCancellationRequested, throwIfCancellationRequested, type ResearchCancellationSignal } from '@server/deepresearch/domain/cancellation'
 
@@ -17,6 +18,25 @@ export interface FetchOutcome {
 }
 
 export type ResearchHostLookup = (hostname: string) => Promise<string[]>
+
+class ContentRejectedError extends Error {
+  constructor(
+    readonly reason: SourceContentRejectionReason,
+    readonly diagnostics: SourceContentDiagnostics | JsonObject,
+    message = `Source content rejected: ${reason}.`,
+  ) {
+    super(message)
+    this.name = 'ContentRejectedError'
+  }
+}
+
+function contentRejectionCode(reason: SourceContentRejectionReason): string {
+  return `RESEARCH_CONTENT_${reason.toUpperCase()}`
+}
+
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(?:$|[?#])/i.test(url)
+}
 
 function isRetryableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
@@ -139,13 +159,26 @@ export function createContentService(options: {
   const lookup = options.lookup ?? lookupPublicAddresses
   const isCancelled = options.isCancelled ?? (() => false)
 
-  function failureOutcome(run: ResearchRunDto, source: ResearchSourceDto, error: { code: string; message: string; retryable: boolean }): FetchOutcome {
+  function failureOutcome(
+    run: ResearchRunDto,
+    source: ResearchSourceDto,
+    error: { code: string; message: string; retryable: boolean },
+    diagnostics?: SourceContentDiagnostics | JsonObject,
+    rejectionReason?: SourceContentRejectionReason,
+    finalUrl?: string,
+  ): FetchOutcome {
     if (error.code !== 'RESEARCH_CANCELLED') {
       repositories.researchEventRepo.append({
         runId: run.id,
         type: 'research.source.fetch_failed',
         phase: 'fetching',
-        payload: { sourceId: source.id, errorCode: error.code },
+        payload: {
+          sourceId: source.id,
+          errorCode: error.code,
+          rejectionReason: rejectionReason ?? null,
+          finalUrl: finalUrl ?? null,
+          contentDiagnostics: diagnostics ? { ...diagnostics } : null,
+        },
       })
     }
     return { sourceId: source.id, status: 'failed', snapshot: null, error }
@@ -158,6 +191,13 @@ export function createContentService(options: {
     if (existingSnapshot) return { sourceId: source.id, status: 'fetched', snapshot: existingSnapshot, error: null }
     try {
       const initialUrl = await validatePublicResearchUrl(source.canonicalUrl, lookup)
+      if (isPdfUrl(initialUrl)) {
+        throw new ContentRejectedError('unsupported_pdf', {
+          parser: SOURCE_CONTENT_PARSER_VERSION,
+          finalUrl: initialUrl,
+          rejectionReasons: ['unsupported_pdf'],
+        })
+      }
       const fetched = await retryWithinDeadline(
         () => executeTool({ caller: 'workflow', toolId: 'web_fetch', input: { url: initialUrl, render: false, maxChars: 50_000 }, sessionId: run.sessionId ?? run.id, signal }),
         run.usage.deadlineAt,
@@ -176,12 +216,45 @@ export function createContentService(options: {
         { signal, isCancellationRequested: cancelled },
       )
       throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
-      const extractOutput = extracted.output as { finalUrl?: unknown; text?: unknown; title?: unknown; headings?: unknown }
+      const extractOutput = extracted.output as {
+        finalUrl?: unknown
+        text?: unknown
+        title?: unknown
+        headings?: unknown
+        byline?: unknown
+        author?: unknown
+        publishedAt?: unknown
+        canonicalUrl?: unknown
+        rendered?: unknown
+      }
       const finalUrl = await validatePublicResearchUrl(typeof extractOutput.finalUrl === 'string' ? extractOutput.finalUrl : safeFetchedFinalUrl, lookup)
-      const content = sanitizeContent(typeof extractOutput.text === 'string' && extractOutput.text.trim()
+      if (isPdfUrl(finalUrl)) {
+        throw new ContentRejectedError('unsupported_pdf', {
+          parser: SOURCE_CONTENT_PARSER_VERSION,
+          finalUrl,
+          rejectionReasons: ['unsupported_pdf'],
+        })
+      }
+      const rawContent = typeof extractOutput.text === 'string' && extractOutput.text.trim()
         ? extractOutput.text
-        : typeof fetchOutput.content === 'string' ? fetchOutput.content : '')
-      if (!content) throw new Error('RESEARCH_FETCH_FAILED: no readable source content was returned.')
+        : typeof fetchOutput.content === 'string' ? fetchOutput.content : ''
+      if (!rawContent) throw new Error('RESEARCH_FETCH_FAILED: no readable source content was returned.')
+      const metadataCanonicalUrl = typeof extractOutput.canonicalUrl === 'string'
+        ? await validatePublicResearchUrl(extractOutput.canonicalUrl, lookup)
+        : finalUrl
+      const extraction = extractMainContent({
+        text: sanitizeContent(rawContent),
+        finalUrl,
+        title: sanitizeContent(typeof extractOutput.title === 'string' ? extractOutput.title : source.title ?? ''),
+        byline: sanitizeContent(typeof extractOutput.byline === 'string' ? extractOutput.byline : typeof extractOutput.author === 'string' ? extractOutput.author : source.author ?? ''),
+        publishedAt: typeof extractOutput.publishedAt === 'string' || typeof extractOutput.publishedAt === 'number' ? extractOutput.publishedAt : source.publishedAt,
+        canonicalUrl: metadataCanonicalUrl,
+        rendered: typeof extractOutput.rendered === 'boolean' ? extractOutput.rendered : null,
+      })
+      if (extraction.rejectionReasons.length > 0) {
+        throw new ContentRejectedError(extraction.rejectionReasons[0], extraction.diagnostics)
+      }
+      const content = extraction.content
       const contentHash = crypto.createHash('sha256').update(content).digest('hex')
       throwIfCancellationRequested({ signal, isCancellationRequested: cancelled })
       const snapshot = repositories.researchSourceRepo.createSnapshot({
@@ -190,14 +263,18 @@ export function createContentService(options: {
         contentHash,
         content,
         metadata: {
-          title: typeof extractOutput.title === 'string' ? extractOutput.title : source.title ?? '',
+          ...extraction.metadata,
           headings: Array.isArray(extractOutput.headings) ? extractOutput.headings.filter((heading): heading is string => typeof heading === 'string').slice(0, 40) : [],
+          fetch: {
+            rendered: typeof extractOutput.rendered === 'boolean' ? extractOutput.rendered : null,
+            httpStatus: typeof fetchOutput.status === 'number' ? fetchOutput.status : null,
+          },
         },
         fetchedAt: Date.now(),
-        parserVersion: 'deepresearch-web-extract-v1',
+        parserVersion: SOURCE_CONTENT_PARSER_VERSION,
         finalUrl,
         httpStatus: typeof fetchOutput.status === 'number' ? fetchOutput.status : null,
-        idempotencyKey: createSnapshotFingerprint({ runId: run.id, sourceId: source.id, finalUrl, parserVersion: 'deepresearch-web-extract-v1', contentHash }),
+        idempotencyKey: createSnapshotFingerprint({ runId: run.id, sourceId: source.id, finalUrl, parserVersion: SOURCE_CONTENT_PARSER_VERSION, contentHash }),
       })
       return { sourceId: source.id, status: 'fetched', snapshot, error: null }
     } catch (error) {
@@ -205,6 +282,21 @@ export function createContentService(options: {
         return failureOutcome(run, source, { code: 'RESEARCH_CANCELLED', message: 'Deep Research run was cancelled.', retryable: false })
       }
       const message = error instanceof Error ? error.message : String(error)
+      if (error instanceof ContentRejectedError) {
+        return failureOutcome(run, source, {
+          code: contentRejectionCode(error.reason),
+          message,
+          retryable: false,
+        }, error.diagnostics, error.reason, source.canonicalUrl)
+      }
+      const rejectionReason = classifySourceFetchFailure(message, source.canonicalUrl)
+      if (rejectionReason) {
+        return failureOutcome(run, source, {
+          code: contentRejectionCode(rejectionReason),
+          message,
+          retryable: false,
+        }, { parser: SOURCE_CONTENT_PARSER_VERSION, rejectionReasons: [rejectionReason] }, rejectionReason, source.canonicalUrl)
+      }
       return failureOutcome(run, source, { code: message.startsWith('RESEARCH_UNSAFE_URL') ? 'RESEARCH_UNSAFE_URL' : 'RESEARCH_FETCH_FAILED', message, retryable: isRetryableError(error) })
     }
   }
