@@ -27,8 +27,10 @@ async function loadTestContext() {
   const { researchAttemptRepo } = await import('../db/repositories/deepresearch/research-attempt.repo')
   const { researchCheckpointRepo } = await import('../db/repositories/deepresearch/research-checkpoint.repo')
   const { researchEventRepo } = await import('../db/repositories/deepresearch/research-event.repo')
+  const { settingsRepo } = await import('../db/repositories/settings.repo')
+  settingsRepo.setMany({ anthropic_api_key: 'test-anthropic-key' })
 
-  return { client, researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo }
+  return { client, researchRunRepo, researchAttemptRepo, researchCheckpointRepo, researchEventRepo, settingsRepo }
 }
 
 describe('Deep Research service and executor', () => {
@@ -62,6 +64,75 @@ describe('Deep Research service and executor', () => {
 
     expect(run.status).toBe('queued')
     expect(runtime.start).toHaveBeenCalledWith(run.id)
+  })
+
+  it('persists the resolved, secret-free model snapshot before dispatching a new Run', async () => {
+    const { researchRunRepo, settingsRepo } = await loadTestContext()
+    settingsRepo.setMany({
+      deep_research_model: 'deepseek-chat',
+      deepseek_api_key: 'deepseek-test-secret',
+    })
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
+
+    const run = await service.startResearch(validInput)
+    const persisted = researchRunRepo.get(run.id)
+
+    expect(persisted?.modelSelectionSnapshot).toMatchObject({
+      requestedModelId: null,
+      selectedModelId: 'deepseek-chat',
+      providerId: 'deepseek',
+      selectionSource: 'deep_research_setting',
+      settingsKey: 'deep_research_model',
+    })
+    expect(JSON.stringify(persisted?.modelSelectionSnapshot)).not.toContain('deepseek-test-secret')
+  })
+  it('uses the durable snapshot on resume and records a retryable model configuration failure', async () => {
+    const { researchRunRepo, researchEventRepo, settingsRepo } = await loadTestContext()
+    const { llmRepo } = await import('../db/repositories/llm.repo')
+    const { resolveResearchRuntimeModel } = await import('./domain/model-selection')
+    settingsRepo.setMany({
+      deep_research_model: 'deepseek-chat',
+      deepseek_api_key: 'deepseek-test-secret',
+      openai_api_key: 'openai-test-secret',
+    })
+    const snapshot = (await resolveResearchRuntimeModel()).snapshot
+    const runtime = { start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) }
+    const service = createDeepResearchService({ runtime })
+
+    const resumable = researchRunRepo.create({
+      input: validInput,
+      budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 },
+      modelSelectionSnapshot: snapshot,
+    })
+    researchRunRepo.transitionWithEvent(resumable.id, 'interrupted', { resumePhase: 'queued' })
+    settingsRepo.setMany({ deep_research_model: 'gpt-4o' })
+
+    const resumed = await service.resumeRun(resumable.id)
+
+    expect(resumed).toMatchObject({
+      status: 'queued',
+      modelSelectionSnapshot: expect.objectContaining({ selectedModelId: 'deepseek-chat', providerId: 'deepseek' }),
+    })
+    expect(runtime.start).toHaveBeenCalledWith(resumable.id)
+
+    const unavailable = researchRunRepo.create({
+      input: validInput,
+      budget: { maxQuestions: 1, maxIterations: 1, maxSearchQueries: 1, maxNormalizedSources: 1, maxFetchedSources: 1, searchConcurrency: 1, fetchConcurrency: 1, maxDurationMs: 1_000 },
+      modelSelectionSnapshot: snapshot,
+    })
+    researchRunRepo.transitionWithEvent(unavailable.id, 'interrupted', { resumePhase: 'queued' })
+    llmRepo.updateModel('deepseek-chat', { isEnabled: false })
+
+    await expect(service.resumeRun(unavailable.id)).resolves.toMatchObject({
+      status: 'failed',
+      phase: 'awaiting_model_configuration',
+      error: { code: 'RESEARCH_MODEL_UNAVAILABLE', retryable: true },
+    })
+    expect(researchEventRepo.list(unavailable.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ action: 'enable_model' }) }),
+    ]))
+    expect(runtime.start).toHaveBeenCalledTimes(1)
   })
 
   it('deduplicates replayed start commands into one initial attempt, checkpoint, and dispatch', async () => {

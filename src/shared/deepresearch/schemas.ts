@@ -122,6 +122,17 @@ export const researchIterationPlanSchema = z.object({
   inputSummary: researchIterationDecisionInputSummarySchema,
   settlement: researchBudgetSettlementSchema.optional(),
 })
+export const researchModelSelectionSnapshotSchema = z.object({
+  requestedModelId: z.string().min(1).nullable(),
+  selectedModelId: z.string().min(1),
+  providerId: z.string().min(1),
+  providerKind: z.enum(['anthropic', 'openai', 'openai-compatible', 'ollama']),
+  selectionSource: z.enum(['requested', 'deep_research_setting', 'general_setting']),
+  settingsKey: z.enum(['deep_research_model', 'model']),
+  modelContractVersion: z.string().min(1),
+  resolvedAt: z.number().int().nonnegative(),
+})
+
 export const researchRunErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string(),
@@ -319,6 +330,7 @@ export const researchRunDtoSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   completedAt: z.number().nullable(),
+  modelSelectionSnapshot: researchModelSelectionSnapshotSchema.nullable().optional(),
   stateVersion: z.number().int().nonnegative().optional(),
   currentAttemptId: z.string().nullable().optional(),
   checkpointCursor: researchCheckpointCursorSchema.nullable().optional(),
@@ -334,6 +346,7 @@ export const researchRunDtoSchema = z.object({
   execution: run.execution ?? null,
   latestCheckpoint: run.latestCheckpoint ?? null,
   cancellation: run.cancellation ?? null,
+  modelSelectionSnapshot: run.modelSelectionSnapshot ?? null,
   capabilities: run.capabilities ?? fallbackResearchRunCapabilities(run.status, run.error),
 }))
 

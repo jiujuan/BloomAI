@@ -134,6 +134,21 @@ export interface StartResearchInput {
   model?: string
 }
 
+export type ResearchModelSelectionSource = 'requested' | 'deep_research_setting' | 'general_setting'
+export type ResearchModelSettingsKey = 'deep_research_model' | 'model'
+
+/** Durable, secret-free model resolution record for a Deep Research Run. */
+export interface ResearchModelSelectionSnapshot {
+  requestedModelId: string | null
+  selectedModelId: string
+  providerId: string
+  providerKind: 'anthropic' | 'openai' | 'openai-compatible' | 'ollama'
+  selectionSource: ResearchModelSelectionSource
+  settingsKey: ResearchModelSettingsKey
+  modelContractVersion: string
+  resolvedAt: number
+}
+
 export interface ResearchRunFilter {
   sessionId?: string
   statuses?: ResearchRunStatus[]
@@ -444,6 +459,8 @@ export interface ResearchRunDto {
   createdAt: number
   updatedAt: number
   completedAt: number | null
+  /** Null for legacy deterministic Runs created before DRQ-00. */
+  modelSelectionSnapshot?: ResearchModelSelectionSnapshot | null
 
   /** V2 fields are optional while historical Run rows and V1 clients are supported. */
   stateVersion?: number

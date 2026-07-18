@@ -8,6 +8,7 @@ import type {
   ResearchEventDto,
   ResearchProfile,
   ResearchQualityDto,
+  ResearchModelSelectionSnapshot,
   ResearchRunDetailDto,
   ResearchRunDto,
   ResearchRunErrorDto,
@@ -47,6 +48,7 @@ export interface CreateResearchRunInput {
   input: StartResearchInput
   budget: ResearchBudgetDto
   usage?: ResearchUsageDto
+  modelSelectionSnapshot?: ResearchModelSelectionSnapshot | null
 }
 
 export interface TransitionResearchRunOptions {
@@ -105,6 +107,9 @@ export function mapRun(row: typeof research_runs.$inferSelect): ResearchRunDto {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    modelSelectionSnapshot: row.model_selection_snapshot_json
+      ? decodeJson<ResearchModelSelectionSnapshot | null>(row.model_selection_snapshot_json, null)
+      : null,
     stateVersion: row.state_version,
     currentAttemptId: row.current_attempt_id,
     checkpointCursor: cursorFromLegacyResumePhase(row.resume_phase),
@@ -137,6 +142,8 @@ export const researchRunRepo = {
       budget_json: encodeJson(data.budget),
       usage_json: encodeJson(data.usage ?? initialResearchUsage()),
       quality_json: null,
+      model_contract_version: data.modelSelectionSnapshot?.modelContractVersion ?? null,
+      model_selection_snapshot_json: data.modelSelectionSnapshot ? encodeJson(data.modelSelectionSnapshot) : null,
       workflow_run_id: null,
       report_artifact_id: null,
       resume_phase: null,

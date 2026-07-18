@@ -95,6 +95,7 @@ function ModelDetailPanel({
   }, [model.id])
 
   const isDefault = defaultSettingKey ? settings[defaultSettingKey] === model.id : false
+  const isDeepResearchModel = model.modality === 'text' && settings.deep_research_model === model.id
 
   const apiKeyValue = apiKeyKey ? (localValues[apiKeyKey] ?? '') : ''
   const apiKeySaved = apiKeyKey ? settings[apiKeyKey] === '***masked***' : false
@@ -136,6 +137,10 @@ function ModelDetailPanel({
 
   const setDefault = async () => {
     if (defaultSettingKey) await updateSetting(defaultSettingKey, model.id)
+  }
+
+  const setDeepResearchModel = async () => {
+    await updateSetting('deep_research_model', model.id)
   }
 
   const hasApiKeyChange = apiKeyKey ? !!localValues[apiKeyKey]?.trim() : false
@@ -225,6 +230,17 @@ function ModelDetailPanel({
               {isDefault
                 ? <><Star size={12} fill="currentColor" /> 已是默认</>
                 : `设为默认${MODALITY_LABEL[model.modality]}`}
+            </button>
+          )}
+          {model.modality === 'text' && model.isEnabled && (
+            <button
+              className={cn('btn-secondary btn-sm', isDeepResearchModel && 'active')}
+              onClick={setDeepResearchModel}
+              disabled={isDeepResearchModel}
+            >
+              {isDeepResearchModel
+                ? <><Star size={12} fill="currentColor" /> 已是深度研究模型</>
+                : '设为深度研究模型'}
             </button>
           )}
         </div>

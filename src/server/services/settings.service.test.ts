@@ -71,9 +71,10 @@ describe('settingsService', () => {
   it('rejects missing and non-writable keys while allowing a normalized batch update', async () => {
     const { settingsRepo, settingsService } = await loadSettingsService()
 
-    expect(settingsService.update({ theme: 'dark', font_size: '15px' })).toEqual({ updated: 2 })
+    expect(settingsService.update({ theme: 'dark', font_size: '15px', deep_research_model: 'deepseek-chat' })).toEqual({ updated: 3 })
     expect(settingsRepo.getValue('theme')).toBe('dark')
     expect(settingsRepo.getValue('font_size')).toBe('15px')
+    expect(settingsRepo.getValue('deep_research_model')).toBe('deepseek-chat')
 
     expect(() => settingsService.getForClient('does_not_exist')).toThrowError('Setting not found')
     expect(() => settingsService.update({ database_path: 'not-allowed' })).toThrowError('Setting key is not writable')

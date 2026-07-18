@@ -369,6 +369,7 @@ export const research_runs = sqliteTable('research_runs', {
   coverage_policy_version: text('coverage_policy_version'),
   parser_version: text('parser_version'),
   model_contract_version: text('model_contract_version'),
+  model_selection_snapshot_json: text('model_selection_snapshot_json'),
   last_checkpoint_sequence: integer('last_checkpoint_sequence'),
 }, (table) => ({
   statusUpdatedIdx: index('idx_research_runs_status_updated').on(table.status, table.updated_at),

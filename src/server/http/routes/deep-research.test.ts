@@ -19,6 +19,11 @@ async function loadApi(): Promise<{
   process.env.DATA_DIR = dataDir
   const client = await import('../../db/client')
   await client.runMigrations()
+  const { settingsRepo } = await import('../../db/repositories/settings.repo')
+  settingsRepo.setMany({
+    deep_research_model: 'deepseek-chat',
+    deepseek_api_key: 'deepseek-test-secret',
+  })
   const { createDeepResearchModule } = await import('../../deepresearch')
   const { createDeepResearchRoutes } = await import('./deep-research')
   const { researchRunRepo } = await import('../../db/repositories/deepresearch/research-run.repo')

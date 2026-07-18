@@ -3,11 +3,13 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { MastraModelConfig } from '@mastra/core/llm'
 import { resolveRuntimeModel } from '../llm/model-selection'
+import { resolveResearchModelSnapshot } from '../deepresearch/domain/model-selection'
 import { getProviderApiKey, getProviderBaseUrl } from '../llm/settings'
 import { getTracer, SpanStatusCode } from '../telemetry/tracer'
 import { getMeter } from '../telemetry/metrics'
 import type { Histogram } from '@opentelemetry/api'
 import type { ResolvedLlmModel } from '../llm/types'
+import type { ResearchModelSelectionSnapshot } from '@shared/deepresearch/contracts'
 
 const tracer = getTracer('bloomai.llm')
 
@@ -67,6 +69,18 @@ export async function resolveMastraModel(requestedModel?: string): Promise<Mastr
   } finally {
     span.end()
   }
+}
+
+/**
+ * Builds a Mastra model exclusively from a Deep Research Run's persisted
+ * snapshot. This prevents resumed runs from being affected by later changes to
+ * the configured default model.
+ */
+export async function resolveResearchMastraModel(
+  snapshot: ResearchModelSelectionSnapshot,
+): Promise<MastraModelConfig> {
+  const { resolved } = await resolveResearchModelSnapshot(snapshot)
+  return toAiSdkModel(resolved)
 }
 
 function toAiSdkModel(resolved: ResolvedLlmModel): MastraModelConfig {
