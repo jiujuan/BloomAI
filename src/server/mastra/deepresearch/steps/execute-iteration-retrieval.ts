@@ -49,7 +49,15 @@ export async function executeIterationRetrieval(
   }
 
   const completed = repositories.researchQuestionRepo.listSearchQueries(run.id).filter((query) => query.iteration === iteration.ordinal && query.status === 'completed')
-  const curated = sourceCurator.curate(run, completed.flatMap((query) => query.candidates.map((candidate) => ({ ...candidate, queryId: query.id }))))
+  const fetchReservation = iteration.plan?.reservation.fetchedSources
+  if (!Number.isInteger(fetchReservation) || fetchReservation < 0) {
+    throw new Error('Active Deep Research iteration is missing a valid fetched-source reservation.')
+  }
+  const curated = sourceCurator.curate(
+    run,
+    completed.flatMap((query) => query.candidates.map((candidate) => ({ ...candidate, queryId: query.id }))),
+    { maxSources: fetchReservation },
+  )
   const sourceIds: string[] = []
   let newSourceCount = 0
   for (const candidate of curated.selected) {

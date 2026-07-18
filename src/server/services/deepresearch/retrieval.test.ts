@@ -94,6 +94,17 @@ describe('Deep Research retrieval services', () => {
       .toBeGreaterThan(curated.selected.find((item) => item.canonicalUrl.includes('old.example.net'))!.score)
   })
 
+  it('limits selected sources to an iteration fetched-source reservation', () => {
+    const curated = new SourceCurator().curate(createRun(), [
+      { queryId: 'q1', title: 'Official source one', url: 'https://one.fixture.gov/report', snippet: 'official data' },
+      { queryId: 'q1', title: 'Official source two', url: 'https://two.fixture.gov/report', snippet: 'official data' },
+      { queryId: 'q1', title: 'Official source three', url: 'https://three.fixture.gov/report', snippet: 'official data' },
+    ], { maxSources: 1 })
+
+    expect(curated.selected).toHaveLength(1)
+    expect(curated.rejected.filter((source) => source.reason === 'budget_cap')).toHaveLength(2)
+  })
+
   it('uses the workflow tool capability with a real session, retrying transient provider failures within the deadline', async () => {
     const calls: WorkflowToolRequest[] = []
     let attempts = 0

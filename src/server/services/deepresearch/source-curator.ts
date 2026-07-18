@@ -54,7 +54,7 @@ export class SourceCurator {
     this.maxSourcesPerDomain = options.maxSourcesPerDomain ?? 2
   }
 
-  curate(run: ResearchRunDto, candidates: DiscoveredResearchSource[]): SourceCurationResult {
+  curate(run: ResearchRunDto, candidates: DiscoveredResearchSource[], options: { maxSources?: number } = {}): SourceCurationResult {
     const rejected: RejectedResearchSource[] = []
     const byCanonicalUrl = new Set<string>()
     const normalized: Array<CuratedResearchSource & { ordinal: number }> = []
@@ -84,7 +84,12 @@ export class SourceCurator {
       })
     })
 
-    const sourceBudget = Math.max(0, run.budget.maxNormalizedSources - run.usage.normalizedSources)
+    const remainingNormalizedSources = Math.max(0, run.budget.maxNormalizedSources - run.usage.normalizedSources)
+    // An iteration reservation is the upper bound for work that may later be
+    // settled. Keep curation inside that bound so every selected source can be
+    // fetched and charged without exceeding the reservation.
+    const reservationCap = options.maxSources === undefined ? remainingNormalizedSources : Math.max(0, Math.floor(options.maxSources))
+    const sourceBudget = Math.min(remainingNormalizedSources, reservationCap)
     const selected: CuratedResearchSource[] = []
     const domainCounts = new Map<string, number>()
     for (const candidate of normalized.sort((left, right) => right.score - left.score || left.ordinal - right.ordinal)) {

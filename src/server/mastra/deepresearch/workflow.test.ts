@@ -274,6 +274,11 @@ describe('Deep Research Mastra report workflow', () => {
     expect(persistedIterations.length).toBeLessThanOrEqual(run.budget.maxIterations)
     expect(persistedIterations.every((iteration) => iteration.status === 'completed' || iteration.status === 'stopped')).toBe(true)
     expect(persistedIterations.every((iteration) => typeof iteration.coverageAfter.materialGain === 'boolean')).toBe(true)
+    const settledIterations = persistedIterations.filter((iteration) => iteration.status === 'completed')
+    expect(settledIterations).not.toHaveLength(0)
+    expect(settledIterations.every((iteration) =>
+      (iteration.plan?.settlement?.spent.fetchedSources ?? Number.POSITIVE_INFINITY) <= (iteration.plan?.reservation.fetchedSources ?? -1),
+    )).toBe(true)
     const iterationCheckpoints = repositories.researchCheckpointRepo.list(run.id)
     expect(iterationCheckpoints).toEqual(expect.arrayContaining([
       expect.objectContaining({ checkpointKey: expect.stringMatching(/^iteration:\d+:retrieval-planned$/) }),
