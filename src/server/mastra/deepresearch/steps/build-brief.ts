@@ -1,7 +1,7 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
 import type { ResearchBriefDto } from '@shared/deepresearch/contracts'
-import { clarificationSchema } from '@shared/deepresearch/schemas'
+import { clarificationSchema, researchBriefSchema } from '@shared/deepresearch/schemas'
 import type { BriefPlan, BriefPlanner } from '../agents/brief-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
@@ -14,26 +14,12 @@ const clarificationPlanSchema = z.object({
   priority: z.enum(['low', 'medium', 'high', 'critical']),
   requiredEvidenceTypes: z.array(z.string().trim().min(1)),
 })
-const briefPlanSchema = z.object({
-  title: z.string().trim().min(1),
-  objective: z.string().trim().min(1).nullable(),
-  audience: z.string().trim().min(1).nullable(),
-  scope: z.string().trim().min(1),
-  assumptions: z.array(z.string().trim().min(1)),
-  plannedSections: z.array(z.string().trim().min(1)).min(1),
-  criticalClarifications: z.array(clarificationPlanSchema),
-})
+const briefPlanSchema = researchBriefSchema
+  .omit({ criticalClarificationIds: true })
+  .extend({ criticalClarifications: z.array(clarificationPlanSchema) })
 const briefOutputSchema = z.object({
   runId: z.string().min(1),
-  brief: z.object({
-    title: z.string(),
-    objective: z.string().nullable(),
-    audience: z.string().nullable(),
-    scope: z.string(),
-    assumptions: z.array(z.string()),
-    plannedSections: z.array(z.string()),
-    criticalClarificationIds: z.array(z.string()),
-  }),
+  brief: researchBriefSchema,
 })
 const suspendSchema = z.object({
   runId: z.string().min(1),
@@ -47,8 +33,13 @@ function toBrief(plan: BriefPlan, criticalClarificationIds: string[]): ResearchB
     objective: parsed.objective,
     audience: parsed.audience,
     scope: parsed.scope,
+    definition: parsed.definition,
+    timeframe: parsed.timeframe,
+    geography: parsed.geography,
+    deliverables: parsed.deliverables,
     assumptions: parsed.assumptions,
     plannedSections: parsed.plannedSections,
+    questions: parsed.questions,
     criticalClarificationIds,
   }
 }
@@ -77,7 +68,7 @@ export function createBuildBriefStep({ repositories, planner }: { repositories: 
 
       if (run.brief) {
         checkpointWorkflowPhase(repositories, run, 'planning', 'plan_questions')
-        return { runId: run.id, brief: run.brief }
+        return { runId: run.id, brief: researchBriefSchema.parse(run.brief) }
       }
 
       assertWorkflowNotCancelled(repositories, run.id)
@@ -89,10 +80,13 @@ export function createBuildBriefStep({ repositories, planner }: { repositories: 
         question: clarification.question,
         intent: clarification.intent,
         requiredEvidenceTypes: clarification.requiredEvidenceTypes,
+        sectionKey: 'scope-and-method',
+        questionType: 'clarification',
+        sourceTargets: clarification.requiredEvidenceTypes,
         priority: clarification.priority,
         status: 'planned',
       }).id)
-      const brief = toBrief(plan, criticalClarificationIds)
+      const brief = researchBriefSchema.parse(toBrief(plan, criticalClarificationIds))
       repositories.researchRunRepo.setBrief(run.id, brief)
       repositories.researchEventRepo.append({
         runId: run.id,

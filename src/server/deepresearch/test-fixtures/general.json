@@ -76,11 +76,6 @@
     "limitations",
     "references"
   ],
-  "expectedQuestionIntents": [
-    "definition",
-    "current-state",
-    "disagreement"
-  ],
   "minimumIndependentDomains": 3,
   "expectedContradictions": [
     {

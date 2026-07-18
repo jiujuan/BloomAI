@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 
 const loopStopDecisionSchema = z.enum([
   'stop_covered',
@@ -10,15 +11,7 @@ const loopStopDecisionSchema = z.enum([
   'stop_blocked',
 ])
 
-export const iterationBriefSchema = z.object({
-  title: z.string(),
-  objective: z.string().nullable(),
-  audience: z.string().nullable(),
-  scope: z.string(),
-  assumptions: z.array(z.string()),
-  plannedSections: z.array(z.string()),
-  criticalClarificationIds: z.array(z.string()),
-})
+export const iterationBriefSchema = researchBriefSchema
 
 export const iterationContextSchema = z.object({
   runId: z.string().min(1),

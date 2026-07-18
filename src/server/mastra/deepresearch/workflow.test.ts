@@ -215,7 +215,7 @@ describe('Deep Research Mastra report workflow', () => {
     const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute' }]) }
     const state = {
       runId: run.id,
-      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,
@@ -256,7 +256,7 @@ describe('Deep Research Mastra report workflow', () => {
     const gapAnalyst = { plan: vi.fn(async () => []) }
     const state = {
       runId: run.id,
-      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,

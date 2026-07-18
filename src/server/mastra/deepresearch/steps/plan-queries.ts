@@ -1,11 +1,12 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import type { QueryPlanner } from '../agents/query-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
-const inputSchema = z.object({ runId: z.string().min(1), brief: z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) }) })
+const inputSchema = z.object({ runId: z.string().min(1), brief: researchBriefSchema })
 const querySchema = z.object({ questionId: z.string().min(1), query: z.string().trim().min(1) })
 
 export function createPlanQueriesStep({ repositories, planner }: { repositories: DeepResearchRepositories; planner: QueryPlanner }) {

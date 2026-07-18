@@ -11,18 +11,35 @@ const run: ResearchRunDto = {
   quality: null, reportArtifactId: null, resumePhase: null, error: null, createdAt: 1, updatedAt: 1, completedAt: null,
 }
 
+function validBrief(topic = run.topic) {
+  return {
+    title: topic,
+    objective: topic,
+    audience: null,
+    scope: 'Global enterprise market',
+    definition: 'A topic-specific research category.',
+    timeframe: '2024–2026',
+    geography: 'Global',
+    deliverables: ['Research report'],
+    assumptions: ['Public sources only'],
+    plannedSections: ['executive-summary', 'market-definition', 'market-and-competition', 'product-and-technology', 'risks-and-limitations'],
+    questions: [
+      { question: `How should ${topic} be defined and bounded?`, intent: 'define category scope', priority: 'high', sectionKey: 'market-definition', questionType: 'definition', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['official definitions'] },
+      { question: `Which vendors and alternatives are relevant to ${topic}?`, intent: 'identify market alternatives', priority: 'high', sectionKey: 'market-and-competition', questionType: 'competitive-landscape', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['company pages'] },
+      { question: `What technical architecture supports ${topic}?`, intent: 'analyze technical architecture', priority: 'high', sectionKey: 'product-and-technology', questionType: 'technical-analysis', needPrimarySource: true, needRecentSource: false, needQuantitativeEvidence: false, sourceTargets: ['technical documentation'] },
+      { question: `Which quantitative market signals describe ${topic}?`, intent: 'assess market signals', priority: 'medium', sectionKey: 'market-and-competition', questionType: 'market-analysis', needPrimarySource: false, needRecentSource: true, needQuantitativeEvidence: true, sourceTargets: ['industry data'] },
+      { question: `What risks and limitations affect ${topic}?`, intent: 'assess risks and limitations', priority: 'high', sectionKey: 'risks-and-limitations', questionType: 'risk-analysis', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['regulatory guidance'] },
+    ],
+    criticalClarifications: [],
+  }
+}
+
 describe('createLlmDeepResearchAdapters', () => {
   it('uses a model-bound generator and reports its token usage', async () => {
     const usageReporter = vi.fn()
     const generate = vi.fn(async () => ({
       text: JSON.stringify({
-        title: run.topic,
-        objective: run.topic,
-        audience: null,
-        scope: 'Global enterprise market',
-        assumptions: ['Public sources only'],
-        plannedSections: ['executive-summary'],
-        criticalClarifications: [],
+        ...validBrief(run.topic),
       }),
       usage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
     }))
@@ -32,7 +49,7 @@ describe('createLlmDeepResearchAdapters', () => {
       usageReporter,
     })
 
-    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic, plannedSections: ['executive-summary'] })
+    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic, plannedSections: expect.arrayContaining(['executive-summary']) })
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({ stage: 'brief_planning', maxOutputTokens: expect.any(Number) }))
     expect(usageReporter).toHaveBeenCalledWith(expect.objectContaining({ stage: 'brief_planning', tokens: 20, inputTokens: 13, outputTokens: 7 }))
   })
@@ -90,13 +107,7 @@ describe('createLlmDeepResearchAdapters', () => {
     const generate = vi.fn()
       .mockResolvedValueOnce({ text: '{truncated', usage: { totalTokens: 3 } })
       .mockResolvedValueOnce({ text: JSON.stringify({
-        title: run.topic,
-        objective: run.topic,
-        audience: null,
-        scope: 'Global enterprise market',
-        assumptions: ['Public sources only'],
-        plannedSections: ['executive-summary'],
-        criticalClarifications: [],
+        ...validBrief(run.topic),
       }), usage: { totalTokens: 4 } })
     const traceReporter = vi.fn()
     const adapters = createLlmDeepResearchAdapters({
@@ -111,3 +122,47 @@ describe('createLlmDeepResearchAdapters', () => {
       stage: 'brief_planning', parseStatus: 'invalid_json', retryReason: 'invalid_json',
     }))
   })
+
+describe('DRQ-03 brief planning', () => {
+  it('keeps a broad market topic moving with topic-bound complementary questions and evidence targets', async () => {
+    const generate = vi.fn(async () => ({
+      text: JSON.stringify({
+        title: 'Market and sales lead intelligence agents',
+        objective: 'Assess the market for market and sales lead intelligence agents.',
+        audience: 'Product and go-to-market leaders',
+        scope: 'Global enterprise market, using current public information.',
+        definition: 'Software agents that identify, enrich, prioritize, or route prospective customer leads for revenue teams.',
+        timeframe: '2024–2026',
+        geography: 'Global, with regional differences noted where material.',
+        deliverables: ['Market landscape', 'Vendor comparison', 'Risks and limitations'],
+        assumptions: ['Use global public sources because no geography was specified.'],
+        plannedSections: ['market-definition', 'product-and-technology', 'data-and-workflows', 'market-and-competition', 'risks-and-limitations'],
+        questions: [
+          { question: 'Which product categories and buyer workflows are included in market and sales lead intelligence agents?', intent: 'define the category and buyer use cases', priority: 'high', sectionKey: 'market-definition', questionType: 'definition', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['product documentation', 'buyer research'] },
+          { question: 'Which representative vendors offer market and sales lead intelligence agents, and how are they positioned?', intent: 'identify vendors and positioning', priority: 'high', sectionKey: 'market-and-competition', questionType: 'competitive-landscape', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['company product pages', 'independent market analysis'] },
+          { question: 'What technical architecture and integrations support lead discovery, enrichment, scoring, and routing?', intent: 'explain product architecture', priority: 'high', sectionKey: 'product-and-technology', questionType: 'technical-analysis', needPrimarySource: true, needRecentSource: false, needQuantitativeEvidence: false, sourceTargets: ['technical documentation', 'integration documentation'] },
+          { question: 'Which first- and third-party data sources are used, and what accuracy, consent, and provenance constraints apply?', intent: 'assess data sources and governance', priority: 'high', sectionKey: 'data-and-workflows', questionType: 'data-governance', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['privacy documentation', 'regulatory guidance'] },
+          { question: 'Which buyer segments, sales scenarios, and operating models most benefit from these agents?', intent: 'analyze buyers and sales scenarios', priority: 'medium', sectionKey: 'data-and-workflows', questionType: 'use-case-analysis', needPrimarySource: false, needRecentSource: true, needQuantitativeEvidence: true, sourceTargets: ['customer case studies', 'buyer surveys'] },
+          { question: 'What market size, growth signals, and competitive dynamics are reported for this category?', intent: 'size the market', priority: 'high', sectionKey: 'market-and-competition', questionType: 'market-analysis', needPrimarySource: false, needRecentSource: true, needQuantitativeEvidence: true, sourceTargets: ['industry association data', 'research institute data'] },
+          { question: 'What legal, data-quality, model-reliability, and adoption risks could limit deployment?', intent: 'identify deployment risks', priority: 'high', sectionKey: 'risks-and-limitations', questionType: 'risk-analysis', needPrimarySource: true, needRecentSource: true, needQuantitativeEvidence: false, sourceTargets: ['regulatory guidance', 'security documentation'] },
+        ],
+        criticalClarifications: [],
+      }),
+    }))
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+    const brief = await adapters.planner.plan({ ...run, topic: 'Market and sales lead intelligence agents' })
+
+    expect(brief).toMatchObject({
+      definition: expect.stringContaining('lead'),
+      timeframe: '2024–2026',
+      geography: expect.stringContaining('Global'),
+      deliverables: expect.arrayContaining(['Market landscape']),
+    })
+    const questions = brief.questions!
+    expect(questions).toHaveLength(7)
+    expect(questions.map((question) => question.question)).not.toContain('market-definition')
+    expect(new Set(questions.map((question) => question.sectionKey)).size).toBeGreaterThan(3)
+    expect(questions.filter((question) => question.priority === 'high').every((question) => question.sourceTargets.length > 0)).toBe(true)
+  })
+})

@@ -1,5 +1,6 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import type { SearchExecution } from '@server/services/deepresearch/search-service'
 import type { ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
@@ -7,7 +8,7 @@ import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecuti
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchSearchLatency, setDeepResearchSpanCounts, traceDeepResearchPhase } from '@server/telemetry/metrics'
 
-const briefSchema = z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) })
+const briefSchema = researchBriefSchema
 const inputSchema = z.object({ runId: z.string().min(1), brief: briefSchema })
 const candidateSchema = z.object({ queryId: z.string(), title: z.string(), url: z.string(), snippet: z.string() })
 const outputSchema = z.object({ runId: z.string().min(1), brief: briefSchema, candidates: z.array(candidateSchema) })

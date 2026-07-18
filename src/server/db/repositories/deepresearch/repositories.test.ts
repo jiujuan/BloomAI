@@ -118,6 +118,87 @@ describe('Deep Research repositories', () => {
     expect(researchRunRepo.acquireLease(run.id, 'worker-b', 10_000, 11_001)).toBe(true)
   })
 
+  it('persists topic-specific question metadata and replaces ordered section mappings safely', async () => {
+    const { researchRunRepo, researchQuestionRepo, researchReportRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const otherRun = createRun(researchRunRepo)
+    const productQuestion = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 1,
+      question: 'Which lead-intelligence product categories are relevant to enterprise sales teams?',
+      intent: 'product-category',
+      requiredEvidenceTypes: ['vendor documentation'],
+      sectionKey: 'product-categories',
+      questionType: 'product_capability',
+      needPrimarySource: true,
+      needRecentSource: true,
+      needQuantitativeEvidence: false,
+      sourceTargets: ['vendor documentation', 'product pages'],
+      priority: 'high',
+    })
+    const technologyQuestion = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 2,
+      question: 'What technical architecture and data sources power lead-intelligence products?',
+      intent: 'technical-architecture',
+      requiredEvidenceTypes: ['technical documentation'],
+      sectionKey: 'product-categories',
+      questionType: 'technical_architecture',
+      needPrimarySource: true,
+      needRecentSource: false,
+      needQuantitativeEvidence: false,
+      sourceTargets: ['technical documentation'],
+      priority: 'medium',
+    })
+    const foreignQuestion = researchQuestionRepo.create({
+      runId: otherRun.id,
+      ordinal: 1,
+      question: 'This question belongs to another run.',
+      intent: 'foreign',
+      requiredEvidenceTypes: [],
+      priority: 'low',
+    })
+    const section = researchReportRepo.upsertSection({
+      runId: run.id,
+      ordinal: 1,
+      sectionKey: 'product-categories',
+      title: 'Product categories',
+      purpose: 'Compare categories and technical foundations.',
+      status: 'planned',
+      idempotencyKey: 'section:product-categories',
+    })
+
+    expect(researchQuestionRepo.list(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: productQuestion.id,
+        sectionKey: 'product-categories',
+        questionType: 'product_capability',
+        needPrimarySource: true,
+        needRecentSource: true,
+        sourceTargets: ['vendor documentation', 'product pages'],
+      }),
+    ]))
+    expect(researchReportRepo.listSections(run.id)).toEqual([expect.objectContaining({ id: section.id, sectionKey: 'product-categories' })])
+
+    researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [productQuestion.id, technologyQuestion.id, productQuestion.id],
+    })
+    expect(researchReportRepo.listQuestionIdsForSection(section.id)).toEqual([productQuestion.id, technologyQuestion.id])
+
+    researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [technologyQuestion.id],
+    })
+    expect(researchReportRepo.listQuestionIdsForSection(section.id)).toEqual([technologyQuestion.id])
+    expect(() => researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [productQuestion.id, foreignQuestion.id],
+    })).toThrow('question from another Run')
+  })
   it('keeps sources and snapshots immutable, evidence idempotent, and citation ordinals stable', async () => {
     const {
       researchRunRepo,

@@ -479,6 +479,12 @@ export const research_questions = sqliteTable('research_questions', {
   question: text('question').notNull(),
   intent: text('intent').notNull(),
   required_evidence_types_json: text('required_evidence_types_json').notNull().default('[]'),
+  section_key: text('section_key'),
+  question_type: text('question_type'),
+  need_primary_source: integer('need_primary_source').notNull().default(0),
+  need_recent_source: integer('need_recent_source').notNull().default(0),
+  need_quantitative_evidence: integer('need_quantitative_evidence').notNull().default(0),
+  source_targets_json: text('source_targets_json').notNull().default('[]'),
   priority: text('priority').notNull(),
   status: text('status').notNull(),
   coverage_json: text('coverage_json'),
@@ -486,6 +492,7 @@ export const research_questions = sqliteTable('research_questions', {
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
   runParentOrdinalIdx: index('idx_research_questions_run_parent_ordinal').on(table.run_id, table.parent_question_id, table.ordinal),
+  runSectionOrdinalIdx: index('idx_research_questions_run_section_ordinal').on(table.run_id, table.section_key, table.ordinal),
 }))
 
 export const research_search_queries = sqliteTable('research_search_queries', {
@@ -568,6 +575,7 @@ export const research_report_sections = sqliteTable('research_report_sections', 
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   ordinal: integer('ordinal').notNull(),
+  section_key: text('section_key'),
   title: text('title').notNull(),
   purpose: text('purpose').notNull(),
   draft: text('draft'),
@@ -578,7 +586,19 @@ export const research_report_sections = sqliteTable('research_report_sections', 
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
   runOrdinalIdx: index('idx_research_report_sections_run_ordinal').on(table.run_id, table.ordinal),
+  runSectionKeyIdx: uniqueIndex('idx_research_report_sections_run_section_key').on(table.run_id, table.section_key),
   runIdempotencyIdx: uniqueIndex('idx_research_report_sections_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_report_section_questions = sqliteTable('research_report_section_questions', {
+  section_id: text('section_id').notNull(),
+  question_id: text('question_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  sectionQuestionIdx: uniqueIndex('idx_research_report_section_questions_section_question').on(table.section_id, table.question_id),
+  sectionOrdinalIdx: uniqueIndex('idx_research_report_section_questions_section_ordinal').on(table.section_id, table.ordinal),
+  questionIdx: index('idx_research_report_section_questions_question').on(table.question_id),
 }))
 
 export const research_claims = sqliteTable('research_claims', {

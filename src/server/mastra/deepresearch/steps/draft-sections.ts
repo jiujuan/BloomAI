@@ -17,7 +17,8 @@ export function createDraftSectionsStep({ repositories, writer }: { repositories
       if (!section) throw new Error('Deep Research section not found: ' + inputData.sectionId)
       if (isReplayPastPhase(run.id, 'drafting_sections') || section.status !== 'planned') return inputData
       const questions = repositories.researchQuestionRepo.list(run.id)
-      const evidence = selectEvidenceForSection(section, questions, repositories.researchEvidenceRepo.list(run.id))
+      const mappedQuestionIds = (repositories.researchReportRepo as Partial<typeof repositories.researchReportRepo>).listQuestionIdsForSection?.(section.id)
+      const evidence = selectEvidenceForSection(section, questions, repositories.researchEvidenceRepo.list(run.id), mappedQuestionIds)
       assertWorkflowNotCancelled(repositories, run.id)
       const draft = await writer.draft({ run, section, evidence }, { signal: getWorkflowExecution(run.id)?.signal })
       assertWorkflowNotCancelled(repositories, run.id)

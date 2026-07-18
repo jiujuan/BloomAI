@@ -256,13 +256,34 @@ export const researchIterationSchema = z.object({
   completedAt: z.number().nullable(),
 })
 
+export const researchBriefQuestionPlanSchema = z.object({
+  question: z.string().trim().min(1),
+  intent: z.string().trim().min(1),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  sectionKey: z.string().trim().min(1),
+  questionType: z.string().trim().min(1),
+  needPrimarySource: z.boolean(),
+  needRecentSource: z.boolean(),
+  needQuantitativeEvidence: z.boolean(),
+  sourceTargets: z.array(z.string().trim().min(1)).max(8),
+}).superRefine((question, context) => {
+  if ((question.priority === 'high' || question.priority === 'critical') && question.sourceTargets.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sourceTargets'], message: 'High-priority questions require source targets.' })
+  }
+})
+
 export const researchBriefSchema = z.object({
   title: z.string(),
   objective: z.string().nullable(),
   audience: z.string().nullable(),
   scope: z.string(),
+  definition: z.string().nullable().optional().default(null),
+  timeframe: z.string().nullable().optional().default(null),
+  geography: z.string().nullable().optional().default(null),
+  deliverables: z.array(z.string()).optional().default([]),
   assumptions: z.array(z.string()),
   plannedSections: z.array(z.string()),
+  questions: z.array(researchBriefQuestionPlanSchema).max(10).optional().default([]),
   criticalClarificationIds: z.array(z.string()),
 })
 

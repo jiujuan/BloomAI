@@ -162,13 +162,31 @@ export interface ResearchClarificationInput {
   answer: string
 }
 
+export interface ResearchBriefQuestionPlanDto {
+  question: string
+  intent: string
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  sectionKey: string
+  questionType: string
+  needPrimarySource: boolean
+  needRecentSource: boolean
+  needQuantitativeEvidence: boolean
+  sourceTargets: string[]
+}
+
 export interface ResearchBriefDto {
   title: string
   objective: string | null
   audience: string | null
   scope: string
+  /** Additive fields are optional so Runs saved before DRQ-03 remain readable. */
+  definition?: string | null
+  timeframe?: string | null
+  geography?: string | null
+  deliverables?: string[]
   assumptions: string[]
   plannedSections: string[]
+  questions?: ResearchBriefQuestionPlanDto[]
   criticalClarificationIds: string[]
 }
 
@@ -509,6 +527,13 @@ export interface ResearchQuestionDto {
   question: string
   intent: string
   requiredEvidenceTypes: string[]
+  /** Explicit metadata for topic-driven planning. Empty/null values mean pre-DRQ-03 data. */
+  sectionKey?: string | null
+  questionType?: string | null
+  needPrimarySource?: boolean
+  needRecentSource?: boolean
+  needQuantitativeEvidence?: boolean
+  sourceTargets?: string[]
   priority: 'low' | 'medium' | 'high' | 'critical'
   status: 'planned' | 'researching' | 'covered' | 'limited'
   coverage: ResearchCoverageDto | null
@@ -596,6 +621,7 @@ export interface ResearchReportSectionDto {
   id: string
   runId: string
   ordinal: number
+  sectionKey?: string | null
   title: string
   purpose: string
   draft: string | null

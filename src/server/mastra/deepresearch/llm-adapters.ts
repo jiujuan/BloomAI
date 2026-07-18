@@ -100,9 +100,26 @@ const claimSchema = z.object({
 const citationSchema = z.object({ status: z.enum(['supported', 'partially_supported', 'unsupported']), rationale: z.string().trim().min(1) })
 const repairSchema = z.object({ sectionId: z.string().min(1), claimId: z.string().min(1), limitation: z.string().trim().min(1) })
 const markdownSchema = z.object({ markdown: z.string().trim().min(1) })
+const briefQuestionPlanSchema = z.object({
+  question: z.string().trim().min(12),
+  intent: z.string().trim().min(3),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  sectionKey: z.string().trim().min(1),
+  questionType: z.string().trim().min(1),
+  needPrimarySource: z.boolean(),
+  needRecentSource: z.boolean(),
+  needQuantitativeEvidence: z.boolean(),
+  sourceTargets: z.array(z.string().trim().min(1)).min(1).max(8),
+}).superRefine((question, context) => {
+  if ((question.priority === 'high' || question.priority === 'critical') && question.sourceTargets.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sourceTargets'], message: 'High-priority questions require source targets.' })
+  }
+})
 const briefPlanSchema = z.object({
   title: z.string().trim().min(1), objective: z.string().trim().min(1).nullable(), audience: z.string().trim().min(1).nullable(),
-  scope: z.string().trim().min(1), assumptions: z.array(z.string().trim().min(1)), plannedSections: z.array(z.string().trim().min(1)),
+  scope: z.string().trim().min(1), definition: z.string().trim().min(1).nullable(), timeframe: z.string().trim().min(1).nullable(), geography: z.string().trim().min(1).nullable(),
+  deliverables: z.array(z.string().trim().min(1)).min(1), assumptions: z.array(z.string().trim().min(1)).min(1), plannedSections: z.array(z.string().trim().min(1)).min(1),
+  questions: z.array(briefQuestionPlanSchema).min(5).max(10),
   criticalClarifications: z.array(z.object({
     question: z.string().trim().min(1), intent: z.string().trim().min(1), priority: z.enum(['low', 'medium', 'high', 'critical']), requiredEvidenceTypes: z.array(z.string().trim().min(1)),
   })),
@@ -189,8 +206,18 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
   return {
     planner: {
       async plan(run, context = {}) {
-        return await invoke('brief_planning', 'Return JSON object { title, objective, audience, scope, assumptions, plannedSections, criticalClarifications }.', {
-          topic: run.topic, profile: run.profile, depth: run.depth, objective: run.brief?.objective ?? null,
+        return await invoke('brief_planning', [
+          'Return a JSON research brief with title, objective, audience, scope, definition, timeframe, geography, deliverables, assumptions, plannedSections, questions, and criticalClarifications.',
+          'Generate 5 to 10 complementary questions bound to the topic semantics. Every question must name a research decision, include a stable sectionKey and questionType, source needs, and concrete sourceTargets.',
+          'Use the profile as a minimum structural guardrail only. Never emit an internal category label by itself as a user-visible question or query.',
+          'For a broad topic, choose reasonable defaults, record them in assumptions, and continue. Ask a critical clarification only when meaningful research is impossible without it.',
+          'High-priority and critical questions must have at least one source target. Ensure definition, market/data, product/technical, and risk questions have distinct text and section keys when they are relevant.',
+        ].join(' '), {
+          topic: run.topic,
+          profile: run.profile,
+          depth: run.depth,
+          objective: run.brief?.objective ?? null,
+          existingBrief: run.brief ?? null,
         }, briefPlanSchema, context.signal) as BriefPlan
       },
     },

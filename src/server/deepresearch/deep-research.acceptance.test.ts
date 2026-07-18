@@ -37,7 +37,6 @@ interface AcceptanceFixture {
   searchResponses: Array<{ title: string; url: string; snippet: string }>
   documents: FixtureDocument[]
   requiredSections: string[]
-  expectedQuestionIntents: string[]
   minimumIndependentDomains: number
   expectedContradictions: Array<{ left: string; right: string; sourceUrls: string[] }>
   expectedFinalStatus: string
@@ -99,7 +98,9 @@ function createStorage() {
 function createFixtureRuntime(repositories: TestContext, fixture: AcceptanceFixture) {
   const documents = new Map(fixture.documents.map((document) => [document.url, document]))
   let searchCallCount = 0
-  const initialSearchCallLimit = getResearchBudget(fixture.input.depth).maxQuestions
+  // The brief controls question count, so expose the full fixture corpus after one
+  // initial query instead of coupling fixture coverage to a profile category count.
+  const initialSearchCallLimit = 1
   const executeTool = vi.fn(async ({ toolId, input }: { toolId: string; input: Record<string, unknown> }) => {
     if (toolId === 'web_search') {
       const results = searchCallCount < initialSearchCallLimit ? fixture.searchResponses.slice(0, 1) : fixture.searchResponses
@@ -189,16 +190,22 @@ describe('Deep Research deterministic acceptance fixtures', () => {
     })
     expect(planner.plan).toHaveBeenCalledTimes(1)
     expect(reportTranslator.translate).toHaveBeenCalledTimes(1)
-    expect(detail.questions.map((question) => question.intent)).toEqual(expect.arrayContaining(fixture.expectedQuestionIntents))
+    expect(detail.questions.length).toBeGreaterThanOrEqual(5)
+    expect(detail.questions.length).toBeLessThanOrEqual(10)
+    for (const question of detail.questions) {
+      expect(question.question.toLowerCase()).toContain(fixture.input.topic.toLowerCase())
+      expect(question.sectionKey).toEqual(expect.any(String))
+      expect(question.questionType).toEqual(expect.any(String))
+      expect(question.sourceTargets?.length).toBeGreaterThan(0)
+    }
     expect(detail.searchQueries.length).toBeGreaterThan(0)
     expect(detail.sources.filter((source) => source.selectionStatus === 'selected')).toHaveLength(fixture.searchResponses.length)
     expect(new Set(detail.sources.filter((source) => source.selectionStatus === 'selected').map((source) => source.domain)).size).toBeGreaterThanOrEqual(fixture.minimumIndependentDomains)
     expect(detail.snapshots).toHaveLength(fixture.documents.length)
     expect(detail.evidence.length).toBeGreaterThan(0)
     expect(detail.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'research.questions.planned' }),
       expect.objectContaining({ type: 'research.evidence.extracted' }),
-      expect.objectContaining({ type: 'research.coverage.assessed' }),
-      expect.objectContaining({ type: 'research.iteration.started', phase: 'gap_filling' }),
       expect.objectContaining({ type: 'research.quality.assessed' }),
       expect.objectContaining({ type: 'research.artifact.created' }),
     ]))

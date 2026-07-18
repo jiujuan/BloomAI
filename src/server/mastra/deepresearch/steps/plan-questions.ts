@@ -1,11 +1,12 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
-import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
+import { createTopicBoundQuestionPlans } from '../agents/brief-planner'
 import type { DeepResearchRepositories } from '../workflow-context'
-import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
+import { checkpointWorkflowPhase } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 
-const inputSchema = z.object({ runId: z.string().min(1), brief: z.object({ title: z.string(), objective: z.string().nullable(), audience: z.string().nullable(), scope: z.string(), assumptions: z.array(z.string()), plannedSections: z.array(z.string()), criticalClarificationIds: z.array(z.string()) }) })
+const inputSchema = z.object({ runId: z.string().min(1), brief: researchBriefSchema })
 
 export function createPlanQuestionsStep(repositories: DeepResearchRepositories) {
   return createStep({
@@ -15,16 +16,23 @@ export function createPlanQuestionsStep(repositories: DeepResearchRepositories) 
     execute: async ({ inputData }) => {
       const run = loadRunnableRun(repositories, inputData.runId, ['planning'])
       const existing = repositories.researchQuestionRepo.list(run.id)
-      if (existing.length === 0) {
-        const policy = getResearchProfilePolicy(run.profile)
+      const plannedQuestions = existing.filter((question) => question.questionType !== 'clarification')
+      if (plannedQuestions.length === 0) {
         const remaining = Math.max(0, run.budget.maxQuestions - run.usage.questions)
-        const created = policy.questionCategories.slice(0, remaining).map((category, index) => repositories.researchQuestionRepo.create({
+        const candidates = inputData.brief.questions?.length ? inputData.brief.questions : createTopicBoundQuestionPlans(run)
+        const created = candidates.slice(0, remaining).map((planned, index) => repositories.researchQuestionRepo.create({
           runId: run.id,
-          ordinal: index + 1,
-          question: run.topic + ': ' + category,
-          intent: category,
-          requiredEvidenceTypes: [...policy.preferredSourceTypes],
-          priority: index < 2 ? 'high' : 'medium',
+          ordinal: existing.length + index + 1,
+          question: planned.question,
+          intent: planned.intent,
+          requiredEvidenceTypes: planned.sourceTargets,
+          sectionKey: planned.sectionKey,
+          questionType: planned.questionType,
+          needPrimarySource: planned.needPrimarySource,
+          needRecentSource: planned.needRecentSource,
+          needQuantitativeEvidence: planned.needQuantitativeEvidence,
+          sourceTargets: planned.sourceTargets,
+          priority: planned.priority,
           status: 'planned',
         }))
         repositories.researchRunRepo.setUsage(run.id, { ...run.usage, questions: run.usage.questions + created.length })

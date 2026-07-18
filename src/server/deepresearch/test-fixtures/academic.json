@@ -80,16 +80,6 @@
     "limitations-and-gaps",
     "references"
   ],
-  "expectedQuestionIntents": [
-    "research-question",
-    "terminology",
-    "theoretical-lineage",
-    "foundational-work",
-    "recent-work",
-    "methods",
-    "datasets",
-    "findings"
-  ],
   "minimumIndependentDomains": 3,
   "expectedContradictions": [
     {

@@ -104,7 +104,7 @@ describe('Deep Research cancellation step boundaries', () => {
 
     await expect(executeIterationRetrieval({
       runId: run.id,
-      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,
@@ -150,7 +150,7 @@ describe('Deep Research cancellation step boundaries', () => {
 
     await expect(executeIterationRetrieval({
       runId: run.id,
-      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,

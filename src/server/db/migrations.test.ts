@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(17)
+    expect(migrationVersions()).toHaveLength(18)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(17)
+    expect(migrationVersions()).toHaveLength(18)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -158,6 +158,7 @@ describe('database migrations', () => {
         'research_source_snapshots',
         'research_evidence',
         'research_report_sections',
+        'research_report_section_questions',
         'research_claims',
         'research_citations',
         'research_quality_assessments',
@@ -189,6 +190,7 @@ describe('database migrations', () => {
       '015-deep-research-model-selection-snapshot',
       '016-deep-research-llm-runtime-usage',
       '017-deep-research-structured-model-traces',
+      '018-deep-research-brief-question-section-mapping',
     ])
     const emptyDb = openRawDb()
     try {
@@ -203,6 +205,17 @@ describe('database migrations', () => {
       ])
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_run_attempts') WHERE name = 'model_usage_json'").all()).toEqual([
         { name: 'model_usage_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_questions') WHERE name IN ('section_key', 'question_type', 'need_primary_source', 'need_recent_source', 'need_quantitative_evidence', 'source_targets_json') ORDER BY name").all()).toEqual([
+        { name: 'need_primary_source' },
+        { name: 'need_quantitative_evidence' },
+        { name: 'need_recent_source' },
+        { name: 'question_type' },
+        { name: 'section_key' },
+        { name: 'source_targets_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name = 'section_key'").all()).toEqual([
+        { name: 'section_key' },
       ])
     } finally {
       emptyDb.close()

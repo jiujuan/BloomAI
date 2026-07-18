@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type {
   JsonValue,
@@ -14,6 +14,8 @@ import {
   research_citations,
   research_claims,
   research_quality_assessments,
+  research_questions,
+  research_report_section_questions,
   research_report_sections,
 } from '../../schema'
 import { decodeJson, encodeJson } from './repository-utils'
@@ -21,12 +23,19 @@ import { decodeJson, encodeJson } from './repository-utils'
 export interface UpsertResearchSectionInput {
   runId: string
   ordinal: number
+  sectionKey?: string | null
   title: string
   purpose: string
   draft?: string | null
   verifiedText?: string | null
   status: ResearchReportSectionDto['status']
   idempotencyKey: string
+}
+
+export interface ReplaceSectionQuestionMappingsInput {
+  runId: string
+  sectionId: string
+  questionIds: string[]
 }
 
 export interface UpsertResearchClaimInput {
@@ -90,6 +99,7 @@ export function mapResearchSection(row: typeof research_report_sections.$inferSe
     id: row.id,
     runId: row.run_id,
     ordinal: row.ordinal,
+    sectionKey: row.section_key,
     title: row.title,
     purpose: row.purpose,
     draft: row.draft,
@@ -165,6 +175,7 @@ export const researchReportRepo = {
         id,
         run_id: input.runId,
         ordinal: input.ordinal,
+        section_key: input.sectionKey ?? null,
         title: input.title,
         purpose: input.purpose,
         draft: input.draft ?? null,
@@ -176,6 +187,45 @@ export const researchReportRepo = {
       }).run()
       return mapResearchSection(tx.select().from(research_report_sections).where(eq(research_report_sections.id, id)).get()!)
     })
+  },
+
+  replaceSectionQuestionMappings(input: ReplaceSectionQuestionMappingsInput): void {
+    const questionIds = [...new Set(input.questionIds)]
+    getOrmDb().transaction((tx) => {
+      const section = tx.select({ id: research_report_sections.id }).from(research_report_sections).where(and(
+        eq(research_report_sections.id, input.sectionId),
+        eq(research_report_sections.run_id, input.runId),
+      )).get()
+      if (!section) throw new Error('Deep Research section not found for mapping: ' + input.sectionId)
+
+      if (questionIds.length > 0) {
+        const questions = tx.select({ id: research_questions.id }).from(research_questions).where(and(
+          eq(research_questions.run_id, input.runId),
+          inArray(research_questions.id, questionIds),
+        )).all()
+        if (questions.length !== questionIds.length) throw new Error('Deep Research section mapping contains a question from another Run.')
+      }
+
+      tx.delete(research_report_section_questions).where(eq(research_report_section_questions.section_id, input.sectionId)).run()
+      if (questionIds.length > 0) {
+        const now = Date.now()
+        tx.insert(research_report_section_questions).values(questionIds.map((questionId, index) => ({
+          section_id: input.sectionId,
+          question_id: questionId,
+          ordinal: index + 1,
+          created_at: now,
+        }))).run()
+      }
+    })
+  },
+
+  listQuestionIdsForSection(sectionId: string): string[] {
+    return getOrmDb().select({ questionId: research_report_section_questions.question_id })
+      .from(research_report_section_questions)
+      .where(eq(research_report_section_questions.section_id, sectionId))
+      .orderBy(asc(research_report_section_questions.ordinal))
+      .all()
+      .map((row) => row.questionId)
   },
 
   upsertClaim(input: UpsertResearchClaimInput): ResearchClaimDto {

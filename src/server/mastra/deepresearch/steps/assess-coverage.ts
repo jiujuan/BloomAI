@@ -1,20 +1,13 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import { areHighPriorityQuestionsCovered, type EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchAssessment } from '@server/telemetry/metrics'
 
-const briefSchema = z.object({
-  title: z.string(),
-  objective: z.string().nullable(),
-  audience: z.string().nullable(),
-  scope: z.string(),
-  assumptions: z.array(z.string()),
-  plannedSections: z.array(z.string()),
-  criticalClarificationIds: z.array(z.string()),
-})
+const briefSchema = researchBriefSchema
 export const gapLoopStateSchema = z.object({
   runId: z.string().min(1),
   brief: briefSchema,
