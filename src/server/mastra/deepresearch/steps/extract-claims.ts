@@ -22,10 +22,11 @@ export function createExtractClaimsStep({ repositories, extractor, citationServi
         repositories.researchRunRepo.transitionWithEvent(run.id, 'synthesizing', { phase: 'extracting_claims', progress: 76 })
         return { runId: run.id }
       }
+      const questions = repositories.researchQuestionRepo.list(run.id)
       const evidence = repositories.researchEvidenceRepo.list(run.id)
       for (const section of repositories.researchReportRepo.listSections(run.id)) {
         assertWorkflowNotCancelled(repositories, run.id)
-        const extracted = await extractor.extract({ run, section, evidence: evidence.slice(0, 3) }, { signal: getWorkflowExecution(run.id)?.signal })
+        const extracted = await extractor.extract({ run, section, evidence: selectEvidenceForSection(section, questions, evidence) }, { signal: getWorkflowExecution(run.id)?.signal })
         assertWorkflowNotCancelled(repositories, run.id)
         for (const [index, item] of extracted.entries()) {
           const claim = repositories.researchReportRepo.upsertClaim({

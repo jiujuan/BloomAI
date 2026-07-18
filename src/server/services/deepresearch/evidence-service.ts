@@ -8,6 +8,7 @@ import type {
   ResearchEvidenceDto,
   ResearchQuestionDto,
   ResearchRunDto,
+  ResearchSearchQueryDto,
   ResearchSourceDto,
   ResearchSourceSnapshotDto,
 } from '@shared/deepresearch/contracts'
@@ -64,6 +65,8 @@ export interface EvidenceServiceEvidenceRepository {
 }
 
 export interface EvidenceServiceQuestionRepository {
+  /** Optional for backwards-compatible unit-test and legacy repository adapters. */
+  listSearchQueries?(runId: string): ResearchSearchQueryDto[]
   updateCoverage(
     id: string,
     data: { coverage: ResearchCoverageDto; status: ResearchQuestionDto['status'] },
@@ -193,11 +196,42 @@ export class EvidenceService {
       ranges.push(packet)
       packetRanges.set(packet.snapshotId, ranges)
     }
-    const knownQuestionIds = new Set(questions.filter((question) => question.runId === run.id).map((question) => question.id))
+    const runnableQuestions = questions.filter((question) => question.runId === run.id)
+    const knownQuestionIds = new Set(runnableQuestions.map((question) => question.id))
     const existingEvidenceIds = new Set(persistedEvidence.map((evidence) => evidence.id))
-    const analyses = packets.length > 0
-      ? await this.options.analyst.analyze({ run, questions, packets }, { signal: cancellation.signal })
-      : []
+    const sourcesById = new Map(this.options.sourceRepo.listSources(run.id).map((source) => [source.id, source]))
+    const questionIdByQueryId = new Map(
+      (this.options.questionRepo.listSearchQueries?.(run.id) ?? [])
+        .filter((query) => query.runId === run.id && knownQuestionIds.has(query.questionId))
+        .map((query) => [query.id, query.questionId]),
+    )
+    const packetsByQuestionId = new Map<string, EvidencePacket[]>()
+    const unassignedPackets: EvidencePacket[] = []
+    for (const packet of packets) {
+      const queryId = sourcesById.get(packet.sourceId)?.scores.queryId
+      const questionId = typeof queryId === 'string' ? questionIdByQueryId.get(queryId) : undefined
+      if (!questionId) {
+        unassignedPackets.push(packet)
+        continue
+      }
+      const assigned = packetsByQuestionId.get(questionId) ?? []
+      assigned.push(packet)
+      packetsByQuestionId.set(questionId, assigned)
+    }
+    // Legacy sources did not record query provenance. They can safely be used
+    // when there is only one question; broadcasting them to every question
+    // creates duplicate evidence and repeated report sections.
+    if (runnableQuestions.length === 1 && unassignedPackets.length > 0) {
+      const [question] = runnableQuestions
+      packetsByQuestionId.set(question.id, [...(packetsByQuestionId.get(question.id) ?? []), ...unassignedPackets])
+    }
+    const analyses: EvidenceAnalysis[] = []
+    for (const question of runnableQuestions) {
+      const questionPackets = packetsByQuestionId.get(question.id) ?? []
+      if (questionPackets.length === 0) continue
+      throwIfCancellationRequested(cancellation)
+      analyses.push(...await this.options.analyst.analyze({ run, questions: [question], packets: questionPackets }, { signal: cancellation.signal }))
+    }
     throwIfCancellationRequested(cancellation)
     let createdCount = 0
     let rejectedCount = 0

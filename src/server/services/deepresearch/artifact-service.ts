@@ -118,20 +118,46 @@ export function createReportMarkdown(input: ArtifactWriteInput): string {
     '',
     '## References',
     '',
-    input.citations.map((citation) => '[' + citation.ordinal + '] Evidence ' + citation.evidenceId).join('\n') || 'No citations were verified.',
+    formatReferences(input, 'markdown') || 'No citations were verified.',
     '',
   ].join('\n')
 }
 
-function referenceList(input: ArtifactWriteInput): string {
+function escapeMarkdownLinkLabel(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function escapeMarkdownLinkUrl(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
+}
+
+function formatReferences(input: ArtifactWriteInput, format: 'markdown' | 'plain'): string {
   const sources = new Map(input.sources.map((source) => [source.id, source]))
   const snapshots = new Map(input.snapshots.map((snapshot) => [snapshot.id, snapshot]))
   const evidence = new Map(input.evidence.map((item) => [item.id, item]))
   return input.citations.map((citation) => {
     const item = evidence.get(citation.evidenceId)
     const source = item ? sources.get(snapshots.get(item.snapshotId)?.sourceId ?? '') : undefined
-    return '[' + citation.ordinal + '] ' + (source?.title ?? source?.canonicalUrl ?? citation.evidenceId) + ' (' + (source?.canonicalUrl ?? 'unresolved') + ')'
-  }).join('\n') + '\n'
+    const url = source?.canonicalUrl
+    const title = source?.title ?? url
+    if (!title || !url || !isHttpUrl(url)) return '[' + citation.ordinal + '] Bound source unavailable.'
+    return format === 'markdown'
+      ? '[' + citation.ordinal + '] [' + escapeMarkdownLinkLabel(title) + '](' + escapeMarkdownLinkUrl(url) + ')'
+      : '[' + citation.ordinal + '] ' + title + ' (' + url + ')'
+  }).join('\n')
+}
+
+function referenceList(input: ArtifactWriteInput): string {
+  return formatReferences(input, 'plain') + '\n'
 }
 
 export class ArtifactService {

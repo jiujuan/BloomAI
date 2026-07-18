@@ -227,6 +227,120 @@ describe('EvidenceService', () => {
     })])
   })
 
+
+  it('routes source packets only to the research question that produced the search query', async () => {
+    const definitionQuestion: ResearchQuestionDto = {
+      ...question,
+      id: 'question-definition',
+      ordinal: 1,
+      question: 'What is the market definition?',
+      intent: 'definition',
+    }
+    const growthQuestion: ResearchQuestionDto = {
+      ...question,
+      id: 'question-growth',
+      ordinal: 2,
+      question: 'What is the market growth rate?',
+      intent: 'growth',
+    }
+    const definitionSource: ResearchSourceDto = {
+      ...source,
+      id: 'source-definition',
+      scores: { queryId: 'query-definition' },
+    }
+    const growthSource: ResearchSourceDto = {
+      ...source,
+      id: 'source-growth',
+      canonicalUrl: 'https://example.test/growth',
+      domain: 'growth.example.test',
+      scores: { queryId: 'query-growth' },
+    }
+    const definitionContent = 'The market definition covers software that identifies and prioritizes prospective customers using verified company and buyer signals from multiple public and private data sources.'
+    const growthContent = 'The market growth evidence reports that sales intelligence adoption expanded as revenue teams added automated prospect research to their standard account-planning workflows.'
+    const definitionSnapshot: ResearchSourceSnapshotDto = {
+      ...snapshot,
+      id: 'snapshot-definition',
+      sourceId: definitionSource.id,
+      content: definitionContent,
+      finalUrl: definitionSource.canonicalUrl,
+    }
+    const growthSnapshot: ResearchSourceSnapshotDto = {
+      ...snapshot,
+      id: 'snapshot-growth',
+      sourceId: growthSource.id,
+      content: growthContent,
+      finalUrl: growthSource.canonicalUrl,
+    }
+    const capturedInputs: Array<{ questionId: string; sourceIds: string[] }> = []
+    const persisted: ResearchEvidenceDto[] = []
+    const analyst: EvidenceAnalyst = {
+      analyze: vi.fn(async ({ questions: analyzedQuestions, packets }) => {
+        capturedInputs.push({ questionId: analyzedQuestions[0].id, sourceIds: [...new Set(packets.map((packet) => packet.sourceId))] })
+        return packets.map((packet) => ({
+          questionId: analyzedQuestions[0].id,
+          snapshotId: packet.snapshotId,
+          passage: packet.text,
+          summary: 'A routed source packet supports the assigned research question.',
+          stance: 'supporting' as const,
+          confidence: 0.9,
+          startOffset: packet.startOffset,
+          endOffset: packet.endOffset,
+        }))
+      }),
+    }
+    const service = new EvidenceService({
+      analyst,
+      sourceRepo: {
+        listSources: () => [definitionSource, growthSource],
+        listSnapshots: () => [definitionSnapshot, growthSnapshot],
+      },
+      evidenceRepo: {
+        upsertEvidence: (input) => {
+          const existing = persisted.find((item) => item.questionId === input.questionId && item.snapshotId === input.snapshotId && item.startOffset === input.startOffset && item.endOffset === input.endOffset)
+          if (existing) return existing
+          const { idempotencyKey: _idempotencyKey, ...record } = input
+          const item: ResearchEvidenceDto = { id: 'evidence-' + (persisted.length + 1), ...record }
+          persisted.push(item)
+          return item
+        },
+        list: () => persisted,
+      },
+      questionRepo: {
+        listSearchQueries: () => [
+          { id: 'query-definition', runId: run.id, questionId: definitionQuestion.id, iteration: 0, query: 'definition query', provider: null, status: 'completed', resultCount: 1, error: null, createdAt: 1, completedAt: 1, candidates: [] },
+          { id: 'query-growth', runId: run.id, questionId: growthQuestion.id, iteration: 0, query: 'growth query', provider: null, status: 'completed', resultCount: 1, error: null, createdAt: 1, completedAt: 1, candidates: [] },
+        ],
+        updateCoverage: (id, data) => ({ ...(id === definitionQuestion.id ? definitionQuestion : growthQuestion), coverage: data.coverage, status: data.status }),
+      },
+    })
+
+    await service.extract(run, [definitionQuestion, growthQuestion])
+
+    expect(capturedInputs).toEqual([
+      { questionId: definitionQuestion.id, sourceIds: [definitionSource.id] },
+      { questionId: growthQuestion.id, sourceIds: [growthSource.id] },
+    ])
+    expect(persisted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ questionId: definitionQuestion.id, snapshotId: definitionSnapshot.id }),
+      expect.objectContaining({ questionId: growthQuestion.id, snapshotId: growthSnapshot.id }),
+    ]))
+    expect(persisted).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ questionId: definitionQuestion.id, snapshotId: growthSnapshot.id }),
+      expect.objectContaining({ questionId: growthQuestion.id, snapshotId: definitionSnapshot.id }),
+    ]))
+  })
+
+
+  it('does not broadcast legacy source packets to multiple questions', async () => {
+    const secondQuestion: ResearchQuestionDto = { ...question, id: 'question-2', ordinal: 2, intent: 'definition' }
+    const analyst: EvidenceAnalyst = { analyze: vi.fn(async () => []) }
+    const { service } = createService(analyst)
+
+    await service.extract(run, [question, secondQuestion])
+
+    expect(analyst.analyze).not.toHaveBeenCalled()
+  })
+
   it('adapts persisted evidence into a versioned V2 assessment with an injected deterministic clock', async () => {
     const { service } = createService({
       analyze: async () => [{
