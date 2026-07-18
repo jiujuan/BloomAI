@@ -1,9 +1,11 @@
-﻿import fs from 'fs'
+import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getResearchBudget } from '@server/deepresearch/domain/budgets'
+import { decideIteration } from '@server/deepresearch/domain/iteration-decision'
+import type { ResearchCoverageAssessmentV2Dto } from '@shared/deepresearch/contracts'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -501,6 +503,150 @@ describe('Deep Research repositories', () => {
     expect(researchCoverageAssessmentRepo.getLatest(run.id, iteration.ordinal)).toEqual(assessment)
   })
 
+  it('persists an initial covered stop audit without creating an iteration', async () => {
+    const { researchRunRepo, researchIterationRepo, researchEventRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const covered: ResearchCoverageAssessmentV2Dto = {
+      policyVersion: 'v2',
+      profile: 'market',
+      questionId: 'q-covered',
+      inputFingerprint: 'assessment:q-covered',
+      score: 1,
+      verdict: 'covered',
+      dimensions: { evidenceSufficiency: 1, independentCorroboration: 1, authority: 1, recency: 1, requiredEvidenceTypes: 1, contradictionHandling: 1 },
+      sourceCounts: { evidence: 1, distinctSources: 1, independentDomains: 1, primaryOrAuthoritative: 1, recent: 1 },
+      support: { supporting: 1, contradicting: 0, contextual: 0 },
+      gaps: [],
+      limitation: null,
+      suggestedSearchIntents: [],
+      materialGain: null,
+      assessedAt: 2_000,
+    }
+    const decision = decideIteration({
+      assessments: [covered],
+      previousAssessment: null,
+      iterations: [],
+      budget: run.budget,
+      usage: run.usage,
+      reservations: [],
+      cancellationRequested: false,
+      queryCandidates: [],
+    })
+
+    expect(decision).toMatchObject({ shouldCreateIteration: false, decision: { decision: 'stop_covered', matchedRule: 'coverage_reached' } })
+    researchIterationRepo.recordStopDecision({ runId: run.id, stopReason: decision.decision, timestamp: 2_001 })
+
+    expect(researchIterationRepo.list(run.id)).toEqual([])
+    expect(researchIterationRepo.listStopDecisions(run.id)).toEqual([
+      expect.objectContaining({
+        iteration: null,
+        decision: expect.objectContaining({
+          decision: 'stop_covered',
+          matchedRule: 'coverage_reached',
+          inputSummary: expect.objectContaining({ assessmentFingerprints: ['assessment:q-covered'] }),
+          limitations: [],
+        }),
+      }),
+    ])
+    expect(researchEventRepo.list(run.id)).toContainEqual(expect.objectContaining({
+      type: 'research.iteration.stop_decided',
+      payload: expect.objectContaining({
+        iteration: null,
+        matchedRule: 'coverage_reached',
+        inputSummary: expect.objectContaining({ assessmentFingerprints: ['assessment:q-covered'] }),
+        limitations: [],
+      }),
+    }))
+  })
+
+  it('atomically reserves and settles iteration budgets so cancelled work releases unused capacity', async () => {
+    const { researchRunRepo, researchIterationRepo, researchEventRepo } = await loadRepositories()
+    const run = researchRunRepo.create({
+      input: { topic: 'Budgeted iteration', profile: 'market', depth: 'standard' },
+      budget: {
+        ...getResearchBudget('standard'),
+        maxIterations: 1,
+        maxSearchQueries: 2,
+        maxFetchedSources: 2,
+        maxTokens: 100,
+        maxProviderCostUsd: 1,
+      },
+    })
+    const plan = {
+      version: 1 as const,
+      targets: [{
+        questionId: 'q-1',
+        gapCode: 'NO_EVIDENCE' as const,
+        severity: 'critical' as const,
+        remediation: 'search_primary' as const,
+        searchIntent: 'official source',
+        query: 'official market source',
+        expectedValue: 4.5,
+      }],
+      reservation: { iterations: 1, searchQueries: 2, fetchedSources: 2, modelTokens: 100, providerCostUsd: 1 },
+      inputSummary: {
+        assessmentFingerprints: ['assessment:q-1'],
+        previousAssessmentFingerprint: null,
+        historyIterationCount: 0,
+        consecutiveNoMaterialGain: 0,
+        actionableGapCount: 1,
+        actionableQueryCount: 1,
+        cancellationRequested: false,
+        usage: run.usage,
+        activeReservation: { iterations: 0, searchQueries: 0, fetchedSources: 0, modelTokens: 0, providerCostUsd: 0 },
+      },
+    }
+
+    const iteration = researchIterationRepo.reserve({ runId: run.id, plan, coverageBefore: { aggregateScore: 0.4 }, createdAt: 2_000 })
+    expect(iteration).toMatchObject({
+      decision: 'continue',
+      status: 'planned',
+      plannedQueryCount: 1,
+      budgetBefore: { available: { searchQueries: 2, fetchedSources: 2, modelTokens: 100 } },
+      plan: { reservation: { searchQueries: 2, fetchedSources: 2 } },
+    })
+    expect(() => researchIterationRepo.reserve({ runId: run.id, plan, createdAt: 2_001 })).toThrow('RESEARCH_BUDGET_EXHAUSTED')
+
+    const stopped = researchIterationRepo.settleReservation(iteration.id, {
+      actual: { iterations: 0, searchQueries: 1, fetchedSources: 1, modelTokens: 10, providerCostUsd: 0.1 },
+      status: 'stopped',
+      decision: 'stop_cancelled',
+      stopReason: {
+        decision: 'stop_cancelled',
+        reason: 'Cancellation requested.',
+        limitationCodes: ['CANCELLATION_REQUESTED'],
+        matchedRule: 'cancellation_requested',
+        inputSummary: plan.inputSummary,
+        limitations: ['Research was stopped because cancellation was requested.'],
+      },
+      limitations: ['Research was stopped because cancellation was requested.'],
+      completedAt: 2_002,
+    })
+
+    expect(stopped).toMatchObject({
+      status: 'stopped',
+      decision: 'stop_cancelled',
+      budgetAfter: { available: { searchQueries: 1, fetchedSources: 1, modelTokens: 90 } },
+      plan: { settlement: { released: { searchQueries: 1, fetchedSources: 1, modelTokens: 90 } } },
+    })
+    expect(researchRunRepo.get(run.id)?.usage).toMatchObject({ iterations: 0, searchQueries: 1, fetchedSources: 1, tokens: 10, providerCostUsd: 0.1 })
+    expect(researchEventRepo.list(run.id)).toContainEqual(expect.objectContaining({
+      type: 'research.iteration.stopped',
+      payload: expect.objectContaining({
+        iteration: iteration.ordinal,
+        decision: 'stop_cancelled',
+        matchedRule: 'cancellation_requested',
+        inputSummary: plan.inputSummary,
+        limitations: ['Research was stopped because cancellation was requested.'],
+        stopDecision: expect.objectContaining({
+          decision: 'stop_cancelled',
+          matchedRule: 'cancellation_requested',
+          inputSummary: plan.inputSummary,
+          limitations: ['Research was stopped because cancellation was requested.'],
+        }),
+      }),
+    }))
+  })
   it('allows only one matching-state CAS transition and writes its event in the same transaction', async () => {
     const { researchRunRepo, researchEventRepo } = await loadRepositories()
     const run = createRun(researchRunRepo)

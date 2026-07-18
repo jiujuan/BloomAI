@@ -1,4 +1,4 @@
-﻿import type { JsonObject } from './contracts'
+﻿import type { JsonObject, ResearchIterationDecisionInputSummaryDto, ResearchIterationStopRule, ResearchLoopDecisionDto } from './contracts'
 
 export type ResearchEventType =
   | 'research.run.created'
@@ -32,6 +32,7 @@ export type ResearchEventType =
   | 'research.coverage.gap_detected'
   | 'research.iteration.planned'
   | 'research.iteration.stopped'
+  | 'research.iteration.stop_decided'
   | 'research.run.cancellation_requested'
   | 'research.run.interrupted'
   | 'research.run.resumed'
@@ -80,7 +81,8 @@ export type ResearchEvent =
   | ResearchEventBase<'research.coverage.assessment_completed', IdentifierPayload & { policyVersion: string }>
   | ResearchEventBase<'research.coverage.gap_detected', JsonObject & { questionId: string; gapCodes: string[] }>
   | ResearchEventBase<'research.iteration.planned', JsonObject & { iteration: number; targetQuestionIds: string[] }>
-  | ResearchEventBase<'research.iteration.stopped', JsonObject & { iteration: number; decision: string }>
+  | ResearchEventBase<'research.iteration.stopped', JsonObject & { iteration: number; decision: string; matchedRule: ResearchIterationStopRule; inputSummary: ResearchIterationDecisionInputSummaryDto; limitations: string[]; stopDecision: ResearchLoopDecisionDto }>
+  | ResearchEventBase<'research.iteration.stop_decided', JsonObject & { iteration: number | null; decision: string; matchedRule: ResearchIterationStopRule; inputSummary: ResearchIterationDecisionInputSummaryDto; limitations: string[]; stopDecision: ResearchLoopDecisionDto }>
   | ResearchEventBase<'research.run.cancellation_requested', JsonObject & { reason: string | null }>
   | ResearchEventBase<'research.run.interrupted', JsonObject>
   | ResearchEventBase<'research.run.resumed', IdentifierPayload>

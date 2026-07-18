@@ -45,7 +45,75 @@ export type ResearchLoopDecision =
   | 'stop_no_material_gain'
   | 'stop_no_actionable_gaps'
   | 'stop_cancelled'
+  | 'stop_max_iterations'
+  | 'stop_blocked'
 
+export type ResearchIterationStopRule =
+  | 'coverage_reached'
+  | 'budget_exhausted'
+  | 'max_iterations'
+  | 'no_actionable_gaps'
+  | 'no_material_gain'
+  | 'cancellation_requested'
+  | 'blocked_unrecoverable'
+
+/** Budget capacity reserved before one planned gap-filling iteration is dispatched. */
+export interface ResearchBudgetReservationDto {
+  iterations: number
+  searchQueries: number
+  fetchedSources: number
+  modelTokens: number
+  providerCostUsd: number
+}
+
+export interface ResearchBudgetAvailabilityDto {
+  iterations: number
+  searchQueries: number
+  fetchedSources: number
+  modelTokens: number | null
+  providerCostUsd: number | null
+}
+
+export interface ResearchBudgetSnapshotDto {
+  consumed: ResearchBudgetReservationDto
+  reserved: ResearchBudgetReservationDto
+  available: ResearchBudgetAvailabilityDto
+}
+
+export interface ResearchBudgetSettlementDto {
+  spent: ResearchBudgetReservationDto
+  released: ResearchBudgetReservationDto
+}
+
+export interface ResearchIterationPlanTargetDto {
+  questionId: string
+  gapCode: CoveragePolicyV2GapCode
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  remediation: CoveragePolicyV2Remediation
+  searchIntent: string
+  query: string
+  expectedValue: number
+}
+
+export interface ResearchIterationDecisionInputSummaryDto {
+  assessmentFingerprints: string[]
+  previousAssessmentFingerprint: string | null
+  historyIterationCount: number
+  consecutiveNoMaterialGain: number
+  actionableGapCount: number
+  actionableQueryCount: number
+  cancellationRequested: boolean
+  usage: ResearchUsageDto
+  activeReservation: ResearchBudgetReservationDto
+}
+
+export interface ResearchIterationPlanDto {
+  version: 1
+  targets: ResearchIterationPlanTargetDto[]
+  reservation: ResearchBudgetReservationDto
+  inputSummary: ResearchIterationDecisionInputSummaryDto
+  settlement?: ResearchBudgetSettlementDto
+}
 export interface ResearchTimeRange {
   from?: string
   to?: string
@@ -277,6 +345,10 @@ export interface ResearchLoopDecisionDto {
   decision: ResearchLoopDecision
   reason: string | null
   limitationCodes: string[]
+  /** Additive audit data. Historical decision records may omit these fields. */
+  matchedRule?: ResearchIterationStopRule
+  inputSummary?: ResearchIterationDecisionInputSummaryDto
+  limitations?: string[]
 }
 
 export interface ResearchIterationDto {
@@ -291,6 +363,8 @@ export interface ResearchIterationDto {
   newSourceCount: number
   newEvidenceCount: number
   stopReason: ResearchLoopDecisionDto | null
+  /** Optional while pre-DR2-07 rows remain readable. */
+  plan?: ResearchIterationPlanDto
   createdAt: number
   completedAt: number | null
 }

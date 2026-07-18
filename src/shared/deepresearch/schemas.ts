@@ -42,8 +42,86 @@ export const researchLoopDecisionSchema = z.enum([
   'stop_no_material_gain',
   'stop_no_actionable_gaps',
   'stop_cancelled',
+  'stop_max_iterations',
+  'stop_blocked',
 ])
 
+export const researchIterationStopRuleSchema = z.enum([
+  'coverage_reached',
+  'budget_exhausted',
+  'max_iterations',
+  'no_actionable_gaps',
+  'no_material_gain',
+  'cancellation_requested',
+  'blocked_unrecoverable',
+])
+
+export const researchBudgetReservationSchema = z.object({
+  iterations: z.number().int().nonnegative(),
+  searchQueries: z.number().int().nonnegative(),
+  fetchedSources: z.number().int().nonnegative(),
+  modelTokens: z.number().int().nonnegative(),
+  providerCostUsd: z.number().nonnegative(),
+})
+
+export const researchBudgetAvailabilitySchema = z.object({
+  iterations: z.number().int(),
+  searchQueries: z.number().int(),
+  fetchedSources: z.number().int(),
+  modelTokens: z.number().int().nullable(),
+  providerCostUsd: z.number().nullable(),
+})
+
+export const researchBudgetSnapshotSchema = z.object({
+  consumed: researchBudgetReservationSchema,
+  reserved: researchBudgetReservationSchema,
+  available: researchBudgetAvailabilitySchema,
+})
+
+export const researchBudgetSettlementSchema = z.object({
+  spent: researchBudgetReservationSchema,
+  released: researchBudgetReservationSchema,
+})
+
+export const researchIterationPlanTargetSchema = z.object({
+  questionId: z.string().min(1),
+  gapCode: z.enum(['NO_EVIDENCE', 'SINGLE_DOMAIN', 'MISSING_REQUIRED_TYPE', 'NO_AUTHORITATIVE_SOURCE', 'STALE_EVIDENCE', 'UNRESOLVED_CONTRADICTION', 'INSUFFICIENT_CONFIDENCE']),
+  severity: z.enum(['critical', 'high', 'medium', 'low']),
+  remediation: z.enum(['search_primary', 'search_independent', 'search_recent', 'search_counterevidence', 'disclose_limitation']),
+  searchIntent: z.string().min(1),
+  query: z.string().min(1),
+  expectedValue: z.number().nonnegative(),
+})
+
+export const researchIterationDecisionInputSummarySchema = z.object({
+  assessmentFingerprints: z.array(z.string().min(1)),
+  previousAssessmentFingerprint: z.string().min(1).nullable(),
+  historyIterationCount: z.number().int().nonnegative(),
+  consecutiveNoMaterialGain: z.number().int().nonnegative(),
+  actionableGapCount: z.number().int().nonnegative(),
+  actionableQueryCount: z.number().int().nonnegative(),
+  cancellationRequested: z.boolean(),
+  usage: z.object({
+    questions: z.number(),
+    iterations: z.number(),
+    searchQueries: z.number(),
+    normalizedSources: z.number(),
+    fetchedSources: z.number(),
+    tokens: z.number(),
+    providerCostUsd: z.number(),
+    startedAt: z.number().nullable(),
+    deadlineAt: z.number().nullable(),
+  }),
+  activeReservation: researchBudgetReservationSchema,
+})
+
+export const researchIterationPlanSchema = z.object({
+  version: z.literal(1),
+  targets: z.array(researchIterationPlanTargetSchema),
+  reservation: researchBudgetReservationSchema,
+  inputSummary: researchIterationDecisionInputSummarySchema,
+  settlement: researchBudgetSettlementSchema.optional(),
+})
 export const researchRunErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string(),
@@ -122,6 +200,9 @@ export const researchLoopDecisionDtoSchema = z.object({
   decision: researchLoopDecisionSchema,
   reason: z.string().nullable(),
   limitationCodes: z.array(z.string()),
+  matchedRule: researchIterationStopRuleSchema.optional(),
+  inputSummary: researchIterationDecisionInputSummarySchema.optional(),
+  limitations: z.array(z.string()).optional(),
 })
 
 export const researchIterationSchema = z.object({
@@ -136,6 +217,7 @@ export const researchIterationSchema = z.object({
   newSourceCount: z.number().int().nonnegative(),
   newEvidenceCount: z.number().int().nonnegative(),
   stopReason: researchLoopDecisionDtoSchema.nullable(),
+  plan: researchIterationPlanSchema.optional(),
   createdAt: z.number(),
   completedAt: z.number().nullable(),
 })
