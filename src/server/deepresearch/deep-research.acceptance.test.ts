@@ -115,10 +115,14 @@ function createFixtureRuntime(repositories: TestContext, fixture: AcceptanceFixt
     throw new Error('Unexpected fixture tool: ' + toolId)
   })
   const planner = { plan: vi.fn(async () => fixture.planner) }
+  // Acceptance must remain frozen and offline: translation is injected rather than
+  // allowing the runtime default to resolve a configured external model.
+  const reportTranslator = { translate: vi.fn(async ({ markdown }: { markdown: string }) => markdown) }
   const runtime = createDeepResearchMastraRuntime({
     dataDir,
     storage: createStorage(),
     planner,
+    reportTranslator,
     repositories,
     searchService: createSearchService({ executeTool, sleep: async () => {} }),
     sourceCurator: new SourceCurator(),
@@ -130,7 +134,7 @@ function createFixtureRuntime(repositories: TestContext, fixture: AcceptanceFixt
     }),
   })
   runtimes.push(runtime)
-  return { runtime, planner }
+  return { runtime, planner, reportTranslator }
 }
 
 function createRun(repositories: TestContext, input: StartResearchInput) {
@@ -158,7 +162,7 @@ describe('Deep Research deterministic acceptance fixtures', () => {
   it.each<ResearchProfile>(['general', 'market', 'competitor', 'academic'])('runs the %s profile through the complete evidence and report pipeline', async (profile) => {
     const fixture = readFixture(profile)
     const repositories = await loadTestContext()
-    const { runtime, planner } = createFixtureRuntime(repositories, fixture)
+    const { runtime, planner, reportTranslator } = createFixtureRuntime(repositories, fixture)
     const run = createRun(repositories, fixture.input)
 
     await runtime.start({
@@ -184,6 +188,7 @@ describe('Deep Research deterministic acceptance fixtures', () => {
       },
     })
     expect(planner.plan).toHaveBeenCalledTimes(1)
+    expect(reportTranslator.translate).toHaveBeenCalledTimes(1)
     expect(detail.questions.map((question) => question.intent)).toEqual(expect.arrayContaining(fixture.expectedQuestionIntents))
     expect(detail.searchQueries.length).toBeGreaterThan(0)
     expect(detail.sources.filter((source) => source.selectionStatus === 'selected')).toHaveLength(fixture.searchResponses.length)

@@ -3,6 +3,7 @@ import type { ResearchReportSectionDto, ResearchRunDto } from '@shared/deepresea
 import { createBuildBriefStep } from './build-brief'
 import { createDraftSectionsStep } from './draft-sections'
 import { createFinalizeArtifactsStep } from './finalize-artifacts'
+import { executeIterationRetrieval } from './execute-iteration-retrieval'
 import { bindWorkflowExecution, clearWorkflowExecution } from './checkpoint-replay'
 
 function createRun(overrides: Partial<ResearchRunDto> = {}): ResearchRunDto {
@@ -74,6 +75,52 @@ describe('Deep Research cancellation step boundaries', () => {
 
     expect(writer.draft).toHaveBeenCalledTimes(1)
     expect(repositories.researchReportRepo.updateSection).not.toHaveBeenCalled()
+    expect(repositories.researchEventRepo.append).not.toHaveBeenCalled()
+  })
+
+  it('iteration retrieval stops at the post-search safety boundary without fetching or persisting follow-up effects', async () => {
+    const controller = new AbortController()
+    const run = createRun({ status: 'researching', phase: 'gap_filling' })
+    const repositories = {
+      researchRunRepo: { get: vi.fn(() => run) },
+      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1 })), update: vi.fn() },
+      researchQuestionRepo: {
+        listSearchQueries: vi.fn(() => [{ id: 'query-1', iteration: 1, query: 'safe fixture query', status: 'queued', idempotencyKey: 'query-key', candidates: [] }]),
+        updateSearchQuery: vi.fn(),
+      },
+      researchSourceRepo: { getByCanonicalUrl: vi.fn(), createSource: vi.fn(), getSource: vi.fn() },
+      researchEventRepo: { append: vi.fn() },
+    } as any
+    const searchService = {
+      search: vi.fn(async (_run: ResearchRunDto, _requests: unknown[], options?: { signal?: AbortSignal }) => {
+        expect(options?.signal).toBe(controller.signal)
+        controller.abort()
+        return []
+      }),
+    }
+    const contentService = { fetch: vi.fn() }
+    const sourceCurator = { curate: vi.fn(() => ({ selected: [] })) }
+    bindCancelledSignal(run.id, controller)
+
+    await expect(executeIterationRetrieval({
+      runId: run.id,
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      coverageComplete: false,
+      marginalNewEvidenceCount: 0,
+      cancelled: false,
+      iterations: 0,
+      maxIterations: 1,
+      iterationId: 'iteration-1',
+      queryIds: ['query-1'],
+      sourceIds: [],
+      stopDecision: null,
+      limitations: [],
+    }, { repositories, searchService, sourceCurator, contentService } as any)).rejects.toMatchObject({ code: 'RESEARCH_CANCELLED' })
+
+    expect(searchService.search).toHaveBeenCalledTimes(1)
+    expect(contentService.fetch).not.toHaveBeenCalled()
+    expect(repositories.researchQuestionRepo.updateSearchQuery).not.toHaveBeenCalled()
+    expect(repositories.researchIterationRepo.update).not.toHaveBeenCalled()
     expect(repositories.researchEventRepo.append).not.toHaveBeenCalled()
   })
 

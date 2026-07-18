@@ -3,6 +3,7 @@ import type { SourceCurator } from '@server/services/deepresearch/source-curator
 import type { ReturnTypeOfContentService, ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
+import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
 
 export async function executeIterationRetrieval(
   input: IterationContext,
@@ -14,12 +15,21 @@ export async function executeIterationRetrieval(
   const iteration = repositories.researchIterationRepo!.get(input.iterationId)
   if (!run || !iteration || run.status === 'cancelled' || run.status === 'cancelling') return { ...input, cancelled: Boolean(run && run.status !== 'researching') }
 
+  const isCancellationRequested = () => {
+    const current = repositories.researchRunRepo.get(run.id)
+    return current?.status === 'cancelling' || current?.status === 'cancelled' || current?.cancellation?.requestedAt != null
+  }
+  const signal = getWorkflowExecution(run.id)?.signal
+  assertWorkflowNotCancelled(repositories, run.id)
+
   const queries = repositories.researchQuestionRepo.listSearchQueries(run.id).filter((query) => query.iteration === iteration.ordinal)
   const incomplete = queries.filter((query) => query.status !== 'completed')
   if (incomplete.length) {
     await searchService.search(run, incomplete.map((query) => ({ id: query.id, query: query.query, idempotencyKey: query.idempotencyKey ?? query.id })), {
-      isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled',
+      signal,
+      isCancelled: isCancellationRequested,
       onExecution: (execution) => {
+        assertWorkflowNotCancelled(repositories, run.id)
         const cachedCandidates = execution.candidates.map((candidate) => ({ title: candidate.title, url: candidate.url, snippet: candidate.snippet }))
         repositories.researchQuestionRepo.updateSearchQuery(execution.queryId, {
           provider: execution.provider,
@@ -35,6 +45,7 @@ export async function executeIterationRetrieval(
       },
     })
     await dependencies.afterSearchPersisted?.()
+    assertWorkflowNotCancelled(repositories, run.id)
   }
 
   const completed = repositories.researchQuestionRepo.listSearchQueries(run.id).filter((query) => query.iteration === iteration.ordinal && query.status === 'completed')
@@ -60,7 +71,9 @@ export async function executeIterationRetrieval(
     repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.selected', phase: 'gap_filling', payload: { id: source.id } })
   }
   const sources = sourceIds.map((id) => repositories.researchSourceRepo.getSource(id)).filter((source): source is NonNullable<typeof source> => Boolean(source))
-  const fetched = await contentService.fetch(run, sources, { isCancelled: () => repositories.researchRunRepo.get(run.id)?.status === 'cancelled' })
+  assertWorkflowNotCancelled(repositories, run.id)
+  const fetched = await contentService.fetch(run, sources, { signal, isCancelled: isCancellationRequested })
+  assertWorkflowNotCancelled(repositories, run.id)
   repositories.researchEventRepo.append({
     runId: run.id,
     type: 'research.sources.fetched',
@@ -68,7 +81,7 @@ export async function executeIterationRetrieval(
     payload: { sourceIds: fetched.filter((outcome) => outcome.status === 'fetched').map((outcome) => outcome.sourceId), fetchedCount: fetched.filter((outcome) => outcome.status === 'fetched').length, failedCount: fetched.filter((outcome) => outcome.status !== 'fetched').length },
   })
   repositories.researchIterationRepo!.update(iteration.id, { executedQueryCount: completed.length, newSourceCount })
-  return { ...input, queryIds: completed.map((query) => query.id), sourceIds, cancelled: repositories.researchRunRepo.get(run.id)?.status === 'cancelled' }
+  return { ...input, queryIds: completed.map((query) => query.id), sourceIds, cancelled: isCancellationRequested() }
 }
 
 export function createExecuteIterationRetrievalStep(dependencies: { repositories: DeepResearchRepositories; searchService: ReturnTypeOfSearchService; sourceCurator: SourceCurator; contentService: ReturnTypeOfContentService }) {
