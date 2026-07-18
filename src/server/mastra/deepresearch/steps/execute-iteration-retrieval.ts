@@ -1,9 +1,33 @@
 import { createStep } from '@mastra/core/workflows'
-import type { SourceCurator } from '@server/services/deepresearch/source-curator'
+import type { JsonValue } from '@shared/deepresearch/contracts'
+import { assessCandidateSourceQuality } from '@server/deepresearch/domain/source-quality'
+import type { SourceCurator, SourceQueryContext } from '@server/services/deepresearch/source-curator'
 import type { ReturnTypeOfContentService, ReturnTypeOfSearchService } from './types'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
 import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
+
+function toJson(value: unknown): JsonValue {
+  return JSON.parse(JSON.stringify(value)) as JsonValue
+}
+
+function buildQueryContexts(repositories: DeepResearchRepositories, runId: string, queryIds: ReadonlySet<string>): Record<string, SourceQueryContext> {
+  const questionsById = new Map(repositories.researchQuestionRepo.list(runId).map((question) => [question.id, question]))
+  return Object.fromEntries(repositories.researchQuestionRepo.listSearchQueries(runId).flatMap((query) => {
+    if (!queryIds.has(query.id)) return []
+    const question = questionsById.get(query.questionId)
+    if (!question) return []
+    return [[query.id, {
+      questionId: question.id,
+      question: question.question,
+      plannedQuery: query.query,
+      intent: query.intent ?? question.intent,
+      sourceTargets: query.sourceTargets ?? question.sourceTargets,
+      needPrimarySource: question.needPrimarySource,
+      needQuantitativeEvidence: question.needQuantitativeEvidence,
+    } satisfies SourceQueryContext]]
+  }))
+}
 
 export async function executeIterationRetrieval(
   input: IterationContext,
@@ -53,11 +77,14 @@ export async function executeIterationRetrieval(
   if (!Number.isInteger(fetchReservation) || fetchReservation < 0) {
     throw new Error('Active Deep Research iteration is missing a valid fetched-source reservation.')
   }
+  const queryContexts = buildQueryContexts(repositories, run.id, new Set(completed.map((query) => query.id)))
   const curated = sourceCurator.curate(
     run,
     completed.flatMap((query) => query.candidates.map((candidate) => ({ ...candidate, queryId: query.id }))),
-    { maxSources: fetchReservation },
+    { maxSources: fetchReservation, queryContexts },
   )
+  const curationRejections = curated.rejected ?? []
+      recordCandidateAssessments(repositories, run.id, queryContexts, curated.selected, curationRejections)
   const sourceIds: string[] = []
   let newSourceCount = 0
   for (const candidate of curated.selected) {
@@ -71,12 +98,36 @@ export async function executeIterationRetrieval(
       title: candidate.title,
       sourceType: candidate.sourceType,
       selectionStatus: 'selected',
-      scores: { finalScore: candidate.score, queryId: candidate.queryId },
+      scores: {
+        finalScore: candidate.score,
+        queryId: candidate.queryId,
+        sourceType: candidate.sourceType,
+        breakdown: toJson(candidate.scoreBreakdown),
+        diagnostics: toJson(candidate.diagnostics),
+      },
     })
     sourceIds.push(source.id)
     newSourceCount += 1
     repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.discovered', phase: 'gap_filling', payload: { id: source.id } })
     repositories.researchEventRepo.append({ runId: run.id, type: 'research.source.selected', phase: 'gap_filling', payload: { id: source.id } })
+  }
+  for (const rejected of curationRejections) {
+    repositories.researchEventRepo.append({
+      runId: run.id,
+      type: 'research.source.rejected',
+      phase: 'gap_filling',
+      payload: {
+        queryId: rejected.queryId,
+        url: rejected.url,
+        canonicalUrl: rejected.canonicalUrl ?? null,
+        domain: rejected.domain ?? null,
+        sourceType: rejected.sourceType ?? null,
+        score: rejected.score ?? null,
+        reason: rejected.reason,
+        scoreBreakdown: rejected.scoreBreakdown ? toJson(rejected.scoreBreakdown) : null,
+        diagnostics: rejected.diagnostics ? toJson(rejected.diagnostics) : null,
+      },
+    })
   }
   const sources = sourceIds.map((id) => repositories.researchSourceRepo.getSource(id)).filter((source): source is NonNullable<typeof source> => Boolean(source))
   assertWorkflowNotCancelled(repositories, run.id)
@@ -92,6 +143,43 @@ export async function executeIterationRetrieval(
   return { ...input, queryIds: completed.map((query) => query.id), sourceIds, cancelled: isCancellationRequested() }
 }
 
+function recordCandidateAssessments(
+  repositories: DeepResearchRepositories,
+  runId: string,
+  contexts: Readonly<Record<string, SourceQueryContext>>,
+  selected: ReadonlyArray<{ queryId: string; title: string; url: string; snippet: string; canonicalUrl: string; domain: string }>,
+  rejected: ReadonlyArray<{ queryId: string; title: string; url: string; snippet: string; canonicalUrl?: string; domain?: string }> = [],
+): void {
+  const existingDomains = selected.map((candidate) => candidate.domain)
+  for (const [selectionStatus, candidates] of [['selected', selected], ['rejected', rejected]] as const) {
+    for (const candidate of candidates) {
+      const context = contexts[candidate.queryId]
+      if (!context) continue
+      const domain = candidate.domain ?? ''
+      repositories.researchSourceRepo.recordCandidateAssessment({
+        runId,
+        questionId: context.questionId,
+        queryId: candidate.queryId,
+        canonicalUrl: candidate.canonicalUrl,
+        originalUrl: candidate.url,
+        domain,
+        title: candidate.title,
+        snippet: candidate.snippet,
+        selectionStatus,
+        assessment: assessCandidateSourceQuality({
+          question: context.question,
+          plannedQuery: context.plannedQuery,
+          sourceTargets: context.sourceTargets,
+          url: candidate.url,
+          domain,
+          title: candidate.title,
+          snippet: candidate.snippet,
+          existingDomains,
+        }),
+      })
+    }
+  }
+}
 export function createExecuteIterationRetrievalStep(dependencies: { repositories: DeepResearchRepositories; searchService: ReturnTypeOfSearchService; sourceCurator: SourceCurator; contentService: ReturnTypeOfContentService }) {
   return createStep({
     id: 'deep-research-execute-iteration-retrieval',

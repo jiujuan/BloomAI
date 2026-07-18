@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getResearchBudget } from '@server/deepresearch/domain/budgets'
 import { decideIteration } from '@server/deepresearch/domain/iteration-decision'
+import { assessCandidateSourceQuality } from '@server/deepresearch/domain/source-quality'
 import type { ResearchCoverageAssessmentV2Dto } from '@shared/deepresearch/contracts'
 
 let dataDir: string
@@ -904,3 +905,63 @@ describe('Deep Research repositories', () => {
     expect(persisted?.[0]).not.toHaveProperty('prompt')
     expect(persisted?.[0]).not.toHaveProperty('rawResponse')
   })
+it('persists candidate source score breakdowns, classifications, and rejection reasons by query', async () => {
+  const { researchRunRepo, researchQuestionRepo, researchSourceRepo } = await loadRepositories()
+  const run = createRun(researchRunRepo)
+  const question = researchQuestionRepo.create({
+    runId: run.id,
+    ordinal: 1,
+    question: 'What CRM lead intelligence capabilities are documented?',
+    intent: 'product-capability',
+    requiredEvidenceTypes: ['product-documentation'],
+    priority: 'high',
+  })
+  const assessment = assessCandidateSourceQuality({
+    question: question.question,
+    plannedQuery: 'CRM lead intelligence product documentation',
+    sourceTargets: ['product documentation'],
+    url: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'CRM lead intelligence',
+    snippet: 'Documentation for lead scoring and CRM enrichment.',
+    assessedAt: 1_700_000_000_000,
+  })
+
+  const created = researchSourceRepo.recordCandidateAssessment({
+    runId: run.id,
+    questionId: question.id,
+    queryId: 'query-1',
+    originalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    canonicalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'CRM lead intelligence',
+    snippet: 'Documentation for lead scoring and CRM enrichment.',
+    selectionStatus: 'selected',
+    assessment,
+  })
+  const replay = researchSourceRepo.recordCandidateAssessment({
+    runId: run.id,
+    questionId: question.id,
+    queryId: 'query-1',
+    originalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    canonicalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'Changed title must not replace the recorded evaluation.',
+    snippet: 'Changed snippet.',
+    selectionStatus: 'rejected',
+    assessment: { ...assessment, rejectionReasons: ['not_relevant'] },
+  })
+
+  expect(replay).toEqual(created)
+  expect(researchSourceRepo.listCandidateAssessments(run.id, question.id)).toEqual([
+    expect.objectContaining({
+      id: created.id,
+      queryId: 'query-1',
+      category: 'product-documentation',
+      scoringMethod: 'keyword-fallback',
+      selectionStatus: 'selected',
+      scoreBreakdown: assessment.scores,
+      rejectionReasons: [],
+    }),
+  ])
+})

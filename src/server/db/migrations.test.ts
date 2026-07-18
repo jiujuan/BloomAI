@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(19)
+    expect(migrationVersions()).toHaveLength(20)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(19)
+    expect(migrationVersions()).toHaveLength(20)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -155,6 +155,7 @@ describe('database migrations', () => {
         'research_questions',
         'research_search_queries',
         'research_sources',
+        'research_source_assessments',
         'research_source_snapshots',
         'research_evidence',
         'research_report_sections',
@@ -192,6 +193,7 @@ describe('database migrations', () => {
       '017-deep-research-structured-model-traces',
       '018-deep-research-brief-question-section-mapping',
       '019-deep-research-query-intents-deduplication',
+      '020-deep-research-source-quality-assessments',
     ])
     const emptyDb = openRawDb()
     try {
@@ -223,12 +225,20 @@ describe('database migrations', () => {
         { name: 'query_intent' },
         { name: 'source_targets_json' },
       ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_source_assessments') WHERE name IN ('source_category', 'scoring_method', 'score_breakdown_json', 'assessment_reasons_json', 'rejection_reasons_json') ORDER BY name").all()).toEqual([
+        { name: 'assessment_reasons_json' },
+        { name: 'rejection_reasons_json' },
+        { name: 'score_breakdown_json' },
+        { name: 'scoring_method' },
+        { name: 'source_category' },
+      ])
     } finally {
       emptyDb.close()
     }
 
     expect(uniqueIndexColumnSets('research_events')).toContainEqual(['run_id', 'sequence'])
     expect(uniqueIndexColumnSets('research_sources')).toContainEqual(['run_id', 'canonical_url'])
+    expect(uniqueIndexColumnSets('research_source_assessments')).toContainEqual(['run_id', 'candidate_key'])
     expect(uniqueIndexColumnSets('research_recovery_commands')).toContainEqual(['run_id', 'command_key'])
     expect(uniqueIndexColumnSets('research_reconciliations')).toContainEqual(['run_id', 'reconciliation_key'])
     expect(uniqueIndexColumnSets('research_run_attempts')).toContainEqual(['run_id', 'ordinal'])
@@ -247,6 +257,8 @@ describe('database migrations', () => {
     expect(indexNames('research_iterations')).toContain('idx_research_iterations_run_status')
     expect(indexNames('research_coverage_assessments')).toContain('idx_research_coverage_assessments_run_iteration')
     expect(indexNames('research_search_queries')).toContain('idx_research_search_queries_run_question_dedupe')
+    expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_question')
+    expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_query')
 
     for (const tableName of [
       'research_search_queries',

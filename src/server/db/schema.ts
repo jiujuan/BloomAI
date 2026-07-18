@@ -540,6 +540,30 @@ export const research_sources = sqliteTable('research_sources', {
   runCanonicalUrlIdx: uniqueIndex('idx_research_sources_run_canonical_url').on(table.run_id, table.canonical_url),
 }))
 
+export const research_source_assessments = sqliteTable('research_source_assessments', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  question_id: text('question_id').notNull(),
+  query_id: text('query_id').notNull(),
+  candidate_key: text('candidate_key').notNull(),
+  canonical_url: text('canonical_url'),
+  original_url: text('original_url').notNull(),
+  domain: text('domain').notNull(),
+  title: text('title').notNull(),
+  snippet: text('snippet').notNull(),
+  source_category: text('source_category').notNull(),
+  scoring_method: text('scoring_method').notNull(),
+  score_breakdown_json: text('score_breakdown_json').notNull().default('{}'),
+  assessment_reasons_json: text('assessment_reasons_json').notNull().default('[]'),
+  rejection_reasons_json: text('rejection_reasons_json').notNull().default('[]'),
+  selection_status: text('selection_status').notNull(),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runQuestionSelectionIdx: index('idx_research_source_assessments_run_question').on(table.run_id, table.question_id, table.selection_status),
+  runQueryIdx: index('idx_research_source_assessments_run_query').on(table.run_id, table.query_id),
+  runCandidateIdx: uniqueIndex('idx_research_source_assessments_run_candidate').on(table.run_id, table.candidate_key),
+}))
 export const research_source_snapshots = sqliteTable('research_source_snapshots', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),

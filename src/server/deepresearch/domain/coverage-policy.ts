@@ -1,4 +1,4 @@
-﻿import { createHash } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import type {
   CoveragePolicyV2GapCode,
   CoveragePolicyV2Remediation,
@@ -41,7 +41,7 @@ export interface CoveragePolicyV2Input {
   previousAssessment?: Pick<ResearchCoverageAssessmentV2Dto, 'score' | 'verdict'> | null
 }
 
-const AUTHORITATIVE_SOURCE_TYPE = /(primary|official|regulatory|filing|peer[- ]?reviewed|peer[- ]?review|conference[- ]?paper|academic[- ]?paper|\bpaper\b|dataset|survey|statistics|research[- ]?institute|institutional[- ]?repository)/i
+const AUTHORITATIVE_SOURCE_TYPE = /(primary|official|company[_ -]?official|product[_ -]?documentation|regulatory|filing|investor[_ -]?material|peer[-_ ]?reviewed|peer[- ]?review|conference[- ]?paper|academic[- ]?paper|\\bpaper\\b|dataset|survey|official[_ -]?statistics|statistics|industry[_ -]?association|research[-_ ]?(institute|firm)|institutional[- ]?repository)/i
 const SCORE_PRECISION = 1_000
 const VERDICT_RANK = { uncovered: 0, limited: 1, covered: 2, blocked: -1 } as const
 
@@ -63,6 +63,20 @@ function normalizeDomain(domain: string): string {
 
 function isAuthoritative(sourceType: string): boolean {
   return AUTHORITATIVE_SOURCE_TYPE.test(sourceType)
+}
+function sourceTypeSatisfiesRequirement(sourceType: string, requirement: string): boolean {
+  if (sourceType === requirement) return true
+  if (/(primary|official source|company official|官网|一手)/.test(requirement)) {
+    return /company[_ -]?official|product[_ -]?documentation|pricing|customer[_ -]?case|investor[_ -]?material/.test(sourceType)
+  }
+  if (/(product documentation|documentation|产品文档|产品能力)/.test(requirement)) return /product[_ -]?documentation|company[_ -]?official/.test(sourceType)
+  if (/(market size|market data|quantitative|official statistics|市场规模|市场数据|统计)/.test(requirement)) {
+    return /official[_ -]?statistics|industry[_ -]?association|research[-_ ]?(institute|firm)/.test(sourceType)
+  }
+  if (/(industry association|行业协会)/.test(requirement)) return /industry[_ -]?association/.test(sourceType)
+  if (/(research institute|research firm|研究机构)/.test(requirement)) return /research[-_ ]?(institute|firm)/.test(sourceType)
+  if (/(peer.reviewed|同行评审)/.test(requirement)) return /peer[-_ ]?reviewed/.test(sourceType)
+  return false
 }
 
 function safeConfidence(value: number): number {
@@ -193,7 +207,7 @@ export function assessCoveragePolicyV2(input: CoveragePolicyV2Input): ResearchCo
   const contextual = evidence.filter((item) => item.stance === 'contextual')
   const requiredTypes = [...new Set(input.requiredEvidenceTypes.map(normalize).filter(Boolean))]
   const availableTypes = new Set(evidence.map((item) => normalize(item.sourceType)))
-  const coveredRequiredTypes = requiredTypes.filter((type) => availableTypes.has(type))
+  const coveredRequiredTypes = requiredTypes.filter((type) => [...availableTypes].some((sourceType) => sourceTypeSatisfiesRequirement(sourceType, type)))
   const exceptionalSingleSource = Boolean(input.singleAuthoritativeSourceException)
   const confidenceMass = evidence.reduce((sum, item) => sum + safeConfidence(item.confidence), 0)
   const evidenceSufficiency = clampScore(confidenceMass / profile.minimumEvidenceByPriority[input.priority])

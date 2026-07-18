@@ -1,4 +1,4 @@
-﻿import type { JsonObject, ResearchIterationDecisionInputSummaryDto, ResearchIterationStopRule, ResearchLoopDecisionDto } from './contracts'
+import type { JsonObject, ResearchIterationDecisionInputSummaryDto, ResearchIterationStopRule, ResearchLoopDecisionDto } from './contracts'
 
 export type ResearchEventType =
   | 'research.run.created'
@@ -10,6 +10,7 @@ export type ResearchEventType =
   | 'research.query.failed'
   | 'research.source.discovered'
   | 'research.source.selected'
+  | 'research.source.rejected'
   | 'research.source.fetch_failed'
   | 'research.sources.fetched'
   | 'research.evidence.extracted'
@@ -61,6 +62,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.query.failed', IdentifierPayload & { errorCode: string }>
   | ResearchEventBase<'research.source.discovered', IdentifierPayload>
   | ResearchEventBase<'research.source.selected', IdentifierPayload>
+  | ResearchEventBase<'research.source.rejected', JsonObject & { queryId: string; url: string; reason: string }>
   | ResearchEventBase<'research.source.fetch_failed', IdentifierPayload & { errorCode: string }>
   | ResearchEventBase<'research.sources.fetched', JsonObject & { sourceIds: string[]; fetchedCount: number; failedCount: number }>
   | ResearchEventBase<'research.evidence.extracted', CountPayload>
