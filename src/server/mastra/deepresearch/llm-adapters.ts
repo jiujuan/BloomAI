@@ -6,6 +6,7 @@ import type { BriefPlan, BriefPlanner } from './agents/brief-planner'
 import type { QueryPlanner, PlannedResearchQuery } from './agents/query-planner'
 import type { EvidenceAnalyst, EvidenceAnalysis } from '@server/services/deepresearch/evidence-service'
 import type { GapAnalyst, FollowUpResearchQuery } from './agents/gap-analyst'
+import { RESEARCH_QUERY_INTENTS, queryIntentForCoverageGap, rewriteCoverageGapAsSearchBrief } from './query-strategy'
 import type { SectionWriter } from './agents/section-writer'
 import type { ClaimExtractor, ExtractedClaim } from './agents/claim-extractor'
 import type { CitationVerifier, CitationVerification } from './agents/citation-verifier'
@@ -87,7 +88,12 @@ const instruction = [
 ].join(' ')
 
 const objectInputSchema = z.object({}).passthrough()
-const queryPlanSchema = z.object({ questionId: z.string().min(1), query: z.string().trim().min(1) })
+const queryPlanSchema = z.object({
+  questionId: z.string().min(1),
+  query: z.string().trim().min(1),
+  intent: z.enum(RESEARCH_QUERY_INTENTS),
+  sourceTargets: z.array(z.string().trim().min(1)).min(1).max(5),
+}).strict()
 const evidenceSchema = z.object({
   questionId: z.string().min(1), snapshotId: z.string().min(1), passage: z.string().trim().min(1).max(800),
   summary: z.string().trim().min(12).max(1_000), stance: z.enum(['supporting', 'contradicting', 'contextual']),
@@ -223,9 +229,26 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
     },
     queryPlanner: {
       async plan(run, questions, context = {}) {
-        return await invoke('query_planning', 'Return JSON array of { questionId, query }.', {
+        return await invoke('query_planning', [
+          'Return a JSON array of { questionId, query, intent, sourceTargets }.',
+          'For every supplied question create 2 to 5 complementary, executable search queries with distinct intents whenever the search budget permits.',
+          'intent must be one of definition, product_capability, technical_architecture, customer_case, market_data, primary_source, counterevidence, recent_update.',
+          'Use the supplied sourceTargets to add useful website or domain constraints (for example company documentation, official statistics, associations, investor materials, or credible industry media).',
+          'Preserve the original user language in every query; add useful Chinese or English synonyms, product terminology, and geography only when they improve retrieval.',
+          'Do not emit internal coverage labels, policy diagnostics, or required-evidence category names in query text.',
+        ].join(' '), {
           topic: run.topic,
-          questions: questions.map((question) => ({ id: question.id, question: question.question, priority: question.priority })),
+          questions: questions.map((question) => ({
+            id: question.id,
+            question: question.question,
+            intent: question.intent,
+            priority: question.priority,
+            questionType: question.questionType ?? null,
+            sourceTargets: question.sourceTargets ?? [],
+            needPrimarySource: Boolean(question.needPrimarySource),
+            needRecentSource: Boolean(question.needRecentSource),
+            needQuantitativeEvidence: Boolean(question.needQuantitativeEvidence),
+          })),
         }, z.array(queryPlanSchema), context.signal) as PlannedResearchQuery[]
       },
     },
@@ -236,9 +259,23 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
     },
     gapAnalyst: {
       async plan(run, questions, context = {}) {
-        return await invoke('gap_analysis', 'Return JSON array of { questionId, query } only for genuine coverage gaps.', {
+        const gapQuestions = questions
+          .filter((question) => (question.priority === 'high' || question.priority === 'critical') && (question.coverage?.gaps.length ?? 0) > 0)
+          .map((question) => ({
+            id: question.id,
+            question: question.question,
+            sourceTargets: question.sourceTargets ?? [],
+            allowedIntents: [...new Set((question.coverage?.gaps ?? []).map((gap) => queryIntentForCoverageGap(gap)))],
+            searchBriefs: (question.coverage?.gaps ?? []).map((gap) => rewriteCoverageGapAsSearchBrief({ question, gap })),
+          }))
+        return await invoke('gap_analysis', [
+          'Return a JSON array of { questionId, query, intent, sourceTargets } only for genuine supplied search briefs.',
+          'A follow-up is allowed only when it uses a different intent or a different unmet source target than prior research described in the safe brief.',
+          'Use only the supplied safe searchBriefs; never reproduce or infer internal coverage diagnostics, category labels, or policy state in a query.',
+          'Keep the original user language, add useful synonyms or site/domain restrictions from sourceTargets, and make each query directly searchable.',
+        ].join(' '), {
           topic: run.topic,
-          questions: questions.map((question) => ({ id: question.id, question: question.question, coverage: question.coverage })),
+          questions: gapQuestions,
         }, z.array(queryPlanSchema), context.signal) as FollowUpResearchQuery[]
       },
     },

@@ -28,6 +28,12 @@ export interface CreateResearchSearchQueryInput {
   questionId: string
   iteration: number
   query: string
+  /** Optional during the migration period for existing callers. */
+  intent?: string | null
+  /** Optional during the migration period for existing callers. */
+  sourceTargets?: string[]
+  /** Optional during the migration period for existing callers. */
+  dedupeKey?: string
   provider?: string | null
   status?: ResearchSearchQueryDto['status']
   resultCount?: number
@@ -69,6 +75,9 @@ export function mapResearchSearchQuery(row: typeof research_search_queries.$infe
     questionId: row.question_id,
     iteration: row.iteration,
     query: row.query,
+    intent: row.query_intent,
+    sourceTargets: decodeJson<string[]>(row.source_targets_json, []),
+    dedupeKey: row.dedupe_key,
     provider: row.provider,
     status: row.status as ResearchSearchQueryDto['status'],
     resultCount: row.result_count,
@@ -156,6 +165,9 @@ export const researchQuestionRepo = {
       question_id: input.questionId,
       iteration: input.iteration,
       query: input.query,
+      query_intent: input.intent ?? null,
+      source_targets_json: encodeJson(input.sourceTargets ?? []),
+      dedupe_key: input.dedupeKey ?? '',
       provider: input.provider ?? null,
       status: input.status ?? 'queued',
       result_count: input.resultCount ?? 0,

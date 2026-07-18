@@ -166,3 +166,35 @@ describe('DRQ-03 brief planning', () => {
     expect(questions.filter((question) => question.priority === 'high').every((question) => question.sourceTargets.length > 0)).toBe(true)
   })
 })
+
+describe('DRQ-04 query planning', () => {
+  it('requires structured multi-intent plans with source targets and safe gap briefs', async () => {
+    const generate = vi.fn(async ({ stage }: { stage: string }) => ({
+      text: JSON.stringify(stage === 'query_planning'
+        ? [{ questionId: 'question-llm', query: 'Enterprise AI assistant market market size data site:gov', intent: 'market_data', sourceTargets: ['official statistics'] }]
+        : [{ questionId: 'question-llm', query: 'Enterprise AI assistant market independent limitations evidence', intent: 'counterevidence', sourceTargets: ['independent research'] }]),
+    }))
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+    const question = {
+      id: 'question-llm', runId: run.id, parentQuestionId: null, ordinal: 1,
+      ...validBrief().questions[0], status: 'planned', coverage: {
+        questionId: 'question-llm', score: 0.1, independentDomainCount: 0, evidenceCategories: [], primarySourceCount: 0, recentSourceCount: 0, supportingEvidenceCount: 0, contradictingEvidenceCount: 0, hasSingleSourceDependency: true, gaps: ['Missing required evidence category: primary_source'],
+      },
+    } as any
+
+    await expect(adapters.queryPlanner.plan(run, [question])).resolves.toEqual([
+      expect.objectContaining({ intent: 'market_data', sourceTargets: ['official statistics'] }),
+    ])
+    await expect(adapters.gapAnalyst.plan(run, [question])).resolves.toEqual([
+      expect.objectContaining({ intent: 'counterevidence', sourceTargets: ['independent research'] }),
+    ])
+
+    const queryRequest: any = generate.mock.calls.find(([input]) => input.stage === 'query_planning')![0]
+    const gapRequest: any = generate.mock.calls.find(([input]) => input.stage === 'gap_analysis')![0]
+    expect(queryRequest.prompt).toContain('2 to 5')
+    expect(queryRequest.prompt).toContain('sourceTargets')
+    expect(queryRequest.prompt).toContain('original user language')
+    expect(gapRequest.prompt).toContain('searchBrief')
+    expect(gapRequest.prompt).not.toContain('Missing required evidence category')
+  })
+})

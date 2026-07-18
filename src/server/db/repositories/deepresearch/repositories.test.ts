@@ -199,6 +199,52 @@ describe('Deep Research repositories', () => {
       questionIds: [productQuestion.id, foreignQuestion.id],
     })).toThrow('question from another Run')
   })
+  it('persists query intent, source targets, and dedupe keys while preserving legacy query creation', async () => {
+    const { researchRunRepo, researchQuestionRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const question = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 1,
+      question: 'Which product capabilities are supported?',
+      intent: 'product-capability',
+      requiredEvidenceTypes: ['vendor documentation'],
+      priority: 'high',
+    })
+
+    const enriched = researchQuestionRepo.createSearchQuery({
+      runId: run.id,
+      questionId: question.id,
+      iteration: 0,
+      query: 'BloomAI product capabilities site:docs.bloomai.example',
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+      idempotencyKey: 'query:enriched',
+    })
+    const legacy = researchQuestionRepo.createSearchQuery({
+      runId: run.id,
+      questionId: question.id,
+      iteration: 0,
+      query: 'BloomAI pricing',
+      idempotencyKey: 'query:legacy',
+    })
+
+    expect(enriched).toMatchObject({
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+    })
+    expect(researchQuestionRepo.getSearchQuery(enriched.id)).toMatchObject({
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+    })
+    expect(researchQuestionRepo.listSearchQueries(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: enriched.id, intent: 'product_capability', dedupeKey: 'sha256:capability-query' }),
+      expect.objectContaining({ id: legacy.id, intent: null, sourceTargets: [], dedupeKey: '' }),
+    ]))
+  })
+
   it('keeps sources and snapshots immutable, evidence idempotent, and citation ordinals stable', async () => {
     const {
       researchRunRepo,

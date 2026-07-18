@@ -2,10 +2,15 @@ import { Agent } from '@mastra/core/agent'
 import type { ResearchQuestionDto, ResearchRunDto } from '@shared/deepresearch/contracts'
 import { resolveMastraModel } from '../../model-resolver'
 import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
+import { createTopicBoundQueryPlans, type ResearchQueryIntent } from '../query-strategy'
 
 export interface PlannedResearchQuery {
   questionId: string
   query: string
+  intent: ResearchQueryIntent
+  sourceTargets: string[]
+  /** Generated and validated by the server before persistence; model output is never trusted. */
+  dedupeKey?: string
 }
 
 export interface QueryPlanner {
@@ -23,7 +28,7 @@ export function createDeterministicQueryPlanner(): QueryPlanner {
   return {
     async plan(run, questions, options = {}) {
       throwIfCancellationRequested(options)
-      const plans = questions.map((question) => ({ questionId: question.id, query: run.topic + ' ' + question.question }))
+      const plans = questions.flatMap((question) => createTopicBoundQueryPlans(run, question))
       throwIfCancellationRequested(options)
       return plans
     },

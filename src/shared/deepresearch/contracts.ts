@@ -90,7 +90,12 @@ export interface ResearchIterationPlanTargetDto {
   gapCode: CoveragePolicyV2GapCode
   severity: 'critical' | 'high' | 'medium' | 'low'
   remediation: CoveragePolicyV2Remediation
+  /** Coverage-policy intent retained for iteration audit. */
   searchIntent: string
+  /** Public query-planning intent (DRQ-04), distinct from searchIntent. */
+  intent?: string | null
+  sourceTargets?: string[]
+  dedupeKey?: string
   query: string
   expectedValue: number
 }
@@ -370,6 +375,7 @@ export interface ResearchCoverageGapV2Dto {
   severity: 'critical' | 'high' | 'medium' | 'low'
   remediable: boolean
   remediation: CoveragePolicyV2Remediation
+  /** Free-form coverage-policy intent used only for planning/audit, never query text. */
   recommendedSearchIntent: string | null
 }
 
@@ -571,6 +577,12 @@ export interface ResearchSearchQueryDto {
   error: ResearchRunErrorDto | null
   createdAt: number
   completedAt: number | null
+  /** Query-planning intent. Optional so legacy persisted records and fixtures remain readable. */
+  intent?: string | null
+  /** Preferred sites or domains for this query. Optional so legacy persisted records remain readable. */
+  sourceTargets?: string[]
+  /** Normalized query fingerprint used for duplicate detection. Optional for legacy compatibility. */
+  dedupeKey?: string
   /** Durable domain fingerprint; legacy callers may omit it in fixture DTOs. */
   idempotencyKey?: string
   candidates: ResearchSearchResultCandidateDto[]

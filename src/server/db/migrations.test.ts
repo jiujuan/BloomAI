@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(18)
+    expect(migrationVersions()).toHaveLength(19)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(18)
+    expect(migrationVersions()).toHaveLength(19)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -191,6 +191,7 @@ describe('database migrations', () => {
       '016-deep-research-llm-runtime-usage',
       '017-deep-research-structured-model-traces',
       '018-deep-research-brief-question-section-mapping',
+      '019-deep-research-query-intents-deduplication',
     ])
     const emptyDb = openRawDb()
     try {
@@ -217,6 +218,11 @@ describe('database migrations', () => {
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name = 'section_key'").all()).toEqual([
         { name: 'section_key' },
       ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_search_queries') WHERE name IN ('query_intent', 'source_targets_json', 'dedupe_key') ORDER BY name").all()).toEqual([
+        { name: 'dedupe_key' },
+        { name: 'query_intent' },
+        { name: 'source_targets_json' },
+      ])
     } finally {
       emptyDb.close()
     }
@@ -240,6 +246,7 @@ describe('database migrations', () => {
     expect(indexNames('research_run_checkpoints')).toContain('idx_research_run_checkpoints_attempt_status')
     expect(indexNames('research_iterations')).toContain('idx_research_iterations_run_status')
     expect(indexNames('research_coverage_assessments')).toContain('idx_research_coverage_assessments_run_iteration')
+    expect(indexNames('research_search_queries')).toContain('idx_research_search_queries_run_question_dedupe')
 
     for (const tableName of [
       'research_search_queries',

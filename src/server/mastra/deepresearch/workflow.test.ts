@@ -212,7 +212,7 @@ describe('Deep Research Mastra report workflow', () => {
         maxDurationMs: 30 * 60 * 1000,
       },
     })
-    const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute' }]) }
+    const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute', intent: 'primary_source' as const, sourceTargets: ['official source'], dedupeKey: 'unreachable-query' }]) }
     const state = {
       runId: run.id,
       brief: { title: run.topic, objective: null, audience: null, scope: run.topic, definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
@@ -291,7 +291,7 @@ describe('Deep Research Mastra report workflow', () => {
     const gapAnalyst = {
       plan: vi.fn(async (currentRun: { topic: string }, questions: Array<{ id: string; question: string; priority: string; coverage: { gaps: string[] } | null }>) => questions
         .filter((question) => question.priority === 'high' || question.priority === 'critical')
-        .map((question) => ({ questionId: question.id, query: currentRun.topic + ' ' + question.question + ' follow-up ' + (question.coverage?.gaps[0] ?? 'official evidence') }))),
+        .map((question) => ({ questionId: question.id, query: currentRun.topic + ' ' + question.question + ' follow-up official evidence', intent: 'primary_source' as const, sourceTargets: ['official source'], dedupeKey: 'follow-up:' + question.id }))),
     }
     const runtime = createDeepResearchMastraRuntime({
       dataDir,

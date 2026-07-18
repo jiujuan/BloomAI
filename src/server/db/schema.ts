@@ -501,6 +501,9 @@ export const research_search_queries = sqliteTable('research_search_queries', {
   question_id: text('question_id').notNull(),
   iteration: integer('iteration').notNull(),
   query: text('query').notNull(),
+  query_intent: text('query_intent'),
+  source_targets_json: text('source_targets_json').notNull().default('[]'),
+  dedupe_key: text('dedupe_key').notNull().default(''),
   provider: text('provider'),
   status: text('status').notNull(),
   result_count: integer('result_count').notNull().default(0),
@@ -513,6 +516,7 @@ export const research_search_queries = sqliteTable('research_search_queries', {
   result_json: text('result_json').notNull().default('[]'),
 }, (table) => ({
   runStatusIdx: index('idx_research_search_queries_run_status').on(table.run_id, table.status),
+  runQuestionDedupeIdx: index('idx_research_search_queries_run_question_dedupe').on(table.run_id, table.question_id, table.dedupe_key),
   runIdempotencyIdx: uniqueIndex('idx_research_search_queries_run_idempotency').on(table.run_id, table.idempotency_key),
 }))
 
