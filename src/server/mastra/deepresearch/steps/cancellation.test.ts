@@ -124,6 +124,55 @@ describe('Deep Research cancellation step boundaries', () => {
     expect(repositories.researchEventRepo.append).not.toHaveBeenCalled()
   })
 
+  it('fetch return racing with cancellation never records fetch completion or starts downstream work', async () => {
+    const controller = new AbortController()
+    const run = createRun({ status: 'researching', phase: 'gap_filling' })
+    const source = { id: 'source-1', runId: run.id, canonicalUrl: 'https://fixture.example/source', originalUrl: 'https://fixture.example/source', domain: 'fixture.example', title: 'Frozen source' }
+    const repositories = {
+      researchRunRepo: { get: vi.fn(() => run) },
+      researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1 })), update: vi.fn() },
+      researchQuestionRepo: {
+        listSearchQueries: vi.fn(() => [{ id: 'query-1', iteration: 1, query: 'frozen query', status: 'completed', candidates: [{ title: source.title, url: source.originalUrl, snippet: 'fixture' }] }]),
+        updateSearchQuery: vi.fn(),
+      },
+      researchSourceRepo: { getByCanonicalUrl: vi.fn(() => source), createSource: vi.fn(), getSource: vi.fn(() => source) },
+      researchEventRepo: { append: vi.fn() },
+    } as any
+    const contentService = {
+      fetch: vi.fn(async (_run: ResearchRunDto, sources: unknown[], options?: { signal?: AbortSignal }) => {
+        expect(sources).toEqual([source])
+        expect(options?.signal).toBe(controller.signal)
+        controller.abort()
+        return [{ sourceId: source.id, status: 'fetched' }]
+      }),
+    }
+    bindCancelledSignal(run.id, controller)
+
+    await expect(executeIterationRetrieval({
+      runId: run.id,
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      coverageComplete: false,
+      marginalNewEvidenceCount: 0,
+      cancelled: false,
+      iterations: 0,
+      maxIterations: 1,
+      iterationId: 'iteration-1',
+      queryIds: ['query-1'],
+      sourceIds: [],
+      stopDecision: null,
+      limitations: [],
+    }, {
+      repositories,
+      searchService: { search: vi.fn() },
+      sourceCurator: { curate: vi.fn(() => ({ selected: [{ canonicalUrl: source.canonicalUrl, url: source.originalUrl, domain: source.domain, title: source.title, sourceType: 'web', score: 1, queryId: 'query-1' }] })) },
+      contentService,
+    } as any)).rejects.toMatchObject({ code: 'RESEARCH_CANCELLED' })
+
+    expect(contentService.fetch).toHaveBeenCalledTimes(1)
+    expect(repositories.researchEventRepo.append).not.toHaveBeenCalled()
+    expect(repositories.researchIterationRepo.update).not.toHaveBeenCalled()
+  })
+
   it('finalization stops after an aborted translator return without writing artifacts or completing the run', async () => {
     const controller = new AbortController()
     const run = createRun({

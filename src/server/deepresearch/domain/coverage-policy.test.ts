@@ -81,6 +81,14 @@ describe('Coverage Policy V2', () => {
       expect.stringContaining('independent domain'),
       expect.stringContaining('authoritative'),
     ]))
+    expect(result.gaps.find((gap) => gap.code === 'SINGLE_DOMAIN')).toMatchObject({
+      remediation: 'search_independent',
+      remediable: true,
+    })
+    expect(result.gaps.find((gap) => gap.code === 'NO_AUTHORITATIVE_SOURCE')).toMatchObject({
+      remediation: 'search_primary',
+      remediable: true,
+    })
   })
 
   it('records a non-remediable limitation instead of calling a single-authority exception covered', () => {
