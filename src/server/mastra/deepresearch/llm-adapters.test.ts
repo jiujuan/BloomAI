@@ -152,6 +152,21 @@ it('repairs a malformed section draft before it can bypass the structured writer
   await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)).resolves.toMatchObject(validDraft)
   expect(generate).toHaveBeenCalledTimes(2)
 })
+
+
+it('retries a citation response that omits the required semantic checks', async () => {
+  const generate = vi.fn()
+    .mockResolvedValueOnce({ text: JSON.stringify({ status: 'supported', rationale: 'Missing checks.' }) })
+    .mockResolvedValueOnce({ text: JSON.stringify({ status: 'supported', rationale: 'Every semantic dimension is directly supported.', checks: { entity: 'supported', numericTemporal: 'not_applicable', relationship: 'supported', stance: 'supported' } }) })
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  await expect(adapters.citationVerifier.verify({
+    claim: { id: 'claim-1', runId: run.id, sectionId: 'section-1', text: 'Acme grew in 2025.', kind: 'factual', importance: 'high', verificationStatus: 'not_applicable', confidence: 0.8, repairHistory: [] },
+    evidence: { id: 'evidence-1', runId: run.id, questionId: 'question-1', snapshotId: 'snapshot-1', passage: 'Acme grew in 2025.', summary: 'Acme grew in 2025.', stance: 'supporting', confidence: 0.8, startOffset: 0, endOffset: 18 },
+  })).resolves.toMatchObject({ status: 'supported', verificationMethod: 'semantic_llm' })
+  expect(generate).toHaveBeenCalledTimes(2)
+})
+
 describe('DRQ-03 brief planning', () => {
   it('keeps a broad market topic moving with topic-bound complementary questions and evidence targets', async () => {
     const generate = vi.fn(async () => ({

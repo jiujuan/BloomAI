@@ -100,6 +100,7 @@ export function createReportMarkdown(input: ArtifactWriteInput): string {
   })
   return [
     '# ' + (brief?.title ?? input.run.topic),
+    ...(input.quality.releaseStatus === 'completed_with_limitations' ? ['', '> **Draft with limitations — not a formally published deep research report.**'] : []),
     '',
     '## Scope and method',
     '',

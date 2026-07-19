@@ -4,8 +4,11 @@ import type {
   JsonValue,
   ResearchArtifactDto,
   ResearchCitationDto,
+  CitationSemanticChecksDto,
+  CitationVerificationMethod,
   ResearchClaimDto,
   ResearchQualityDto,
+  ResearchQualityGateResultDto,
   ResearchReportSectionDto,
   SectionDraftDto,
 } from '@shared/deepresearch/contracts'
@@ -58,6 +61,8 @@ export interface UpsertResearchCitationInput {
   evidenceId: string
   entailmentStatus: ResearchCitationDto['entailmentStatus']
   rationale: string
+  verificationMethod?: CitationVerificationMethod | null
+  semanticChecks?: CitationSemanticChecksDto | null
 }
 
 export interface UpdateResearchSectionInput {
@@ -75,6 +80,8 @@ export interface UpdateResearchClaimInput {
 export interface UpdateResearchCitationInput {
   entailmentStatus?: ResearchCitationDto['entailmentStatus']
   rationale?: string
+  verificationMethod?: CitationVerificationMethod | null
+  semanticChecks?: CitationSemanticChecksDto | null
 }
 
 export interface UpsertResearchArtifactInput {
@@ -134,6 +141,8 @@ export function mapResearchCitation(row: typeof research_citations.$inferSelect)
     evidenceId: row.evidence_id,
     entailmentStatus: row.entailment_status as ResearchCitationDto['entailmentStatus'],
     rationale: row.rationale,
+    verificationMethod: row.verification_method as CitationVerificationMethod | null ?? undefined,
+    semanticChecks: decodeJson<CitationSemanticChecksDto | null>(row.semantic_checks_json, null),
     ordinal: row.ordinal,
   }
 }
@@ -161,6 +170,9 @@ export function mapResearchQuality(row: typeof research_quality_assessments.$inf
     requiredSectionCoverage: row.required_section_coverage,
     limitations: decodeJson<string[]>(row.limitations_json, []),
     assessorVersion: row.assessor_version,
+    policyVersion: row.policy_version ?? undefined,
+    gateResults: decodeJson<ResearchQualityGateResultDto[]>(row.gate_results_json, []),
+    remedialActions: decodeJson<string[]>(row.remedial_actions_json, []),
   }
 }
 
@@ -285,6 +297,8 @@ export const researchReportRepo = {
     const updates: Partial<typeof research_citations.$inferInsert> = {}
     if (data.entailmentStatus !== undefined) updates.entailment_status = data.entailmentStatus
     if (data.rationale !== undefined) updates.rationale = data.rationale
+    if (data.verificationMethod !== undefined) updates.verification_method = data.verificationMethod
+    if (data.semanticChecks !== undefined) updates.semantic_checks_json = data.semanticChecks === null ? null : encodeJson(data.semanticChecks)
     const result = getOrmDb().update(research_citations).set(updates).where(eq(research_citations.id, id)).run()
     if (result.changes !== 1) throw new Error('Deep Research citation not found: ' + id)
     return mapResearchCitation(getOrmDb().select().from(research_citations).where(eq(research_citations.id, id)).get()!)
@@ -313,6 +327,8 @@ export const researchReportRepo = {
         evidence_id: input.evidenceId,
         entailment_status: input.entailmentStatus,
         rationale: input.rationale,
+        verification_method: input.verificationMethod ?? null,
+        semantic_checks_json: input.semanticChecks === undefined || input.semanticChecks === null ? null : encodeJson(input.semanticChecks),
         ordinal,
         created_at: Date.now(),
       }).run()
@@ -360,6 +376,9 @@ export const researchReportRepo = {
       required_section_coverage: quality.requiredSectionCoverage,
       limitations_json: encodeJson(quality.limitations),
       assessor_version: quality.assessorVersion,
+      policy_version: quality.policyVersion ?? null,
+      gate_results_json: encodeJson(quality.gateResults ?? []),
+      remedial_actions_json: encodeJson(quality.remedialActions ?? []),
       created_at: Date.now(),
     }).run()
     return quality

@@ -663,6 +663,8 @@ export const research_citations = sqliteTable('research_citations', {
   evidence_id: text('evidence_id').notNull(),
   entailment_status: text('entailment_status').notNull(),
   rationale: text('rationale').notNull(),
+  verification_method: text('verification_method'),
+  semantic_checks_json: text('semantic_checks_json'),
   ordinal: integer('ordinal').notNull(),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
@@ -681,6 +683,9 @@ export const research_quality_assessments = sqliteTable('research_quality_assess
   required_section_coverage: real('required_section_coverage').notNull(),
   limitations_json: text('limitations_json').notNull().default('[]'),
   assessor_version: text('assessor_version').notNull(),
+  policy_version: text('policy_version'),
+  gate_results_json: text('gate_results_json').notNull().default('[]'),
+  remedial_actions_json: text('remedial_actions_json').notNull().default('[]'),
   created_at: integer('created_at').notNull(),
 })
 

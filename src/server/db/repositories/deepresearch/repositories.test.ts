@@ -417,6 +417,14 @@ describe('Deep Research repositories', () => {
 
     expect(repeatedCitation).toMatchObject({ id: firstCitation.id, ordinal: 1 })
     expect(secondCitation.ordinal).toBe(2)
+    const verifiedCitation = researchReportRepo.updateCitation(firstCitation.id, {
+      verificationMethod: 'semantic_llm',
+      semanticChecks: { entity: 'supported', numericTemporal: 'supported', relationship: 'supported', stance: 'supported' },
+    })
+    expect(verifiedCitation).toMatchObject({
+      verificationMethod: 'semantic_llm',
+      semanticChecks: { entity: 'supported', numericTemporal: 'supported', relationship: 'supported', stance: 'supported' },
+    })
   })
 
   it('returns aggregate run detail and cascades all child records on deletion', async () => {

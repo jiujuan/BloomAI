@@ -19,6 +19,7 @@ export type ResearchEventType =
   | 'research.iteration.completed'
   | 'research.section.drafted'
   | 'research.claim.verified'
+  | 'research.citation.verification_unavailable'
   | 'research.quality.assessed'
   | 'research.artifact.created'
   | 'research.run.awaiting_input'
@@ -71,6 +72,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.iteration.completed', JsonObject & { iteration: number; newEvidenceCount: number }>
   | ResearchEventBase<'research.section.drafted', IdentifierPayload>
   | ResearchEventBase<'research.claim.verified', IdentifierPayload & { status: string }>
+  | ResearchEventBase<'research.citation.verification_unavailable', IdentifierPayload & { claimId: string; errorCode: string }>
   | ResearchEventBase<'research.quality.assessed', JsonObject & { releaseStatus: string }>
   | ResearchEventBase<'research.artifact.created', IdentifierPayload>
   | ResearchEventBase<'research.run.awaiting_input', JsonObject & { clarificationIds: string[] }>

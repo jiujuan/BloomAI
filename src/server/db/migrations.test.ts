@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(22)
+    expect(migrationVersions()).toHaveLength(23)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(22)
+    expect(migrationVersions()).toHaveLength(23)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -196,6 +196,7 @@ describe('database migrations', () => {
       '020-deep-research-source-quality-assessments',
       '021-deep-research-structured-evidence',
       '022-deep-research-section-drafts',
+      '023-deep-research-semantic-citation-quality-gates',
     ])
     const emptyDb = openRawDb()
     try {
@@ -222,6 +223,15 @@ describe('database migrations', () => {
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name IN ('section_key', 'draft_payload_json') ORDER BY name").all()).toEqual([
         { name: 'draft_payload_json' },
         { name: 'section_key' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_citations') WHERE name IN ('verification_method', 'semantic_checks_json') ORDER BY name").all()).toEqual([
+        { name: 'semantic_checks_json' },
+        { name: 'verification_method' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_quality_assessments') WHERE name IN ('policy_version', 'gate_results_json', 'remedial_actions_json') ORDER BY name").all()).toEqual([
+        { name: 'gate_results_json' },
+        { name: 'policy_version' },
+        { name: 'remedial_actions_json' },
       ])
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_search_queries') WHERE name IN ('query_intent', 'source_targets_json', 'dedupe_key') ORDER BY name").all()).toEqual([
         { name: 'dedupe_key' },

@@ -690,6 +690,16 @@ export interface ResearchClaimDto {
   repairHistory: JsonValue[]
 }
 
+export type CitationVerificationMethod = 'semantic_llm' | 'conservative_structural' | 'unavailable'
+export type CitationSemanticCheck = 'supported' | 'contradicted' | 'not_applicable' | 'unclear'
+
+export interface CitationSemanticChecksDto {
+  entity: CitationSemanticCheck
+  numericTemporal: CitationSemanticCheck
+  relationship: CitationSemanticCheck
+  stance: CitationSemanticCheck
+}
+
 export interface ResearchCitationDto {
   id: string
   runId: string
@@ -697,6 +707,9 @@ export interface ResearchCitationDto {
   evidenceId: string
   entailmentStatus: 'supported' | 'partially_supported' | 'unsupported'
   rationale: string
+  /** Added by DRQ-09; legacy citations remain readable without these fields. */
+  verificationMethod?: CitationVerificationMethod
+  semanticChecks?: CitationSemanticChecksDto | null
   ordinal: number
 }
 
@@ -709,6 +722,16 @@ export interface ResearchReportDto {
   generatedAt: number | null
 }
 
+export interface ResearchQualityGateResultDto {
+  ruleId: string
+  actual: number | string
+  threshold: number | string | null
+  passed: boolean
+  blocking: boolean
+  affectedIds: string[]
+  remedialAction: string
+}
+
 export interface ResearchQualityDto {
   releaseStatus: 'completed' | 'completed_with_limitations' | 'failed'
   highPriorityQuestionCoverage: number
@@ -719,6 +742,10 @@ export interface ResearchQualityDto {
   requiredSectionCoverage: number
   limitations: string[]
   assessorVersion: string
+  /** DRQ-09 release-gate diagnostics. Optional for pre-migration Runs. */
+  policyVersion?: string
+  gateResults?: ResearchQualityGateResultDto[]
+  remedialActions?: string[]
 }
 
 export interface ResearchEventDto {

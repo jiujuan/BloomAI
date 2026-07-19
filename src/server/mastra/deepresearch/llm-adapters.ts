@@ -107,7 +107,25 @@ const claimSchema = z.object({
   text: z.string().trim().min(1), kind: z.enum(['factual', 'analysis', 'recommendation', 'limitation']),
   importance: z.enum(['low', 'medium', 'high', 'critical']), confidence: z.number().min(0).max(1), evidenceIds: z.array(z.string().min(1)),
 })
-const citationSchema = z.object({ status: z.enum(['supported', 'partially_supported', 'unsupported']), rationale: z.string().trim().min(1) })
+const citationSemanticCheckSchema = z.enum(['supported', 'contradicted', 'not_applicable', 'unclear'])
+const citationSchema = z.object({
+  status: z.enum(['supported', 'partially_supported', 'unsupported']),
+  rationale: z.string().trim().min(1),
+  checks: z.object({
+    entity: citationSemanticCheckSchema,
+    numericTemporal: citationSemanticCheckSchema,
+    relationship: citationSemanticCheckSchema,
+    stance: citationSemanticCheckSchema,
+  }).strict(),
+}).strict().superRefine((value, context) => {
+  const outcomes = Object.values(value.checks)
+  if (value.status === 'supported' && outcomes.some((item) => item === 'contradicted' || item === 'unclear')) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Supported citations require explicit support or not_applicable for every semantic check.' })
+  }
+  if (value.status !== 'unsupported' && outcomes.includes('contradicted')) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'A contradicted semantic check requires unsupported citation status.' })
+  }
+})
 const repairSchema = z.object({ sectionId: z.string().min(1), claimId: z.string().min(1), limitation: z.string().trim().min(1) })
 const markdownSchema = z.object({ markdown: z.string().trim().min(1) })
 const SECTION_DRAFT_HEADINGS = ['Direct answer', 'Comparison or classification', 'Evidence basis', 'Conditions and limitations'] as const
@@ -363,7 +381,13 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
     },
     citationVerifier: {
       async verify(input, context = {}) {
-        return await invoke('citation_verification', 'Return JSON object { status, rationale }. Assess only the supplied claim and evidence.', input as unknown as Record<string, unknown>, citationSchema, context.signal) as CitationVerification
+        const output = await invoke('citation_verification', [
+          'Return JSON object { status, rationale, checks: { entity, numericTemporal, relationship, stance } }.',
+          'Assess only the supplied claim and bounded evidence passage. For each check return supported, contradicted, not_applicable, or unclear.',
+          'Verify named entities; every material number, date, period, and unit; the asserted relation or causality; and whether the claim preserves the evidence stance, qualifiers, and negation.',
+          'Return supported only if every applicable check is supported. Unknown or missing semantic support must not be treated as supported.',
+        ].join(' '), input as unknown as Record<string, unknown>, citationSchema, context.signal)
+        return { ...output, verificationMethod: 'semantic_llm' } as CitationVerification
       },
     },
     reportCritic: {
