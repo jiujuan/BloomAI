@@ -647,6 +647,23 @@ export interface ResearchEvidenceDto {
   endOffset: number
 }
 
+export interface SectionDraftClaimDto {
+  text: string
+  kind: 'factual' | 'analysis' | 'recommendation' | 'limitation'
+  importance: 'low' | 'medium' | 'high' | 'critical'
+  confidence: number
+  evidenceIds: string[]
+}
+
+export interface SectionDraftDto {
+  summary: string
+  bodyMarkdown: string
+  claims: SectionDraftClaimDto[]
+  evidenceIds: string[]
+  limitations: string[]
+  missingEvidence: string[]
+}
+
 export interface ResearchReportSectionDto {
   id: string
   runId: string
@@ -655,6 +672,8 @@ export interface ResearchReportSectionDto {
   title: string
   purpose: string
   draft: string | null
+  /** Replayable structured writer output; absent for legacy sections. */
+  draftPayload?: SectionDraftDto | null
   verifiedText: string | null
   status: 'planned' | 'drafted' | 'verified' | 'limited'
 }

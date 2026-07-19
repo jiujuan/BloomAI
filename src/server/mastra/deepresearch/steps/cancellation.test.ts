@@ -65,7 +65,7 @@ describe('Deep Research cancellation step boundaries', () => {
       draft: vi.fn(async (_input: unknown, options?: { signal?: AbortSignal }) => {
         expect(options?.signal).toBe(controller.signal)
         controller.abort()
-        return 'must not persist'
+        return { summary: 'must not persist', bodyMarkdown: '### Direct answer\n\nThe available evidence is insufficient for a section conclusion.\n\n### Comparison or classification\n\nNo reliable comparison can be made without routed evidence.\n\n### Evidence basis\n\nNo qualifying evidence passage was routed to this section.\n\n### Conditions and limitations\n\nAdditional section-specific evidence is required before publication.', claims: [], evidenceIds: [], limitations: ['No qualifying evidence was routed.'], missingEvidence: ['Section-specific evidence'] }
       }),
     }
     bindCancelledSignal(run.id, controller)

@@ -74,7 +74,7 @@ describe('createLlmDeepResearchAdapters', () => {
           startOffset: 0,
           endOffset: 55,
         }])
-        : JSON.stringify({ markdown: 'Section draft' }),
+        : JSON.stringify({ summary: 'Section summary', bodyMarkdown: '### Direct answer\n\nSection draft.\n\n### Comparison or classification\n\nClassified.\n\n### Evidence basis\n\nNo factual claims.\n\n### Conditions and limitations\n\nLimited.', claims: [], evidenceIds: [], limitations: [], missingEvidence: [] }),
     }))
     const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
 
@@ -85,7 +85,7 @@ describe('createLlmDeepResearchAdapters', () => {
         relevance: expect.any(Number),
       },
     ])
-    await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, evidence: [] } as never)).resolves.toBe('Section draft')
+    await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)).resolves.toMatchObject({ bodyMarkdown: expect.stringContaining('Section draft') })
 
     expect(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
       .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.query_planning.maxOutputTokens)
@@ -134,6 +134,24 @@ describe('createLlmDeepResearchAdapters', () => {
     }))
   })
 
+it('repairs a malformed section draft before it can bypass the structured writer retry', async () => {
+  const invalidDraft = {
+    summary: 'Too short.',
+    bodyMarkdown: '### Direct answer\n\nShort.\n\n### Comparison or classification\n\nClassified answer.\n\n### Evidence basis\n\nNo factual claims.\n\n### Conditions and limitations\n\nLimited.',
+    claims: [], evidenceIds: [], limitations: ['Limited evidence.'], missingEvidence: ['Evidence'],
+  }
+  const validDraft = {
+    ...invalidDraft,
+    bodyMarkdown: '### Direct answer\n\nThe available routed evidence supports a bounded answer.\n\n### Comparison or classification\n\nThe answer is classified by the mapped question.\n\n### Evidence basis\n\nNo factual claims are asserted beyond the bounded answer.\n\n### Conditions and limitations\n\nEvidence coverage remains limited.',
+  }
+  const generate = vi.fn()
+    .mockResolvedValueOnce({ text: JSON.stringify(invalidDraft) })
+    .mockResolvedValueOnce({ text: JSON.stringify(validDraft) })
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)).resolves.toMatchObject(validDraft)
+  expect(generate).toHaveBeenCalledTimes(2)
+})
 describe('DRQ-03 brief planning', () => {
   it('keeps a broad market topic moving with topic-bound complementary questions and evidence targets', async () => {
     const generate = vi.fn(async () => ({

@@ -7,6 +7,7 @@ import type {
   ResearchClaimDto,
   ResearchQualityDto,
   ResearchReportSectionDto,
+  SectionDraftDto,
 } from '@shared/deepresearch/contracts'
 import { getOrmDb } from '../../client'
 import {
@@ -27,6 +28,7 @@ export interface UpsertResearchSectionInput {
   title: string
   purpose: string
   draft?: string | null
+  draftPayload?: SectionDraftDto | null
   verifiedText?: string | null
   status: ResearchReportSectionDto['status']
   idempotencyKey: string
@@ -60,6 +62,7 @@ export interface UpsertResearchCitationInput {
 
 export interface UpdateResearchSectionInput {
   draft?: string | null
+  draftPayload?: SectionDraftDto | null
   verifiedText?: string | null
   status?: ResearchReportSectionDto['status']
 }
@@ -103,6 +106,7 @@ export function mapResearchSection(row: typeof research_report_sections.$inferSe
     title: row.title,
     purpose: row.purpose,
     draft: row.draft,
+    draftPayload: decodeJson<SectionDraftDto | null>(row.draft_payload_json, null),
     verifiedText: row.verified_text,
     status: row.status as ResearchReportSectionDto['status'],
   }
@@ -179,6 +183,7 @@ export const researchReportRepo = {
         title: input.title,
         purpose: input.purpose,
         draft: input.draft ?? null,
+        draft_payload_json: input.draftPayload === undefined ? null : encodeJson(input.draftPayload),
         verified_text: input.verifiedText ?? null,
         status: input.status,
         idempotency_key: input.idempotencyKey,
@@ -259,6 +264,7 @@ export const researchReportRepo = {
   updateSection(id: string, data: UpdateResearchSectionInput): ResearchReportSectionDto {
     const updates: Partial<typeof research_report_sections.$inferInsert> = { updated_at: Date.now() }
     if (data.draft !== undefined) updates.draft = data.draft
+    if (data.draftPayload !== undefined) updates.draft_payload_json = data.draftPayload === null ? null : encodeJson(data.draftPayload)
     if (data.verifiedText !== undefined) updates.verified_text = data.verifiedText
     if (data.status !== undefined) updates.status = data.status
     const result = getOrmDb().update(research_report_sections).set(updates).where(eq(research_report_sections.id, id)).run()

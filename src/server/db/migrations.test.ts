@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(21)
+    expect(migrationVersions()).toHaveLength(22)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(21)
+    expect(migrationVersions()).toHaveLength(22)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -195,6 +195,7 @@ describe('database migrations', () => {
       '019-deep-research-query-intents-deduplication',
       '020-deep-research-source-quality-assessments',
       '021-deep-research-structured-evidence',
+      '022-deep-research-section-drafts',
     ])
     const emptyDb = openRawDb()
     try {
@@ -218,7 +219,8 @@ describe('database migrations', () => {
         { name: 'section_key' },
         { name: 'source_targets_json' },
       ])
-      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name = 'section_key'").all()).toEqual([
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name IN ('section_key', 'draft_payload_json') ORDER BY name").all()).toEqual([
+        { name: 'draft_payload_json' },
         { name: 'section_key' },
       ])
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_search_queries') WHERE name IN ('query_intent', 'source_targets_json', 'dedupe_key') ORDER BY name").all()).toEqual([

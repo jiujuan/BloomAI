@@ -200,6 +200,34 @@ describe('Deep Research repositories', () => {
       questionIds: [productQuestion.id, foreignQuestion.id],
     })).toThrow('question from another Run')
   })
+  it('round-trips structured section drafts through section persistence', async () => {
+    const { researchRunRepo, researchReportRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const initialDraft = {
+      summary: 'Initial evidence-backed conclusion.',
+      bodyMarkdown: '### Direct answer\n\nInitial direct answer.\n\n### Comparison or classification\n\nInitial classification.\n\n### Evidence basis\n\nInitial evidence.\n\n### Conditions and limitations\n\nInitial limitation.',
+      claims: [{ text: 'Initial evidence.', kind: 'factual' as const, importance: 'medium' as const, confidence: 0.9, evidenceIds: ['evidence-1'] }],
+      evidenceIds: ['evidence-1'],
+      limitations: ['Initial limitation.'],
+      missingEvidence: [],
+    }
+    const section = researchReportRepo.upsertSection({
+      runId: run.id,
+      ordinal: 1,
+      title: 'Evidence-backed section',
+      purpose: 'Preserve the structured writer result.',
+      draft: initialDraft.bodyMarkdown,
+      draftPayload: initialDraft,
+      status: 'drafted',
+      idempotencyKey: 'section:structured-draft',
+    })
+
+    expect(section.draftPayload).toEqual(initialDraft)
+
+    const updatedDraft = { ...initialDraft, summary: 'Updated evidence-backed conclusion.', missingEvidence: ['Independent confirmation.'] }
+    expect(researchReportRepo.updateSection(section.id, { draftPayload: updatedDraft }).draftPayload).toEqual(updatedDraft)
+    expect(researchReportRepo.listSections(run.id)).toEqual([expect.objectContaining({ id: section.id, draftPayload: updatedDraft })])
+  })
   it('persists query intent, source targets, and dedupe keys while preserving legacy query creation', async () => {
     const { researchRunRepo, researchQuestionRepo } = await loadRepositories()
     const run = createRun(researchRunRepo)

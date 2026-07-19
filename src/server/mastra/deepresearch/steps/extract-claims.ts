@@ -27,9 +27,18 @@ export function createExtractClaimsStep({ repositories, extractor, citationServi
       for (const section of repositories.researchReportRepo.listSections(run.id)) {
         assertWorkflowNotCancelled(repositories, run.id)
         const mappedQuestionIds = (repositories.researchReportRepo as Partial<typeof repositories.researchReportRepo>).listQuestionIdsForSection?.(section.id)
-        const extracted = await extractor.extract({ run, section, evidence: selectEvidenceForSection(section, questions, evidence, mappedQuestionIds) }, { signal: getWorkflowExecution(run.id)?.signal })
+        const routedEvidence = selectEvidenceForSection(section, questions, evidence, mappedQuestionIds)
+        const allowedEvidenceIds = new Set(routedEvidence.map((item) => item.id))
+        const structuredClaims = section.draftPayload?.claims
+        const extracted = structuredClaims && structuredClaims.length > 0 ? structuredClaims : await extractor.extract({ run, section, evidence: routedEvidence }, { signal: getWorkflowExecution(run.id)?.signal })
         assertWorkflowNotCancelled(repositories, run.id)
         for (const [index, item] of extracted.entries()) {
+          if (item.evidenceIds.some((evidenceId) => !allowedEvidenceIds.has(evidenceId))) {
+            throw new Error('Deep Research claim referenced out-of-scope section evidence.')
+          }
+          if (item.kind === 'factual' && item.evidenceIds.length === 0) {
+            throw new Error('Deep Research factual claim requires routed evidence.')
+          }
           const claim = repositories.researchReportRepo.upsertClaim({
             runId: run.id,
             sectionId: section.id,
@@ -39,10 +48,10 @@ export function createExtractClaimsStep({ repositories, extractor, citationServi
             verificationStatus: item.kind === 'factual' ? 'partially_supported' : 'not_applicable',
             confidence: item.confidence,
             repairHistory: [],
-            idempotencyKey: 'report-claim:v1:' + createHash('sha256').update(section.id + '\u0000' + index + '\u0000' + item.text).digest('hex'),
+            idempotencyKey: 'report-claim:v2:' + createHash('sha256').update(section.id + '\u0000' + index + '\u0000' + item.text).digest('hex'),
           })
           if (item.kind === 'factual') {
-            for (const evidenceId of item.evidenceIds) citationService.bind({ runId: run.id, claimId: claim.id, evidenceId, entailmentStatus: 'partially_supported', rationale: 'Pending citation verification.' })
+            for (const evidenceId of item.evidenceIds) citationService.bind({ runId: run.id, claimId: claim.id, evidenceId, entailmentStatus: 'partially_supported', rationale: 'Bound by the structured section draft; pending citation verification.' })
           }
         }
       }

@@ -23,3 +23,13 @@ describe('selectEvidenceForSection', () => {
     expect(selectEvidenceForSection(section, questions, evidence, ['q-data-sources', 'q-buyer-workflows']).map((item) => item.id)).toEqual(['e-data', 'e-workflow'])
   })
 })
+
+  it('prefers high-confidence, non-uncertain evidence while preserving the mapped-question boundary', () => {
+    const selected = selectEvidenceForSection(section, questions, [
+      { ...evidence[0], id: 'low-confidence', confidence: 0.1, relevance: 0.1, evidenceType: 'uncertain' },
+      { ...evidence[0], id: 'high-confidence', confidence: 0.95, relevance: 0.95, evidenceType: 'fact' },
+      { ...evidence[1], id: 'wrong-question', questionId: 'q-risks', confidence: 1, relevance: 1, evidenceType: 'fact' },
+    ], ['q-data-sources'])
+
+    expect(selected.map((item) => item.id)).toEqual(['high-confidence', 'low-confidence'])
+  })
