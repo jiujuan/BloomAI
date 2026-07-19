@@ -80,6 +80,21 @@ function isSuspendedWorkflowResult(result: unknown): boolean {
     && (result as { status?: unknown }).status === 'suspended'
 }
 
+function failedWorkflowError(result: unknown): Error | null {
+  if (typeof result !== 'object' || result === null || !('status' in result)
+    || (result as { status?: unknown }).status !== 'failed') return null
+  const error = 'error' in result ? (result as { error?: unknown }).error : undefined
+  if (error instanceof Error) return error
+  const message = typeof error === 'object' && error !== null && 'message' in error && typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string }).message
+    : 'Deep Research workflow failed without an Error object.'
+  const normalized = new Error(message)
+  if (typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    Object.assign(normalized, { code: (error as { code: string }).code })
+  }
+  return normalized
+}
+
 export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOptions): DeepResearchExecutor {
   const executorId = options.executorId ?? 'deepresearch-' + uuidv4()
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS
@@ -137,6 +152,8 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
       }
 
       const result = await invoke(context)
+      const workflowError = failedWorkflowError(result)
+      if (workflowError) throw workflowError
       // A provider that cannot abort may still resolve. Never let that result
       // promote the Run or persist a downstream terminal outcome after cancel.
       if (controller.signal.aborted || cancellationRequested(runId)) {

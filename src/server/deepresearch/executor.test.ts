@@ -268,4 +268,27 @@ describe('Deep Research attempt-aware executor', () => {
     await expect(cancelled.start(cancelledRun.id)).resolves.toBe(true)
     expect(researchAttemptRepo.get(cancelledAttempt.id)).toMatchObject({ status: 'cancelled', error: null })
   })
+  it('treats a failed Mastra workflow result as an attempt failure instead of success', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadTestContext()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', createdAt: 1_000 })
+    const timeout = Object.assign(new Error('RESEARCH_MODEL_TIMEOUT: brief_planning exceeded its configured timeout.'), {
+      code: 'RESEARCH_MODEL_TIMEOUT',
+    })
+    const executor = createDeepResearchExecutor({
+      executorId: 'workflow-failure-worker',
+      now: () => 1_000,
+      runtime: {
+        start: async () => ({ status: 'failed', error: timeout }),
+        resume: async () => undefined,
+      },
+    } as any)
+
+    await expect(executor.start(run.id)).resolves.toBe(true)
+    expect(researchAttemptRepo.get(attempt.id)).toMatchObject({
+      status: 'failed',
+      error: { code: 'RESEARCH_PROVIDER_TIMEOUT', retryable: true, category: 'timeout' },
+    })
+  })
+
 })

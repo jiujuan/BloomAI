@@ -38,8 +38,8 @@ export interface ResearchLlmStageLimits {
 
 /** Per-stage budgets prevent any one research step from issuing an unbounded model request. */
 export const RESEARCH_LLM_STAGE_LIMITS: Record<ResearchLlmStage, ResearchLlmStageLimits> = {
-  brief_planning: { timeoutMs: 30_000, maxOutputTokens: 1_200 },
-  query_planning: { timeoutMs: 25_000, maxOutputTokens: 1_200 },
+  brief_planning: { timeoutMs: 90_000, maxOutputTokens: 2_400 },
+  query_planning: { timeoutMs: 60_000, maxOutputTokens: 1_600 },
   evidence_analysis: { timeoutMs: 60_000, maxOutputTokens: 2_400 },
   gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 1_200 },
   section_writing: { timeoutMs: 75_000, maxOutputTokens: 3_000 },
@@ -229,6 +229,10 @@ function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLl
       timedOut = true
       controller.abort()
     }, timeoutMs)
+    const assertActive = (cause?: unknown) => {
+      throwIfCancellationRequested({ signal })
+      if (timedOut) throw modelTimeoutError(stage, cause)
+    }
     try {
       // Prefer native schema-constrained output. Some OpenAI-compatible and
       // local providers reject response-format APIs, so retry those with the
@@ -237,16 +241,24 @@ function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLl
       let response
       try {
         response = await agent.generate(prompt, request)
-        if (response.object === undefined) throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
-      } catch {
+        assertActive()
+        // OpenAI-compatible providers can return valid JSON text without
+        // populating Mastra's object field. Preserve that response and let the
+        // shared parser validate it instead of issuing a duplicate model call.
+        if (response.object === undefined && !response.text?.trim()) {
+          throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
+        }
+      } catch (error) {
+        assertActive(error)
         response = await agent.generate(prompt, {
           ...request,
           structuredOutput: { ...request.structuredOutput, jsonPromptInjection: true },
         })
+        assertActive()
       }
       return { text: response.text, object: response.object, usage: response.totalUsage }
     } catch (error) {
-      if (timedOut && !signal?.aborted) throw modelTimeoutError(stage, error)
+      assertActive(error)
       throw error
     } finally {
       clearTimeout(timer)

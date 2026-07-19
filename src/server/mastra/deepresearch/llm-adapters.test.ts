@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MastraModelConfig } from '@mastra/core/llm'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 
@@ -57,6 +57,10 @@ describe('createLlmDeepResearchAdapters', () => {
     vi.clearAllMocks()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('requests provider-validated structured output for production model calls', async () => {
     agentGenerate.mockResolvedValueOnce({
       text: 'The structured response is attached.',
@@ -90,6 +94,39 @@ describe('createLlmDeepResearchAdapters', () => {
     expect(agentGenerate.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
       structuredOutput: expect.objectContaining({ jsonPromptInjection: true }),
     }))
+  })
+
+  it('accepts valid JSON text when an OpenAI-compatible provider omits the structured object', async () => {
+    agentGenerate.mockResolvedValueOnce({
+      text: JSON.stringify(validBrief()),
+      object: undefined,
+      totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+    })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic })
+    expect(agentGenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a stage timeout when Mastra resolves an aborted model call with an empty response', async () => {
+    vi.useFakeTimers()
+    agentGenerate.mockImplementation((_prompt: unknown, request: { abortSignal: AbortSignal }) => new Promise((resolve) => {
+      const finish = () => resolve({
+        text: '',
+        object: undefined,
+        totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      })
+      if (request.abortSignal.aborted) finish()
+      else request.abortSignal.addEventListener('abort', finish, { once: true })
+    }))
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    const planning = adapters.planner.plan(run)
+    const assertion = expect(planning).rejects.toMatchObject({ code: 'RESEARCH_MODEL_TIMEOUT' })
+    await vi.advanceTimersByTimeAsync(RESEARCH_LLM_STAGE_LIMITS.brief_planning.timeoutMs * 2)
+
+    await assertion
+    expect(agentGenerate).toHaveBeenCalledTimes(1)
   })
 
   it('uses a model-bound generator and reports its token usage', async () => {
