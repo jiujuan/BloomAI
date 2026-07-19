@@ -4,6 +4,7 @@ import { createDeepResearchService } from './deep-research.service'
 export { createDeepResearchExecutor } from './executor'
 export type { CreateDeepResearchExecutorOptions, DeepResearchExecutor, DeepResearchRuntimeAdapter } from './executor'
 export { createDeepResearchService } from './deep-research.service'
+export { buildResearchRunDiagnostics, recordProductionRunDiagnosticEvents } from './run-diagnostics'
 export type { CreateDeepResearchServiceOptions, DeepResearchCommandOptions, DeepResearchScheduler } from './deep-research.service'
 
 let defaultRuntime: DeepResearchRuntimeAdapter | undefined

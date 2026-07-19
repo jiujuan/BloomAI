@@ -12,6 +12,7 @@ import type {
   ResearchRunCheckpointSummaryDto,
   ResearchEventDto,
   ResearchRunDetailDto,
+  ResearchRunDiagnosticsDto,
   ResearchRunDto,
   ResearchRunFilter,
   StartResearchInput,
@@ -26,6 +27,7 @@ type MaybePromise<T> = T | Promise<T>
 type DeepResearchHttpModule = {
   startResearch(input: StartResearchInput): Promise<ResearchRunDto>
   getRun(runId: string): MaybePromise<ResearchRunDetailDto | undefined>
+  getRunDiagnostics(runId: string): MaybePromise<ResearchRunDiagnosticsDto | undefined>
   listRuns(filter?: ResearchRunFilter): MaybePromise<ResearchRunDto[]>
   listAttemptHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchRunAttemptSummaryDto>>
   listCheckpointHistory(runId: string, query?: HistoryQuery): MaybePromise<ResearchHistoryPageDto<ResearchRunCheckpointSummaryDto>>
@@ -41,6 +43,11 @@ type DeepResearchHttpModule = {
 
 export interface CreateDeepResearchRoutesOptions {
   module?: DeepResearchHttpModule
+  /**
+   * Diagnostics contain operational details and are denied unless a trusted
+   * authentication middleware marks the request as an administrator.
+   */
+  isAdmin?: (context: any) => boolean
 }
 
 const listFilterSchema = z.object({
@@ -59,7 +66,7 @@ const historyQuerySchema = z.object({
 
 type HistoryQuery = z.infer<typeof historyQuerySchema>
 
-function errorResponse(c: any, status: 400 | 404 | 409 | 500, code: string, message: string) {
+function errorResponse(c: any, status: 400 | 403 | 404 | 409 | 500, code: string, message: string) {
   return c.json({ error: { code, message } }, status)
 }
 
@@ -152,6 +159,32 @@ function toPublicResearchRun(run: ResearchRunDto): ResearchRunDto {
 }
 
 /** The long-lived detail route remains additive while hiding fetched bodies and sensitive URL components. */
+export function toPublicResearchRunDiagnostics(diagnostics: ResearchRunDiagnosticsDto): ResearchRunDiagnosticsDto {
+  return {
+    ...diagnostics,
+    queries: {
+      ...diagnostics.queries,
+      items: diagnostics.queries.items.map((query) => ({
+        ...query,
+        candidates: query.candidates.map((candidate) => ({ ...candidate, url: publicUrl(candidate.url) })),
+      })),
+    },
+    sources: {
+      ...diagnostics.sources,
+      selected: diagnostics.sources.selected.map((source) => ({ ...source, canonicalUrl: publicUrl(source.canonicalUrl) })),
+      candidates: diagnostics.sources.candidates.map((candidate) => ({
+        ...candidate,
+        canonicalUrl: candidate.canonicalUrl ? publicUrl(candidate.canonicalUrl) : null,
+        originalUrl: publicUrl(candidate.originalUrl),
+      })),
+    },
+    fetch: {
+      ...diagnostics.fetch,
+      snapshots: diagnostics.fetch.snapshots.map((snapshot) => ({ ...snapshot, finalUrl: publicUrl(snapshot.finalUrl) })),
+    },
+  }
+}
+
 export function toPublicResearchRunDetail(run: ResearchRunDetailDto): ResearchRunDetailDto {
   return {
     ...run,
@@ -191,6 +224,20 @@ export function createDeepResearchRoutes(options: CreateDeepResearchRoutesOption
 
   routes.get('/runs', async (c) => {
     try { return c.json({ data: (await module.listRuns(buildFilter(c))).map(toPublicResearchRun) }) } catch (error) { return routeError(c, error) }
+  })
+
+  routes.get('/admin/runs/:runId/diagnostics', async (c) => {
+    try {
+      // Never infer admin authority from a user-controlled header. The hosting
+      // application must set this through its trusted auth middleware or pass
+      // the explicit route option when wiring the desktop/admin runtime.
+      const isAdmin = options.isAdmin?.(c) ?? (c as any).get('isAdmin') === true
+      if (!isAdmin) return errorResponse(c, 403, 'RESEARCH_DIAGNOSTICS_FORBIDDEN', 'Administrator access is required for Run diagnostics.')
+      const diagnostics = await module.getRunDiagnostics(c.req.param('runId'))
+      return diagnostics
+        ? c.json({ data: toPublicResearchRunDiagnostics(diagnostics) })
+        : errorResponse(c, 404, 'RESEARCH_RUN_NOT_FOUND', 'Deep Research Run not found: ' + c.req.param('runId'))
+    } catch (error) { return routeError(c, error) }
   })
 
   routes.get('/runs/:runId', async (c) => {

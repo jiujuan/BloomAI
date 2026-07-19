@@ -7,6 +7,7 @@ import type { DeepResearchRepositories } from '../workflow-context'
 import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchCompletion, recordDeepResearchE2EDuration, recordDeepResearchFailure, traceDeepResearchPhase } from '@server/telemetry/metrics'
+import { recordProductionRunDiagnosticEvents } from '@server/deepresearch/run-diagnostics'
 
 export function createFinalizeArtifactsStep({ repositories, artifactService, reportTranslator }: { repositories: DeepResearchRepositories; artifactService: ArtifactService; reportTranslator: ReportTranslator }) {
   return createStep({
@@ -53,6 +54,10 @@ export function createFinalizeArtifactsStep({ repositories, artifactService, rep
         const report = artifacts.find((artifact) => artifact.type === 'report_markdown')
         if (!report) throw new Error('Deep Research Markdown artifact is missing.')
         repositories.researchRunRepo.setReportArtifactId(run.id, report.id)
+        const currentRun = repositories.researchRunRepo.get(run.id) ?? run
+        if (currentRun.usage.tokens === 0) {
+          recordProductionRunDiagnosticEvents(repositories, currentRun, 'finalizing_artifacts', [{ kind: 'tokens_zero' }])
+        }
         checkpointWorkflowPhase(repositories, run, 'finalizing_artifacts', 'completed')
         if (quality.releaseStatus === 'failed') {
           repositories.researchRunRepo.transitionWithEvent(run.id, 'failed', { phase: 'report_failed', progress: 100, error: { code: 'RESEARCH_QUALITY_FAILED', message: 'Report quality gates failed.', retryable: false }, eventType: 'research.run.failed', eventPayload: { errorCode: 'RESEARCH_QUALITY_FAILED', retryable: false } })

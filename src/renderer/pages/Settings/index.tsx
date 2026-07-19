@@ -99,6 +99,9 @@ function ModelDetailPanel({
 
   const apiKeyValue = apiKeyKey ? (localValues[apiKeyKey] ?? '') : ''
   const apiKeySaved = apiKeyKey ? settings[apiKeyKey] === '***masked***' : false
+  const isDeepResearchFallback = model.modality === 'text' && !settings.deep_research_model && settings.model === model.id
+  const hasConfiguredCredential = isOllama || provider?.hasApiKey === true || apiKeySaved || !apiKeyKey
+  const researchRuntimeReady = model.modality === 'text' && model.isEnabled && provider?.isEnabled !== false && hasConfiguredCredential
 
   const baseUrlDefault = info?.baseUrlDefault || ''
   const currentBaseUrl = isOllama
@@ -163,6 +166,14 @@ function ModelDetailPanel({
       </div>
 
       <div className="smd-body">
+        {(isDeepResearchModel || isDeepResearchFallback) && <div className="smd-field" aria-label="深度研究运行状态">
+          <label className="smd-label">深度研究运行状态</label>
+          <p className="api-key-hint">
+            {isDeepResearchModel ? '此模型由 deep_research_model 专用设置选择。' : '未设置专用模型；深度研究将回退到通用文本模型。'}
+            {' '}{researchRuntimeReady ? '就绪：模型、厂商和凭据配置满足运行前检查。' : '未就绪：请启用模型和厂商，并配置所需凭据后再运行。'}
+          </p>
+          <p className="api-key-hint">凭据仅显示为已配置状态，不会在此处展示 Key 内容。</p>
+        </div>}
         {apiKeyKey && (
           <div className="smd-field">
             <label className="smd-label">API Key</label>

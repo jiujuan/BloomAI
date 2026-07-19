@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import type { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
 import { recordDeepResearchAssessment, recordDeepResearchIteration } from '@server/telemetry/metrics'
+import { recordProductionRunDiagnosticEvents } from '@server/deepresearch/run-diagnostics'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
 import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
 
@@ -64,6 +65,10 @@ export async function assessIteration(
     })
   }
   const updatedQuestions = repositories.researchQuestionRepo.list(run.id)
+  const highPriorityQuestions = updatedQuestions.filter((question) => question.priority === 'high' || question.priority === 'critical')
+  if (highPriorityQuestions.length > 0 && highPriorityQuestions.every((question) => question.status !== 'covered')) {
+    recordProductionRunDiagnosticEvents(repositories, run, 'gap_filling', [{ kind: 'high_priority_coverage_zero', questions: updatedQuestions }])
+  }
   return { ...input, coverageComplete: updatedQuestions.filter((question) => question.priority === 'high' || question.priority === 'critical').every((question) => question.status === 'covered'), marginalNewEvidenceCount: extraction.createdCount, iterations: settled?.ordinal ?? run.usage.iterations + 1, maxIterations: run.budget.maxIterations, iterationId: settled?.id ?? input.iterationId, stopDecision: null, limitations: projection.limitations }
 }
 

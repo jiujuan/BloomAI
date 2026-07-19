@@ -14,6 +14,7 @@ import type {
   ResearchRunAttemptDto,
   ResearchRunCheckpointDto,
   ResearchRunDetailDto,
+  ResearchRunDiagnosticsDto,
   ResearchRunDto,
   ResearchRunFilter,
   StartResearchInput,
@@ -26,6 +27,7 @@ import { researchIterationRepo } from '../db/repositories/deepresearch/research-
 import { researchCoverageAssessmentRepo } from '../db/repositories/deepresearch/research-coverage-assessment.repo'
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
 import { researchReportRepo } from '../db/repositories/deepresearch/research-report.repo'
+import { researchSourceRepo } from '../db/repositories/deepresearch/research-source.repo'
 import { subscribeToResearchEvents } from './research-event-publisher'
 import { claimDeepResearchCommand, deepResearchCommandKey, markDeepResearchCommandDispatched } from './commands'
 import { getResearchBudget } from './domain/budgets'
@@ -34,6 +36,7 @@ import { isResearchDomainError, ResearchDomainError } from './domain/errors'
 import { resolveResearchModelSnapshot, resolveResearchRuntimeModel } from './domain/model-selection'
 import { createDeepResearchRecoveryCoordinator, type DeepResearchRecoveryResult, type DeepResearchWorkflowRunState } from './recovery'
 import { abortActiveDeepResearchExecution } from './executor'
+import { buildResearchRunDiagnostics } from './run-diagnostics'
 import { recordDeepResearchCancellation, recordDeepResearchCheckpointReuse, recordDeepResearchResume, recordDeepResearchResumeOutcome, type DeepResearchTelemetryContext } from '../telemetry/metrics'
 
 export interface DeepResearchScheduler {
@@ -370,6 +373,30 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
     getRun(runId: string): ResearchRunDetailDto | undefined {
       const detail = researchRunRepo.getDetail(runId)
       return detail ? { ...detail, lifecycle: getLifecycle(detail) } : undefined
+    },
+
+    getRunDiagnostics(runId: string): ResearchRunDiagnosticsDto | undefined {
+      // This service boundary deliberately aggregates all diagnostic dimensions in
+      // one admin API request, without exposing source bodies or provider secrets.
+      const detail = researchRunRepo.getDetail(runId)
+      if (!detail) return undefined
+      const attempts = researchAttemptRepo.listForRun(runId)
+      return buildResearchRunDiagnostics({
+        run: detail,
+        questions: detail.questions,
+        searchQueries: detail.searchQueries,
+        sources: detail.sources,
+        snapshots: detail.snapshots,
+        evidence: detail.evidence,
+        sections: detail.report?.sections ?? [],
+        claims: detail.report?.claims ?? [],
+        citations: detail.report?.citations ?? [],
+        quality: detail.quality,
+        candidateAssessments: researchSourceRepo.listCandidateAssessments(runId),
+        events: detail.events,
+        attempts,
+        coverageAssessments: detail.coverageAssessments ?? [],
+      })
     },
 
     listRuns(filter: ResearchRunFilter = {}): ResearchRunDto[] {

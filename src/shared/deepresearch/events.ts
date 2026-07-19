@@ -40,6 +40,7 @@ export type ResearchEventType =
   | 'research.run.interrupted'
   | 'research.run.resumed'
   | 'research.recovery.reconciled'
+  | 'research.run.diagnostic'
 
 interface ResearchEventBase<TType extends ResearchEventType, TPayload extends JsonObject> {
   runId: string

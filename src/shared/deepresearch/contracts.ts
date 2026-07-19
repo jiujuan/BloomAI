@@ -774,6 +774,108 @@ export interface ResearchArtifactContent {
   content: string
 }
 
+export type ResearchRunDiagnosticCode =
+  | 'tokens_zero'
+  | 'source_scores_uniform'
+  | 'gap_fill_no_new_sources'
+  | 'high_priority_coverage_zero'
+
+/**
+ * Safe, administrator-facing Run diagnosis. It intentionally excludes source
+ * bodies, raw provider payloads, prompts, provider credentials and storage paths.
+ */
+export interface ResearchRunDiagnosticsDto {
+  run: Pick<ResearchRunDto, 'id' | 'status' | 'phase' | 'profile' | 'depth' | 'createdAt' | 'updatedAt' | 'completedAt' | 'error'>
+  model: {
+    mode: 'llm_backed' | 'legacy_deterministic'
+    selection: ResearchModelSelectionSnapshot | null
+    usage: ResearchUsageDto
+    calls: number
+    inputTokens: number
+    outputTokens: number
+    providerCostUsd: number | null
+    latencyMs: number | null
+    traces: ResearchModelTraceDto[]
+  }
+  queries: {
+    total: number
+    completed: number
+    failed: number
+    resultCount: number
+    items: ResearchSearchQueryDto[]
+  }
+  sources: {
+    sourceTypeCounts: Record<string, number>
+    selected: Array<{
+      id: string
+      queryId: string | null
+      title: string | null
+      canonicalUrl: string
+      domain: string
+      sourceType: string
+      selectionStatus: ResearchSourceDto['selectionStatus']
+      finalScore: number | null
+    }>
+    candidates: Array<{
+      id: string
+      questionId: string
+      queryId: string
+      canonicalUrl: string | null
+      originalUrl: string
+      domain: string
+      title: string
+      category: string
+      scoringMethod: string
+      scoreBreakdown: { relevance: number; authority: number; recency: number; independence: number; fetchability: number; final: number }
+      reasons: string[]
+      rejectionReasons: string[]
+      selectionStatus: 'discovered' | 'selected' | 'rejected'
+    }>
+    rejectedByReason: Record<string, number>
+    scoresAllSame: boolean
+  }
+  fetch: {
+    attempted: number
+    succeeded: number
+    failed: number
+    successRate: number | null
+    snapshots: Array<{
+      sourceId: string
+      finalUrl: string
+      fetchedAt: number
+      httpStatus: number | null
+      parserVersion: string
+      quality: {
+        rawCharacters: number | null
+        mainCharacters: number | null
+        paragraphCount: number | null
+        contentDensity: number | null
+        navigationRatio: number | null
+        duplicateTextRatio: number | null
+        language: string | null
+        readability: number | null
+        rejectionReasons: string[]
+      }
+    }>
+    failures: Array<{ sourceId: string; errorCode: string; rejectionReason: string | null }>
+  }
+  coverage: {
+    highPriorityCoverage: number | null
+    questions: Array<ResearchQuestionDto & { evidenceCount: number }>
+    evidenceCount: number
+    latestAssessment: ResearchCoverageAssessmentDto | null
+  }
+  report: {
+    sections: Array<Pick<ResearchReportSectionDto, 'id' | 'sectionKey' | 'title' | 'status'>>
+    claims: Array<Pick<ResearchClaimDto, 'id' | 'sectionId' | 'kind' | 'importance' | 'verificationStatus' | 'confidence'>>
+    citations: Array<Pick<ResearchCitationDto, 'id' | 'claimId' | 'evidenceId' | 'entailmentStatus' | 'verificationMethod' | 'semanticChecks'>>
+    citationPassRate: number | null
+    quality: ResearchQualityDto | null
+    gateResults: ResearchQualityGateResultDto[]
+  }
+  anomalies: Array<{ code: ResearchRunDiagnosticCode; severity: 'warning'; message: string; details: JsonObject; timestamp: number }>
+}
+
 export interface ResearchRunDetailDto extends ResearchRunDto {
   questions: ResearchQuestionDto[]
   searchQueries: ResearchSearchQueryDto[]

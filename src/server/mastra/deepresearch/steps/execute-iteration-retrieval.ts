@@ -6,6 +6,7 @@ import type { ReturnTypeOfContentService, ReturnTypeOfSearchService } from './ty
 import type { DeepResearchRepositories } from '../workflow-context'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
 import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
+import { recordProductionRunDiagnosticEvents, type ProductionDiagnosticSignal } from '@server/deepresearch/run-diagnostics'
 
 function toJson(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
@@ -140,6 +141,10 @@ export async function executeIterationRetrieval(
     payload: { sourceIds: fetched.filter((outcome) => outcome.status === 'fetched').map((outcome) => outcome.sourceId), fetchedCount: fetched.filter((outcome) => outcome.status === 'fetched').length, failedCount: fetched.filter((outcome) => outcome.status !== 'fetched').length },
   })
   repositories.researchIterationRepo!.update(iteration.id, { executedQueryCount: completed.length, newSourceCount })
+  const diagnosticSignals: ProductionDiagnosticSignal[] = [{ kind: 'gap_fill_no_new_sources', iteration: iteration.ordinal, newSourceCount }]
+  const selectedScores = curated.selected.map((candidate) => candidate.score).filter((score): score is number => Number.isFinite(score))
+  if (selectedScores.length >= 2) diagnosticSignals.push({ kind: 'source_scores_uniform', scores: selectedScores })
+  recordProductionRunDiagnosticEvents(repositories, run, 'gap_filling', diagnosticSignals)
   return { ...input, queryIds: completed.map((query) => query.id), sourceIds, cancelled: isCancellationRequested() }
 }
 

@@ -6,6 +6,7 @@ import type { DeepResearchRepositories } from '../workflow-context'
 import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchAssessment } from '@server/telemetry/metrics'
+import { recordProductionRunDiagnosticEvents } from '@server/deepresearch/run-diagnostics'
 
 const briefSchema = researchBriefSchema
 export const gapLoopStateSchema = z.object({
@@ -72,6 +73,10 @@ export function createAssessCoverageStep({ repositories, evidenceService }: { re
       }
       checkpointWorkflowPhase(repositories, run, 'assessing_coverage', 'gap_filling')
       const updatedQuestions = repositories.researchQuestionRepo.list(run.id)
+      const highPriorityQuestions = updatedQuestions.filter((question) => question.priority === 'high' || question.priority === 'critical')
+      if (highPriorityQuestions.length > 0 && highPriorityQuestions.every((question) => question.status !== 'covered')) {
+        recordProductionRunDiagnosticEvents(repositories, run, 'assessing_coverage', [{ kind: 'high_priority_coverage_zero', questions: updatedQuestions }])
+      }
       return {
         runId: run.id,
         brief: inputData.brief,
