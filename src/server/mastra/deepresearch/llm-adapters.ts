@@ -149,6 +149,84 @@ const SECTION_DRAFT_HEADING_ALIASES: Record<SectionDraftHeading, RegExp[]> = {
   ],
 }
 
+const SECTION_DRAFT_WRAPPER_KEYS = ['draft', 'sectionDraft', 'section', 'result', 'output', 'data', 'response', 'answer'] as const
+const SECTION_DRAFT_MARKDOWN_KEYS = ['bodyMarkdown', 'body_markdown', 'markdown', 'body', 'content', 'text', 'reportMarkdown', 'report'] as const
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()) : []
+}
+
+function firstStringValue(record: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim()
+  }
+  return null
+}
+
+function inferSummaryFromMarkdown(markdown: string): string {
+  const firstLine = markdown
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#{1,6}\s+/, '').replace(/^[-*+]\s+/, '').trim())
+    .find((line) => line.length >= 12)
+  return firstLine?.slice(0, 500) ?? 'The available routed evidence is insufficient for a complete direct answer.'
+}
+
+function normalizeClaimList(value: unknown): SectionDraft['claims'] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const record = recordValue(item)
+    if (!record) return null
+    const text = typeof record.text === 'string' ? record.text.trim() : ''
+    if (!text) return null
+    const kind = ['factual', 'analysis', 'recommendation', 'limitation'].includes(String(record.kind)) ? record.kind : 'limitation'
+    const importance = ['low', 'medium', 'high', 'critical'].includes(String(record.importance)) ? record.importance : 'medium'
+    const confidence = typeof record.confidence === 'number' && Number.isFinite(record.confidence) ? Math.max(0, Math.min(1, record.confidence)) : 0.5
+    return { text, kind, importance, confidence, evidenceIds: stringArrayValue(record.evidenceIds) } as SectionDraft['claims'][number]
+  }).filter((item): item is SectionDraft['claims'][number] => Boolean(item)).slice(0, 32)
+}
+
+function sectionBodyFromStructuredSections(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  const lines: string[] = []
+  for (const item of value) {
+    const record = recordValue(item)
+    if (!record) continue
+    const heading = firstStringValue(record, ['heading', 'title', 'name'])
+    const content = firstStringValue(record, ['content', 'body', 'markdown', 'text'])
+    if (!heading && !content) continue
+    lines.push('### ' + (heading ?? 'Direct answer'))
+    lines.push('')
+    lines.push(content ?? fallbackSectionDraftContent('Direct answer', {}))
+    lines.push('')
+  }
+  return lines.join('\n').trim() || null
+}
+
+function unwrapSectionDraftCandidate(value: unknown, depth = 0): unknown {
+  if (depth > 4) return value
+  if (Array.isArray(value)) return value.length === 1 ? unwrapSectionDraftCandidate(value[0], depth + 1) : value
+  const record = recordValue(value)
+  if (!record) return value
+  if (typeof record.summary === 'string' || typeof record.bodyMarkdown === 'string' || typeof record.body_markdown === 'string') return record
+  for (const key of SECTION_DRAFT_WRAPPER_KEYS) {
+    if (key in record) {
+      const unwrapped = unwrapSectionDraftCandidate(record[key], depth + 1)
+      if (unwrapped !== record[key] || recordValue(unwrapped)) return unwrapped
+    }
+  }
+  if (Array.isArray(record.sections)) {
+    const markdown = sectionBodyFromStructuredSections(record.sections)
+    if (markdown) return { ...record, bodyMarkdown: markdown }
+  }
+  const markdown = firstStringValue(record, SECTION_DRAFT_MARKDOWN_KEYS)
+  return markdown ? { ...record, bodyMarkdown: markdown } : value
+}
+
 function sectionDraftHeadingMatch(line: string): SectionDraftHeading | null {
   const label = line
     .trim()
@@ -226,11 +304,35 @@ function normalizeSectionBodyMarkdown(bodyMarkdown: string, draft: Record<string
 }
 
 function normalizeSectionDraftCandidate(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const draft = value as Record<string, unknown>
-  if (typeof draft.bodyMarkdown !== 'string') return value
-  return { ...draft, bodyMarkdown: normalizeSectionBodyMarkdown(draft.bodyMarkdown, draft) }
+  const unwrapped = unwrapSectionDraftCandidate(value)
+  const draft = recordValue(unwrapped)
+  if (!draft) {
+    if (typeof unwrapped !== 'string' || !unwrapped.trim()) return value
+    const bodyMarkdown = normalizeSectionBodyMarkdown(unwrapped, {})
+    return {
+      summary: inferSummaryFromMarkdown(bodyMarkdown),
+      bodyMarkdown,
+      claims: [],
+      evidenceIds: [],
+      limitations: ['The model returned markdown instead of the requested structured object; the draft was normalized before validation.'],
+      missingEvidence: [],
+    }
+  }
+
+  const rawBodyMarkdown = firstStringValue(draft, SECTION_DRAFT_MARKDOWN_KEYS)
+  if (!rawBodyMarkdown) return unwrapped
+  const bodyMarkdown = normalizeSectionBodyMarkdown(rawBodyMarkdown, draft)
+  return {
+    summary: firstStringValue(draft, ['summary', 'abstract', 'overview']) ?? inferSummaryFromMarkdown(bodyMarkdown),
+    bodyMarkdown,
+    claims: normalizeClaimList(draft.claims),
+    evidenceIds: stringArrayValue(draft.evidenceIds),
+    limitations: stringArrayValue(draft.limitations),
+    missingEvidence: stringArrayValue(draft.missingEvidence),
+  }
 }
+
+const sectionDraftProviderSchema = z.object({}).passthrough()
 
 const sectionDraftShape = z.object({
   summary: z.string().trim().min(1),
@@ -573,10 +675,10 @@ function responseFromStructuredValidationError(error: unknown): ResearchStructur
     : { text: JSON.stringify(value), object: value }
 }
 
-function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLlmGenerateInput, outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>) => Promise<ResearchStructuredGenerated> {
+function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLlmGenerateInput, outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>, providerOutputSchema?: z.ZodType<unknown, z.ZodTypeDef, unknown>) => Promise<ResearchStructuredGenerated> {
   const agents = new Map<ResearchLlmStage, Agent>()
 
-  return async ({ stage, prompt, maxOutputTokens, timeoutMs, signal }, outputSchema) => {
+  return async ({ stage, prompt, maxOutputTokens, timeoutMs, signal }, outputSchema, providerOutputSchema = outputSchema) => {
     throwIfCancellationRequested({ signal })
     let agent = agents.get(stage)
     if (!agent) {
@@ -606,7 +708,7 @@ function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLl
       // Prefer native schema-constrained output. Some OpenAI-compatible and
       // local providers reject response-format APIs, so retry those with the
       // schema injected into the prompt instead.
-      const request = { abortSignal: controller.signal, structuredOutput: { schema: outputSchema } }
+      const request = { abortSignal: controller.signal, structuredOutput: { schema: providerOutputSchema } }
       const normalizeResponse = (response: { text?: string; object?: unknown; totalUsage?: Record<string, unknown> }): ResearchStructuredGenerated => {
         if (response.object === undefined && !response.text?.trim() && responseReachedOutputLimit(response, maxOutputTokens)) {
           throw modelOutputLimitError(stage, maxOutputTokens)
@@ -674,7 +776,7 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
   const testGenerate = options.generate
   const productionGenerate = testGenerate ? null : defaultGenerator(options.model)
 
-  const invoke = async <TOutput>(stage: ResearchLlmStage, instructionText: string, input: Record<string, unknown>, outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>, signal?: AbortSignal): Promise<TOutput> => {
+  const invoke = async <TOutput>(stage: ResearchLlmStage, instructionText: string, input: Record<string, unknown>, outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>, signal?: AbortSignal, providerOutputSchema?: z.ZodType<unknown, z.ZodTypeDef, unknown>): Promise<TOutput> => {
     throwIfCancellationRequested({ signal })
     const output = await invokeResearchStructured({
       stage,
@@ -684,7 +786,7 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
       outputSchema,
       generate: (request) => testGenerate
         ? testGenerate({ ...request, stage })
-        : productionGenerate!({ ...request, stage }, outputSchema),
+        : productionGenerate!({ ...request, stage }, outputSchema, providerOutputSchema),
       limits: RESEARCH_LLM_STAGE_LIMITS[stage],
       signal,
       usageReporter: (entry) => options.usageReporter?.(usage(stage, entry)),
@@ -803,7 +905,7 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
           'Label analysis or inference explicitly as Inference / synthesis judgment (or 推断/综合判断); never present it as a sourced fact.',
           'When evidence is insufficient, say so in bodyMarkdown and populate limitations and missingEvidence rather than inventing a conclusion.',
           'Do not expose evidence UUIDs in bodyMarkdown.',
-        ].join(' '), input as unknown as Record<string, unknown>, sectionDraftSchema, context.signal)
+        ].join(' '), input as unknown as Record<string, unknown>, sectionDraftSchema, context.signal, sectionDraftProviderSchema)
         return output
       },
       async semanticSimilarity(input, context = {}) {

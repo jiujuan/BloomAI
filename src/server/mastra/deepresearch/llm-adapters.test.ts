@@ -419,6 +419,57 @@ it('normalizes translated or missing section draft headings before schema valida
 })
 
 
+it('unwraps common section draft envelopes and fills optional arrays before validation', async () => {
+  const generate = vi.fn(async () => ({
+    text: JSON.stringify({
+      output: {
+        overview: 'Wrapped section output with useful content.',
+        content: '### Direct answer\n\nWrapped section output with useful content.\n\n### Evidence basis\n\nThe draft only uses routed evidence.',
+      },
+    }),
+  }))
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  const result = await adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)
+
+  expect(result).toMatchObject({
+    summary: 'Wrapped section output with useful content.',
+    claims: [],
+    evidenceIds: [],
+    limitations: [],
+    missingEvidence: [],
+  })
+  expect(result.bodyMarkdown).toContain('### Direct answer')
+  expect(result.bodyMarkdown).toContain('### Comparison or classification')
+  expect(result.bodyMarkdown).toContain('### Evidence basis')
+  expect(result.bodyMarkdown).toContain('### Conditions and limitations')
+  expect(generate).toHaveBeenCalledTimes(1)
+})
+
+
+it('uses a loose provider schema for section writing and validates strictly after normalization', async () => {
+  agentGenerate.mockResolvedValueOnce({
+    text: 'The section draft is attached.',
+    object: {
+      draft: {
+        summary: 'A provider-wrapped section draft is normalized.',
+        bodyMarkdown: '### Direct answer\n\nA provider-wrapped section draft is normalized.\n\n### Comparison or classification\n\nNo comparison is required.\n\n### Evidence basis\n\nThe content is bounded to supplied evidence.\n\n### Conditions and limitations\n\nCoverage is limited.',
+      },
+    },
+    totalUsage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+  })
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+  await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)).resolves.toMatchObject({
+    summary: 'A provider-wrapped section draft is normalized.',
+    claims: [],
+  })
+  expect(agentGenerate).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+    structuredOutput: expect.objectContaining({ schema: expect.anything() }),
+  }))
+})
+
+
 it('retries a citation response that omits the required semantic checks', async () => {
   const generate = vi.fn()
     .mockResolvedValueOnce({ text: JSON.stringify({ status: 'supported', rationale: 'Missing checks.' }) })
