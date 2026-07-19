@@ -44,7 +44,7 @@ export interface InvokeResearchStructuredOptions<TInput, TOutput> {
   instruction: string
   input: TInput
   inputSchema: z.ZodType<TInput>
-  outputSchema: z.ZodType<TOutput>
+  outputSchema: z.ZodType<TOutput, z.ZodTypeDef, unknown>
   generate: (input: ResearchStructuredGenerateInput) => Promise<ResearchStructuredGenerated>
   limits: ResearchStructuredLimits
   signal?: AbortSignal

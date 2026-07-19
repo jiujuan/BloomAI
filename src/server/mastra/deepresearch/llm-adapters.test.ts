@@ -398,6 +398,27 @@ it('repairs a malformed section draft before it can bypass the structured writer
 })
 
 
+it('normalizes translated or missing section draft headings before schema validation', async () => {
+  const generate = vi.fn(async () => ({
+    text: JSON.stringify({
+      summary: 'The routed evidence supports a bounded market answer.',
+      bodyMarkdown: '## 直接回答：\n\nThe routed evidence supports a bounded market answer.\n\n## 证据基础：\n\nThe conclusion uses only supplied evidence.\n\n## 局限性：\n\nCoverage remains limited.',
+      claims: [], evidenceIds: ['evidence-1'], limitations: ['Coverage remains limited.'], missingEvidence: [],
+    }),
+  }))
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  const result = await adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)
+
+  expect(result.bodyMarkdown).toMatch(/^### Direct answer[\s\S]*### Comparison or classification[\s\S]*### Evidence basis[\s\S]*### Conditions and limitations/m)
+  expect(result.bodyMarkdown).toContain('The routed evidence supports a bounded market answer.')
+  expect(result.bodyMarkdown).toContain('No additional comparison or classification is available beyond the routed evidence for this section.')
+  expect(result.bodyMarkdown).toContain('The conclusion uses only supplied evidence.')
+  expect(result.bodyMarkdown).toContain('Coverage remains limited.')
+  expect(generate).toHaveBeenCalledTimes(1)
+})
+
+
 it('retries a citation response that omits the required semantic checks', async () => {
   const generate = vi.fn()
     .mockResolvedValueOnce({ text: JSON.stringify({ status: 'supported', rationale: 'Missing checks.' }) })
