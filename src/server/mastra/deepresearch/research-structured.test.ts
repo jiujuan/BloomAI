@@ -41,6 +41,25 @@ describe('invokeResearchStructured', () => {
     }))
   })
 
+  it('accepts a provider-structured object when the companion text is not valid JSON', async () => {
+    const generate = vi.fn(async () => ({
+      text: 'Here is the requested research assessment:',
+      object: { status: 'supported' },
+    }))
+
+    await expect(invokeResearchStructured({
+      stage: 'citation_verification',
+      instruction: 'Return the requested JSON object.',
+      input: { topic: 'AI agents', packets: [] },
+      inputSchema,
+      outputSchema,
+      generate,
+      limits,
+    })).resolves.toEqual({ status: 'supported' })
+
+    expect(generate).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects invalid schema output after its finite repair budget', async () => {
     const generate = vi.fn(async () => ({ text: JSON.stringify({ status: 'unknown' }) }))
 

@@ -18,6 +18,8 @@ export interface ResearchStructuredGenerateInput extends ResearchStructuredLimit
 
 export interface ResearchStructuredGenerated {
   text: string
+  /** Parsed by a provider/framework structured-output mode when available. */
+  object?: unknown
   usage?: Record<string, unknown>
 }
 
@@ -159,26 +161,32 @@ export async function invokeResearchStructured<TInput, TOutput>(options: InvokeR
 
     await options.usageReporter?.(response.usage ?? {})
     const text = response.text?.trim() ?? ''
-    const outputHash = text ? hash(text) : null
+    const structuredOutput = response.object
+    const serializedOutput = structuredOutput === undefined ? text : JSON.stringify(structuredOutput)
+    const outputHash = serializedOutput ? hash(serializedOutput) : null
     let parsed: unknown
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      retryReason = 'invalid_json'
-      await options.traceReporter?.({
-        stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: text.length,
-        durationMs: Date.now() - startedAt, parseStatus: 'invalid_json', retryReason,
-        errorCode: 'RESEARCH_MODEL_INVALID_OUTPUT', errorCategory: 'invalid_structured_output',
-      })
-      if (attempt === maxAttempts) throw invalidOutputError('Expected valid JSON from ' + options.stage)
-      continue
+    if (structuredOutput !== undefined) {
+      parsed = structuredOutput
+    } else {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        retryReason = 'invalid_json'
+        await options.traceReporter?.({
+          stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: serializedOutput.length,
+          durationMs: Date.now() - startedAt, parseStatus: 'invalid_json', retryReason,
+          errorCode: 'RESEARCH_MODEL_INVALID_OUTPUT', errorCategory: 'invalid_structured_output',
+        })
+        if (attempt === maxAttempts) throw invalidOutputError('Expected valid JSON from ' + options.stage)
+        continue
+      }
     }
 
     const output = options.outputSchema.safeParse(parsed)
     if (!output.success) {
       retryReason = 'invalid_schema'
       await options.traceReporter?.({
-        stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: text.length,
+        stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: serializedOutput.length,
         durationMs: Date.now() - startedAt, parseStatus: 'invalid_schema', retryReason,
         errorCode: 'RESEARCH_MODEL_INVALID_OUTPUT', errorCategory: 'invalid_structured_output',
       })
@@ -187,7 +195,7 @@ export async function invokeResearchStructured<TInput, TOutput>(options: InvokeR
     }
 
     await options.traceReporter?.({
-      stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: text.length,
+      stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: serializedOutput.length,
       durationMs: Date.now() - startedAt, parseStatus: 'valid', retryReason: null, errorCode: null, errorCategory: null,
     })
     return output.data

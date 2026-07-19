@@ -204,10 +204,10 @@ function modelTimeoutError(stage: ResearchLlmStage, cause: unknown): Error {
   )
 }
 
-function defaultGenerator(model: MastraModelConfig): (input: ResearchLlmGenerateInput) => Promise<ResearchStructuredGenerated> {
+function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLlmGenerateInput, outputSchema: z.ZodType<TOutput>) => Promise<ResearchStructuredGenerated> {
   const agents = new Map<ResearchLlmStage, Agent>()
 
-  return async ({ stage, prompt, maxOutputTokens, timeoutMs, signal }) => {
+  return async ({ stage, prompt, maxOutputTokens, timeoutMs, signal }, outputSchema) => {
     throwIfCancellationRequested({ signal })
     let agent = agents.get(stage)
     if (!agent) {
@@ -230,7 +230,21 @@ function defaultGenerator(model: MastraModelConfig): (input: ResearchLlmGenerate
       controller.abort()
     }, timeoutMs)
     try {
-      return await agent.generate(prompt, { abortSignal: controller.signal }) as unknown as ResearchStructuredGenerated
+      // Prefer native schema-constrained output. Some OpenAI-compatible and
+      // local providers reject response-format APIs, so retry those with the
+      // schema injected into the prompt instead.
+      const request = { abortSignal: controller.signal, structuredOutput: { schema: outputSchema } }
+      let response
+      try {
+        response = await agent.generate(prompt, request)
+        if (response.object === undefined) throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
+      } catch {
+        response = await agent.generate(prompt, {
+          ...request,
+          structuredOutput: { ...request.structuredOutput, jsonPromptInjection: true },
+        })
+      }
+      return { text: response.text, object: response.object, usage: response.totalUsage }
     } catch (error) {
       if (timedOut && !signal?.aborted) throw modelTimeoutError(stage, error)
       throw error
@@ -255,7 +269,8 @@ function usage(stage: ResearchLlmStage, input: Record<string, unknown>): Researc
 }
 
 export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdaptersOptions): LlmDeepResearchAdapters {
-  const generate = options.generate ?? defaultGenerator(options.model)
+  const testGenerate = options.generate
+  const productionGenerate = testGenerate ? null : defaultGenerator(options.model)
 
   const invoke = async <TOutput>(stage: ResearchLlmStage, instructionText: string, input: Record<string, unknown>, outputSchema: z.ZodType<TOutput>, signal?: AbortSignal): Promise<TOutput> => {
     throwIfCancellationRequested({ signal })
@@ -265,7 +280,9 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
       input,
       inputSchema: objectInputSchema,
       outputSchema,
-      generate: (request) => generate({ ...request, stage }),
+      generate: (request) => testGenerate
+        ? testGenerate({ ...request, stage })
+        : productionGenerate!({ ...request, stage }, outputSchema),
       limits: RESEARCH_LLM_STAGE_LIMITS[stage],
       signal,
       usageReporter: (entry) => options.usageReporter?.(usage(stage, entry)),

@@ -1,6 +1,24 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MastraModelConfig } from '@mastra/core/llm'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
+
+const { agentGenerate, agentOptions } = vi.hoisted(() => ({
+  agentGenerate: vi.fn(),
+  agentOptions: vi.fn(),
+}))
+
+vi.mock('@mastra/core/agent', () => ({
+  Agent: class {
+    constructor(options: unknown) {
+      agentOptions(options)
+    }
+
+    generate(...args: unknown[]) {
+      return agentGenerate(...args)
+    }
+  },
+}))
+
 import { createLlmDeepResearchAdapters, RESEARCH_LLM_STAGE_LIMITS } from './llm-adapters'
 
 const run: ResearchRunDto = {
@@ -35,6 +53,45 @@ function validBrief(topic = run.topic) {
 }
 
 describe('createLlmDeepResearchAdapters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('requests provider-validated structured output for production model calls', async () => {
+    agentGenerate.mockResolvedValueOnce({
+      text: 'The structured response is attached.',
+      object: validBrief(),
+      totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+    })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic })
+
+    expect(agentGenerate).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      structuredOutput: expect.objectContaining({
+        schema: expect.anything(),
+      }),
+    }))
+  })
+
+  it('falls back to an injected JSON schema when native structured output is unavailable', async () => {
+    agentGenerate
+      .mockRejectedValueOnce(new Error('response format is unsupported'))
+      .mockResolvedValueOnce({
+        text: 'The structured response is attached.',
+        object: validBrief(),
+        totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+      })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    await expect(adapters.planner.plan(run)).resolves.toMatchObject({ title: run.topic })
+
+    expect(agentGenerate).toHaveBeenCalledTimes(2)
+    expect(agentGenerate.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      structuredOutput: expect.objectContaining({ jsonPromptInjection: true }),
+    }))
+  })
+
   it('uses a model-bound generator and reports its token usage', async () => {
     const usageReporter = vi.fn()
     const generate = vi.fn(async () => ({
