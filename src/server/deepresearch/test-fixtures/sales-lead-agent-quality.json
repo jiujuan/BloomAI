@@ -1,0 +1,36 @@
+{
+  "topic": "Market and sales lead intelligence agent：产品类别、技术栈、代表能力与限制",
+  "copyright": "All text is original synthetic test content. No external page body is stored in this repository.",
+  "queryContext": {
+    "queryId": "sales-lead-agent-overview",
+    "questionId": "question-sales-lead-agent",
+    "question": "What are the product categories, technical stack, representative capabilities, and deployment limits of market and sales lead intelligence agents?",
+    "plannedQuery": "market sales lead intelligence agent product categories technical stack capabilities limitations official documentation research",
+    "sourceTargets": ["product documentation", "industry association data", "independent research"],
+    "needPrimarySource": true,
+    "needQuantitativeEvidence": true
+  },
+  "candidates": [
+    { "id": "official-product", "url": "https://product.fixture.example/sales-lead-agent", "title": "Sales lead intelligence product overview", "snippet": "Official product category, lead scoring workflow, CRM integration, audit trail, and documented limits.", "expectedCuration": "selected" },
+    { "id": "official-documentation", "url": "https://docs.fixture.example/sales-lead-agent/architecture", "title": "Sales lead agent architecture documentation", "snippet": "Official documentation for retrieval, CRM connectors, human approval, and data provenance.", "expectedCuration": "selected" },
+    { "id": "industry-research", "url": "https://association.fixture.org/research/sales-lead-agent", "title": "Sales lead agent adoption research methodology", "snippet": "Industry association survey of sales lead intelligence adoption, measurement method, and limitations.", "expectedCuration": "selected" },
+    { "id": "independent-research", "url": "https://research.fixture.example/sales-lead-agent-study", "title": "Independent sales lead agent evaluation", "snippet": "Independent evaluation of product categories, technical trade-offs, representative capabilities, and failure modes.", "expectedCuration": "selected" },
+    { "id": "generic-news", "url": "https://news.fixture.example/general-ai-roundup", "title": "Celebrity garden festival roundup", "snippet": "A celebrity garden festival, weather summary, and travel headlines without business research evidence.", "expectedCuration": "not_relevant" },
+    { "id": "duplicate-product", "url": "https://product.fixture.example/sales-lead-agent?utm_source=fixture", "title": "Sales lead intelligence product overview mirror", "snippet": "Duplicate official product result for sales lead intelligence.", "expectedCuration": "duplicate" },
+    { "id": "navigation-noise", "url": "https://portal.fixture.example/sales-lead-agent/navigation", "title": "Sales lead agent documentation portal", "snippet": "Sales lead agent product portal with navigation and account links.", "expectedCuration": "selected" },
+    { "id": "captcha-page", "url": "https://protected.fixture.example/sales-lead-agent/report", "title": "Sales lead agent research report", "snippet": "Sales lead agent research report subject to access protection.", "expectedCuration": "selected" },
+    { "id": "short-page", "url": "https://short.fixture.example/sales-lead-agent", "title": "Sales lead agent note", "snippet": "A short sales lead agent note.", "expectedCuration": "selected" }
+  ],
+  "documents": [
+    { "candidateId": "official-product", "title": "Sales lead intelligence product overview", "text": "<article><p>This synthetic official product page describes a sales lead intelligence agent as a product category that combines account records, buyer signals, qualification rules, and representative review queues. It documents that sales teams can inspect each recommendation before sending an outreach action.</p><p>The fixture capability set includes CRM synchronization, lead scoring explanations, account research summaries, configurable approval steps, and an audit trail. It also states that incomplete CRM data or missing consent should block automated enrichment rather than create a confident recommendation.</p></article>", "expectedRejection": null },
+    { "candidateId": "official-documentation", "title": "Sales lead agent architecture documentation", "text": "<article><p>This synthetic technical documentation explains that the sales lead agent uses retrieval over approved CRM objects and connector responses, then records the sources used for each proposed lead action. The integration boundary keeps source provenance and consent status attached to a recommendation.</p><p>The document describes human approval, rate limits, connector failure handling, and a policy that suppresses actions when account identity is uncertain. These constraints are included to test that a report can discuss both technical stack and operational limits.</p></article>", "expectedRejection": null },
+    { "candidateId": "industry-research", "title": "Sales lead agent adoption research methodology", "text": "<article><p>This synthetic association study describes its survey population, collection period, and response limitations for organizations evaluating sales lead intelligence agents. It reports that teams compare measurable workflow fit, data governance, and integration effort rather than treating agent output as an independent source of truth.</p><p>The study records a fictional adoption observation of 65 percent for a defined sample. It cautions that the observation should not be generalized beyond that sample and that implementation quality changes the result.</p></article>", "expectedRejection": null },
+    { "candidateId": "independent-research", "title": "Independent sales lead agent evaluation", "text": "<article><p>This synthetic independent evaluation compares sales lead intelligence product categories, retrieval-based architecture, scoring explanations, and representative workflows. It finds that visible sources and review controls help buyers assess a recommendation, while opaque scoring can make prioritization difficult to audit.</p><p>The evaluation records a conflicting fictional observation of 48 percent for a differently defined sample. It recommends preserving the methodological difference rather than averaging incompatible figures, and lists data freshness, consent, and CRM coverage as deployment limits.</p></article>", "expectedRejection": null },
+    { "candidateId": "navigation-noise", "title": "Sales lead agent documentation portal", "text": "<header>Products Documentation Solutions Pricing Sign in Support Privacy Policy Terms Contact Search Menu </header><nav>Sales lead agent CRM product documentation navigation account settings help center </nav><article><p>A single short portal sentence is present.</p></article><footer>Privacy Policy Terms Contact Cookie settings</footer>", "expectedRejection": "navigation_heavy" },
+    { "candidateId": "captcha-page", "title": "Sales lead agent research report", "text": "Please complete the CAPTCHA security check to continue.", "expectedRejection": "captcha" },
+    { "candidateId": "short-page", "title": "Sales lead agent note", "text": "Sales lead agents can rank accounts.", "expectedRejection": "too_short" }
+  ],
+  "expectedConflicts": [
+    { "left": "65 percent", "right": "48 percent", "candidateIds": ["industry-research", "independent-research"] }
+  ]
+}
