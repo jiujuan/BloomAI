@@ -81,6 +81,33 @@ describe('createDraftSectionsStep', () => {
   })
 
 
+  it('fills limitations and missing evidence for evidence-insufficient sections before saving', async () => {
+    const bodyMarkdown = '### Direct answer\n\nThe available routed evidence is insufficient to answer this section.\n\n### Comparison or classification\n\nNo reliable comparison can be made without section-specific evidence.\n\n### Evidence basis\n\nNo qualifying evidence passage was routed to this section.\n\n### Conditions and limitations\n\nThe section must be treated as evidence-insufficient.'
+    const writer = { draft: vi.fn(async () => ({ summary: 'Insufficient evidence', bodyMarkdown, claims: [], evidenceIds: [], limitations: [], missingEvidence: [] })) }
+    const updateSection = vi.fn()
+    const repositories = {
+      researchRunRepo: { get: vi.fn(() => run) },
+      researchReportRepo: { listSections: vi.fn(() => [section]), updateSection, listQuestionIdsForSection: vi.fn(() => []) },
+      researchQuestionRepo: { list: vi.fn(() => questions) },
+      researchEvidenceRepo: { list: vi.fn(() => evidence) },
+      researchEventRepo: { append: vi.fn() },
+    } as any
+    const step = createDraftSectionsStep({ repositories, writer: writer as any })
+
+    await (step as any).execute({ inputData: { runId: run.id, sectionId: section.id } })
+
+    expect(updateSection).toHaveBeenCalledWith(section.id, expect.objectContaining({
+      draft: expect.stringContaining('Limitation: No qualifying routed evidence was available for this section.'),
+      draftPayload: expect.objectContaining({
+        limitations: ['No qualifying routed evidence was available for this section.'],
+        missingEvidence: ['Section-specific evidence for this section'],
+        bodyMarkdown: expect.stringContaining('Missing evidence: Section-specific evidence for this section'),
+      }),
+      status: 'drafted',
+    }))
+  })
+
+
   it('rewrites a later section when its body is too similar to an earlier drafted section', async () => {
     const earlier = { ...section, id: 'section-earlier', title: 'market-definition', draft: '### Direct answer\n\nThe market is defined by routed evidence.\n\n### Comparison or classification\n\nThe market is classified by routed evidence.\n\n### Evidence basis\n\nEvidence supports the conclusion.\n\n### Conditions and limitations\n\nCoverage is limited.', status: 'drafted' as const }
     const duplicate = earlier.draft!

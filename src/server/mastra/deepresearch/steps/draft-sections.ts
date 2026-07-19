@@ -46,7 +46,31 @@ function isControlledSection(sectionKey: string | null | undefined): boolean {
   return sectionKey === 'scope-and-method' || sectionKey === 'references'
 }
 
-function validateDraft(draft: SectionDraft, allowedEvidenceIds: Set<string>, sectionKey?: string | null): SectionDraft {
+function appendInsufficientEvidenceDisclosure(bodyMarkdown: string, limitation: string, missingEvidence: string): string {
+  const disclosure = 'Limitation: ' + limitation + '\n\nMissing evidence: ' + missingEvidence
+  const conditions = headingContent(bodyMarkdown, 'Conditions and limitations')
+  if (conditions.includes(limitation) && conditions.includes(missingEvidence)) return bodyMarkdown
+  return bodyMarkdown.trimEnd() + '\n\n' + disclosure
+}
+
+function normalizeEvidenceInsufficientDraft(draft: SectionDraft, allowedEvidenceIds: Set<string>, sectionKey?: string | null): SectionDraft {
+  if (allowedEvidenceIds.size > 0 || isControlledSection(sectionKey)) return draft
+  const hasLimitations = draft.limitations.length > 0
+  const hasMissingEvidence = draft.missingEvidence.length > 0
+  const limitations = hasLimitations ? draft.limitations : ['No qualifying routed evidence was available for this section.']
+  const missingEvidence = hasMissingEvidence ? draft.missingEvidence : ['Section-specific evidence for ' + (sectionKey?.trim() || 'this section')]
+  return {
+    ...draft,
+    limitations,
+    missingEvidence,
+    bodyMarkdown: !hasLimitations || !hasMissingEvidence
+      ? appendInsufficientEvidenceDisclosure(draft.bodyMarkdown, limitations[0]!, missingEvidence[0]!)
+      : draft.bodyMarkdown,
+  }
+}
+
+function validateDraft(rawDraft: SectionDraft, allowedEvidenceIds: Set<string>, sectionKey?: string | null): SectionDraft {
+  const draft = normalizeEvidenceInsufficientDraft(rawDraft, allowedEvidenceIds, sectionKey)
   const checkIds = (ids: string[], label: string) => {
     if (ids.some((id) => !allowedEvidenceIds.has(id))) throw new ResearchDomainError('RESEARCH_VALIDATION_ERROR', 'Section draft referenced out-of-scope evidence.', false, { label })
     return [...new Set(ids)]
