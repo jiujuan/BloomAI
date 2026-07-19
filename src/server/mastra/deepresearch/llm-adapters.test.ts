@@ -78,6 +78,92 @@ describe('createLlmDeepResearchAdapters', () => {
     }))
   })
 
+  it('normalizes brief questions when the model returns structured text-shaped question items', async () => {
+    agentGenerate.mockResolvedValueOnce({
+      text: 'The structured response is attached.',
+      object: {
+        title: run.topic,
+        objective: run.topic,
+        audience: null,
+        scope: 'Global enterprise market',
+        definition: 'A topic-specific research category.',
+        timeframe: '2024–2026',
+        geography: 'Global',
+        deliverables: ['Research report'],
+        assumptions: ['Public sources only'],
+        plannedSections: ['market-definition'],
+        questions: [
+          { text: `How should ${run.topic} be defined and bounded?` },
+          `Which vendors and alternatives are relevant to ${run.topic}?`,
+        ],
+        criticalClarifications: [],
+      },
+      totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+    })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    const brief = await adapters.planner.plan(run)
+
+    expect(brief.questions).toHaveLength(5)
+    expect(brief.questions?.[0]).toMatchObject({
+      question: expect.stringContaining(run.topic),
+      intent: expect.any(String),
+      priority: expect.any(String),
+      needPrimarySource: expect.any(Boolean),
+      needRecentSource: expect.any(Boolean),
+      needQuantitativeEvidence: expect.any(Boolean),
+      sourceTargets: expect.any(Array),
+    })
+  })
+
+  it('normalizes brief questions when the model returns a numbered text block', async () => {
+    agentGenerate.mockResolvedValueOnce({
+      text: 'The structured response is attached.',
+      object: {
+        title: run.topic,
+        objective: run.topic,
+        audience: null,
+        scope: 'Global enterprise market',
+        definition: 'A topic-specific research category.',
+        timeframe: '2024–2026',
+        geography: 'Global',
+        deliverables: 'Research report',
+        assumptions: 'Public sources only',
+        plannedSections: 'market-definition; market-and-competition',
+        questions: [
+          '1. Which product categories and boundaries define Enterprise AI assistant market?',
+          '2. Which vendors and alternatives are most relevant to Enterprise AI assistant market?',
+        ].join('\n'),
+        criticalClarifications: null,
+      },
+      totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+    })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    const brief = await adapters.planner.plan(run)
+
+    expect(brief.questions).toHaveLength(5)
+    expect(brief.questions?.[0]).toMatchObject({
+      question: 'Which product categories and boundaries define Enterprise AI assistant market?',
+      intent: expect.any(String),
+      needRecentSource: expect.any(Boolean),
+      sourceTargets: expect.any(Array),
+    })
+    expect(brief.plannedSections).toEqual(expect.arrayContaining(['market-definition', 'market-and-competition']))
+  })
+
+  it('uses a deterministic topic-bound brief when brief planning returns non-json text twice', async () => {
+    const generate = vi.fn(async () => ({ text: 'Here are several research subtopics in plain text instead of JSON.' }))
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+    const brief = await adapters.planner.plan(run)
+
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(brief).toMatchObject({ title: run.topic, criticalClarifications: [] })
+    expect(brief.questions).toHaveLength(7)
+    expect(brief.questions?.every((question) => typeof question.needPrimarySource === 'boolean')).toBe(true)
+  })
+
   it('falls back to an injected JSON schema when native structured output is unavailable', async () => {
     agentGenerate
       .mockRejectedValueOnce(new Error('response format is unsupported'))

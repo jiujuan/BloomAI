@@ -2,7 +2,8 @@ import { Agent } from '@mastra/core/agent'
 import type { MastraModelConfig } from '@mastra/core/llm'
 import { z } from 'zod'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
-import type { BriefPlan, BriefPlanner } from './agents/brief-planner'
+import { createTopicBoundQuestionPlans, type BriefPlan, type BriefPlanner, type BriefQuestionPlan, type BriefClarificationPlan } from './agents/brief-planner'
+import { getResearchProfilePolicy } from '@server/deepresearch/domain/profiles'
 import type { QueryPlanner, PlannedResearchQuery } from './agents/query-planner'
 import type { EvidenceAnalyst, EvidenceAnalysis } from '@server/services/deepresearch/evidence-service'
 import type { GapAnalyst, FollowUpResearchQuery } from './agents/gap-analyst'
@@ -13,6 +14,7 @@ import type { CitationVerifier, CitationVerification } from './agents/citation-v
 import type { ReportCritic, RepairInstruction } from './agents/report-critic'
 import type { ReportTranslator } from './agents/report-translator'
 import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
+import { logWarning } from '@server/logger/logger'
 import {
   invokeResearchStructured,
   type ResearchStructuredGenerateInput,
@@ -38,10 +40,10 @@ export interface ResearchLlmStageLimits {
 
 /** Per-stage budgets prevent any one research step from issuing an unbounded model request. */
 export const RESEARCH_LLM_STAGE_LIMITS: Record<ResearchLlmStage, ResearchLlmStageLimits> = {
-  brief_planning: { timeoutMs: 120_000, maxOutputTokens: 12_000 },
-  query_planning: { timeoutMs: 90_000, maxOutputTokens: 4_400 },
+  brief_planning: { timeoutMs: 300_000, maxOutputTokens: 18_000 },
+  query_planning: { timeoutMs: 180_000, maxOutputTokens: 8_600 },
   evidence_analysis: { timeoutMs: 60_000, maxOutputTokens: 2_400 },
-  gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 1_200 },
+  gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 2_200 },
   section_writing: { timeoutMs: 75_000, maxOutputTokens: 3_000 },
   claim_extraction: { timeoutMs: 45_000, maxOutputTokens: 2_000 },
   citation_verification: { timeoutMs: 35_000, maxOutputTokens: 800 },
@@ -187,15 +189,217 @@ const briefQuestionPlanSchema = z.object({
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['sourceTargets'], message: 'High-priority questions require source targets.' })
   }
 })
+const briefClarificationPlanSchema = z.object({
+  question: z.string().trim().min(1),
+  intent: z.string().trim().min(1),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  requiredEvidenceTypes: z.array(z.string().trim().min(1)),
+})
 const briefPlanSchema = z.object({
   title: z.string().trim().min(1), objective: z.string().trim().min(1).nullable(), audience: z.string().trim().min(1).nullable(),
   scope: z.string().trim().min(1), definition: z.string().trim().min(1).nullable(), timeframe: z.string().trim().min(1).nullable(), geography: z.string().trim().min(1).nullable(),
   deliverables: z.array(z.string().trim().min(1)).min(1), assumptions: z.array(z.string().trim().min(1)).min(1), plannedSections: z.array(z.string().trim().min(1)).min(1),
   questions: z.array(briefQuestionPlanSchema).min(5).max(10),
-  criticalClarifications: z.array(z.object({
-    question: z.string().trim().min(1), intent: z.string().trim().min(1), priority: z.enum(['low', 'medium', 'high', 'critical']), requiredEvidenceTypes: z.array(z.string().trim().min(1)),
-  })),
+  criticalClarifications: z.array(briefClarificationPlanSchema),
 })
+
+const briefPlanModelSchema = z.object({
+  title: z.unknown().optional(),
+  objective: z.unknown().optional(),
+  audience: z.unknown().optional(),
+  scope: z.unknown().optional(),
+  definition: z.unknown().optional(),
+  timeframe: z.unknown().optional(),
+  geography: z.unknown().optional(),
+  deliverables: z.unknown().optional(),
+  assumptions: z.unknown().optional(),
+  plannedSections: z.unknown().optional(),
+  questions: z.unknown().optional(),
+  criticalClarifications: z.unknown().optional(),
+}).passthrough()
+
+type BriefPlanModelOutput = z.infer<typeof briefPlanModelSchema>
+type BriefPlanNormalization = { plan: BriefPlan; repairedQuestionCount: number; fallbackQuestionCount: number }
+
+const BRIEF_QUESTION_TEXT_KEYS = ['question', 'researchQuestion', 'text', 'title', 'subtopic', 'topic', 'query'] as const
+const BRIEF_STRING_ARRAY_KEYS = ['sourceTargets', 'sources', 'source_types', 'requiredEvidenceTypes', 'evidenceTargets'] as const
+const BRIEF_PRIORITIES = new Set(['low', 'medium', 'high', 'critical'])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function textList(value: string): string[] {
+  return value
+    .split(/\r?\n|[;；]/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)、]|[（(]\d+[）)])\s*/, '').trim())
+    .filter(Boolean)
+}
+
+function unknownList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    const items = textList(value)
+    return items.length > 1 ? items : value.trim() ? [value.trim()] : []
+  }
+  if (isRecord(value)) {
+    for (const key of ['items', 'questions', 'values', 'list']) {
+      const nested = unknownList(value[key])
+      if (nested.length) return nested
+    }
+  }
+  return []
+}
+
+function stringArray(value: unknown, fallback: string[] = [], maximum = 8): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? textList(value)
+      : []
+  const items = raw
+    .map((item) => typeof item === 'string' ? item.trim() : '')
+    .filter(Boolean)
+  const unique = [...new Set(items.length ? items : fallback)]
+  return unique.slice(0, maximum)
+}
+
+function firstRecordString(value: unknown, keys: readonly string[]): string | null {
+  if (!isRecord(value)) return null
+  for (const key of keys) {
+    const text = optionalString(value[key])
+    if (text) return text
+  }
+  return null
+}
+
+function firstRecordStringArray(value: unknown, keys: readonly string[], fallback: string[]): string[] {
+  if (!isRecord(value)) return fallback
+  for (const key of keys) {
+    const items = stringArray(value[key], [], 8)
+    if (items.length) return items
+  }
+  return fallback
+}
+
+function recordBoolean(value: unknown, key: string, fallback: boolean): boolean {
+  if (!isRecord(value)) return fallback
+  const raw = value[key]
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'string') {
+    const text = raw.trim().toLowerCase()
+    if (['true', 'yes', 'y', '1', '需要', '是'].includes(text)) return true
+    if (['false', 'no', 'n', '0', '不需要', '否'].includes(text)) return false
+  }
+  return fallback
+}
+
+function recordString(value: unknown, key: string, fallback: string): string {
+  const text = isRecord(value) ? optionalString(value[key]) : null
+  return text ?? fallback
+}
+
+function recordPriority(value: unknown, fallback: BriefQuestionPlan['priority']): BriefQuestionPlan['priority'] {
+  const text = isRecord(value) ? optionalString(value.priority)?.toLowerCase() : null
+  return text && BRIEF_PRIORITIES.has(text) ? text as BriefQuestionPlan['priority'] : fallback
+}
+
+function normalizeBriefQuestion(value: unknown, fallback: BriefQuestionPlan): { question: BriefQuestionPlan; repaired: boolean } {
+  const parsed = briefQuestionPlanSchema.safeParse(value)
+  if (parsed.success) return { question: parsed.data, repaired: false }
+
+  const text = typeof value === 'string' && value.trim()
+    ? value.trim()
+    : firstRecordString(value, BRIEF_QUESTION_TEXT_KEYS)
+  const sourceTargets = firstRecordStringArray(value, BRIEF_STRING_ARRAY_KEYS, fallback.sourceTargets)
+  const repaired: BriefQuestionPlan = {
+    question: text && text.length >= 12 ? text : fallback.question,
+    intent: recordString(value, 'intent', fallback.intent),
+    priority: recordPriority(value, fallback.priority),
+    sectionKey: recordString(value, 'sectionKey', recordString(value, 'section', fallback.sectionKey)),
+    questionType: recordString(value, 'questionType', recordString(value, 'type', fallback.questionType)),
+    needPrimarySource: recordBoolean(value, 'needPrimarySource', fallback.needPrimarySource),
+    needRecentSource: recordBoolean(value, 'needRecentSource', fallback.needRecentSource),
+    needQuantitativeEvidence: recordBoolean(value, 'needQuantitativeEvidence', fallback.needQuantitativeEvidence),
+    sourceTargets: sourceTargets.length ? sourceTargets : fallback.sourceTargets,
+  }
+  return { question: briefQuestionPlanSchema.parse(repaired), repaired: true }
+}
+
+function normalizeBriefQuestions(run: ResearchRunDto, rawQuestions: unknown): { questions: BriefQuestionPlan[]; repairedQuestionCount: number; fallbackQuestionCount: number } {
+  const fallbackQuestions = createTopicBoundQuestionPlans(run).slice(0, 10)
+  const rawItems = unknownList(rawQuestions)
+  const normalized = rawItems.slice(0, 10).map((value, index) => normalizeBriefQuestion(value, fallbackQuestions[index] ?? fallbackQuestions[index % fallbackQuestions.length]!))
+  const seen = new Set(normalized.map((item) => item.question.question.toLowerCase()))
+  let fallbackQuestionCount = 0
+  for (const fallback of fallbackQuestions) {
+    if (normalized.length >= 5) break
+    const key = fallback.question.toLowerCase()
+    if (seen.has(key)) continue
+    normalized.push({ question: fallback, repaired: false })
+    seen.add(key)
+    fallbackQuestionCount += 1
+  }
+  return {
+    questions: normalized.map((item) => item.question),
+    repairedQuestionCount: normalized.filter((item) => item.repaired).length,
+    fallbackQuestionCount,
+  }
+}
+
+function fallbackBriefPlan(run: ResearchRunDto): BriefPlan {
+  const questions = createTopicBoundQuestionPlans(run).slice(0, 10)
+  const policy = getResearchProfilePolicy(run.profile)
+  return briefPlanSchema.parse({
+    title: run.topic,
+    objective: run.brief?.objective ?? 'Research ' + run.topic,
+    audience: run.brief?.audience ?? null,
+    scope: 'Research scope for ' + run.topic + ' using public, source-verifiable information.',
+    definition: 'Working definition and boundaries for ' + run.topic + '.',
+    timeframe: 'Recent public information available at research time.',
+    geography: 'Global unless the topic implies a narrower geography.',
+    deliverables: ['Research report'],
+    assumptions: ['Use public, source-verifiable information and label uncertainty explicitly.'],
+    plannedSections: [...new Set([...policy.requiredSections, ...questions.map((question) => question.sectionKey)])],
+    questions,
+    criticalClarifications: [],
+  })
+}
+
+function normalizeBriefPlan(run: ResearchRunDto, candidate: BriefPlanModelOutput): BriefPlanNormalization {
+  const fallback = fallbackBriefPlan(run)
+  const { questions, repairedQuestionCount, fallbackQuestionCount } = normalizeBriefQuestions(run, candidate.questions)
+  const plannedSections = [...new Set([
+    ...stringArray(candidate.plannedSections, [], 12),
+    ...questions.map((question) => question.sectionKey),
+  ])]
+  const plan = briefPlanSchema.parse({
+    title: optionalString(candidate.title) ?? fallback.title,
+    objective: optionalString(candidate.objective) ?? fallback.objective,
+    audience: optionalString(candidate.audience),
+    scope: optionalString(candidate.scope) ?? fallback.scope,
+    definition: optionalString(candidate.definition) ?? fallback.definition,
+    timeframe: optionalString(candidate.timeframe) ?? fallback.timeframe,
+    geography: optionalString(candidate.geography) ?? fallback.geography,
+    deliverables: stringArray(candidate.deliverables, fallback.deliverables ?? [], 8),
+    assumptions: stringArray(candidate.assumptions, fallback.assumptions, 12),
+    plannedSections: plannedSections.length ? plannedSections : fallback.plannedSections,
+    questions,
+    criticalClarifications: unknownList(candidate.criticalClarifications)
+      .map((item) => briefClarificationPlanSchema.safeParse(item))
+      .filter((result): result is z.SafeParseSuccess<BriefClarificationPlan> => result.success)
+      .map((result) => result.data),
+  })
+  return { plan, repairedQuestionCount, fallbackQuestionCount }
+}
+
+function isModelInvalidOutputError(error: unknown): boolean {
+  return hasErrorCode(error, 'RESEARCH_MODEL_INVALID_OUTPUT')
+}
 
 function modelTimeoutError(stage: ResearchLlmStage, cause: unknown): Error {
   return Object.assign(
@@ -393,19 +597,43 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
   return {
     planner: {
       async plan(run, context = {}) {
-        return await invoke('brief_planning', [
-          'Return a JSON research brief with title, objective, audience, scope, definition, timeframe, geography, deliverables, assumptions, plannedSections, questions, and criticalClarifications.',
-          'Generate 5 to 10 complementary questions bound to the topic semantics. Every question must name a research decision, include a stable sectionKey and questionType, source needs, and concrete sourceTargets.',
-          'Use the profile as a minimum structural guardrail only. Never emit an internal category label by itself as a user-visible question or query.',
-          'For a broad topic, choose reasonable defaults, record them in assumptions, and continue. Ask a critical clarification only when meaningful research is impossible without it.',
-          'High-priority and critical questions must have at least one source target. Ensure definition, market/data, product/technical, and risk questions have distinct text and section keys when they are relevant.',
-        ].join(' '), {
-          topic: run.topic,
-          profile: run.profile,
-          depth: run.depth,
-          objective: run.brief?.objective ?? null,
-          existingBrief: run.brief ?? null,
-        }, briefPlanSchema, context.signal) as BriefPlan
+        try {
+          const candidate = await invoke('brief_planning', [
+            'Return exactly one JSON object for a research brief. Do not return Markdown, bullets, prose, or a JSON string.',
+            'Top-level keys: title, objective, audience, scope, definition, timeframe, geography, deliverables, assumptions, plannedSections, questions, criticalClarifications.',
+            'questions must be an array of 5 to 10 JSON objects, not strings. Every question object must include exactly these fields: question, intent, priority, sectionKey, questionType, needPrimarySource, needRecentSource, needQuantitativeEvidence, sourceTargets.',
+            'priority must be low, medium, high, or critical. The three need* fields must be booleans. sourceTargets must be a non-empty string array for high/critical questions.',
+            'Use the profile as a minimum structural guardrail only. Never emit an internal category label by itself as a user-visible question or query.',
+            'For a broad topic, choose reasonable defaults, record them in assumptions, and continue. Ask a critical clarification only when meaningful research is impossible without it.',
+          ].join(' '), {
+            topic: run.topic,
+            profile: run.profile,
+            depth: run.depth,
+            objective: run.brief?.objective ?? null,
+            existingBrief: run.brief ?? null,
+          }, briefPlanModelSchema, context.signal)
+          const normalized = normalizeBriefPlan(run, candidate)
+          if (normalized.repairedQuestionCount > 0 || normalized.fallbackQuestionCount > 0) {
+            logWarning('deep-research.brief-normalization', 'Deep Research brief model output was normalized to the required question schema.', {
+              runId: run.id,
+              stage: 'brief_planning',
+              repairedQuestionCount: normalized.repairedQuestionCount,
+              fallbackQuestionCount: normalized.fallbackQuestionCount,
+              questionCount: normalized.plan.questions?.length ?? 0,
+            })
+          }
+          return normalized.plan
+        } catch (error) {
+          if (!isModelInvalidOutputError(error)) throw error
+          const fallback = fallbackBriefPlan(run)
+          logWarning('deep-research.brief-fallback', 'Deep Research brief model output was not valid JSON/schema; using a deterministic topic-bound brief.', {
+            runId: run.id,
+            stage: 'brief_planning',
+            errorCode: 'RESEARCH_MODEL_INVALID_OUTPUT',
+            questionCount: fallback.questions?.length ?? 0,
+          })
+          return fallback
+        }
       },
     },
     queryPlanner: {
