@@ -71,7 +71,7 @@ function errorCategory(error: unknown): ResearchStructuredTrace['errorCategory']
   const message = error instanceof Error ? error.message : String(error)
   if (code === 'RESEARCH_MODEL_TIMEOUT' || /timeout|timed out/i.test(message)) return 'timeout'
   if (code === '429' || /rate.?limit/i.test(message)) return 'rate_limit'
-  if (code === 'RESEARCH_MODEL_OUTPUT_LIMIT' || code === 'RESEARCH_MODEL_INVALID_OUTPUT') return 'invalid_structured_output'
+  if (code === 'RESEARCH_MODEL_OUTPUT_LIMIT' || code === 'RESEARCH_MODEL_INVALID_OUTPUT' || code === 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED') return 'invalid_structured_output'
   return 'provider_unavailable'
 }
 

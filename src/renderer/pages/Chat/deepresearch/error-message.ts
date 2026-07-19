@@ -27,6 +27,7 @@ export function deepResearchErrorMessage(error: unknown): string {
     case 'RESEARCH_MODEL_OUTPUT_LIMIT':
       return '深度研究模型输出达到长度上限，但没有返回完整的 JSON 结果。可点击重试；如果持续失败，请缩小研究主题或切换更适合结构化输出的模型。'
     case 'RESEARCH_MODEL_INVALID_OUTPUT':
+    case 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED':
       return '深度研究模型返回了无法解析的结构化结果。请检查模型是否支持 JSON/结构化输出后重试。'
     default:
       return originalMessage(error) ?? '深度研究请求失败'

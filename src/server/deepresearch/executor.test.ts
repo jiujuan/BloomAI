@@ -295,7 +295,7 @@ describe('Deep Research attempt-aware executor', () => {
     const { researchRunRepo, researchAttemptRepo } = await loadTestContext()
     const run = createRun(researchRunRepo)
     const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', createdAt: 1_000 })
-    const invalidOutput = { code: 'RESEARCH_MODEL_INVALID_OUTPUT', message: 'Expected valid JSON from brief_planning' }
+    const invalidOutput = { code: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED', message: 'Structured output validation failed: - 7.intent: Required' }
     const executor = createDeepResearchExecutor({
       executorId: 'workflow-invalid-output-worker',
       now: () => 1_000,

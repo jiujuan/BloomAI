@@ -70,7 +70,7 @@ export function classifyResearchError(error: unknown): ResearchErrorClassificati
   if (hasCode(error, 'RESEARCH_MODEL_OUTPUT_LIMIT')) {
     return { code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message, retryable: true, category: 'provider' }
   }
-  if (hasCode(error, 'RESEARCH_MODEL_INVALID_OUTPUT')) {
+  if (hasCode(error, 'RESEARCH_MODEL_INVALID_OUTPUT') || hasCode(error, 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED') || /Structured output validation failed/i.test(message)) {
     return { code: 'RESEARCH_MODEL_INVALID_OUTPUT', message, retryable: true, category: 'provider' }
   }
   if (hasCode(error, '429') || /rate.?limit/i.test(message)) {

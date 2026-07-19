@@ -39,6 +39,11 @@ describe('ResearchDomainError', () => {
       category: 'provider',
       retryable: true,
     })
+    expect(classifyResearchError({ code: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED', message: 'Structured output validation failed: - 7.intent: Required' })).toMatchObject({
+      code: 'RESEARCH_MODEL_INVALID_OUTPUT',
+      category: 'provider',
+      retryable: true,
+    })
   })
 
 })

@@ -147,6 +147,50 @@ describe('createLlmDeepResearchAdapters', () => {
     expect(agentGenerate).toHaveBeenCalledTimes(1)
   })
 
+  it('lets the shared repair loop handle Mastra structured schema validation failures', async () => {
+    const invalidPlans = [{ questionId: 'question-1', query: 'Enterprise AI assistant market' }]
+    const validationError = Object.assign(new Error('Structured output validation failed: - 0.intent: Required'), {
+      code: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED',
+      details: { value: JSON.stringify(invalidPlans) },
+    })
+    agentGenerate
+      .mockRejectedValueOnce(validationError)
+      .mockResolvedValueOnce({
+        text: 'The structured response is attached.',
+        object: [{ questionId: 'question-1', query: 'Enterprise AI assistant market official statistics', intent: 'market_data', sourceTargets: ['official statistics'] }],
+        totalUsage: { inputTokens: 13, outputTokens: 7, totalTokens: 20 },
+      })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+    const question = {
+      id: 'question-1', runId: run.id, parentQuestionId: null, ordinal: 1,
+      ...validBrief().questions[0], status: 'planned', coverage: null,
+    } as any
+
+    await expect(adapters.queryPlanner.plan(run, [question])).resolves.toEqual([
+      expect.objectContaining({ questionId: 'question-1', intent: 'market_data', sourceTargets: ['official statistics'] }),
+    ])
+
+    expect(agentGenerate).toHaveBeenCalledTimes(2)
+    expect(agentGenerate.mock.calls[1]?.[0]).toContain('Repair the previous response')
+  })
+
+  it('normalizes repeated Mastra structured schema validation failures without leaking an internal error code', async () => {
+    const validationError = Object.assign(new Error('Structured output validation failed: - 7.intent: Required'), {
+      code: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED',
+    })
+    agentGenerate.mockRejectedValue(validationError)
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+    const question = {
+      id: 'question-1', runId: run.id, parentQuestionId: null, ordinal: 1,
+      ...validBrief().questions[0], status: 'planned', coverage: null,
+    } as any
+
+    await expect(adapters.queryPlanner.plan(run, [question])).rejects.toMatchObject({ code: 'RESEARCH_MODEL_INVALID_OUTPUT' })
+
+    expect(agentGenerate).toHaveBeenCalledTimes(2)
+    expect(agentGenerate.mock.calls[1]?.[1]).not.toHaveProperty('structuredOutput')
+  })
+
   it('uses a model-bound generator and reports its token usage', async () => {
     const usageReporter = vi.fn()
     const generate = vi.fn(async () => ({

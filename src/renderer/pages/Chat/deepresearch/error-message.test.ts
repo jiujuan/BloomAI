@@ -10,6 +10,10 @@ describe('deepResearchErrorMessage', () => {
     },
   )
 
+  it('renders actionable invalid structured output guidance', () => {
+    expect(deepResearchErrorMessage({ code: 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED', message: 'raw schema validation' })).toContain('无法解析的结构化结果')
+  })
+
   it('renders actionable output-limit guidance', () => {
     expect(deepResearchErrorMessage({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message: 'raw output limit' })).toContain('输出达到长度上限')
     expect(deepResearchErrorMessage({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message: 'raw output limit' })).toContain('缩小研究主题')

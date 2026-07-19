@@ -38,8 +38,8 @@ export interface ResearchLlmStageLimits {
 
 /** Per-stage budgets prevent any one research step from issuing an unbounded model request. */
 export const RESEARCH_LLM_STAGE_LIMITS: Record<ResearchLlmStage, ResearchLlmStageLimits> = {
-  brief_planning: { timeoutMs: 120_000, maxOutputTokens: 8_000 },
-  query_planning: { timeoutMs: 90_000, maxOutputTokens: 3_200 },
+  brief_planning: { timeoutMs: 120_000, maxOutputTokens: 12_000 },
+  query_planning: { timeoutMs: 90_000, maxOutputTokens: 4_400 },
   evidence_analysis: { timeoutMs: 60_000, maxOutputTokens: 2_400 },
   gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 1_200 },
   section_writing: { timeoutMs: 75_000, maxOutputTokens: 3_000 },
@@ -211,6 +211,13 @@ function modelOutputLimitError(stage: ResearchLlmStage, maxOutputTokens: number)
   )
 }
 
+function modelInvalidStructuredOutputError(stage: ResearchLlmStage, cause: unknown): Error {
+  return Object.assign(
+    new Error('RESEARCH_MODEL_INVALID_OUTPUT: ' + stage + ' returned structured output that did not match the required schema.'),
+    { code: 'RESEARCH_MODEL_INVALID_OUTPUT', cause },
+  )
+}
+
 function responseOutputTokens(response: { totalUsage?: Record<string, unknown> } | undefined): number {
   const usage = response?.totalUsage
   if (!usage) return 0
@@ -225,8 +232,41 @@ function responseReachedOutputLimit(response: { totalUsage?: Record<string, unkn
   return maxOutputTokens > 0 && responseOutputTokens(response) >= Math.max(1, Math.floor(maxOutputTokens * 0.98))
 }
 
+function hasErrorCode(error: unknown, code: string): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === code)
+}
+
 function isModelOutputLimitError(error: unknown): boolean {
-  return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === 'RESEARCH_MODEL_OUTPUT_LIMIT')
+  return hasErrorCode(error, 'RESEARCH_MODEL_OUTPUT_LIMIT')
+}
+
+function isStructuredOutputValidationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return hasErrorCode(error, 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED')
+    || Boolean(error && typeof error === 'object' && 'id' in error && (error as { id?: unknown }).id === 'STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED')
+    || /Structured output validation failed/i.test(message)
+}
+
+function structuredValidationValue(error: unknown): unknown {
+  if (!error || typeof error !== 'object') return undefined
+  const details = 'details' in error ? (error as { details?: unknown }).details : undefined
+  if (!details || typeof details !== 'object' || !('value' in details)) return undefined
+  const value = (details as { value?: unknown }).value
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function responseFromStructuredValidationError(error: unknown): ResearchStructuredGenerated | null {
+  if (!isStructuredOutputValidationError(error)) return null
+  const value = structuredValidationValue(error)
+  if (value === undefined) return null
+  return typeof value === 'string'
+    ? { text: value }
+    : { text: JSON.stringify(value), object: value }
 }
 
 function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLlmGenerateInput, outputSchema: z.ZodType<TOutput>) => Promise<ResearchStructuredGenerated> {
@@ -263,30 +303,46 @@ function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLl
       // local providers reject response-format APIs, so retry those with the
       // schema injected into the prompt instead.
       const request = { abortSignal: controller.signal, structuredOutput: { schema: outputSchema } }
-      let response
-      try {
-        response = await agent.generate(prompt, request)
-        assertActive()
-        // OpenAI-compatible providers can return valid JSON text without
-        // populating Mastra's object field. Preserve that response and let the
-        // shared parser validate it instead of issuing a duplicate model call.
-        if (response.object === undefined && !response.text?.trim()) {
-          if (responseReachedOutputLimit(response, maxOutputTokens)) throw modelOutputLimitError(stage, maxOutputTokens)
-          throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
-        }
-      } catch (error) {
-        assertActive(error)
-        if (isModelOutputLimitError(error)) throw error
-        response = await agent.generate(prompt, {
-          ...request,
-          structuredOutput: { ...request.structuredOutput, jsonPromptInjection: true },
-        })
-        assertActive()
+      const normalizeResponse = (response: { text?: string; object?: unknown; totalUsage?: Record<string, unknown> }): ResearchStructuredGenerated => {
         if (response.object === undefined && !response.text?.trim() && responseReachedOutputLimit(response, maxOutputTokens)) {
           throw modelOutputLimitError(stage, maxOutputTokens)
         }
+        return { text: response.text ?? '', object: response.object, usage: response.totalUsage }
       }
-      return { text: response.text, object: response.object, usage: response.totalUsage }
+      try {
+        const response = await agent.generate(prompt, request)
+        assertActive()
+        const normalized = normalizeResponse(response)
+        // OpenAI-compatible providers can return valid JSON text without
+        // populating Mastra's object field. Preserve that response and let the
+        // shared parser validate it instead of issuing a duplicate model call.
+        if (response.object === undefined && !response.text?.trim()) throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
+        return normalized
+      } catch (error) {
+        assertActive(error)
+        if (isModelOutputLimitError(error)) throw error
+
+        const validationResponse = responseFromStructuredValidationError(error)
+        if (validationResponse) return validationResponse
+
+        try {
+          const response = isStructuredOutputValidationError(error)
+            ? await agent.generate(prompt, { abortSignal: controller.signal })
+            : await agent.generate(prompt, {
+              ...request,
+              structuredOutput: { ...request.structuredOutput, jsonPromptInjection: true },
+            })
+          assertActive()
+          return normalizeResponse(response)
+        } catch (fallbackError) {
+          assertActive(fallbackError)
+          if (isModelOutputLimitError(fallbackError)) throw fallbackError
+          const fallbackValidationResponse = responseFromStructuredValidationError(fallbackError)
+          if (fallbackValidationResponse) return fallbackValidationResponse
+          if (isStructuredOutputValidationError(fallbackError)) throw modelInvalidStructuredOutputError(stage, fallbackError)
+          throw fallbackError
+        }
+      }
     } catch (error) {
       assertActive(error)
       throw error
