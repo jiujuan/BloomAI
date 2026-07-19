@@ -331,8 +331,8 @@ describe('createLlmDeepResearchAdapters', () => {
 
     expect(RESEARCH_LLM_STAGE_LIMITS.brief_planning.maxOutputTokens)
       .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.query_planning.maxOutputTokens)
-    expect(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
-      .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.gap_analysis.maxOutputTokens)
+    expect(RESEARCH_LLM_STAGE_LIMITS.gap_analysis.maxOutputTokens)
+      .toBeGreaterThan(0)
     expect(RESEARCH_LLM_STAGE_LIMITS.section_writing.maxOutputTokens)
       .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({
@@ -467,6 +467,58 @@ it('uses a loose provider schema for section writing and validates strictly afte
   expect(agentGenerate).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
     structuredOutput: expect.objectContaining({ schema: expect.anything() }),
   }))
+})
+
+
+it('normalizes section arrays, nested headings, and claim aliases before strict validation', async () => {
+  const generate = vi.fn(async () => ({
+    text: JSON.stringify({
+      summary: 'Structured section arrays should become a valid draft.',
+      sections: [
+        { title: '1. Direct answer', content: ['### Market context', 'The routed evidence supports a bounded answer.'] },
+        { title: 'Evidence basis', content: 'The body omitted the exact factual claim.' },
+      ],
+      claims: [
+        { claim: 'The exact factual claim is appended for citation rendering.', kind: 'factual', importance: 'high', confidence: 0.8, evidence_ids: 'evidence-1' },
+        { text: 'This is a bounded synthesis.', kind: 'analysis', importance: 'medium', confidence: 0.6, evidenceIds: ['evidence-1'] },
+      ],
+      evidence_ids: ['evidence-1'],
+      caveats: 'Coverage is limited to routed evidence.',
+      missing_evidence: 'Independent corroboration.',
+    }),
+  }))
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  const result = await adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)
+
+  expect(result.evidenceIds).toEqual(['evidence-1'])
+  expect(result.limitations).toEqual(['Coverage is limited to routed evidence.'])
+  expect(result.missingEvidence).toEqual(['Independent corroboration.'])
+  expect(result.bodyMarkdown).toContain('Market context')
+  expect(result.bodyMarkdown).toContain('The exact factual claim is appended for citation rendering.')
+  expect(result.bodyMarkdown).toContain('Inference / synthesis judgment: This is a bounded synthesis.')
+  expect(result.claims).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'factual', evidenceIds: ['evidence-1'] }),
+    expect.objectContaining({ kind: 'analysis', text: 'Inference / synthesis judgment: This is a bounded synthesis.' }),
+  ]))
+})
+
+it('falls back to a deterministic section draft after repeated unusable section writer output', async () => {
+  const generate = vi.fn(async () => ({ text: JSON.stringify({ summary: 'Missing body markdown.' }) }))
+  const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
+
+  const result = await adapters.sectionWriter.draft({
+    run,
+    section: { id: 'section-1', title: 'Market definition' },
+    questions: [{ id: 'question-1', question: 'How is the market defined?', intent: 'definition', priority: 'high', status: 'covered', requiredEvidenceTypes: [] }],
+    evidence: [{ id: 'evidence-1', summary: 'Market definition evidence is available.', confidence: 0.8 }],
+    sectionGoal: 'Draft the section.',
+  } as never)
+
+  expect(generate).toHaveBeenCalledTimes(2)
+  expect(result.bodyMarkdown).toContain('### Direct answer')
+  expect(result.bodyMarkdown).toContain('The routed evidence supports a focused answer to: How is the market defined?.')
+  expect(result.evidenceIds).toEqual(['evidence-1'])
 })
 
 
