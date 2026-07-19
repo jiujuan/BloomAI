@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(20)
+    expect(migrationVersions()).toHaveLength(21)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(20)
+    expect(migrationVersions()).toHaveLength(21)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -194,6 +194,7 @@ describe('database migrations', () => {
       '018-deep-research-brief-question-section-mapping',
       '019-deep-research-query-intents-deduplication',
       '020-deep-research-source-quality-assessments',
+      '021-deep-research-structured-evidence',
     ])
     const emptyDb = openRawDb()
     try {
@@ -232,6 +233,15 @@ describe('database migrations', () => {
         { name: 'scoring_method' },
         { name: 'source_category' },
       ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_evidence') WHERE name IN ('source_id', 'claim', 'evidence_type', 'entities_json', 'numbers_json', 'timeframe', 'relevance') ORDER BY name").all()).toEqual([
+        { name: 'claim' },
+        { name: 'entities_json' },
+        { name: 'evidence_type' },
+        { name: 'numbers_json' },
+        { name: 'relevance' },
+        { name: 'source_id' },
+        { name: 'timeframe' },
+      ])
     } finally {
       emptyDb.close()
     }
@@ -258,6 +268,7 @@ describe('database migrations', () => {
     expect(indexNames('research_coverage_assessments')).toContain('idx_research_coverage_assessments_run_iteration')
     expect(indexNames('research_search_queries')).toContain('idx_research_search_queries_run_question_dedupe')
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_question')
+    expect(indexNames('research_evidence')).toContain('idx_research_evidence_run_source')
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_query')
 
     for (const tableName of [
@@ -485,7 +496,19 @@ describe('database migrations', () => {
     try {
       expect(upgraded.prepare('SELECT topic FROM research_runs WHERE id = ?').get('run-legacy')).toEqual({ topic: 'Legacy topic' })
       expect(upgraded.prepare('SELECT canonical_url FROM research_sources WHERE id = ?').get('source-legacy')).toEqual({ canonical_url: 'https://example.com/legacy' })
-      expect(upgraded.prepare('SELECT passage FROM research_evidence WHERE id = ?').get('evidence-legacy')).toEqual({ passage: 'legacy passage' })
+      expect(upgraded.prepare(`
+        SELECT passage, source_id, claim, evidence_type, entities_json, numbers_json, timeframe, relevance
+        FROM research_evidence WHERE id = ?
+      `).get('evidence-legacy')).toEqual({
+        passage: 'legacy passage',
+        source_id: '',
+        claim: '',
+        evidence_type: 'uncertain',
+        entities_json: '[]',
+        numbers_json: '[]',
+        timeframe: null,
+        relevance: 0,
+      })
       expect(upgraded.prepare(`
         SELECT state_version, current_attempt_id, last_checkpoint_sequence, limitations_json
         FROM research_runs WHERE id = 'run-legacy-interrupted'

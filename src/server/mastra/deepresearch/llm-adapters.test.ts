@@ -59,10 +59,17 @@ describe('createLlmDeepResearchAdapters', () => {
       text: stage === 'evidence_analysis'
         ? JSON.stringify([{
           questionId: 'question-1',
+          sourceId: 'source-1',
           snapshotId: 'snapshot-1',
           passage: 'A bounded source passage with relevant factual context.',
           summary: 'The source provides relevant context for the research question.',
+          claim: 'The bounded source passage provides relevant factual context.',
+          evidenceType: 'fact',
+          entities: ['source passage'],
+          numbers: [],
+          timeframe: null,
           stance: 'contextual',
+          relevance: 0.8,
           confidence: 0.8,
           startOffset: 0,
           endOffset: 55,
@@ -72,7 +79,11 @@ describe('createLlmDeepResearchAdapters', () => {
     const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig, generate })
 
     await expect(adapters.evidenceAnalyst.analyze({ run, questions: [], packets: [] })).resolves.toMatchObject([
-      { stance: 'contextual', snapshotId: 'snapshot-1' },
+      {
+        stance: 'contextual', snapshotId: 'snapshot-1', sourceId: 'source-1',
+        claim: expect.any(String), evidenceType: 'fact', entities: expect.any(Array), numbers: expect.any(Array),
+        relevance: expect.any(Number),
+      },
     ])
     await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, evidence: [] } as never)).resolves.toBe('Section draft')
 

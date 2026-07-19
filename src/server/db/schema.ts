@@ -585,10 +585,17 @@ export const research_evidence = sqliteTable('research_evidence', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   question_id: text('question_id').notNull(),
+  source_id: text('source_id').notNull(),
   snapshot_id: text('snapshot_id').notNull(),
   passage: text('passage').notNull(),
   summary: text('summary').notNull(),
+  claim: text('claim').notNull(),
+  evidence_type: text('evidence_type').notNull(),
+  entities_json: text('entities_json').notNull(),
+  numbers_json: text('numbers_json').notNull(),
+  timeframe: text('timeframe'),
   stance: text('stance').notNull(),
+  relevance: real('relevance').notNull(),
   confidence: real('confidence').notNull(),
   start_offset: integer('start_offset').notNull(),
   end_offset: integer('end_offset').notNull(),
@@ -596,6 +603,7 @@ export const research_evidence = sqliteTable('research_evidence', {
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   runQuestionIdx: index('idx_research_evidence_run_question').on(table.run_id, table.question_id),
+  runSourceIdx: index('idx_research_evidence_run_source').on(table.run_id, table.source_id),
   runIdempotencyIdx: uniqueIndex('idx_research_evidence_run_idempotency').on(table.run_id, table.idempotency_key),
 }))
 

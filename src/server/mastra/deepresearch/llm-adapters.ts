@@ -94,9 +94,13 @@ const queryPlanSchema = z.object({
   intent: z.enum(RESEARCH_QUERY_INTENTS),
   sourceTargets: z.array(z.string().trim().min(1)).min(1).max(5),
 }).strict()
+const evidenceNumberSchema = z.object({ value: z.string().trim().min(1), unit: z.string().trim().min(1).nullable(), context: z.string().trim().min(1).nullable() }).strict()
 const evidenceSchema = z.object({
-  questionId: z.string().min(1), snapshotId: z.string().min(1), passage: z.string().trim().min(1).max(800),
-  summary: z.string().trim().min(12).max(1_000), stance: z.enum(['supporting', 'contradicting', 'contextual']),
+  questionId: z.string().min(1), sourceId: z.string().min(1), snapshotId: z.string().min(1), passage: z.string().trim().min(1).max(800),
+  summary: z.string().trim().min(12).max(1_000), claim: z.string().trim().min(8).max(1_000),
+  evidenceType: z.enum(['fact', 'analysis', 'marketing_claim', 'opinion', 'uncertain']), entities: z.array(z.string().trim().min(1)).max(32),
+  numbers: z.array(evidenceNumberSchema).max(24), timeframe: z.string().trim().min(1).nullable(),
+  stance: z.enum(['supporting', 'contradicting', 'contextual']), relevance: z.number().min(0).max(1),
   confidence: z.number().min(0).max(1), startOffset: z.number().int().nonnegative(), endOffset: z.number().int().positive(),
 })
 const claimSchema = z.object({
@@ -254,7 +258,11 @@ export function createLlmDeepResearchAdapters(options: CreateLlmDeepResearchAdap
     },
     evidenceAnalyst: {
       async analyze(input, context = {}) {
-        return await invoke('evidence_analysis', 'Return JSON array of { questionId, snapshotId, passage, summary, stance, confidence, startOffset, endOffset }. Use only supplied bounded packets.', input as unknown as Record<string, unknown>, z.array(evidenceSchema), context.signal) as EvidenceAnalysis[]
+        return await invoke('evidence_analysis', [
+          'Return a JSON array of { questionId, sourceId, snapshotId, passage, summary, claim, evidenceType, entities, numbers, timeframe, stance, relevance, confidence, startOffset, endOffset }. Use only supplied bounded packets and exact UTF-16 offsets.',
+          'Classify evidenceType as fact, analysis, marketing_claim, opinion, or uncertain. A vendor self-description is marketing_claim or opinion, never an unqualified fact.',
+          'For high-priority numeric evidence, numbers must have a timeframe. Return multiple complementary passages per source only when they add a distinct information dimension; do not repeat near-duplicates.',
+        ].join(' '), input as unknown as Record<string, unknown>, z.array(evidenceSchema), context.signal) as EvidenceAnalysis[]
       },
     },
     gapAnalyst: {

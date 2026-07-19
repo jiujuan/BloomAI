@@ -616,14 +616,32 @@ export interface ResearchSourceSnapshotDto {
   httpStatus: number | null
 }
 
+export type ResearchEvidenceType = 'fact' | 'analysis' | 'marketing_claim' | 'opinion' | 'uncertain'
+
+export interface ResearchEvidenceNumberDto {
+  value: string
+  unit: string | null
+  context: string | null
+}
+
 export interface ResearchEvidenceDto {
   id: string
   runId: string
   questionId: string
+  /** Durable source identity, captured from the source snapshot rather than model output. */
+  sourceId?: string
   snapshotId: string
   passage: string
+  /** Legacy display summary retained for existing report consumers. */
   summary: string
+  /** Atomic, attributable statement extracted from this exact passage. */
+  claim?: string
+  evidenceType?: ResearchEvidenceType
+  entities?: string[]
+  numbers?: ResearchEvidenceNumberDto[]
+  timeframe?: string | null
   stance: 'supporting' | 'contradicting' | 'contextual'
+  relevance?: number
   confidence: number
   startOffset: number
   endOffset: number
