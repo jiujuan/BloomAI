@@ -27,4 +27,18 @@ describe('ResearchDomainError', () => {
       retryable: true,
     })
   })
+
+  it('classifies model structured-output failures as retryable provider failures', () => {
+    expect(classifyResearchError({ code: 'RESEARCH_MODEL_INVALID_OUTPUT', message: 'Expected valid JSON from brief_planning' })).toMatchObject({
+      code: 'RESEARCH_MODEL_INVALID_OUTPUT',
+      category: 'provider',
+      retryable: true,
+    })
+    expect(classifyResearchError({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message: 'Reached max output tokens' })).toMatchObject({
+      code: 'RESEARCH_MODEL_OUTPUT_LIMIT',
+      category: 'provider',
+      retryable: true,
+    })
+  })
+
 })

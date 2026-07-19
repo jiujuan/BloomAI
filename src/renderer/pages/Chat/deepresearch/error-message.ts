@@ -24,6 +24,8 @@ export function deepResearchErrorMessage(error: unknown): string {
     case 'RESEARCH_PROVIDER_TIMEOUT':
     case 'RESEARCH_MODEL_TIMEOUT':
       return '深度研究模型响应超时。可点击重试；如果持续超时，请切换响应更快的模型或检查模型服务状态。'
+    case 'RESEARCH_MODEL_OUTPUT_LIMIT':
+      return '深度研究模型输出达到长度上限，但没有返回完整的 JSON 结果。可点击重试；如果持续失败，请缩小研究主题或切换更适合结构化输出的模型。'
     case 'RESEARCH_MODEL_INVALID_OUTPUT':
       return '深度研究模型返回了无法解析的结构化结果。请检查模型是否支持 JSON/结构化输出后重试。'
     default:

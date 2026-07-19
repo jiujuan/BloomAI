@@ -291,4 +291,25 @@ describe('Deep Research attempt-aware executor', () => {
     })
   })
 
+  it('preserves failed workflow model-output errors as retryable provider failures', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadTestContext()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial', createdAt: 1_000 })
+    const invalidOutput = { code: 'RESEARCH_MODEL_INVALID_OUTPUT', message: 'Expected valid JSON from brief_planning' }
+    const executor = createDeepResearchExecutor({
+      executorId: 'workflow-invalid-output-worker',
+      now: () => 1_000,
+      runtime: {
+        start: async () => ({ status: 'failed', error: invalidOutput }),
+        resume: async () => undefined,
+      },
+    } as any)
+
+    await expect(executor.start(run.id)).resolves.toBe(true)
+    expect(researchAttemptRepo.get(attempt.id)).toMatchObject({
+      status: 'failed',
+      error: { code: 'RESEARCH_MODEL_INVALID_OUTPUT', retryable: true, category: 'provider' },
+    })
+  })
+
 })

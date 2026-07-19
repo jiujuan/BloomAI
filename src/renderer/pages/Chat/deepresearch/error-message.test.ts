@@ -9,4 +9,10 @@ describe('deepResearchErrorMessage', () => {
       expect(deepResearchErrorMessage({ code, message: 'raw provider timeout' })).toContain('切换响应更快的模型')
     },
   )
+
+  it('renders actionable output-limit guidance', () => {
+    expect(deepResearchErrorMessage({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message: 'raw output limit' })).toContain('输出达到长度上限')
+    expect(deepResearchErrorMessage({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message: 'raw output limit' })).toContain('缩小研究主题')
+  })
+
 })

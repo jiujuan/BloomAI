@@ -67,6 +67,12 @@ export function classifyResearchError(error: unknown): ResearchErrorClassificati
   if (hasCode(error, 'ETIMEDOUT') || /timeout|timed out/i.test(message)) {
     return { code: 'RESEARCH_PROVIDER_TIMEOUT', message, retryable: true, category: 'timeout' }
   }
+  if (hasCode(error, 'RESEARCH_MODEL_OUTPUT_LIMIT')) {
+    return { code: 'RESEARCH_MODEL_OUTPUT_LIMIT', message, retryable: true, category: 'provider' }
+  }
+  if (hasCode(error, 'RESEARCH_MODEL_INVALID_OUTPUT')) {
+    return { code: 'RESEARCH_MODEL_INVALID_OUTPUT', message, retryable: true, category: 'provider' }
+  }
   if (hasCode(error, '429') || /rate.?limit/i.test(message)) {
     return { code: 'RESEARCH_PROVIDER_RATE_LIMIT', message, retryable: true, category: 'rate_limit' }
   }

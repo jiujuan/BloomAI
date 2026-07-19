@@ -38,8 +38,8 @@ export interface ResearchLlmStageLimits {
 
 /** Per-stage budgets prevent any one research step from issuing an unbounded model request. */
 export const RESEARCH_LLM_STAGE_LIMITS: Record<ResearchLlmStage, ResearchLlmStageLimits> = {
-  brief_planning: { timeoutMs: 90_000, maxOutputTokens: 2_400 },
-  query_planning: { timeoutMs: 60_000, maxOutputTokens: 1_600 },
+  brief_planning: { timeoutMs: 120_000, maxOutputTokens: 8_000 },
+  query_planning: { timeoutMs: 90_000, maxOutputTokens: 3_200 },
   evidence_analysis: { timeoutMs: 60_000, maxOutputTokens: 2_400 },
   gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 1_200 },
   section_writing: { timeoutMs: 75_000, maxOutputTokens: 3_000 },
@@ -204,6 +204,31 @@ function modelTimeoutError(stage: ResearchLlmStage, cause: unknown): Error {
   )
 }
 
+function modelOutputLimitError(stage: ResearchLlmStage, maxOutputTokens: number): Error {
+  return Object.assign(
+    new Error('RESEARCH_MODEL_OUTPUT_LIMIT: ' + stage + ' reached its max output token limit (' + maxOutputTokens + ') before returning complete JSON.'),
+    { code: 'RESEARCH_MODEL_OUTPUT_LIMIT' },
+  )
+}
+
+function responseOutputTokens(response: { totalUsage?: Record<string, unknown> } | undefined): number {
+  const usage = response?.totalUsage
+  if (!usage) return 0
+  for (const key of ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens']) {
+    const value = usage[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return 0
+}
+
+function responseReachedOutputLimit(response: { totalUsage?: Record<string, unknown> } | undefined, maxOutputTokens: number): boolean {
+  return maxOutputTokens > 0 && responseOutputTokens(response) >= Math.max(1, Math.floor(maxOutputTokens * 0.98))
+}
+
+function isModelOutputLimitError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === 'RESEARCH_MODEL_OUTPUT_LIMIT')
+}
+
 function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLlmGenerateInput, outputSchema: z.ZodType<TOutput>) => Promise<ResearchStructuredGenerated> {
   const agents = new Map<ResearchLlmStage, Agent>()
 
@@ -246,15 +271,20 @@ function defaultGenerator(model: MastraModelConfig): <TOutput>(input: ResearchLl
         // populating Mastra's object field. Preserve that response and let the
         // shared parser validate it instead of issuing a duplicate model call.
         if (response.object === undefined && !response.text?.trim()) {
+          if (responseReachedOutputLimit(response, maxOutputTokens)) throw modelOutputLimitError(stage, maxOutputTokens)
           throw new Error('RESEARCH_MODEL_STRUCTURED_OBJECT_UNDEFINED')
         }
       } catch (error) {
         assertActive(error)
+        if (isModelOutputLimitError(error)) throw error
         response = await agent.generate(prompt, {
           ...request,
           structuredOutput: { ...request.structuredOutput, jsonPromptInjection: true },
         })
         assertActive()
+        if (response.object === undefined && !response.text?.trim() && responseReachedOutputLimit(response, maxOutputTokens)) {
+          throw modelOutputLimitError(stage, maxOutputTokens)
+        }
       }
       return { text: response.text, object: response.object, usage: response.totalUsage }
     } catch (error) {

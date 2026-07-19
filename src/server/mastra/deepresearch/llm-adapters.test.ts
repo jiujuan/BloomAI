@@ -129,6 +129,24 @@ describe('createLlmDeepResearchAdapters', () => {
     expect(agentGenerate).toHaveBeenCalledTimes(1)
   })
 
+
+
+  it('does not issue a fallback request when an empty response already exhausted output tokens', async () => {
+    agentGenerate.mockResolvedValueOnce({
+      text: '',
+      object: undefined,
+      totalUsage: {
+        inputTokens: 120,
+        outputTokens: RESEARCH_LLM_STAGE_LIMITS.brief_planning.maxOutputTokens,
+        totalTokens: 120 + RESEARCH_LLM_STAGE_LIMITS.brief_planning.maxOutputTokens,
+      },
+    })
+    const adapters = createLlmDeepResearchAdapters({ model: {} as MastraModelConfig })
+
+    await expect(adapters.planner.plan(run)).rejects.toMatchObject({ code: 'RESEARCH_MODEL_OUTPUT_LIMIT' })
+    expect(agentGenerate).toHaveBeenCalledTimes(1)
+  })
+
   it('uses a model-bound generator and reports its token usage', async () => {
     const usageReporter = vi.fn()
     const generate = vi.fn(async () => ({
@@ -148,7 +166,7 @@ describe('createLlmDeepResearchAdapters', () => {
     expect(usageReporter).toHaveBeenCalledWith(expect.objectContaining({ stage: 'brief_planning', tokens: 20, inputTokens: 13, outputTokens: 7 }))
   })
 
-  it('uses contextual evidence and assigns larger output budgets to evidence and writing stages', async () => {
+  it('uses contextual evidence and applies stage-specific output budgets', async () => {
     const generate = vi.fn(async ({ stage }: { stage: string }) => ({
       text: stage === 'evidence_analysis'
         ? JSON.stringify([{
@@ -181,10 +199,12 @@ describe('createLlmDeepResearchAdapters', () => {
     ])
     await expect(adapters.sectionWriter.draft({ run, section: { id: 'section-1' }, questions: [], evidence: [], sectionGoal: 'Draft the section.' } as never)).resolves.toMatchObject({ bodyMarkdown: expect.stringContaining('Section draft') })
 
-    expect(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
+    expect(RESEARCH_LLM_STAGE_LIMITS.brief_planning.maxOutputTokens)
       .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.query_planning.maxOutputTokens)
+    expect(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
+      .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.gap_analysis.maxOutputTokens)
     expect(RESEARCH_LLM_STAGE_LIMITS.section_writing.maxOutputTokens)
-      .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.brief_planning.maxOutputTokens)
+      .toBeGreaterThan(RESEARCH_LLM_STAGE_LIMITS.evidence_analysis.maxOutputTokens)
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({
       stage: 'section_writing',
       timeoutMs: RESEARCH_LLM_STAGE_LIMITS.section_writing.timeoutMs,

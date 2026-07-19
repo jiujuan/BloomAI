@@ -71,7 +71,88 @@ function errorCategory(error: unknown): ResearchStructuredTrace['errorCategory']
   const message = error instanceof Error ? error.message : String(error)
   if (code === 'RESEARCH_MODEL_TIMEOUT' || /timeout|timed out/i.test(message)) return 'timeout'
   if (code === '429' || /rate.?limit/i.test(message)) return 'rate_limit'
+  if (code === 'RESEARCH_MODEL_OUTPUT_LIMIT' || code === 'RESEARCH_MODEL_INVALID_OUTPUT') return 'invalid_structured_output'
   return 'provider_unavailable'
+}
+
+function numericUsageValue(usage: Record<string, unknown> | undefined, ...keys: string[]): number {
+  if (!usage) return 0
+  for (const key of keys) {
+    const value = usage[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return 0
+}
+
+function reachedOutputLimit(response: ResearchStructuredGenerated, maxOutputTokens: number): boolean {
+  const outputTokens = numericUsageValue(response.usage, 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens')
+  return maxOutputTokens > 0 && outputTokens >= Math.max(1, Math.floor(maxOutputTokens * 0.98))
+}
+
+function outputLimitError(stage: string): Error {
+  return Object.assign(
+    new Error('RESEARCH_MODEL_OUTPUT_LIMIT: ' + stage + ' reached its max output token limit before returning complete JSON.'),
+    { code: 'RESEARCH_MODEL_OUTPUT_LIMIT' },
+  )
+}
+
+function tryParseJson(text: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) }
+  } catch {
+    return { ok: false }
+  }
+}
+
+function fencedJsonCandidates(text: string): string[] {
+  return [...text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)]
+    .map((match) => match[1]?.trim() ?? '')
+    .filter(Boolean)
+}
+
+function balancedJsonCandidate(text: string): string | null {
+  for (let index = 0; index < text.length; index += 1) {
+    const first = text[index]
+    if (first !== '{' && first !== '[') continue
+    const stack: string[] = []
+    let inString = false
+    let escaped = false
+    for (let i = index; i < text.length; i += 1) {
+      const current = text[i]!
+      if (inString) {
+        if (escaped) escaped = false
+        else if (current === '\\') escaped = true
+        else if (current === '"') inString = false
+        continue
+      }
+      if (current === '"') {
+        inString = true
+        continue
+      }
+      if (current === '{') stack.push('}')
+      else if (current === '[') stack.push(']')
+      else if (current === '}' || current === ']') {
+        if (stack.pop() !== current) break
+        if (stack.length === 0) return text.slice(index, i + 1).trim()
+      }
+    }
+  }
+  return null
+}
+
+function parseModelJson(text: string): { ok: true; value: unknown } | { ok: false } {
+  const direct = tryParseJson(text)
+  if (direct.ok) return direct
+  for (const candidate of fencedJsonCandidates(text)) {
+    const parsed = tryParseJson(candidate)
+    if (parsed.ok) return parsed
+  }
+  const balanced = balancedJsonCandidate(text)
+  if (balanced) {
+    const parsed = tryParseJson(balanced)
+    if (parsed.ok) return parsed
+  }
+  return { ok: false }
 }
 
 function boundedUntrustedValue(value: unknown, remaining: { value: number }): unknown {
@@ -168,18 +249,20 @@ export async function invokeResearchStructured<TInput, TOutput>(options: InvokeR
     if (structuredOutput !== undefined) {
       parsed = structuredOutput
     } else {
-      try {
-        parsed = JSON.parse(text)
-      } catch {
+      const parsedJson = parseModelJson(text)
+      if (!parsedJson.ok) {
         retryReason = 'invalid_json'
+        const outputLimited = reachedOutputLimit(response, options.limits.maxOutputTokens)
         await options.traceReporter?.({
           stage: options.stage, attempt, inputHash, outputHash, inputCharacters: serializedInput.length, outputCharacters: serializedOutput.length,
           durationMs: Date.now() - startedAt, parseStatus: 'invalid_json', retryReason,
-          errorCode: 'RESEARCH_MODEL_INVALID_OUTPUT', errorCategory: 'invalid_structured_output',
+          errorCode: outputLimited ? 'RESEARCH_MODEL_OUTPUT_LIMIT' : 'RESEARCH_MODEL_INVALID_OUTPUT', errorCategory: 'invalid_structured_output',
         })
+        if (outputLimited) throw outputLimitError(options.stage)
         if (attempt === maxAttempts) throw invalidOutputError('Expected valid JSON from ' + options.stage)
         continue
       }
+      parsed = parsedJson.value
     }
 
     const output = options.outputSchema.safeParse(parsed)
