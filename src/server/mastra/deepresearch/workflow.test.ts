@@ -236,6 +236,12 @@ describe('Deep Research Mastra report workflow', () => {
       matchedRule: 'budget_exhausted',
       limitations: expect.any(Array),
     })
+    const { readLogs } = await import('../../logger/logger')
+    expect(readLogs()).toContainEqual(expect.objectContaining({
+      level: 'warn',
+      scope: 'deep-research.budget-limit',
+      details: expect.objectContaining({ runId: run.id, decision: 'stop_budget' }),
+    }))
   })
 
   it('replays a persisted no-actionable-gaps stop without reinvoking the gap-planning provider', async () => {

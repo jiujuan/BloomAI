@@ -2,6 +2,7 @@ import { createStep } from '@mastra/core/workflows'
 import type { GapAnalyst } from '../agents/gap-analyst'
 import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
 import { recordDeepResearchBudgetExhausted, recordDeepResearchNoMaterialGain, recordDeepResearchStopReason } from '@server/telemetry/metrics'
+import { logWarning } from '@server/logger/logger'
 import { decideIteration, type ResearchIterationQueryCandidate } from '@server/deepresearch/domain/iteration-decision'
 import { createIterationQueryFingerprint } from '@server/deepresearch/domain/idempotency'
 import type { ResearchBudgetReservationDto, ResearchLoopDecisionDto } from '@shared/deepresearch/contracts'
@@ -93,7 +94,18 @@ function appendStopCheckpoint(repositories: DeepResearchRepositories, runId: str
 function recordIterationStop(run: Parameters<typeof deepResearchTelemetryContext>[0], decision: ResearchLoopDecisionDto): void {
   if (decision.decision === 'continue') return
   recordDeepResearchStopReason(decision.decision, deepResearchTelemetryContext(run))
-  if (decision.decision === 'stop_budget') recordDeepResearchBudgetExhausted(deepResearchTelemetryContext(run))
+  if (decision.decision === 'stop_budget') {
+    recordDeepResearchBudgetExhausted(deepResearchTelemetryContext(run))
+    logWarning('deep-research.budget-limit', 'Deep Research stopped because a configured resource budget was exhausted.', {
+      runId: run.id,
+      depth: run.depth,
+      phase: run.phase,
+      decision: decision.decision,
+      matchedRule: decision.matchedRule,
+      usage: run.usage,
+      budget: run.budget,
+    })
+  }
   if (decision.decision === 'stop_no_material_gain') recordDeepResearchNoMaterialGain(deepResearchTelemetryContext(run))
 }
 

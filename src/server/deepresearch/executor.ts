@@ -6,6 +6,7 @@ import { researchRunRepo } from '../db/repositories/deepresearch/research-run.re
 import type { DeepResearchWorkflowRunState } from './recovery'
 import { classifyResearchError } from './domain/errors'
 import { recordDeepResearchAttemptDuration, recordDeepResearchCancellationLatency, recordDeepResearchExternalCallsAfterCancellation, recordDeepResearchFailure, recordDeepResearchLeaseRejectedWrite } from '../telemetry/metrics'
+import { logError } from '../logger/logger'
 
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_LEASE_RENEWAL_MS = 10_000
@@ -170,6 +171,13 @@ export function createDeepResearchExecutor(options: CreateDeepResearchExecutorOp
       return completed !== null
     } catch (error) {
       const classification = classifyResearchError(error)
+      logError('deep-research.execution', error, {
+        runId,
+        attemptId: attempt.id,
+        phase: researchRunRepo.get(runId)?.phase ?? 'unknown',
+        errorCode: classification.code,
+        errorCategory: classification.category,
+      })
       const status = classification.category === 'cancelled' || cancellationRequested(runId)
         ? 'cancelled'
         : 'failed'

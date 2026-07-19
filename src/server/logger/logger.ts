@@ -64,6 +64,13 @@ export function logError(scope: string, error: unknown, details?: Record<string,
   return logEntry
 }
 
+/** Records an operational limit warning in both the durable log and stdout. */
+export function logWarning(scope: string, message: string, details?: Record<string, unknown>): LogEntry {
+  const logEntry = appendLog({ level: 'warn', scope, message, details })
+  serverLogger.warn(`[${scope}] ${logEntry.message}`, logEntry.details ?? {})
+  return logEntry
+}
+
 export function readLogs(date?: string): LogEntry[] {
   const dir = getLogDir()
   if (!fs.existsSync(dir)) return []

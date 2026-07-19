@@ -47,6 +47,7 @@ describe('ResearchRunLifecyclePanel', () => {
     expect(markup).toContain('extract-evidence')
     expect(markup).toContain('68%')
     expect(markup).toContain('已使用迭代 1 / 4')
+    expect(markup).toContain('子主题预算')
     expect(markup).toContain('取消请求已持久化')
     expect(markup).toContain('disabled')
     expect(markup).not.toContain('TOP_SECRET')

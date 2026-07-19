@@ -20,6 +20,13 @@ const question: ResearchQuestionDto = {
   sourceTargets: ['公司官网与产品文档', '客户案例', '官方统计'], priority: 'high', status: 'planned', coverage: null,
 }
 
+const secondQuestion: ResearchQuestionDto = {
+  ...question,
+  id: 'question-2',
+  ordinal: 2,
+  question: 'CRM 销售线索智能产品的价格和采购流程如何？',
+}
+
 const brief = { title: 'brief', objective: null, audience: null, scope: 'scope', assumptions: [], plannedSections: [], criticalClarificationIds: [] }
 
 describe('createPlanQueriesStep', () => {
@@ -57,5 +64,72 @@ describe('createPlanQueriesStep', () => {
     ]))
     expect(created.find((item) => item.intent === 'product_capability')?.dedupeKey).toBe(createQueryDedupeKey('CRM 销售线索智能 产品能力 官网'))
     expect(repositories.researchRunRepo.setUsage).toHaveBeenCalledWith(run.id, expect.objectContaining({ searchQueries: 2 }))
+  })
+
+  it('caps initial search queries by the actual number of planned subtopics', async () => {
+    const run = createRun()
+    const created: any[] = []
+    const repositories = {
+      researchRunRepo: { get: vi.fn(() => run), setUsage: vi.fn() },
+      researchQuestionRepo: {
+        list: vi.fn(() => [question]),
+        listSearchQueries: vi.fn(() => []),
+        createSearchQuery: vi.fn((input) => {
+          created.push(input)
+          return { id: 'query-' + created.length, ...input }
+        }),
+      },
+      researchEventRepo: { append: vi.fn() },
+      researchAttemptRepo: { get: vi.fn(() => undefined) },
+    } as any
+    const planner: any = {
+      plan: vi.fn(async () => [
+        { questionId: question.id, query: 'CRM 销售线索智能 产品能力 官网', intent: 'product_capability', sourceTargets: ['公司官网与产品文档'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 客户案例', intent: 'customer_case', sourceTargets: ['客户案例'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 行业数据', intent: 'market_data', sourceTargets: ['官方统计'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 采购价格', intent: 'recent_update', sourceTargets: ['公司官网与产品文档'] },
+      ]),
+    }
+
+    const step = createPlanQueriesStep({ repositories, planner })
+    await (step as any).execute({ inputData: { runId: run.id, brief } })
+
+    expect(created).toHaveLength(3)
+    expect(repositories.researchRunRepo.setUsage).toHaveBeenCalledWith(run.id, expect.objectContaining({ searchQueries: 3 }))
+  })
+
+  it('does not reallocate one subtopic search budget to another subtopic', async () => {
+    const run = createRun()
+    run.budget = { ...run.budget, maxSearchQueries: 10 }
+    const created: any[] = []
+    const repositories = {
+      researchRunRepo: { get: vi.fn(() => run), setUsage: vi.fn() },
+      researchQuestionRepo: {
+        list: vi.fn(() => [question, secondQuestion]),
+        listSearchQueries: vi.fn(() => []),
+        createSearchQuery: vi.fn((input) => {
+          created.push(input)
+          return { id: 'query-' + created.length, ...input }
+        }),
+      },
+      researchEventRepo: { append: vi.fn() },
+      researchAttemptRepo: { get: vi.fn(() => undefined) },
+    } as any
+    const planner: any = {
+      plan: vi.fn(async () => [
+        { questionId: question.id, query: 'CRM 销售线索智能 官方定义', intent: 'definition', sourceTargets: ['公司官网与产品文档'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 产品功能', intent: 'product_capability', sourceTargets: ['公司官网与产品文档'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 技术架构', intent: 'technical_architecture', sourceTargets: ['公司官网与产品文档'] },
+        { questionId: question.id, query: 'CRM 销售线索智能 客户案例', intent: 'customer_case', sourceTargets: ['客户案例'] },
+        { questionId: secondQuestion.id, query: 'CRM 销售线索智能 采购价格', intent: 'recent_update', sourceTargets: ['公司官网与产品文档'] },
+      ]),
+    }
+
+    const step = createPlanQueriesStep({ repositories, planner })
+    await (step as any).execute({ inputData: { runId: run.id, brief } })
+
+    expect(created.filter((item) => item.questionId === question.id)).toHaveLength(3)
+    expect(created.filter((item) => item.questionId === secondQuestion.id)).toHaveLength(1)
+    expect(repositories.researchRunRepo.setUsage).toHaveBeenCalledWith(run.id, expect.objectContaining({ searchQueries: 4 }))
   })
 })

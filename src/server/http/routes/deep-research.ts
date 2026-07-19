@@ -66,8 +66,8 @@ const historyQuerySchema = z.object({
 
 type HistoryQuery = z.infer<typeof historyQuerySchema>
 
-function errorResponse(c: any, status: 400 | 403 | 404 | 409 | 500, code: string, message: string) {
-  return c.json({ error: { code, message } }, status)
+function errorResponse(c: any, status: 400 | 403 | 404 | 409 | 500, code: string, message: string, details?: JsonObject) {
+  return c.json({ error: { code, message, ...(details ? { details } : {}) } }, status)
 }
 
 function routeError(c: any, error: unknown) {
@@ -76,7 +76,12 @@ function routeError(c: any, error: unknown) {
   }
   if (isResearchDomainError(error)) {
     const status = ['RESEARCH_INVALID_TRANSITION', 'RESEARCH_NOT_RUNNABLE', 'RESEARCH_NOT_RESUMABLE', 'RESEARCH_BUDGET_EXHAUSTED', 'RESEARCH_CANCELLED'].includes(error.code) ? 409 : 400
-    return errorResponse(c, status, error.code, error.message)
+    // The client only needs the safe remediation action. Never serialize provider
+    // settings, credentials, stack traces, or other internal error details.
+    const details = error.code === 'RESEARCH_MODEL_UNAVAILABLE'
+      ? { action: String(error.details?.action ?? 'configure_model') }
+      : undefined
+    return errorResponse(c, status, error.code, error.message, details)
   }
   return errorResponse(c, 500, 'INTERNAL_ERROR', 'Internal server error')
 }

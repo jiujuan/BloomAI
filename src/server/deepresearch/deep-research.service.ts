@@ -28,6 +28,7 @@ import { researchCoverageAssessmentRepo } from '../db/repositories/deepresearch/
 import { researchRunRepo } from '../db/repositories/deepresearch/research-run.repo'
 import { researchReportRepo } from '../db/repositories/deepresearch/research-report.repo'
 import { researchSourceRepo } from '../db/repositories/deepresearch/research-source.repo'
+import { logError } from '../logger/logger'
 import { subscribeToResearchEvents } from './research-event-publisher'
 import { claimDeepResearchCommand, deepResearchCommandKey, markDeepResearchCommandDispatched } from './commands'
 import { getResearchBudget } from './domain/budgets'
@@ -351,9 +352,21 @@ export function createDeepResearchService({ runtime }: CreateDeepResearchService
         throw new ResearchDomainError('RESEARCH_VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid Deep Research input.', false)
       }
 
-      const runtimeModel = await resolveResearchRuntimeModel({
-        requestedModelId: parsed.data.model,
-      })
+      let runtimeModel
+      try {
+        runtimeModel = await resolveResearchRuntimeModel({
+          requestedModelId: parsed.data.model,
+        })
+      } catch (error) {
+        if (isResearchDomainError(error) && error.code === 'RESEARCH_MODEL_UNAVAILABLE') {
+          logError('deep-research.model-selection', error, {
+            operation: 'start',
+            requestedModelId: parsed.data.model ?? null,
+            action: error.details?.action ?? 'configure_model',
+          })
+        }
+        throw error
+      }
       const run = researchRunRepo.create({
         input: parsed.data,
         budget: { ...getResearchBudget(parsed.data.depth) },

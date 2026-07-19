@@ -87,6 +87,7 @@ export function ResearchRunLifecyclePanel({ run, lifecycle, loading, onCancel, o
       {currentAttempt && <div><dt>当前尝试</dt><dd>尝试 #{currentAttempt.ordinal}（{currentAttempt.status}）</dd></div>}
       {activeIteration && <div><dt>补充迭代</dt><dd>第 {activeIteration.ordinal} 轮</dd></div>}
       <div><dt>预算</dt><dd>已使用迭代 {budget.usage.iterations} / {budget.limit.maxIterations}</dd></div>
+      <div><dt>子主题预算</dt><dd>{budget.usage.questions} / {budget.limit.maxQuestions}</dd></div>
       <div><dt>检索预算</dt><dd>{budget.usage.searchQueries} / {budget.limit.maxSearchQueries}</dd></div>
       <div><dt>抓取预算</dt><dd>{budget.usage.fetchedSources} / {budget.limit.maxFetchedSources}</dd></div>
       {assessment && <div><dt>覆盖评估</dt><dd>{Math.round(assessment.aggregateScore * 100)}%</dd></div>}

@@ -8,6 +8,7 @@ import { ResearchQuestionTree } from './ResearchQuestionTree'
 import { ResearchReportView } from './ResearchReportView'
 import { ResearchRunLifecyclePanel } from './ResearchRunLifecyclePanel'
 import { ResearchSourcesPanel } from './ResearchSourcesPanel'
+import { deepResearchErrorMessage } from './error-message'
 
 const VIEW_LABELS: Record<DeepResearchView, string> = { overview: '概览', questions: '问题', sources: '来源', report: '报告', evidence: '证据', activity: '活动' }
 
@@ -63,7 +64,7 @@ export function DeepResearchRunView(props: DeepResearchRunViewProps) {
           {actions.includes('export') && <button type="button" className="research-icon-button" aria-label="导出报告" title="导出报告" disabled={props.loading} onClick={props.onExport}><Download size={16} /></button>}
         </div>
       </header>
-      {(props.error ?? props.run.error?.message) && <p className="deep-research-error" role="alert">{props.error ?? props.run.error?.message}</p>}
+      {(props.error ?? props.run.error) && <p className="deep-research-error" role="alert">{deepResearchErrorMessage(props.error ?? props.run.error)}</p>}
       <ResearchProgress run={props.run} />
       <ResearchRunLifecyclePanel run={props.run} lifecycle={props.lifecycle ?? null} loading={props.loading} onCancel={props.onCancel} onResume={props.onResume} />
       <ClarificationForm run={props.run} loading={props.loading} onAnswer={props.onAnswerClarification} />

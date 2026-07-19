@@ -9,7 +9,7 @@ let originalEnv: NodeJS.ProcessEnv
 
 type TestApp = { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }
 
-async function loadApi(options: { admin?: boolean } = {}): Promise<{
+async function loadApi(options: { admin?: boolean; configureModel?: boolean } = {}): Promise<{
   app: TestApp
   researchRunRepo: typeof import('../../db/repositories/deepresearch/research-run.repo').researchRunRepo
   researchEventRepo: typeof import('../../db/repositories/deepresearch/research-event.repo').researchEventRepo
@@ -20,10 +20,12 @@ async function loadApi(options: { admin?: boolean } = {}): Promise<{
   const client = await import('../../db/client')
   await client.runMigrations()
   const { settingsRepo } = await import('../../db/repositories/settings.repo')
-  settingsRepo.setMany({
-    deep_research_model: 'deepseek-chat',
-    deepseek_api_key: 'deepseek-test-secret',
-  })
+  if (options.configureModel !== false) {
+    settingsRepo.setMany({
+      deep_research_model: 'deepseek-chat',
+      deepseek_api_key: 'deepseek-test-secret',
+    })
+  }
   const { createDeepResearchModule } = await import('../../deepresearch')
   const { createDeepResearchRoutes } = await import('./deep-research')
   const { researchRunRepo } = await import('../../db/repositories/deepresearch/research-run.repo')
@@ -71,6 +73,21 @@ describe('Deep Research HTTP API', () => {
     const created = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
     expect(created.response.status).toBe(201)
     expect(created.body.data).toMatchObject({ status: 'queued' })
+  })
+
+  it('returns an actionable error when no Deep Research model is configured', async () => {
+    const { app, researchRunRepo } = await loadApi({ configureModel: false })
+
+    const response = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
+
+    expect(response.response.status).toBe(400)
+    expect(response.body.error).toMatchObject({
+      code: 'RESEARCH_MODEL_UNAVAILABLE',
+      details: { action: expect.any(String) },
+    })
+    expect(['configure_model', 'configure_credentials', 'enable_model', 'test_model', 'restore_model'])
+      .toContain(response.body.error.details.action)
+    expect(researchRunRepo.list()).toHaveLength(0)
   })
 
   it('denies diagnostics without admin access and exposes only safe operational summaries to administrators', async () => {

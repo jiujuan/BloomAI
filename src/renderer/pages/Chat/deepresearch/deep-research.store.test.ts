@@ -277,4 +277,17 @@ describe('deep research store', () => {
     await store.getState().start()
     expect(store.getState().error).toBeNull()
   })
+
+  it('shows a Chinese remediation message when the Deep Research model is not configured', async () => {
+    const { store, api } = createHarness({ eventSource: false })
+    store.getState().setDraft({ topic: 'A valid topic', profile: 'general', depth: 'standard' })
+    api.start.mockRejectedValueOnce(Object.assign(new Error('Deep Research requires an enabled model.'), {
+      code: 'RESEARCH_MODEL_UNAVAILABLE',
+    }))
+
+    await store.getState().start()
+
+    expect(store.getState().error).toContain('未配置可用的深度研究模型')
+    expect(store.getState().error).toContain('设置')
+  })
 })

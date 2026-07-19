@@ -6,8 +6,12 @@ import type { DeepResearchRepositories } from '../workflow-context'
 import { assertWorkflowNotCancelled, checkpointWorkflowPhase, getWorkflowExecution } from './checkpoint-replay'
 import { loadRunnableRun } from '../workflow-context'
 import { RESEARCH_QUERY_INTENTS, createQueryDedupeKey, dedupeResearchQueryPlans, type ResearchQueryIntent } from '../query-strategy'
+import { logWarning } from '@server/logger/logger'
 
 const inputSchema = z.object({ runId: z.string().min(1), brief: researchBriefSchema })
+
+/** A single subtopic gets a small, predictable initial search budget. */
+export const MAX_INITIAL_SEARCH_QUERIES_PER_SUBTOPIC = 3
 const querySchema = z.object({
   questionId: z.string().min(1),
   query: z.string().trim().min(1),
@@ -35,17 +39,33 @@ function roundRobinByQuestion(plans: readonly PlannedResearchQuery[], questionId
   return selected
 }
 
+function capPlansPerQuestion(plans: readonly PlannedResearchQuery[], maxPerQuestion: number): PlannedResearchQuery[] {
+  const counts = new Map<string, number>()
+  return plans.filter((plan) => {
+    const count = counts.get(plan.questionId) ?? 0
+    if (count >= maxPerQuestion) return false
+    counts.set(plan.questionId, count + 1)
+    return true
+  })
+}
+
 function isKnownIntent(intent: string): intent is ResearchQueryIntent {
   return (RESEARCH_QUERY_INTENTS as readonly string[]).includes(intent)
 }
 
 /** Normalizes model output, rejects unknown questions, and makes the server the source of truth for dedupe keys. */
-export function prepareInitialQueryPlans(
+type InitialQueryPlanSelection = {
+  plans: PlannedResearchQuery[]
+  cappedPerSubtopicCount: number
+  cappedByGlobalBudgetCount: number
+}
+
+function selectInitialQueryPlans(
   plans: readonly PlannedResearchQuery[],
   questionIds: readonly string[],
   existing: ReadonlyArray<{ questionId: string; dedupeKey?: string; query: string }>,
   remaining: number,
-): PlannedResearchQuery[] {
+): InitialQueryPlanSelection {
   const knownQuestionIds = new Set(questionIds)
   const existingByQuestion = new Map<string, Set<string>>()
   for (const query of existing) {
@@ -65,7 +85,22 @@ export function prepareInitialQueryPlans(
     .filter((plan) => plan.sourceTargets.length > 0)
     .filter((plan) => !existingByQuestion.get(plan.questionId)?.has(plan.dedupeKey)))
 
-  return roundRobinByQuestion(normalized, questionIds, Math.max(0, remaining))
+  const perSubtopicCapped = capPlansPerQuestion(normalized, MAX_INITIAL_SEARCH_QUERIES_PER_SUBTOPIC)
+  const selected = roundRobinByQuestion(perSubtopicCapped, questionIds, Math.max(0, remaining))
+  return {
+    plans: selected,
+    cappedPerSubtopicCount: normalized.length - perSubtopicCapped.length,
+    cappedByGlobalBudgetCount: Math.max(0, perSubtopicCapped.length - selected.length),
+  }
+}
+
+export function prepareInitialQueryPlans(
+  plans: readonly PlannedResearchQuery[],
+  questionIds: readonly string[],
+  existing: ReadonlyArray<{ questionId: string; dedupeKey?: string; query: string }>,
+  remaining: number,
+): PlannedResearchQuery[] {
+  return selectInitialQueryPlans(plans, questionIds, existing, remaining).plans
 }
 
 export function createPlanQueriesStep({ repositories, planner }: { repositories: DeepResearchRepositories; planner: QueryPlanner }) {
@@ -81,8 +116,25 @@ export function createPlanQueriesStep({ repositories, planner }: { repositories:
         assertWorkflowNotCancelled(repositories, run.id)
         const rawPlans = z.array(querySchema).parse(await planner.plan(run, questions, { signal: getWorkflowExecution(run.id)?.signal }))
         assertWorkflowNotCancelled(repositories, run.id)
-        const remaining = Math.max(0, run.budget.maxSearchQueries - run.usage.searchQueries)
-        const plans = prepareInitialQueryPlans(rawPlans, questions.map((question) => question.id), existing, remaining)
+        const remainingGlobalBudget = Math.max(0, run.budget.maxSearchQueries - run.usage.searchQueries)
+        const topicAwareLimit = questions.length * MAX_INITIAL_SEARCH_QUERIES_PER_SUBTOPIC
+        const remaining = Math.min(remainingGlobalBudget, topicAwareLimit)
+        const selection = selectInitialQueryPlans(rawPlans, questions.map((question) => question.id), existing, remaining)
+        const plans = selection.plans
+        if (selection.cappedPerSubtopicCount > 0 || selection.cappedByGlobalBudgetCount > 0) {
+          logWarning('deep-research.search-limit', 'Deep Research initial search plan was capped by the configured search budget.', {
+            runId: run.id,
+            depth: run.depth,
+            plannedSubtopicCount: questions.length,
+            requestedQueryCount: rawPlans.length,
+            maxQueriesPerSubtopic: MAX_INITIAL_SEARCH_QUERIES_PER_SUBTOPIC,
+            topicAwareLimit,
+            remainingGlobalBudget,
+            acceptedQueryCount: plans.length,
+            cappedPerSubtopicCount: selection.cappedPerSubtopicCount,
+            cappedByGlobalBudgetCount: selection.cappedByGlobalBudgetCount,
+          })
+        }
         const created = plans.map((plan) => repositories.researchQuestionRepo.createSearchQuery({
           runId: run.id,
           questionId: plan.questionId,

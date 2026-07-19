@@ -14,6 +14,7 @@ import type {
 } from '@shared/deepresearch/contracts'
 import type { ResearchEventType } from '@shared/deepresearch/events'
 import type { DeepResearchDraft, DeepResearchLifecycle, DeepResearchView } from './deep-research.types'
+import { deepResearchErrorMessage } from './error-message'
 
 const TERMINAL_STATUSES = new Set<ResearchRunDto['status']>([
   'completed',
@@ -168,7 +169,7 @@ function toRun(detail: ResearchRunDetailDto): ResearchRunDto {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '深度研究请求失败'
+  return deepResearchErrorMessage(error)
 }
 
 function isTerminal(run: ResearchRunDto): boolean {
