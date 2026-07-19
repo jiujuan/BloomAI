@@ -1,20 +1,14 @@
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import { areHighPriorityQuestionsCovered, type EvidenceService } from '@server/services/deepresearch/evidence-service'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { checkpointWorkflowPhase, isReplayPastPhase } from './checkpoint-replay'
 import { deepResearchTelemetryContext, loadRunnableRun } from '../workflow-context'
 import { recordDeepResearchAssessment } from '@server/telemetry/metrics'
+import { recordProductionRunDiagnosticEvents } from '@server/deepresearch/run-diagnostics'
 
-const briefSchema = z.object({
-  title: z.string(),
-  objective: z.string().nullable(),
-  audience: z.string().nullable(),
-  scope: z.string(),
-  assumptions: z.array(z.string()),
-  plannedSections: z.array(z.string()),
-  criticalClarificationIds: z.array(z.string()),
-})
+const briefSchema = researchBriefSchema
 export const gapLoopStateSchema = z.object({
   runId: z.string().min(1),
   brief: briefSchema,
@@ -79,6 +73,10 @@ export function createAssessCoverageStep({ repositories, evidenceService }: { re
       }
       checkpointWorkflowPhase(repositories, run, 'assessing_coverage', 'gap_filling')
       const updatedQuestions = repositories.researchQuestionRepo.list(run.id)
+      const highPriorityQuestions = updatedQuestions.filter((question) => question.priority === 'high' || question.priority === 'critical')
+      if (highPriorityQuestions.length > 0 && highPriorityQuestions.every((question) => question.status !== 'covered')) {
+        recordProductionRunDiagnosticEvents(repositories, run, 'assessing_coverage', [{ kind: 'high_priority_coverage_zero', questions: updatedQuestions }])
+      }
       return {
         runId: run.id,
         brief: inputData.brief,

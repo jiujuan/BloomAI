@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResearchBriefDto, ResearchQualityDto, StartResearchInput } from '@shared/deepresearch/contracts'
 import { createCheckpointCursor } from '@server/deepresearch/domain/checkpoint-replay'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import { createContentService } from '@server/services/deepresearch/content-service'
 import { EvidenceService } from '@server/services/deepresearch/evidence-service'
 import { createExecuteSearchesStep } from './execute-searches'
@@ -274,7 +275,7 @@ describe('Deep Research checkpoint cursor recovery', () => {
     const { planIteration } = await import('./plan-iteration')
     const state = {
       runId: run.id,
-      brief,
+      brief: researchBriefSchema.parse(brief),
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,

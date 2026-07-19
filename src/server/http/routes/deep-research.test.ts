@@ -9,7 +9,7 @@ let originalEnv: NodeJS.ProcessEnv
 
 type TestApp = { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }
 
-async function loadApi(): Promise<{
+async function loadApi(options: { admin?: boolean } = {}): Promise<{
   app: TestApp
   researchRunRepo: typeof import('../../db/repositories/deepresearch/research-run.repo').researchRunRepo
   researchEventRepo: typeof import('../../db/repositories/deepresearch/research-event.repo').researchEventRepo
@@ -31,7 +31,7 @@ async function loadApi(): Promise<{
   const { researchReportRepo } = await import('../../db/repositories/deepresearch/research-report.repo')
   const module = createDeepResearchModule({ start: vi.fn(async () => undefined), resume: vi.fn(async () => undefined) })
   const app = new Hono()
-  app.route('/api/v1/deep-research', createDeepResearchRoutes({ module }))
+  app.route('/api/v1/deep-research', createDeepResearchRoutes({ module, isAdmin: options.admin ? () => true : undefined }))
   return { app, researchRunRepo, researchEventRepo, researchReportRepo }
 }
 
@@ -71,6 +71,25 @@ describe('Deep Research HTTP API', () => {
     const created = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
     expect(created.response.status).toBe(201)
     expect(created.body.data).toMatchObject({ status: 'queued' })
+  })
+
+  it('denies diagnostics without admin access and exposes only safe operational summaries to administrators', async () => {
+    const deniedApi = await loadApi()
+    const created = await requestJson(deniedApi.app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
+    const denied = await requestJson(deniedApi.app, '/admin/runs/' + created.body.data.id + '/diagnostics')
+    expect(denied.response.status).toBe(403)
+    expect(denied.body.error.code).toBe('RESEARCH_DIAGNOSTICS_FORBIDDEN')
+
+    const { app, researchRunRepo } = await loadApi({ admin: true })
+    const adminCreated = await requestJson(app, '/runs', { method: 'POST', body: JSON.stringify(validInput()) })
+    const runId = adminCreated.body.data.id as string
+    researchRunRepo.transitionWithEvent(runId, 'planning', { phase: 'planning' })
+    const diagnostics = await requestJson(app, '/admin/runs/' + runId + '/diagnostics')
+    expect(diagnostics.response.status).toBe(200)
+    expect(diagnostics.body.data).toMatchObject({ run: { id: runId }, model: { mode: 'llm_backed' }, fetch: { snapshots: [] } })
+    const serialized = JSON.stringify(diagnostics.body)
+    expect(serialized).not.toContain('deepseek-test-secret')
+    expect(serialized).not.toContain('content')
   })
 
   it('creates, lists, reads, validates, clarifies, cancels, resumes, and serves owned artifacts', async () => {

@@ -199,7 +199,7 @@ function seedSettings() {
   const database = getOrmDb()
   const now = Date.now()
   const settings = [
-    ['model', 'claude-3-5-sonnet-20241022'], ['deep_research_model', ''], ['theme', 'system'],
+    ['model', 'claude-3-5-sonnet-20241022'], ['deep_research_model', ''], ['deep_research_quality_gates', ''], ['theme', 'system'],
     ['shortcut_overlay', 'Alt+Space'], ['anthropic_api_key', ''],
     ['openai_api_key', ''], ['agnes_api_key', ''], ['deepseek_api_key', ''],
     ['ollama_base_url', 'http://127.0.0.1:11434'],
@@ -290,7 +290,7 @@ function seedTools() {
       ['web_search', 'web', 'Web Search', 'Search the web and return relevant results with titles, URLs and snippets.', '{"query":{"type":"string"},"limit":{"type":"number","default":8}}', '{"results":{"type":"array"}}', null],
       ['web_fetch', 'web', 'Web Fetch', 'Fetch a webpage and return its readable main text. Handles non-UTF-8 encodings and, for JS-heavy/SPA pages, can render with a headless browser.', '{"url":{"type":"string"},"mode":{"type":"string","enum":["text","html","full"],"default":"text"},"maxChars":{"type":"number","default":20000},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto (renders only when the static page has little text, e.g. SPAs)."},"timeoutMs":{"type":"number","default":20000}}', '{"title":{"type":"string"},"content":{"type":"string"},"finalUrl":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
       ['web_screenshot', 'web', 'Web Screenshot', 'Capture a full-page screenshot of any URL as PNG.', '{"url":{"type":"string"}}', '{"imagePath":{"type":"string"}}', 'network'],
-      ['web_extract', 'web', 'Web Extract', 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.', '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}', '{"title":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
+      ['web_extract', 'web', 'Web Extract', 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.', '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}', '{"title":{"type":"string"},"byline":{"type":"string"},"publishedAt":{"type":"string"},"canonicalUrl":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
       ['fs_read', 'fs', 'File Read', 'Read the contents of a local file with optional line range.', '{"path":{"type":"string"},"offset":{"type":"number"},"limit":{"type":"number"}}', '{"content":{"type":"string"},"totalLines":{"type":"number"}}', 'fs'],
       ['fs_write', 'fs', 'File Write', 'Write or append content to a local file.', '{"path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["write","append"],"default":"write"}}', '{"bytesWritten":{"type":"number"}}', 'write'],
       ['fs_edit', 'fs', 'File Edit', 'Replace an exact unique string in a file.', '{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}}', '{"success":{"type":"boolean"},"linesChanged":{"type":"number"}}', 'write'],
@@ -330,9 +330,9 @@ function seedTools() {
   }).where(eq(schema.tools.id, 'web_fetch')).run()
 
   database.update(schema.tools).set({
-    description: 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.',
+    description: 'Extract structured metadata (title, byline, published date, canonical URL), headings, links, and main text from a webpage. Supports JS rendering for complex/SPA pages.',
     params_schema: '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}',
-    result_schema: '{"title":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}',
+    result_schema: '{"title":{"type":"string"},"byline":{"type":"string"},"publishedAt":{"type":"string"},"canonicalUrl":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}',
   }).where(eq(schema.tools.id, 'web_extract')).run()
 }
 

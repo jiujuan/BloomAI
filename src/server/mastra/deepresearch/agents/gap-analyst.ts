@@ -3,11 +3,9 @@ import type { ResearchQuestionDto, ResearchRunDto } from '@shared/deepresearch/c
 import { isQuestionCovered } from '@server/services/deepresearch/evidence-service'
 import { throwIfCancellationRequested } from '@server/deepresearch/domain/cancellation'
 import { resolveMastraModel } from '../../model-resolver'
+import { createGapQueryPlan, dedupeResearchQueryPlans, type PlannedTopicQuery, type ResearchQueryIntent } from '../query-strategy'
 
-export interface FollowUpResearchQuery {
-  questionId: string
-  query: string
-}
+export interface FollowUpResearchQuery extends PlannedTopicQuery {}
 
 export interface GapAnalyst {
   plan(run: ResearchRunDto, questions: ResearchQuestionDto[], options?: { signal?: AbortSignal }): Promise<FollowUpResearchQuery[]>
@@ -26,15 +24,9 @@ export function createDeterministicGapAnalyst(): GapAnalyst {
       throwIfCancellationRequested(options)
       const plans = questions
         .filter((question) => (question.priority === 'high' || question.priority === 'critical') && !isQuestionCovered(question))
-        .flatMap((question) => {
-          const gap = question.coverage?.gaps[0] ?? 'citable evidence'
-          return [{
-            questionId: question.id,
-            query: run.topic + ' ' + question.question + ' ' + gap,
-          }]
-        })
+        .flatMap((question) => (question.coverage?.gaps ?? ['citable evidence']).map((gap) => createGapQueryPlan(run, question, gap)))
       throwIfCancellationRequested(options)
-      return plans
+      return dedupeResearchQueryPlans(plans)
     },
   }
 }

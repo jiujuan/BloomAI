@@ -161,3 +161,21 @@ describe('Coverage Policy V2', () => {
     expect(assessCoveragePolicyV2(input)).toMatchObject({ verdict: 'blocked', limitation: input.blockedReason })
   })
 })
+
+describe('DRQ-05 source category coverage', () => {
+  it('treats selected product documentation and official statistics as authoritative requirements rather than literal source-type matches', () => {
+    const result = assessCoveragePolicyV2({
+      ...COVERAGE_POLICY_V2_PROFILE_FIXTURES.general,
+      priority: 'low',
+      requiredEvidenceTypes: ['official source', 'official statistics'],
+      evidence: [
+        { ...COVERAGE_POLICY_V2_PROFILE_FIXTURES.general.evidence[0], id: 'doc', sourceId: 'doc', domain: 'docs.vendor.test', sourceType: 'product_documentation', confidence: 0.9, publishedAt: Date.UTC(2026, 6, 1) },
+        { ...COVERAGE_POLICY_V2_PROFILE_FIXTURES.general.evidence[0], id: 'stats', sourceId: 'stats', domain: 'stats.gov.test', sourceType: 'official_statistics', confidence: 0.9, publishedAt: Date.UTC(2026, 6, 1) },
+      ],
+    })
+
+    expect(result.dimensions.requiredEvidenceTypes).toBe(1)
+    expect(result.sourceCounts.primaryOrAuthoritative).toBeGreaterThanOrEqual(2)
+    expect(result.gaps.map((gap) => gap.code)).not.toContain('MISSING_REQUIRED_TYPE')
+  })
+})

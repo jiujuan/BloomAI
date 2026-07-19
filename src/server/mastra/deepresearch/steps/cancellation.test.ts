@@ -65,7 +65,7 @@ describe('Deep Research cancellation step boundaries', () => {
       draft: vi.fn(async (_input: unknown, options?: { signal?: AbortSignal }) => {
         expect(options?.signal).toBe(controller.signal)
         controller.abort()
-        return 'must not persist'
+        return { summary: 'must not persist', bodyMarkdown: '### Direct answer\n\nThe available evidence is insufficient for a section conclusion.\n\n### Comparison or classification\n\nNo reliable comparison can be made without routed evidence.\n\n### Evidence basis\n\nNo qualifying evidence passage was routed to this section.\n\n### Conditions and limitations\n\nAdditional section-specific evidence is required before publication.', claims: [], evidenceIds: [], limitations: ['No qualifying evidence was routed.'], missingEvidence: ['Section-specific evidence'] }
       }),
     }
     bindCancelledSignal(run.id, controller)
@@ -104,7 +104,7 @@ describe('Deep Research cancellation step boundaries', () => {
 
     await expect(executeIterationRetrieval({
       runId: run.id,
-      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,
@@ -132,6 +132,7 @@ describe('Deep Research cancellation step boundaries', () => {
       researchRunRepo: { get: vi.fn(() => run) },
       researchIterationRepo: { get: vi.fn(() => ({ id: 'iteration-1', ordinal: 1, plan: { reservation: { fetchedSources: 1 } } })), update: vi.fn() },
       researchQuestionRepo: {
+        list: vi.fn(() => []),
         listSearchQueries: vi.fn(() => [{ id: 'query-1', iteration: 1, query: 'frozen query', status: 'completed', candidates: [{ title: source.title, url: source.originalUrl, snippet: 'fixture' }] }]),
         updateSearchQuery: vi.fn(),
       },
@@ -150,7 +151,7 @@ describe('Deep Research cancellation step boundaries', () => {
 
     await expect(executeIterationRetrieval({
       runId: run.id,
-      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: 'Cancellation boundary', objective: null, audience: null, scope: 'fixture', definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,

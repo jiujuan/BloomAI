@@ -12,6 +12,12 @@ export interface CreateResearchQuestionInput {
   question: string
   intent: string
   requiredEvidenceTypes: string[]
+  sectionKey?: string | null
+  questionType?: string | null
+  needPrimarySource?: boolean
+  needRecentSource?: boolean
+  needQuantitativeEvidence?: boolean
+  sourceTargets?: string[]
   priority: ResearchQuestionDto['priority']
   status?: ResearchQuestionDto['status']
   coverage?: ResearchCoverageDto | null
@@ -22,6 +28,12 @@ export interface CreateResearchSearchQueryInput {
   questionId: string
   iteration: number
   query: string
+  /** Optional during the migration period for existing callers. */
+  intent?: string | null
+  /** Optional during the migration period for existing callers. */
+  sourceTargets?: string[]
+  /** Optional during the migration period for existing callers. */
+  dedupeKey?: string
   provider?: string | null
   status?: ResearchSearchQueryDto['status']
   resultCount?: number
@@ -40,6 +52,12 @@ export function mapResearchQuestion(row: typeof research_questions.$inferSelect)
     question: row.question,
     intent: row.intent,
     requiredEvidenceTypes: decodeJson<string[]>(row.required_evidence_types_json, []),
+    sectionKey: row.section_key,
+    questionType: row.question_type,
+    needPrimarySource: Boolean(row.need_primary_source),
+    needRecentSource: Boolean(row.need_recent_source),
+    needQuantitativeEvidence: Boolean(row.need_quantitative_evidence),
+    sourceTargets: decodeJson<string[]>(row.source_targets_json, []),
     priority: row.priority as ResearchQuestionDto['priority'],
     status: row.status as ResearchQuestionDto['status'],
     coverage: row.coverage_json ? decodeJson<ResearchCoverageDto | null>(row.coverage_json, null) : null,
@@ -57,6 +75,9 @@ export function mapResearchSearchQuery(row: typeof research_search_queries.$infe
     questionId: row.question_id,
     iteration: row.iteration,
     query: row.query,
+    intent: row.query_intent,
+    sourceTargets: decodeJson<string[]>(row.source_targets_json, []),
+    dedupeKey: row.dedupe_key,
     provider: row.provider,
     status: row.status as ResearchSearchQueryDto['status'],
     resultCount: row.result_count,
@@ -92,6 +113,12 @@ export const researchQuestionRepo = {
       question: input.question,
       intent: input.intent,
       required_evidence_types_json: encodeJson(input.requiredEvidenceTypes),
+      section_key: input.sectionKey ?? null,
+      question_type: input.questionType ?? null,
+      need_primary_source: input.needPrimarySource ? 1 : 0,
+      need_recent_source: input.needRecentSource ? 1 : 0,
+      need_quantitative_evidence: input.needQuantitativeEvidence ? 1 : 0,
+      source_targets_json: encodeJson(input.sourceTargets ?? []),
       priority: input.priority,
       status: input.status ?? 'planned',
       coverage_json: input.coverage ? encodeJson(input.coverage) : null,
@@ -138,6 +165,9 @@ export const researchQuestionRepo = {
       question_id: input.questionId,
       iteration: input.iteration,
       query: input.query,
+      query_intent: input.intent ?? null,
+      source_targets_json: encodeJson(input.sourceTargets ?? []),
+      dedupe_key: input.dedupeKey ?? '',
       provider: input.provider ?? null,
       status: input.status ?? 'queued',
       result_count: input.resultCount ?? 0,

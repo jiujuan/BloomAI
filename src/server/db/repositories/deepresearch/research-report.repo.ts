@@ -1,12 +1,16 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type {
   JsonValue,
   ResearchArtifactDto,
   ResearchCitationDto,
+  CitationSemanticChecksDto,
+  CitationVerificationMethod,
   ResearchClaimDto,
   ResearchQualityDto,
+  ResearchQualityGateResultDto,
   ResearchReportSectionDto,
+  SectionDraftDto,
 } from '@shared/deepresearch/contracts'
 import { getOrmDb } from '../../client'
 import {
@@ -14,6 +18,8 @@ import {
   research_citations,
   research_claims,
   research_quality_assessments,
+  research_questions,
+  research_report_section_questions,
   research_report_sections,
 } from '../../schema'
 import { decodeJson, encodeJson } from './repository-utils'
@@ -21,12 +27,20 @@ import { decodeJson, encodeJson } from './repository-utils'
 export interface UpsertResearchSectionInput {
   runId: string
   ordinal: number
+  sectionKey?: string | null
   title: string
   purpose: string
   draft?: string | null
+  draftPayload?: SectionDraftDto | null
   verifiedText?: string | null
   status: ResearchReportSectionDto['status']
   idempotencyKey: string
+}
+
+export interface ReplaceSectionQuestionMappingsInput {
+  runId: string
+  sectionId: string
+  questionIds: string[]
 }
 
 export interface UpsertResearchClaimInput {
@@ -47,10 +61,13 @@ export interface UpsertResearchCitationInput {
   evidenceId: string
   entailmentStatus: ResearchCitationDto['entailmentStatus']
   rationale: string
+  verificationMethod?: CitationVerificationMethod | null
+  semanticChecks?: CitationSemanticChecksDto | null
 }
 
 export interface UpdateResearchSectionInput {
   draft?: string | null
+  draftPayload?: SectionDraftDto | null
   verifiedText?: string | null
   status?: ResearchReportSectionDto['status']
 }
@@ -63,6 +80,8 @@ export interface UpdateResearchClaimInput {
 export interface UpdateResearchCitationInput {
   entailmentStatus?: ResearchCitationDto['entailmentStatus']
   rationale?: string
+  verificationMethod?: CitationVerificationMethod | null
+  semanticChecks?: CitationSemanticChecksDto | null
 }
 
 export interface UpsertResearchArtifactInput {
@@ -90,9 +109,11 @@ export function mapResearchSection(row: typeof research_report_sections.$inferSe
     id: row.id,
     runId: row.run_id,
     ordinal: row.ordinal,
+    sectionKey: row.section_key,
     title: row.title,
     purpose: row.purpose,
     draft: row.draft,
+    draftPayload: decodeJson<SectionDraftDto | null>(row.draft_payload_json, null),
     verifiedText: row.verified_text,
     status: row.status as ResearchReportSectionDto['status'],
   }
@@ -120,6 +141,8 @@ export function mapResearchCitation(row: typeof research_citations.$inferSelect)
     evidenceId: row.evidence_id,
     entailmentStatus: row.entailment_status as ResearchCitationDto['entailmentStatus'],
     rationale: row.rationale,
+    verificationMethod: row.verification_method as CitationVerificationMethod | null ?? undefined,
+    semanticChecks: decodeJson<CitationSemanticChecksDto | null>(row.semantic_checks_json, null),
     ordinal: row.ordinal,
   }
 }
@@ -147,6 +170,9 @@ export function mapResearchQuality(row: typeof research_quality_assessments.$inf
     requiredSectionCoverage: row.required_section_coverage,
     limitations: decodeJson<string[]>(row.limitations_json, []),
     assessorVersion: row.assessor_version,
+    policyVersion: row.policy_version ?? undefined,
+    gateResults: decodeJson<ResearchQualityGateResultDto[]>(row.gate_results_json, []),
+    remedialActions: decodeJson<string[]>(row.remedial_actions_json, []),
   }
 }
 
@@ -165,9 +191,11 @@ export const researchReportRepo = {
         id,
         run_id: input.runId,
         ordinal: input.ordinal,
+        section_key: input.sectionKey ?? null,
         title: input.title,
         purpose: input.purpose,
         draft: input.draft ?? null,
+        draft_payload_json: input.draftPayload === undefined ? null : encodeJson(input.draftPayload),
         verified_text: input.verifiedText ?? null,
         status: input.status,
         idempotency_key: input.idempotencyKey,
@@ -176,6 +204,45 @@ export const researchReportRepo = {
       }).run()
       return mapResearchSection(tx.select().from(research_report_sections).where(eq(research_report_sections.id, id)).get()!)
     })
+  },
+
+  replaceSectionQuestionMappings(input: ReplaceSectionQuestionMappingsInput): void {
+    const questionIds = [...new Set(input.questionIds)]
+    getOrmDb().transaction((tx) => {
+      const section = tx.select({ id: research_report_sections.id }).from(research_report_sections).where(and(
+        eq(research_report_sections.id, input.sectionId),
+        eq(research_report_sections.run_id, input.runId),
+      )).get()
+      if (!section) throw new Error('Deep Research section not found for mapping: ' + input.sectionId)
+
+      if (questionIds.length > 0) {
+        const questions = tx.select({ id: research_questions.id }).from(research_questions).where(and(
+          eq(research_questions.run_id, input.runId),
+          inArray(research_questions.id, questionIds),
+        )).all()
+        if (questions.length !== questionIds.length) throw new Error('Deep Research section mapping contains a question from another Run.')
+      }
+
+      tx.delete(research_report_section_questions).where(eq(research_report_section_questions.section_id, input.sectionId)).run()
+      if (questionIds.length > 0) {
+        const now = Date.now()
+        tx.insert(research_report_section_questions).values(questionIds.map((questionId, index) => ({
+          section_id: input.sectionId,
+          question_id: questionId,
+          ordinal: index + 1,
+          created_at: now,
+        }))).run()
+      }
+    })
+  },
+
+  listQuestionIdsForSection(sectionId: string): string[] {
+    return getOrmDb().select({ questionId: research_report_section_questions.question_id })
+      .from(research_report_section_questions)
+      .where(eq(research_report_section_questions.section_id, sectionId))
+      .orderBy(asc(research_report_section_questions.ordinal))
+      .all()
+      .map((row) => row.questionId)
   },
 
   upsertClaim(input: UpsertResearchClaimInput): ResearchClaimDto {
@@ -209,6 +276,7 @@ export const researchReportRepo = {
   updateSection(id: string, data: UpdateResearchSectionInput): ResearchReportSectionDto {
     const updates: Partial<typeof research_report_sections.$inferInsert> = { updated_at: Date.now() }
     if (data.draft !== undefined) updates.draft = data.draft
+    if (data.draftPayload !== undefined) updates.draft_payload_json = data.draftPayload === null ? null : encodeJson(data.draftPayload)
     if (data.verifiedText !== undefined) updates.verified_text = data.verifiedText
     if (data.status !== undefined) updates.status = data.status
     const result = getOrmDb().update(research_report_sections).set(updates).where(eq(research_report_sections.id, id)).run()
@@ -229,6 +297,8 @@ export const researchReportRepo = {
     const updates: Partial<typeof research_citations.$inferInsert> = {}
     if (data.entailmentStatus !== undefined) updates.entailment_status = data.entailmentStatus
     if (data.rationale !== undefined) updates.rationale = data.rationale
+    if (data.verificationMethod !== undefined) updates.verification_method = data.verificationMethod
+    if (data.semanticChecks !== undefined) updates.semantic_checks_json = data.semanticChecks === null ? null : encodeJson(data.semanticChecks)
     const result = getOrmDb().update(research_citations).set(updates).where(eq(research_citations.id, id)).run()
     if (result.changes !== 1) throw new Error('Deep Research citation not found: ' + id)
     return mapResearchCitation(getOrmDb().select().from(research_citations).where(eq(research_citations.id, id)).get()!)
@@ -257,6 +327,8 @@ export const researchReportRepo = {
         evidence_id: input.evidenceId,
         entailment_status: input.entailmentStatus,
         rationale: input.rationale,
+        verification_method: input.verificationMethod ?? null,
+        semantic_checks_json: input.semanticChecks === undefined || input.semanticChecks === null ? null : encodeJson(input.semanticChecks),
         ordinal,
         created_at: Date.now(),
       }).run()
@@ -304,6 +376,9 @@ export const researchReportRepo = {
       required_section_coverage: quality.requiredSectionCoverage,
       limitations_json: encodeJson(quality.limitations),
       assessor_version: quality.assessorVersion,
+      policy_version: quality.policyVersion ?? null,
+      gate_results_json: encodeJson(quality.gateResults ?? []),
+      remedial_actions_json: encodeJson(quality.remedialActions ?? []),
       created_at: Date.now(),
     }).run()
     return quality

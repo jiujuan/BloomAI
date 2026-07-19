@@ -103,6 +103,7 @@ describe('llmRepo', () => {
         'google_api_key',
         'together_api_key',
         'qwen_api_key',
+        'deep_research_quality_gates',
         'default_image_model',
         'default_video_model',
       ])

@@ -3,7 +3,9 @@ import os from 'os'
 import path from 'path'
 import { LibSQLStore } from '@mastra/libsql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { StartResearchInput } from '@shared/deepresearch/contracts'
+import type { ResearchModelSelectionSnapshot, StartResearchInput } from '@shared/deepresearch/contracts'
+import type { MastraModelConfig } from '@mastra/core/llm'
+import { createLlmDeepResearchAdapters, type LlmDeepResearchAdapters } from './llm-adapters'
 import { createDeepResearchExecutor } from '../../deepresearch/executor'
 import { createDeepResearchService } from '../../deepresearch/deep-research.service'
 import { createDeepResearchMastraRuntime } from './mastra'
@@ -98,6 +100,86 @@ function createStorage() {
 }
 
 describe('Deep Research Mastra report workflow', () => {
+  it('uses the snapshotted LLM factory by default while tests inject fakes explicitly', async () => {
+    const repositories = await loadTestContext()
+    const retrieval = createRetrievalServices(repositories)
+    const snapshot: ResearchModelSelectionSnapshot = {
+      requestedModelId: null,
+      selectedModelId: 'configured-text-model',
+      providerId: 'configured-provider',
+      providerKind: 'openai-compatible',
+      selectionSource: 'deep_research_setting',
+      settingsKey: 'deep_research_model',
+      modelContractVersion: 'v1',
+      resolvedAt: 1,
+    }
+    const planner = { plan: vi.fn(async () => ({
+      title: 'Enterprise AI assistant market research',
+      objective: 'Compare the market and leading vendors.',
+      audience: null,
+      scope: 'Enterprise market',
+      assumptions: [],
+      plannedSections: ['executive-summary'],
+      criticalClarifications: [{
+        question: 'Which geography should the comparison cover?',
+        intent: 'scope',
+        priority: 'critical' as const,
+        requiredEvidenceTypes: ['official-statistics'],
+      }],
+    })) }
+    const llmAdapterFactory = vi.fn((_: Parameters<typeof createLlmDeepResearchAdapters>[0]) => ({ planner }) as unknown as LlmDeepResearchAdapters)
+    const researchModelResolver = vi.fn(async () => ({}) as MastraModelConfig)
+    const runtime = createDeepResearchMastraRuntime({
+      dataDir,
+      storage: createStorage(),
+      repositories,
+      llmAdapterFactory,
+      researchModelResolver,
+      ...retrieval,
+    })
+    runtimes.push(runtime)
+    const run = repositories.researchRunRepo.create({
+      input,
+      budget: {
+        maxQuestions: 2,
+        maxIterations: 1,
+        maxSearchQueries: 2,
+        maxNormalizedSources: 2,
+        maxFetchedSources: 2,
+        searchConcurrency: 1,
+        fetchConcurrency: 1,
+        maxDurationMs: 60_000,
+      },
+      modelSelectionSnapshot: snapshot,
+    })
+
+    const attempt = repositories.researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    await runtime.start({
+      runId: run.id,
+      attemptId: attempt.id,
+      ownershipToken: 'production-composition-token',
+      signal: new AbortController().signal,
+      resumeCursor: { version: 1, nextPhase: 'research', iteration: 3 },
+    })
+
+    expect(researchModelResolver).toHaveBeenCalledWith(snapshot)
+    expect(llmAdapterFactory).toHaveBeenCalledWith(expect.objectContaining({ model: {}, usageReporter: expect.any(Function), traceReporter: expect.any(Function) }))
+    const factoryOptions = llmAdapterFactory.mock.calls[0]?.[0] as Parameters<typeof createLlmDeepResearchAdapters>[0]
+    await factoryOptions.traceReporter?.({
+      stage: 'brief_planning', attempt: 1,
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), inputCharacters: 120, outputCharacters: 40,
+      durationMs: 30, parseStatus: 'valid', retryReason: null, errorCode: null, errorCategory: null,
+    })
+    expect(repositories.researchAttemptRepo.get(attempt.id)?.modelTraces).toEqual([expect.objectContaining({
+      stage: 'brief_planning', iteration: 3, inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64),
+    })])
+    expect(planner.plan).toHaveBeenCalledTimes(1)
+    expect(repositories.researchRunRepo.get(run.id)).toMatchObject({
+      status: 'awaiting_input',
+      phase: 'awaiting_clarification',
+    })
+  })
+
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-deepresearch-workflow-'))
     originalEnv = { ...process.env }
@@ -130,10 +212,10 @@ describe('Deep Research Mastra report workflow', () => {
         maxDurationMs: 30 * 60 * 1000,
       },
     })
-    const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute' }]) }
+    const gapAnalyst = { plan: vi.fn(async () => [{ questionId: 'unreachable', query: 'must not execute', intent: 'primary_source' as const, sourceTargets: ['official source'], dedupeKey: 'unreachable-query' }]) }
     const state = {
       runId: run.id,
-      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,
@@ -174,7 +256,7 @@ describe('Deep Research Mastra report workflow', () => {
     const gapAnalyst = { plan: vi.fn(async () => []) }
     const state = {
       runId: run.id,
-      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, assumptions: [], plannedSections: [], criticalClarificationIds: [] },
+      brief: { title: run.topic, objective: null, audience: null, scope: run.topic, definition: null, timeframe: null, geography: null, deliverables: [], assumptions: [], plannedSections: [], questions: [], criticalClarificationIds: [] },
       coverageComplete: false,
       marginalNewEvidenceCount: 0,
       cancelled: false,
@@ -209,7 +291,7 @@ describe('Deep Research Mastra report workflow', () => {
     const gapAnalyst = {
       plan: vi.fn(async (currentRun: { topic: string }, questions: Array<{ id: string; question: string; priority: string; coverage: { gaps: string[] } | null }>) => questions
         .filter((question) => question.priority === 'high' || question.priority === 'critical')
-        .map((question) => ({ questionId: question.id, query: currentRun.topic + ' ' + question.question + ' follow-up ' + (question.coverage?.gaps[0] ?? 'official evidence') }))),
+        .map((question) => ({ questionId: question.id, query: currentRun.topic + ' ' + question.question + ' follow-up official evidence', intent: 'primary_source' as const, sourceTargets: ['official source'], dedupeKey: 'follow-up:' + question.id }))),
     }
     const runtime = createDeepResearchMastraRuntime({
       dataDir,

@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getResearchBudget } from '@server/deepresearch/domain/budgets'
 import { decideIteration } from '@server/deepresearch/domain/iteration-decision'
+import { assessCandidateSourceQuality } from '@server/deepresearch/domain/source-quality'
 import type { ResearchCoverageAssessmentV2Dto } from '@shared/deepresearch/contracts'
 
 let dataDir: string
@@ -116,6 +117,161 @@ describe('Deep Research repositories', () => {
     expect(researchRunRepo.acquireLease(run.id, 'worker-a', 10_000, 1_000)).toBe(true)
     expect(researchRunRepo.acquireLease(run.id, 'worker-b', 10_000, 1_001)).toBe(false)
     expect(researchRunRepo.acquireLease(run.id, 'worker-b', 10_000, 11_001)).toBe(true)
+  })
+
+  it('persists topic-specific question metadata and replaces ordered section mappings safely', async () => {
+    const { researchRunRepo, researchQuestionRepo, researchReportRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const otherRun = createRun(researchRunRepo)
+    const productQuestion = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 1,
+      question: 'Which lead-intelligence product categories are relevant to enterprise sales teams?',
+      intent: 'product-category',
+      requiredEvidenceTypes: ['vendor documentation'],
+      sectionKey: 'product-categories',
+      questionType: 'product_capability',
+      needPrimarySource: true,
+      needRecentSource: true,
+      needQuantitativeEvidence: false,
+      sourceTargets: ['vendor documentation', 'product pages'],
+      priority: 'high',
+    })
+    const technologyQuestion = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 2,
+      question: 'What technical architecture and data sources power lead-intelligence products?',
+      intent: 'technical-architecture',
+      requiredEvidenceTypes: ['technical documentation'],
+      sectionKey: 'product-categories',
+      questionType: 'technical_architecture',
+      needPrimarySource: true,
+      needRecentSource: false,
+      needQuantitativeEvidence: false,
+      sourceTargets: ['technical documentation'],
+      priority: 'medium',
+    })
+    const foreignQuestion = researchQuestionRepo.create({
+      runId: otherRun.id,
+      ordinal: 1,
+      question: 'This question belongs to another run.',
+      intent: 'foreign',
+      requiredEvidenceTypes: [],
+      priority: 'low',
+    })
+    const section = researchReportRepo.upsertSection({
+      runId: run.id,
+      ordinal: 1,
+      sectionKey: 'product-categories',
+      title: 'Product categories',
+      purpose: 'Compare categories and technical foundations.',
+      status: 'planned',
+      idempotencyKey: 'section:product-categories',
+    })
+
+    expect(researchQuestionRepo.list(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: productQuestion.id,
+        sectionKey: 'product-categories',
+        questionType: 'product_capability',
+        needPrimarySource: true,
+        needRecentSource: true,
+        sourceTargets: ['vendor documentation', 'product pages'],
+      }),
+    ]))
+    expect(researchReportRepo.listSections(run.id)).toEqual([expect.objectContaining({ id: section.id, sectionKey: 'product-categories' })])
+
+    researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [productQuestion.id, technologyQuestion.id, productQuestion.id],
+    })
+    expect(researchReportRepo.listQuestionIdsForSection(section.id)).toEqual([productQuestion.id, technologyQuestion.id])
+
+    researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [technologyQuestion.id],
+    })
+    expect(researchReportRepo.listQuestionIdsForSection(section.id)).toEqual([technologyQuestion.id])
+    expect(() => researchReportRepo.replaceSectionQuestionMappings({
+      runId: run.id,
+      sectionId: section.id,
+      questionIds: [productQuestion.id, foreignQuestion.id],
+    })).toThrow('question from another Run')
+  })
+  it('round-trips structured section drafts through section persistence', async () => {
+    const { researchRunRepo, researchReportRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const initialDraft = {
+      summary: 'Initial evidence-backed conclusion.',
+      bodyMarkdown: '### Direct answer\n\nInitial direct answer.\n\n### Comparison or classification\n\nInitial classification.\n\n### Evidence basis\n\nInitial evidence.\n\n### Conditions and limitations\n\nInitial limitation.',
+      claims: [{ text: 'Initial evidence.', kind: 'factual' as const, importance: 'medium' as const, confidence: 0.9, evidenceIds: ['evidence-1'] }],
+      evidenceIds: ['evidence-1'],
+      limitations: ['Initial limitation.'],
+      missingEvidence: [],
+    }
+    const section = researchReportRepo.upsertSection({
+      runId: run.id,
+      ordinal: 1,
+      title: 'Evidence-backed section',
+      purpose: 'Preserve the structured writer result.',
+      draft: initialDraft.bodyMarkdown,
+      draftPayload: initialDraft,
+      status: 'drafted',
+      idempotencyKey: 'section:structured-draft',
+    })
+
+    expect(section.draftPayload).toEqual(initialDraft)
+
+    const updatedDraft = { ...initialDraft, summary: 'Updated evidence-backed conclusion.', missingEvidence: ['Independent confirmation.'] }
+    expect(researchReportRepo.updateSection(section.id, { draftPayload: updatedDraft }).draftPayload).toEqual(updatedDraft)
+    expect(researchReportRepo.listSections(run.id)).toEqual([expect.objectContaining({ id: section.id, draftPayload: updatedDraft })])
+  })
+  it('persists query intent, source targets, and dedupe keys while preserving legacy query creation', async () => {
+    const { researchRunRepo, researchQuestionRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const question = researchQuestionRepo.create({
+      runId: run.id,
+      ordinal: 1,
+      question: 'Which product capabilities are supported?',
+      intent: 'product-capability',
+      requiredEvidenceTypes: ['vendor documentation'],
+      priority: 'high',
+    })
+
+    const enriched = researchQuestionRepo.createSearchQuery({
+      runId: run.id,
+      questionId: question.id,
+      iteration: 0,
+      query: 'BloomAI product capabilities site:docs.bloomai.example',
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+      idempotencyKey: 'query:enriched',
+    })
+    const legacy = researchQuestionRepo.createSearchQuery({
+      runId: run.id,
+      questionId: question.id,
+      iteration: 0,
+      query: 'BloomAI pricing',
+      idempotencyKey: 'query:legacy',
+    })
+
+    expect(enriched).toMatchObject({
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+    })
+    expect(researchQuestionRepo.getSearchQuery(enriched.id)).toMatchObject({
+      intent: 'product_capability',
+      sourceTargets: ['docs.bloomai.example', 'support.bloomai.example'],
+      dedupeKey: 'sha256:capability-query',
+    })
+    expect(researchQuestionRepo.listSearchQueries(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: enriched.id, intent: 'product_capability', dedupeKey: 'sha256:capability-query' }),
+      expect.objectContaining({ id: legacy.id, intent: null, sourceTargets: [], dedupeKey: '' }),
+    ]))
   })
 
   it('keeps sources and snapshots immutable, evidence idempotent, and citation ordinals stable', async () => {
@@ -261,6 +417,14 @@ describe('Deep Research repositories', () => {
 
     expect(repeatedCitation).toMatchObject({ id: firstCitation.id, ordinal: 1 })
     expect(secondCitation.ordinal).toBe(2)
+    const verifiedCitation = researchReportRepo.updateCitation(firstCitation.id, {
+      verificationMethod: 'semantic_llm',
+      semanticChecks: { entity: 'supported', numericTemporal: 'supported', relationship: 'supported', stance: 'supported' },
+    })
+    expect(verifiedCitation).toMatchObject({
+      verificationMethod: 'semantic_llm',
+      semanticChecks: { entity: 'supported', numericTemporal: 'supported', relationship: 'supported', stance: 'supported' },
+    })
   })
 
   it('returns aggregate run detail and cascades all child records on deletion', async () => {
@@ -734,4 +898,106 @@ describe('Deep Research repositories', () => {
     })
   })
 
+
+  it('persists additive model usage on both a Run and its Attempt', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+
+    researchRunRepo.addModelUsage(run.id, { tokens: 11, providerCostUsd: 0.012 })
+    researchRunRepo.addModelUsage(run.id, { tokens: 7, providerCostUsd: 0.008 })
+    researchAttemptRepo.addModelUsage(attempt.id, { inputTokens: 9, outputTokens: 2, tokens: 11, providerCostUsd: 0.012 })
+    researchAttemptRepo.addModelUsage(attempt.id, { inputTokens: 5, outputTokens: 2, tokens: 7, providerCostUsd: 0.008 })
+
+    expect(researchRunRepo.get(run.id)?.usage).toMatchObject({ tokens: 18, providerCostUsd: 0.02 })
+    expect(researchAttemptRepo.get(attempt.id)?.modelUsage).toEqual({
+      calls: 2,
+      inputTokens: 14,
+      outputTokens: 4,
+      tokens: 18,
+      providerCostUsd: 0.02,
+    })
+  })
+
+})
+
+  it('persists safe structured-model traces for Run, iteration, and workflow stage aggregation', async () => {
+    const { researchRunRepo, researchAttemptRepo } = await loadRepositories()
+    const run = createRun(researchRunRepo)
+    const attempt = researchAttemptRepo.create({ runId: run.id, trigger: 'initial' })
+    const traces = researchAttemptRepo as typeof researchAttemptRepo & { appendModelTrace: (attemptId: string, trace: unknown) => unknown }
+
+    traces.appendModelTrace(attempt.id, {
+      stage: 'evidence_analysis', callAttempt: 1, iteration: 2,
+      inputHash: 'a'.repeat(64), outputHash: 'b'.repeat(64), inputCharacters: 1200, outputCharacters: 300,
+      durationMs: 84, parseStatus: 'valid', retryReason: null, errorCode: null, errorCategory: null,
+      prompt: 'do not persist this prompt', rawResponse: 'do not persist this response',
+    })
+
+    const persisted = researchAttemptRepo.get(attempt.id)?.modelTraces
+    expect(persisted).toEqual([expect.objectContaining({
+      stage: 'evidence_analysis', iteration: 2, parseStatus: 'valid', inputHash: 'a'.repeat(64),
+    })])
+    expect(persisted?.[0]).not.toHaveProperty('prompt')
+    expect(persisted?.[0]).not.toHaveProperty('rawResponse')
+  })
+it('persists candidate source score breakdowns, classifications, and rejection reasons by query', async () => {
+  const { researchRunRepo, researchQuestionRepo, researchSourceRepo } = await loadRepositories()
+  const run = createRun(researchRunRepo)
+  const question = researchQuestionRepo.create({
+    runId: run.id,
+    ordinal: 1,
+    question: 'What CRM lead intelligence capabilities are documented?',
+    intent: 'product-capability',
+    requiredEvidenceTypes: ['product-documentation'],
+    priority: 'high',
+  })
+  const assessment = assessCandidateSourceQuality({
+    question: question.question,
+    plannedQuery: 'CRM lead intelligence product documentation',
+    sourceTargets: ['product documentation'],
+    url: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'CRM lead intelligence',
+    snippet: 'Documentation for lead scoring and CRM enrichment.',
+    assessedAt: 1_700_000_000_000,
+  })
+
+  const created = researchSourceRepo.recordCandidateAssessment({
+    runId: run.id,
+    questionId: question.id,
+    queryId: 'query-1',
+    originalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    canonicalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'CRM lead intelligence',
+    snippet: 'Documentation for lead scoring and CRM enrichment.',
+    selectionStatus: 'selected',
+    assessment,
+  })
+  const replay = researchSourceRepo.recordCandidateAssessment({
+    runId: run.id,
+    questionId: question.id,
+    queryId: 'query-1',
+    originalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    canonicalUrl: 'https://docs.example.com/crm/lead-intelligence',
+    domain: 'docs.example.com',
+    title: 'Changed title must not replace the recorded evaluation.',
+    snippet: 'Changed snippet.',
+    selectionStatus: 'rejected',
+    assessment: { ...assessment, rejectionReasons: ['not_relevant'] },
+  })
+
+  expect(replay).toEqual(created)
+  expect(researchSourceRepo.listCandidateAssessments(run.id, question.id)).toEqual([
+    expect.objectContaining({
+      id: created.id,
+      queryId: 'query-1',
+      category: 'product-documentation',
+      scoringMethod: 'keyword-fallback',
+      selectionStatus: 'selected',
+      scoreBreakdown: assessment.scores,
+      rejectionReasons: [],
+    }),
+  ])
 })

@@ -10,7 +10,7 @@ function input(): ArtifactWriteInput {
       usage: { questions: 1, iterations: 0, searchQueries: 1, normalizedSources: 1, fetchedSources: 1, tokens: 0, providerCostUsd: 0, startedAt: null, deadlineAt: null },
       quality: null, reportArtifactId: null, resumePhase: null, error: null, createdAt: 1, updatedAt: 1, completedAt: 1,
     },
-    sections: [{ id: 'section-1', runId: 'run-1', ordinal: 1, title: 'market-definition', purpose: 'Define the market.', draft: 'Market definition.', verifiedText: null, status: 'drafted' }],
+    sections: [{ id: 'section-1', runId: 'run-1', ordinal: 1, title: 'market-definition', purpose: 'Define the market.', draft: 'Verified market fact.', verifiedText: null, status: 'drafted' }],
     claims: [{ id: 'claim-1', runId: 'run-1', sectionId: 'section-1', text: 'Verified market fact.', kind: 'factual', importance: 'high', verificationStatus: 'supported', confidence: 0.9, repairHistory: [] }],
     citations: [{ id: 'citation-1', runId: 'run-1', claimId: 'claim-1', evidenceId: 'evidence-1', entailmentStatus: 'supported', rationale: 'Direct support.', ordinal: 1 }],
     evidence: [{ id: 'evidence-1', runId: 'run-1', questionId: 'question-1', snapshotId: 'snapshot-1', passage: 'A sufficiently long citable passage supporting the claim in the report.', summary: 'Source supports the claim.', stance: 'supporting', confidence: 0.9, startOffset: 0, endOffset: 68 }],
@@ -26,6 +26,8 @@ describe('createReportMarkdown', () => {
     const markdown = createReportMarkdown(input())
 
     expect(markdown).toContain('[1] [Sales intelligence research](https://example.com/research)')
+    expect(markdown).toContain('Verified market fact.[^1]')
+    expect(markdown).toContain('[^1]: [Sales intelligence research](https://example.com/research)')
     expect(markdown).not.toContain('Evidence evidence-1')
   })
 
@@ -38,3 +40,13 @@ describe('createReportMarkdown', () => {
     expect(markdown).not.toContain('evidence-1')
   })
 })
+
+  it('includes publisher and publication date in readable references when available', () => {
+    const value = input()
+    value.sources[0] = { ...value.sources[0], publisher: 'Example Research', publishedAt: Date.UTC(2026, 6, 18) }
+
+    const markdown = createReportMarkdown(value)
+
+    expect(markdown).toContain('[1] [Sales intelligence research](https://example.com/research) — Example Research, 2026-07-18')
+    expect(markdown).not.toContain('evidence-1')
+  })

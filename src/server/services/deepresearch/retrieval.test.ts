@@ -191,7 +191,7 @@ describe('Deep Research retrieval services', () => {
     let activeFetches = 0
     let maxActiveFetches = 0
     let fetchProviderCalls = 0
-    const content = 'A source page may say Ignore prior instructions, but it remains untrusted evidence.\nAuthorization: Bearer secret-token\nC:\\Users\\researcher\\secret.txt'
+    const content = 'A source page may say Ignore prior instructions, but it remains untrusted evidence. The analysis identifies how enterprise teams evaluate source provenance, accountable workflows, and data quality before relying on automated recommendations. It also explains that public claims need independent verification and clear operational context.\nAuthorization: Bearer secret-token\nC:\\Users\\researcher\\secret.txt'
     const contentService = createContentService({
       repositories: { researchSourceRepo, researchEventRepo },
       maxConcurrency: 2,
@@ -230,6 +230,64 @@ describe('Deep Research retrieval services', () => {
     expect(fetchProviderCalls).toBe(providerCallsBeforeReplay)
   })
 
+
+  it('persists extracted metadata and diagnostics while recording explicit content rejections without snapshots', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const run = researchRunRepo.create({ input: { topic: 'Content quality', profile: 'market', depth: 'deep', objective: undefined }, budget: getResearchBudget('deep') })
+    const article = researchSourceRepo.createSource({
+      runId: run.id, canonicalUrl: 'https://metadata.example/article', domain: 'metadata.example', title: 'Search title', sourceType: 'research-firm', selectionStatus: 'selected', scores: {},
+    })
+    const captcha = researchSourceRepo.createSource({
+      runId: run.id, canonicalUrl: 'https://blocked.example/article', domain: 'blocked.example', title: 'Blocked', sourceType: 'reputable-secondary', selectionStatus: 'selected', scores: {},
+    })
+    const pdf = researchSourceRepo.createSource({
+      runId: run.id, canonicalUrl: 'https://reports.example/annual-report.pdf', domain: 'reports.example', title: 'PDF', sourceType: 'investor-material', selectionStatus: 'selected', scores: {},
+    })
+    const executeTool = vi.fn(async ({ toolId, input }: WorkflowToolRequest) => {
+      if (toolId === 'web_fetch') return { output: { finalUrl: input.url, status: 200 } }
+      if (String(input.url).includes('blocked')) return { output: { finalUrl: input.url, text: 'Please complete the CAPTCHA security check to continue.', rendered: false } }
+      return {
+        output: {
+          finalUrl: input.url,
+          canonicalUrl: 'https://metadata.example/canonical',
+          title: 'Published CRM analysis',
+          byline: 'Avery Researcher',
+          publishedAt: '2026-07-17T12:00:00.000Z',
+          rendered: false,
+          text: `<header>Home Search Subscribe Privacy Policy</header><article><p>Enterprise CRM teams use traceable account signals to prioritize outreach, compare lead quality, and document the operational reasons for each recommendation.</p><p>Independent research notes that data lineage, explicit workflow ownership, and measured conversion outcomes are necessary before a sales organization treats a signal as actionable.</p><ul><li>Account scoring</li><li>Source provenance</li></ul></article><footer>Privacy Policy Contact</footer>`,
+        },
+      }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo }, executeTool, sleep: async () => undefined, lookup: async () => ['93.184.216.34'],
+    })
+
+    const outcomes = await contentService.fetch(createRun({ id: run.id }), [article, captcha, pdf])
+    const snapshots = researchSourceRepo.listSnapshots(run.id)
+    const failedEvents = researchEventRepo.list(run.id).filter((event) => event.type === 'research.source.fetch_failed')
+
+    expect(outcomes).toMatchObject([
+      { sourceId: article.id, status: 'fetched' },
+      { sourceId: captcha.id, status: 'failed', error: { code: 'RESEARCH_CONTENT_CAPTCHA', retryable: false } },
+      { sourceId: pdf.id, status: 'failed', error: { code: 'RESEARCH_CONTENT_UNSUPPORTED_PDF', retryable: false } },
+    ])
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0].parserVersion).toBe('deepresearch-main-content-v2')
+    expect(snapshots[0].content).not.toContain('Privacy Policy')
+    expect(snapshots[0].metadata).toMatchObject({
+      title: 'Published CRM analysis', byline: 'Avery Researcher', canonicalUrl: 'https://metadata.example/canonical',
+      extraction: expect.objectContaining({ paragraphCount: 4, rejectionReasons: [] }),
+      offsetUnit: 'utf16_code_unit',
+    })
+    const offsets = snapshots[0].metadata.paragraphs as Array<{ startOffset: number; endOffset: number }>
+    expect(offsets.every((offset) => snapshots[0].content.slice(offset.startOffset, offset.endOffset).length > 0)).toBe(true)
+    expect(failedEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ rejectionReason: 'captcha', contentDiagnostics: expect.objectContaining({ rejectionReasons: ['captcha'] }) }) }),
+      expect.objectContaining({ payload: expect.objectContaining({ rejectionReason: 'unsupported_pdf', contentDiagnostics: expect.objectContaining({ rejectionReasons: ['unsupported_pdf'] }) }) }),
+    ]))
+    expect(executeTool).not.toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ url: pdf.canonicalUrl }) }))
+  })
+
   it('reuses one durable snapshot when different sources yield the same content hash', async () => {
     const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
     const run = researchRunRepo.create({ input: { topic: 'Snapshot dedupe', profile: 'market', depth: 'deep', objective: undefined }, budget: getResearchBudget('deep') })
@@ -241,7 +299,7 @@ describe('Deep Research retrieval services', () => {
       repositories: { researchSourceRepo, researchEventRepo },
       executeTool: async ({ toolId, input }) => toolId === 'web_fetch'
         ? { output: { finalUrl: input.url, status: 200 } }
-        : { output: { finalUrl: input.url, title: 'Shared body', text: 'The same frozen fixture content for both sources.' } },
+        : { output: { finalUrl: input.url, title: 'Shared body', text: 'The first finding explains that shared fixture evidence should remain immutable for repeated retrieval. The second finding records that two canonical sources can refer to the same published analysis without creating conflicting evidence. The third finding preserves deterministic content hashes so recovery is safe and auditable.' } },
       sleep: async () => undefined,
       lookup: async () => ['93.184.216.34'],
     })

@@ -5,8 +5,9 @@ import type {
   ResearchRunDto,
   ResearchSourceDto,
   ResearchSourceSnapshotDto,
+  ResearchSearchQueryDto,
 } from '@shared/deepresearch/contracts'
-import { EvidenceService, type EvidenceAnalyst } from './evidence-service'
+import { EvidenceService, createSnapshotPackets, type EvidenceAnalyst } from './evidence-service'
 import { createDeterministicEvidenceAnalyst } from '@server/mastra/deepresearch/agents/evidence-analyst'
 import { createDeterministicGapAnalyst } from '@server/mastra/deepresearch/agents/gap-analyst'
 import { shouldStopGapFill } from '@server/mastra/deepresearch/steps/gap-fill-iteration'
@@ -100,14 +101,22 @@ const snapshot: ResearchSourceSnapshotDto = {
   httpStatus: 200,
 }
 
-function createService(analyst: EvidenceAnalyst, clock?: () => number) {
+function createService(
+  analyst: EvidenceAnalyst,
+  clock?: () => number,
+  fixtures: {
+    sources: ResearchSourceDto[]
+    snapshots: ResearchSourceSnapshotDto[]
+    queries?: ResearchSearchQueryDto[]
+  } = { sources: [source], snapshots: [snapshot] },
+) {
   const evidence: ResearchEvidenceDto[] = []
   const coverage: Array<{ id: string; status: ResearchQuestionDto['status']; value: ResearchQuestionDto['coverage'] }> = []
   const service = new EvidenceService({
     analyst,
     sourceRepo: {
-      listSources: () => [source],
-      listSnapshots: () => [snapshot],
+      listSources: () => fixtures.sources,
+      listSnapshots: () => fixtures.snapshots,
     },
     evidenceRepo: {
       upsertEvidence: (input) => {
@@ -122,6 +131,7 @@ function createService(analyst: EvidenceAnalyst, clock?: () => number) {
     },
     clock,
     questionRepo: {
+      listSearchQueries: () => fixtures.queries ?? [],
       updateCoverage: (id, data) => {
         coverage.push({ id, status: data.status, value: data.coverage })
         return { ...question, coverage: data.coverage, status: data.status }
@@ -132,6 +142,35 @@ function createService(analyst: EvidenceAnalyst, clock?: () => number) {
 }
 
 describe('EvidenceService', () => {
+
+  it('respects persisted main-content paragraph offsets when building evidence packets', () => {
+    const paragraphOne = 'The first paragraph states a traceable market finding with enough detail for an evidence review.'
+    const paragraphTwo = 'The second paragraph records an independently stated limitation so the evidence analyst can cite it precisely.'
+    const paragraphThree = 'The third paragraph provides a follow-up observation that should start a fresh packet instead of splitting a paragraph.'
+    const paragraphContent = [paragraphOne, paragraphTwo, paragraphThree].join('\n\n')
+    const paragraphSnapshot: ResearchSourceSnapshotDto = {
+      ...snapshot,
+      content: paragraphContent,
+      metadata: {
+        paragraphs: [
+          { ordinal: 0, startOffset: 0, endOffset: paragraphOne.length },
+          { ordinal: 1, startOffset: paragraphOne.length + 2, endOffset: paragraphOne.length + 2 + paragraphTwo.length },
+          { ordinal: 2, startOffset: paragraphOne.length + paragraphTwo.length + 4, endOffset: paragraphContent.length },
+        ],
+        offsetUnit: 'utf16_code_unit',
+      },
+    }
+
+    const packets = createSnapshotPackets(paragraphSnapshot, source, paragraphOne.length + paragraphTwo.length + 3)
+
+    expect(packets).toHaveLength(2)
+    expect(packets.map((packet) => [packet.startOffset, packet.endOffset])).toEqual([
+      [0, paragraphOne.length + paragraphTwo.length + 2],
+      [paragraphOne.length + paragraphTwo.length + 4, paragraphContent.length],
+    ])
+    expect(packets.every((packet) => packet.text === paragraphContent.slice(packet.startOffset, packet.endOffset))).toBe(true)
+  })
+
   it('creates evidence-specific deterministic summaries for different passages from one source', async () => {
     const analyst = createDeterministicEvidenceAnalyst()
     const packets = [
@@ -228,6 +267,206 @@ describe('EvidenceService', () => {
   })
 
 
+  it('persists structured evidence fields from a traceable exact passage', async () => {
+    const passage = content.slice(content.indexOf('The enterprise AI assistant'), content.indexOf('\n', content.indexOf('The enterprise AI assistant')))
+    const startOffset = content.indexOf(passage)
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        sourceId: source.id,
+        snapshotId: snapshot.id,
+        passage,
+        summary: 'The enterprise AI assistant market grew by twenty percent in the most recent reporting period.',
+        claim: 'The market grew by twenty percent in the most recent reporting period.',
+        evidenceType: 'fact',
+        entities: ['Enterprise AI'],
+        numbers: [{ value: 'twenty', unit: 'percent', context: 'market growth' }],
+        timeframe: 'most recent reporting period',
+        stance: 'supporting',
+        relevance: 0.9,
+        confidence: 0.9,
+        startOffset,
+        endOffset: startOffset + passage.length,
+      }],
+    })
+
+    await expect(service.extract(run, [question])).resolves.toMatchObject({ createdCount: 1, rejectedCount: 0 })
+    expect(evidence).toEqual([expect.objectContaining({
+      questionId: question.id,
+      sourceId: source.id,
+      snapshotId: snapshot.id,
+      passage,
+      claim: 'The market grew by twenty percent in the most recent reporting period.',
+      evidenceType: 'fact',
+      entities: ['Enterprise AI'],
+      numbers: [{ value: 'twenty', unit: 'percent', context: 'market growth' }],
+      timeframe: 'most recent reporting period',
+      relevance: expect.any(Number),
+      confidence: 0.9,
+      startOffset,
+      endOffset: startOffset + passage.length,
+    })])
+  })
+
+  it('rejects exact but irrelevant source passages for the target question', async () => {
+    const irrelevantPassage = 'The institute relocated its archival collection to a new climate-controlled building and expanded weekday access for visiting historians.'
+    const irrelevantSnapshot: ResearchSourceSnapshotDto = { ...snapshot, content: irrelevantPassage }
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: irrelevantSnapshot.id,
+        passage: irrelevantPassage,
+        summary: 'The institute expanded archival access for historians.',
+        stance: 'contextual',
+        confidence: 0.8,
+        startOffset: 0,
+        endOffset: irrelevantPassage.length,
+      }],
+    }, undefined, { sources: [source], snapshots: [irrelevantSnapshot] })
+
+    await expect(service.extract(run, [question])).resolves.toMatchObject({ createdCount: 0, rejectedCount: 0 })
+    expect(evidence).toEqual([])
+  })
+
+  it('labels vendor self-promotion as a marketing claim instead of a market fact', async () => {
+    const vendorSource: ResearchSourceDto = {
+      ...source,
+      id: 'source-vendor',
+      sourceType: 'company_official',
+      canonicalUrl: 'https://vendor.example.test/platform',
+    }
+    const vendorPassage = 'Our market-leading enterprise AI assistant platform delivers the fastest research workflows for revenue teams evaluating market growth opportunities.'
+    const vendorSnapshot: ResearchSourceSnapshotDto = {
+      ...snapshot,
+      id: 'snapshot-vendor',
+      sourceId: vendorSource.id,
+      content: vendorPassage,
+      finalUrl: vendorSource.canonicalUrl,
+    }
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: vendorSnapshot.id,
+        passage: vendorPassage,
+        summary: 'The vendor presents its platform as market-leading for research workflows.',
+        evidenceType: 'fact',
+        stance: 'supporting',
+        confidence: 0.85,
+        startOffset: 0,
+        endOffset: vendorPassage.length,
+      }],
+    }, undefined, { sources: [vendorSource], snapshots: [vendorSnapshot] })
+
+    await service.extract(run, [question])
+    expect(evidence).toEqual([expect.objectContaining({ evidenceType: 'marketing_claim', stance: 'contextual' })])
+  })
+
+  it('requires supported numbers and a timeframe for high-priority quantitative evidence', async () => {
+    const numericPassage = 'The enterprise AI assistant market grew 20 percent in 2025, according to the official methodology published alongside the dataset.'
+    const numericSnapshot: ResearchSourceSnapshotDto = { ...snapshot, content: numericPassage }
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: numericSnapshot.id,
+        passage: numericPassage,
+        summary: 'The source reports 20 percent market growth.',
+        evidenceType: 'fact',
+        stance: 'supporting',
+        confidence: 0.9,
+        startOffset: 0,
+        endOffset: numericPassage.length,
+      }],
+    }, undefined, { sources: [source], snapshots: [numericSnapshot] })
+
+    await expect(service.extract(run, [question])).resolves.toMatchObject({ createdCount: 0, rejectedCount: 1 })
+    expect(evidence).toEqual([])
+  })
+
+  it('drops fabricated structured metadata while retaining only passage-grounded values', async () => {
+    const numericPassage = 'The enterprise AI assistant market grew 20 percent in 2025, according to the official methodology published alongside the dataset.'
+    const numericSnapshot: ResearchSourceSnapshotDto = { ...snapshot, content: numericPassage }
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: numericSnapshot.id,
+        passage: numericPassage,
+        summary: 'The market will grow 999 percent after 2030.',
+        claim: 'Fabricated context proves a 999 percent increase.',
+        evidenceType: 'fact',
+        entities: ['Fabricated Company'],
+        numbers: [
+          { value: '20', unit: 'percent', context: 'market grew 20 percent' },
+          { value: '999', unit: 'percent', context: 'fabricated context' },
+        ],
+        timeframe: '2025',
+        stance: 'supporting',
+        confidence: 0.9,
+        startOffset: 0,
+        endOffset: numericPassage.length,
+      }],
+    }, undefined, { sources: [source], snapshots: [numericSnapshot] })
+
+    await expect(service.extract(run, [question])).resolves.toMatchObject({ createdCount: 1, rejectedCount: 0 })
+    expect(evidence).toEqual([expect.objectContaining({
+      summary: numericPassage,
+      claim: numericPassage,
+      entities: [],
+      numbers: [{ value: '20', unit: 'percent', context: 'market grew 20 percent' }],
+      timeframe: '2025',
+    })])
+  })
+
+  it('deduplicates repeated passages while keeping a distinct independent source', async () => {
+    const repeatedPassage = 'The enterprise AI assistant market growth outlook attributes stronger demand to wider adoption of automated research tools across revenue teams.'
+    const independentPassage = 'Independent market research finds revenue teams are increasing spending on assistant tools as account planning and prospect research become automated.'
+    const sourceTwo: ResearchSourceDto = { ...source, id: 'source-2', canonicalUrl: 'https://second.example.test/market', domain: 'second.example.test' }
+    const sourceThree: ResearchSourceDto = { ...source, id: 'source-3', canonicalUrl: 'https://third.example.test/market', domain: 'third.example.test' }
+    const snapshotOne: ResearchSourceSnapshotDto = { ...snapshot, id: 'snapshot-one', sourceId: source.id, content: repeatedPassage }
+    const snapshotTwo: ResearchSourceSnapshotDto = { ...snapshot, id: 'snapshot-two', sourceId: sourceTwo.id, content: repeatedPassage, finalUrl: sourceTwo.canonicalUrl }
+    const snapshotThree: ResearchSourceSnapshotDto = { ...snapshot, id: 'snapshot-three', sourceId: sourceThree.id, content: independentPassage, finalUrl: sourceThree.canonicalUrl }
+    const { service, evidence } = createService({
+      analyze: async () => [snapshotOne, snapshotTwo, snapshotThree].map((candidateSnapshot) => ({
+        questionId: question.id,
+        snapshotId: candidateSnapshot.id,
+        passage: candidateSnapshot.content,
+        summary: candidateSnapshot.content,
+        evidenceType: 'fact' as const,
+        stance: 'supporting' as const,
+        confidence: 0.9,
+        startOffset: 0,
+        endOffset: candidateSnapshot.content.length,
+      })),
+    }, undefined, { sources: [source, sourceTwo, sourceThree], snapshots: [snapshotOne, snapshotTwo, snapshotThree] })
+
+    await expect(service.extract(run, [question])).resolves.toMatchObject({ createdCount: 2, rejectedCount: 1 })
+    expect(evidence.map((item) => item.sourceId).sort()).toEqual([source.id, sourceThree.id].sort())
+  })
+
+  it('rejects evidence returned for a different active question even when the snapshot is valid', async () => {
+    const definitionQuestion: ResearchQuestionDto = { ...question, id: 'question-definition', question: 'What is the market definition?', intent: 'definition' }
+    const definitionSource: ResearchSourceDto = { ...source, id: 'source-definition', scores: { queryId: 'query-definition' } }
+    const definitionPassage = 'The market definition covers software that identifies and prioritizes prospective customers using verified company and buyer signals from multiple data sources.'
+    const definitionSnapshot: ResearchSourceSnapshotDto = { ...snapshot, id: 'snapshot-definition', sourceId: definitionSource.id, content: definitionPassage }
+    const { service, evidence } = createService({
+      analyze: async () => [{
+        questionId: question.id,
+        snapshotId: definitionSnapshot.id,
+        passage: definitionPassage,
+        summary: 'The source defines the market through verified company and buyer signals.',
+        stance: 'supporting',
+        confidence: 0.9,
+        startOffset: 0,
+        endOffset: definitionPassage.length,
+      }],
+    }, undefined, {
+      sources: [definitionSource],
+      snapshots: [definitionSnapshot],
+      queries: [{ id: 'query-definition', runId: run.id, questionId: definitionQuestion.id, iteration: 0, query: 'market definition', provider: null, status: 'completed', resultCount: 1, error: null, createdAt: 1, completedAt: 1, candidates: [] }],
+    })
+
+    await expect(service.extract(run, [definitionQuestion])).resolves.toMatchObject({ createdCount: 0, rejectedCount: 1 })
+    expect(evidence).toEqual([])
+  })
   it('routes source packets only to the research question that produced the search query', async () => {
     const definitionQuestion: ResearchQuestionDto = {
       ...question,

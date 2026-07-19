@@ -23,7 +23,12 @@ const SEVERITY_VALUE: Record<ResearchIterationPlanTargetDto['severity'], number>
 export interface ResearchIterationQueryCandidate {
   questionId: string
   query: string
+  /** DRQ-04 public query intent; distinct from coverage-policy search intent. */
   intent?: string | null
+  sourceTargets?: string[]
+  dedupeKey?: string
+  /** Optional legacy/audit binding to a coverage-policy recommendedSearchIntent. */
+  coverageIntent?: string | null
 }
 
 export interface ResearchIterationHistoryEntry extends Pick<ResearchIterationDto, 'ordinal' | 'status' | 'decision' | 'completedAt'> {
@@ -127,32 +132,56 @@ function actionableGaps(assessments: readonly ResearchCoverageAssessmentV2Dto[])
     ))
 }
 
+function isPublicQueryIntent(value: string | null | undefined): boolean {
+  return value === 'definition' || value === 'product_capability' || value === 'technical_architecture'
+    || value === 'customer_case' || value === 'market_data' || value === 'primary_source'
+    || value === 'counterevidence' || value === 'recent_update'
+}
+
+function candidateMatchesGap(candidate: ResearchIterationQueryCandidate, gap: ActionableGap['gap']): boolean {
+  const coverageIntent = gap.recommendedSearchIntent!
+  if (candidate.coverageIntent) return candidate.coverageIntent === coverageIntent
+  // Keep historic candidates executable while allowing DRQ-04's fixed public intent
+  // vocabulary to remain separate from free-form coverage-policy search intents.
+  return !candidate.intent || isPublicQueryIntent(candidate.intent) || candidate.intent === coverageIntent
+}
+
 function planTargets(gaps: readonly ActionableGap[], candidates: readonly ResearchIterationQueryCandidate[]): ResearchIterationPlanTargetDto[] {
   const cleanCandidates = candidates
     .filter((candidate) => candidate.questionId.trim() && candidate.query.trim())
-    .map((candidate) => ({ ...candidate, questionId: candidate.questionId.trim(), query: candidate.query.trim(), intent: candidate.intent?.trim() || null }))
+    .map((candidate) => ({
+      ...candidate,
+      questionId: candidate.questionId.trim(),
+      query: candidate.query.trim(),
+      intent: candidate.intent?.trim() || null,
+      sourceTargets: [...new Set((candidate.sourceTargets ?? []).map((target) => target.trim()).filter(Boolean))],
+      dedupeKey: candidate.dedupeKey?.trim() || '',
+      coverageIntent: candidate.coverageIntent?.trim() || null,
+    }))
     .sort((left, right) => compareText(left.questionId, right.questionId) || compareText(left.query, right.query) || compareText(left.intent ?? '', right.intent ?? ''))
 
   const targets: ResearchIterationPlanTargetDto[] = []
-  const seen = new Set<string>()
-  for (const { assessment, gap } of gaps) {
-    const intent = gap.recommendedSearchIntent!
-    for (const candidate of cleanCandidates) {
-      if (candidate.questionId !== assessment.questionId) continue
-      if (candidate.intent && candidate.intent !== intent) continue
-      const identity = [assessment.questionId, gap.code, intent, candidate.query].join('\u0000')
-      if (seen.has(identity)) continue
-      seen.add(identity)
-      targets.push({
-        questionId: assessment.questionId,
-        gapCode: gap.code,
-        severity: gap.severity,
-        remediation: gap.remediation,
-        searchIntent: intent,
-        query: candidate.query,
-        expectedValue: SEVERITY_VALUE[gap.severity] + (gap.remediation === 'search_primary' || gap.remediation === 'search_independent' ? 0.5 : 0),
-      })
-    }
+  const seenQueries = new Set<string>()
+  for (const candidate of cleanCandidates) {
+    const matching = gaps.find(({ assessment, gap }) => assessment.questionId === candidate.questionId && candidateMatchesGap(candidate, gap))
+    if (!matching) continue
+    const { assessment, gap } = matching
+    const searchIntent = gap.recommendedSearchIntent!
+    const identity = [assessment.questionId, candidate.dedupeKey || candidate.query].join('\u0000')
+    if (seenQueries.has(identity)) continue
+    seenQueries.add(identity)
+    targets.push({
+      questionId: assessment.questionId,
+      gapCode: gap.code,
+      severity: gap.severity,
+      remediation: gap.remediation,
+      searchIntent,
+      intent: candidate.intent,
+      sourceTargets: candidate.sourceTargets,
+      dedupeKey: candidate.dedupeKey || undefined,
+      query: candidate.query,
+      expectedValue: SEVERITY_VALUE[gap.severity] + (gap.remediation === 'search_primary' || gap.remediation === 'search_independent' ? 0.5 : 0),
+    })
   }
   return targets.sort((left, right) => (
     SEVERITY_VALUE[right.severity] - SEVERITY_VALUE[left.severity]
@@ -161,7 +190,6 @@ function planTargets(gaps: readonly ActionableGap[], candidates: readonly Resear
     || compareText(left.gapCode, right.gapCode)
   ))
 }
-
 function exhaustedHardBudgetLimits(input: IterationDecisionInput): string[] {
   const exhausted: string[] = []
   // A persisted deadline is authoritative. Legacy/frozen fixtures may only have

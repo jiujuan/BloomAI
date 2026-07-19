@@ -13,9 +13,10 @@ import type {
   ResearchSourceDto,
   ResearchSourceSnapshotDto,
 } from '@shared/deepresearch/contracts'
-import { ArtifactService } from './artifact-service'
+import { ArtifactService, createReportMarkdown } from './artifact-service'
 import { CitationService } from './citation-service'
 import { assessReportQuality } from '@server/mastra/deepresearch/steps/assess-quality'
+import { DEFAULT_RESEARCH_QUALITY_GATE_POLICY } from '@server/deepresearch/domain/quality-policy'
 
 const runId = 'run-a'
 const otherRunId = 'run-b'
@@ -126,6 +127,7 @@ function createSource(id: string, domain: string): ResearchSourceDto {
 }
 
 function createSection(id: string, title: string, ordinal: number): ResearchReportSectionDto {
+  const uniqueDetail = Array.from({ length: 28 }, (_, index) => title.replace(/[^a-z0-9]/gi, '') + 'evidence' + index).join(' ')
   return {
     id,
     runId,
@@ -133,7 +135,7 @@ function createSection(id: string, title: string, ordinal: number): ResearchRepo
     title,
     purpose: title,
     draft: title + ' draft',
-    verifiedText: title + ' verified text.',
+    verifiedText: title + ' verified text. This section develops a distinct evidence-backed conclusion with scope, conditions, source provenance, and explicit uncertainty. ' + uniqueDetail,
     status: 'verified',
   }
 }
@@ -161,6 +163,8 @@ function createCitation(id: string, claimId: string, evidenceId: string, overrid
     evidenceId,
     entailmentStatus: 'supported',
     rationale: 'The evidence directly supports the claim.',
+    verificationMethod: 'semantic_llm',
+    semanticChecks: { entity: 'supported', numericTemporal: 'not_applicable', relationship: 'supported', stance: 'supported' },
     ordinal: 1,
     ...overrides,
   }
@@ -259,7 +263,7 @@ describe('Deep Research report quality', () => {
     expect(quality.releaseStatus).toBe('failed')
   })
 
-  it('accepts partially supported citations and disclosed contradictory evidence', () => {
+  it('accepts semantically verified citations and disclosed contradictory evidence', () => {
     const sections = createRequiredSections()
     const evidence = [
       createEvidence('evidence-a', 'source-a'),
@@ -283,7 +287,7 @@ describe('Deep Research report quality', () => {
       claims,
       citations: [
         createCitation('citation-a', claims[0].id, evidence[0].id),
-        createCitation('citation-b', claims[1].id, evidence[1].id, { entailmentStatus: 'partially_supported' }),
+        createCitation('citation-b', claims[1].id, evidence[1].id),
         createCitation('citation-c', claims[2].id, evidence[2].id),
       ],
       evidence,
@@ -315,6 +319,63 @@ describe('Deep Research report quality', () => {
 
     expect(quality.releaseStatus).toBe('completed_with_limitations')
     expect(quality.limitations).toEqual(expect.arrayContaining([expect.stringContaining('budget')]))
+  })
+
+  it('never formally completes zero high-priority coverage and records an actionable gate result', () => {
+    const sections = createRequiredSections()
+    const quality = assessReportQuality({
+      run: createRun(),
+      questions: [createQuestion({ status: 'limited', coverage: { ...createQuestion().coverage!, score: 0, gaps: ['primary evidence'] } })],
+      sections,
+      claims: [createClaim('claim-a', sections[0].id)],
+      citations: [createCitation('citation-a', 'claim-a', 'evidence-a')],
+      evidence: [createEvidence('evidence-a', 'source-a')],
+      sources: [createSource('source-a', 'a.example.test')],
+      snapshots: [{ id: 'snapshot-source-a', runId, sourceId: 'source-a', contentHash: 'hash', content: 'snapshot', metadata: {}, fetchedAt: now, parserVersion: 'test', finalUrl: 'https://a.example.test/research', httpStatus: 200 }],
+    })
+
+    expect(quality.releaseStatus).not.toBe('completed')
+    expect(quality.gateResults).toEqual(expect.arrayContaining([expect.objectContaining({
+      ruleId: 'high_priority_coverage', actual: 0, threshold: 0.8, passed: false,
+      remedialAction: expect.stringContaining('gap-fill'),
+    })]))
+    expect(quality.remedialActions).toEqual(expect.arrayContaining([expect.stringContaining('gap-fill')]))
+  })
+
+  it('fails formal publication when key citations only have conservative structural verification', () => {
+    const sections = createRequiredSections()
+    const quality = assessReportQuality({
+      run: createRun(),
+      questions: [createQuestion()],
+      sections,
+      claims: [createClaim('claim-a', sections[0].id, { verificationStatus: 'partially_supported' })],
+      citations: [createCitation('citation-a', 'claim-a', 'evidence-a', {
+        entailmentStatus: 'partially_supported', verificationMethod: 'conservative_structural',
+        semanticChecks: { entity: 'unclear', numericTemporal: 'not_applicable', relationship: 'unclear', stance: 'unclear' },
+      })],
+      evidence: [createEvidence('evidence-a', 'source-a')],
+      sources: [createSource('source-a', 'a.example.test')],
+      snapshots: [{ id: 'snapshot-source-a', runId, sourceId: 'source-a', contentHash: 'hash', content: 'snapshot', metadata: {}, fetchedAt: now, parserVersion: 'test', finalUrl: 'https://a.example.test/research', httpStatus: 200 }],
+    })
+
+    expect(quality.releaseStatus).toBe('failed')
+    expect(quality.gateResults).toEqual(expect.arrayContaining([expect.objectContaining({ ruleId: 'citation_verification_capability', passed: false })]))
+  })
+
+  it('fails rather than releasing a limited draft when policy disables limited publication', () => {
+    const sections = createRequiredSections()
+    const quality = assessReportQuality({
+      run: createRun(),
+      questions: [createQuestion({ status: 'limited', coverage: { ...createQuestion().coverage!, score: 0.6, gaps: ['independent sources'] } })],
+      sections,
+      claims: [createClaim('claim-a', sections[0].id)],
+      citations: [createCitation('citation-a', 'claim-a', 'evidence-a')],
+      evidence: [createEvidence('evidence-a', 'source-a')],
+      sources: [createSource('source-a', 'a.example.test')],
+      snapshots: [{ id: 'snapshot-source-a', runId, sourceId: 'source-a', contentHash: 'hash', content: 'snapshot', metadata: {}, fetchedAt: now, parserVersion: 'test', finalUrl: 'https://a.example.test/research', httpStatus: 200 }],
+    }, { ...DEFAULT_RESEARCH_QUALITY_GATE_POLICY, allowLimitedPublication: false })
+
+    expect(quality.releaseStatus).toBe('failed')
   })
 
   it('writes verified Markdown and structured JSON artifacts', () => {
@@ -366,6 +427,12 @@ describe('Deep Research report quality', () => {
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       generatedAt: expect.any(Number),
     })
+    expect(createReportMarkdown({
+      run: createRun({ brief, currentAttemptId: 'attempt-artifact-write' }), questions: [createQuestion()], sections,
+      claims: [createClaim('claim-a', 'section-a')], citations: [createCitation('citation-a', 'claim-a', 'evidence-a')],
+      evidence: [createEvidence('evidence-a', 'source-a')], sources: [createSource('source-a', 'a.example.test')], snapshots: [],
+      quality: { releaseStatus: 'completed_with_limitations', highPriorityQuestionCoverage: 0.8, factualClaimCitationCoverage: 1, supportedCitationCoverage: 1, independentCitedDomainCount: 1, contradictionDisclosureCoverage: 1, requiredSectionCoverage: 1, limitations: ['More evidence is needed.'], assessorVersion: 'test' },
+    })).toContain('Draft with limitations — not a formally published deep research report.')
     const chinese = new ArtifactService({ reportRepo, dataDir }).writeChineseMarkdown(runId, '# \u4e2d\u6587\u62a5\u544a\n')
     expect(chinese.type).toBe('report_markdown_zh_cn')
     expect(fs.readFileSync(path.join(artifactDirectory, 'report.zh-CN.md'), 'utf8')).toContain('\u4e2d\u6587\u62a5\u544a')

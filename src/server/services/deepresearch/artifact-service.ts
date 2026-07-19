@@ -85,7 +85,6 @@ function atomicWrite(filePath: string, content: string): void {
 
 export function createReportMarkdown(input: ArtifactWriteInput): string {
   const brief = input.run.brief
-  const evidenceById = new Map(input.evidence.map((item) => [item.id, item]))
   const citationsByClaim = new Map<string, ResearchCitationDto[]>()
   for (const citation of input.citations) {
     const current = citationsByClaim.get(citation.claimId) ?? []
@@ -94,15 +93,14 @@ export function createReportMarkdown(input: ArtifactWriteInput): string {
   }
   const sections = input.sections.map((section) => {
     const sectionClaims = input.claims.filter((claim) => claim.sectionId === section.id)
-    const citationLines = sectionClaims.flatMap((claim) => (citationsByClaim.get(claim.id) ?? []).map((citation) => {
-      const evidence = evidenceById.get(citation.evidenceId)
-      return '[^' + citation.ordinal + ']: ' + (evidence?.summary ?? 'Bound evidence unavailable.')
-    }))
-    return '## ' + section.title + '\n\n' + (section.verifiedText ?? section.draft ?? 'Evidence was insufficient for a verified section.')
-      + (citationLines.length ? '\n\n' + citationLines.join('\n') : '')
+    const sectionCitations = sectionClaims.flatMap((claim) => citationsByClaim.get(claim.id) ?? [])
+    const body = renderBodyWithClaimCitations(section.verifiedText ?? section.draft ?? 'Evidence was insufficient for a verified section.', sectionClaims, citationsByClaim)
+    const citationLines = renderCitationFootnotes(input, sectionCitations)
+    return '## ' + section.title + '\n\n' + body + (citationLines.length ? '\n\n' + citationLines.join('\n') : '')
   })
   return [
     '# ' + (brief?.title ?? input.run.topic),
+    ...(input.quality.releaseStatus === 'completed_with_limitations' ? ['', '> **Draft with limitations — not a formally published deep research report.**'] : []),
     '',
     '## Scope and method',
     '',
@@ -123,6 +121,25 @@ export function createReportMarkdown(input: ArtifactWriteInput): string {
   ].join('\n')
 }
 
+function renderBodyWithClaimCitations(body: string, claims: ResearchClaimDto[], citationsByClaim: Map<string, ResearchCitationDto[]>): string {
+  let rendered = body
+  for (const claim of claims.filter((item) => item.kind === 'factual')) {
+    const citations = [...new Map((citationsByClaim.get(claim.id) ?? []).map((citation) => [citation.ordinal, citation])).values()].sort((left, right) => left.ordinal - right.ordinal)
+    if (!citations.length) continue
+    const index = rendered.indexOf(claim.text)
+    if (index < 0) continue
+    const markers = citations.map((citation) => '[^' + citation.ordinal + ']').join('')
+    const end = index + claim.text.length
+    if (!rendered.slice(end).startsWith(markers)) rendered = rendered.slice(0, end) + markers + rendered.slice(end)
+  }
+  return rendered
+}
+
+function renderCitationFootnotes(input: ArtifactWriteInput, citations: ResearchCitationDto[]): string[] {
+  const unique = [...new Map(citations.map((citation) => [citation.ordinal, citation])).values()].sort((left, right) => left.ordinal - right.ordinal)
+  return unique.map((citation) => '[^' + citation.ordinal + ']: ' + formatCitationReference(input, citation, 'markdown').replace('[' + citation.ordinal + '] ', ''))
+}
+
 function escapeMarkdownLinkLabel(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]')
 }
@@ -140,20 +157,24 @@ function escapeMarkdownLinkUrl(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
 }
 
-function formatReferences(input: ArtifactWriteInput, format: 'markdown' | 'plain'): string {
+function formatCitationReference(input: ArtifactWriteInput, citation: ResearchCitationDto, format: 'markdown' | 'plain'): string {
   const sources = new Map(input.sources.map((source) => [source.id, source]))
   const snapshots = new Map(input.snapshots.map((snapshot) => [snapshot.id, snapshot]))
   const evidence = new Map(input.evidence.map((item) => [item.id, item]))
-  return input.citations.map((citation) => {
-    const item = evidence.get(citation.evidenceId)
-    const source = item ? sources.get(snapshots.get(item.snapshotId)?.sourceId ?? '') : undefined
-    const url = source?.canonicalUrl
-    const title = source?.title ?? url
-    if (!title || !url || !isHttpUrl(url)) return '[' + citation.ordinal + '] Bound source unavailable.'
-    return format === 'markdown'
-      ? '[' + citation.ordinal + '] [' + escapeMarkdownLinkLabel(title) + '](' + escapeMarkdownLinkUrl(url) + ')'
-      : '[' + citation.ordinal + '] ' + title + ' (' + url + ')'
-  }).join('\n')
+  const item = evidence.get(citation.evidenceId)
+  const source = item ? sources.get(item.sourceId || snapshots.get(item.snapshotId)?.sourceId || '') : undefined
+  const url = source?.canonicalUrl
+  const title = source?.title ?? source?.domain ?? url
+  if (!title || !url || !isHttpUrl(url)) return '[' + citation.ordinal + '] Bound source unavailable.'
+  const metadata = [source.publisher, source.publishedAt === null || source.publishedAt === undefined ? null : new Date(source.publishedAt).toISOString().slice(0, 10)].filter(Boolean).join(', ')
+  const readable = format === 'markdown'
+    ? '[' + citation.ordinal + '] [' + escapeMarkdownLinkLabel(title) + '](' + escapeMarkdownLinkUrl(url) + ')'
+    : '[' + citation.ordinal + '] ' + title + ' (' + url + ')'
+  return readable + (metadata ? ' — ' + metadata : '')
+}
+
+function formatReferences(input: ArtifactWriteInput, format: 'markdown' | 'plain'): string {
+  return input.citations.map((citation) => formatCitationReference(input, citation, format)).join('\n')
 }
 
 function referenceList(input: ArtifactWriteInput): string {

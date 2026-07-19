@@ -165,6 +165,23 @@ export const researchCancellationSchema = z.object({
   reason: z.string().nullable(),
 })
 
+export const researchModelUsageSchema = z.object({ calls: z.number().int().nonnegative(), inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), tokens: z.number().int().nonnegative(), providerCostUsd: z.number().nonnegative() })
+
+export const researchModelTraceSchema = z.object({
+  stage: z.string().min(1),
+  callAttempt: z.number().int().positive(),
+  iteration: z.number().int().nonnegative(),
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/),
+  outputHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  inputCharacters: z.number().int().nonnegative(),
+  outputCharacters: z.number().int().nonnegative(),
+  durationMs: z.number().int().nonnegative(),
+  parseStatus: z.enum(['valid', 'invalid_json', 'invalid_schema', 'provider_error']),
+  retryReason: z.enum(['invalid_json', 'invalid_schema']).nullable(),
+  errorCode: z.string().min(1).nullable(),
+  errorCategory: z.enum(['timeout', 'rate_limit', 'provider_unavailable', 'invalid_structured_output']).nullable(),
+})
+
 export const researchRunAttemptSchema = z.object({
   id: z.string().min(1),
   runId: z.string().min(1),
@@ -178,6 +195,8 @@ export const researchRunAttemptSchema = z.object({
   startCheckpointKey: z.string().nullable(),
   endCheckpointKey: z.string().nullable(),
   error: researchRunErrorSchema.nullable(),
+  modelUsage: researchModelUsageSchema,
+  modelTraces: z.array(researchModelTraceSchema).default([]),
   startedAt: z.number().nullable(),
   endedAt: z.number().nullable(),
   createdAt: z.number(),
@@ -237,13 +256,34 @@ export const researchIterationSchema = z.object({
   completedAt: z.number().nullable(),
 })
 
+export const researchBriefQuestionPlanSchema = z.object({
+  question: z.string().trim().min(1),
+  intent: z.string().trim().min(1),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  sectionKey: z.string().trim().min(1),
+  questionType: z.string().trim().min(1),
+  needPrimarySource: z.boolean(),
+  needRecentSource: z.boolean(),
+  needQuantitativeEvidence: z.boolean(),
+  sourceTargets: z.array(z.string().trim().min(1)).max(8),
+}).superRefine((question, context) => {
+  if ((question.priority === 'high' || question.priority === 'critical') && question.sourceTargets.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sourceTargets'], message: 'High-priority questions require source targets.' })
+  }
+})
+
 export const researchBriefSchema = z.object({
   title: z.string(),
   objective: z.string().nullable(),
   audience: z.string().nullable(),
   scope: z.string(),
+  definition: z.string().nullable().optional().default(null),
+  timeframe: z.string().nullable().optional().default(null),
+  geography: z.string().nullable().optional().default(null),
+  deliverables: z.array(z.string()).optional().default([]),
   assumptions: z.array(z.string()),
   plannedSections: z.array(z.string()),
+  questions: z.array(researchBriefQuestionPlanSchema).max(10).optional().default([]),
   criticalClarificationIds: z.array(z.string()),
 })
 

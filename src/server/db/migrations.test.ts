@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(15)
+    expect(migrationVersions()).toHaveLength(23)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(15)
+    expect(migrationVersions()).toHaveLength(23)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -155,9 +155,11 @@ describe('database migrations', () => {
         'research_questions',
         'research_search_queries',
         'research_sources',
+        'research_source_assessments',
         'research_source_snapshots',
         'research_evidence',
         'research_report_sections',
+        'research_report_section_questions',
         'research_claims',
         'research_citations',
         'research_quality_assessments',
@@ -187,6 +189,14 @@ describe('database migrations', () => {
       '013-deep-research-attempt-lease-ownership',
       '014-deep-research-reconciliation',
       '015-deep-research-model-selection-snapshot',
+      '016-deep-research-llm-runtime-usage',
+      '017-deep-research-structured-model-traces',
+      '018-deep-research-brief-question-section-mapping',
+      '019-deep-research-query-intents-deduplication',
+      '020-deep-research-source-quality-assessments',
+      '021-deep-research-structured-evidence',
+      '022-deep-research-section-drafts',
+      '023-deep-research-semantic-citation-quality-gates',
     ])
     const emptyDb = openRawDb()
     try {
@@ -199,12 +209,58 @@ describe('database migrations', () => {
       expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_runs') WHERE name = 'model_selection_snapshot_json'").all()).toEqual([
         { name: 'model_selection_snapshot_json' },
       ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_run_attempts') WHERE name = 'model_usage_json'").all()).toEqual([
+        { name: 'model_usage_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_questions') WHERE name IN ('section_key', 'question_type', 'need_primary_source', 'need_recent_source', 'need_quantitative_evidence', 'source_targets_json') ORDER BY name").all()).toEqual([
+        { name: 'need_primary_source' },
+        { name: 'need_quantitative_evidence' },
+        { name: 'need_recent_source' },
+        { name: 'question_type' },
+        { name: 'section_key' },
+        { name: 'source_targets_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_report_sections') WHERE name IN ('section_key', 'draft_payload_json') ORDER BY name").all()).toEqual([
+        { name: 'draft_payload_json' },
+        { name: 'section_key' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_citations') WHERE name IN ('verification_method', 'semantic_checks_json') ORDER BY name").all()).toEqual([
+        { name: 'semantic_checks_json' },
+        { name: 'verification_method' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_quality_assessments') WHERE name IN ('policy_version', 'gate_results_json', 'remedial_actions_json') ORDER BY name").all()).toEqual([
+        { name: 'gate_results_json' },
+        { name: 'policy_version' },
+        { name: 'remedial_actions_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_search_queries') WHERE name IN ('query_intent', 'source_targets_json', 'dedupe_key') ORDER BY name").all()).toEqual([
+        { name: 'dedupe_key' },
+        { name: 'query_intent' },
+        { name: 'source_targets_json' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_source_assessments') WHERE name IN ('source_category', 'scoring_method', 'score_breakdown_json', 'assessment_reasons_json', 'rejection_reasons_json') ORDER BY name").all()).toEqual([
+        { name: 'assessment_reasons_json' },
+        { name: 'rejection_reasons_json' },
+        { name: 'score_breakdown_json' },
+        { name: 'scoring_method' },
+        { name: 'source_category' },
+      ])
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('research_evidence') WHERE name IN ('source_id', 'claim', 'evidence_type', 'entities_json', 'numbers_json', 'timeframe', 'relevance') ORDER BY name").all()).toEqual([
+        { name: 'claim' },
+        { name: 'entities_json' },
+        { name: 'evidence_type' },
+        { name: 'numbers_json' },
+        { name: 'relevance' },
+        { name: 'source_id' },
+        { name: 'timeframe' },
+      ])
     } finally {
       emptyDb.close()
     }
 
     expect(uniqueIndexColumnSets('research_events')).toContainEqual(['run_id', 'sequence'])
     expect(uniqueIndexColumnSets('research_sources')).toContainEqual(['run_id', 'canonical_url'])
+    expect(uniqueIndexColumnSets('research_source_assessments')).toContainEqual(['run_id', 'candidate_key'])
     expect(uniqueIndexColumnSets('research_recovery_commands')).toContainEqual(['run_id', 'command_key'])
     expect(uniqueIndexColumnSets('research_reconciliations')).toContainEqual(['run_id', 'reconciliation_key'])
     expect(uniqueIndexColumnSets('research_run_attempts')).toContainEqual(['run_id', 'ordinal'])
@@ -222,6 +278,10 @@ describe('database migrations', () => {
     expect(indexNames('research_run_checkpoints')).toContain('idx_research_run_checkpoints_attempt_status')
     expect(indexNames('research_iterations')).toContain('idx_research_iterations_run_status')
     expect(indexNames('research_coverage_assessments')).toContain('idx_research_coverage_assessments_run_iteration')
+    expect(indexNames('research_search_queries')).toContain('idx_research_search_queries_run_question_dedupe')
+    expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_question')
+    expect(indexNames('research_evidence')).toContain('idx_research_evidence_run_source')
+    expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_query')
 
     for (const tableName of [
       'research_search_queries',
@@ -448,7 +508,19 @@ describe('database migrations', () => {
     try {
       expect(upgraded.prepare('SELECT topic FROM research_runs WHERE id = ?').get('run-legacy')).toEqual({ topic: 'Legacy topic' })
       expect(upgraded.prepare('SELECT canonical_url FROM research_sources WHERE id = ?').get('source-legacy')).toEqual({ canonical_url: 'https://example.com/legacy' })
-      expect(upgraded.prepare('SELECT passage FROM research_evidence WHERE id = ?').get('evidence-legacy')).toEqual({ passage: 'legacy passage' })
+      expect(upgraded.prepare(`
+        SELECT passage, source_id, claim, evidence_type, entities_json, numbers_json, timeframe, relevance
+        FROM research_evidence WHERE id = ?
+      `).get('evidence-legacy')).toEqual({
+        passage: 'legacy passage',
+        source_id: '',
+        claim: '',
+        evidence_type: 'uncertain',
+        entities_json: '[]',
+        numbers_json: '[]',
+        timeframe: null,
+        relevance: 0,
+      })
       expect(upgraded.prepare(`
         SELECT state_version, current_attempt_id, last_checkpoint_sequence, limitations_json
         FROM research_runs WHERE id = 'run-legacy-interrupted'

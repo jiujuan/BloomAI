@@ -99,7 +99,7 @@ export function createDeepResearchWorkflow(options: CreateDeepResearchWorkflowOp
     .then(assessCoverage)
     .dountil(boundedPersistentIteration, async ({ inputData }) => shouldStopGapFill(inputData))
     .then(buildOutline)
-    .foreach(draftSections, { concurrency: 4 })
+    .foreach(draftSections, { concurrency: 1 })
     .then(checkpointDrafts)
     .then(extractClaims)
     .then(verifyCitations)

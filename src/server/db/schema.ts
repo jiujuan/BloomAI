@@ -394,6 +394,8 @@ export const research_run_attempts = sqliteTable('research_run_attempts', {
   error_category: text('error_category'),
   error_message: text('error_message'),
   error_retryable: integer('error_retryable'),
+  model_usage_json: text('model_usage_json').notNull().default('{}'),
+  model_trace_json: text('model_trace_json').notNull().default('[]'),
   started_at: integer('started_at'),
   ended_at: integer('ended_at'),
   created_at: integer('created_at').notNull(),
@@ -477,6 +479,12 @@ export const research_questions = sqliteTable('research_questions', {
   question: text('question').notNull(),
   intent: text('intent').notNull(),
   required_evidence_types_json: text('required_evidence_types_json').notNull().default('[]'),
+  section_key: text('section_key'),
+  question_type: text('question_type'),
+  need_primary_source: integer('need_primary_source').notNull().default(0),
+  need_recent_source: integer('need_recent_source').notNull().default(0),
+  need_quantitative_evidence: integer('need_quantitative_evidence').notNull().default(0),
+  source_targets_json: text('source_targets_json').notNull().default('[]'),
   priority: text('priority').notNull(),
   status: text('status').notNull(),
   coverage_json: text('coverage_json'),
@@ -484,6 +492,7 @@ export const research_questions = sqliteTable('research_questions', {
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
   runParentOrdinalIdx: index('idx_research_questions_run_parent_ordinal').on(table.run_id, table.parent_question_id, table.ordinal),
+  runSectionOrdinalIdx: index('idx_research_questions_run_section_ordinal').on(table.run_id, table.section_key, table.ordinal),
 }))
 
 export const research_search_queries = sqliteTable('research_search_queries', {
@@ -492,6 +501,9 @@ export const research_search_queries = sqliteTable('research_search_queries', {
   question_id: text('question_id').notNull(),
   iteration: integer('iteration').notNull(),
   query: text('query').notNull(),
+  query_intent: text('query_intent'),
+  source_targets_json: text('source_targets_json').notNull().default('[]'),
+  dedupe_key: text('dedupe_key').notNull().default(''),
   provider: text('provider'),
   status: text('status').notNull(),
   result_count: integer('result_count').notNull().default(0),
@@ -504,6 +516,7 @@ export const research_search_queries = sqliteTable('research_search_queries', {
   result_json: text('result_json').notNull().default('[]'),
 }, (table) => ({
   runStatusIdx: index('idx_research_search_queries_run_status').on(table.run_id, table.status),
+  runQuestionDedupeIdx: index('idx_research_search_queries_run_question_dedupe').on(table.run_id, table.question_id, table.dedupe_key),
   runIdempotencyIdx: uniqueIndex('idx_research_search_queries_run_idempotency').on(table.run_id, table.idempotency_key),
 }))
 
@@ -527,6 +540,30 @@ export const research_sources = sqliteTable('research_sources', {
   runCanonicalUrlIdx: uniqueIndex('idx_research_sources_run_canonical_url').on(table.run_id, table.canonical_url),
 }))
 
+export const research_source_assessments = sqliteTable('research_source_assessments', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  question_id: text('question_id').notNull(),
+  query_id: text('query_id').notNull(),
+  candidate_key: text('candidate_key').notNull(),
+  canonical_url: text('canonical_url'),
+  original_url: text('original_url').notNull(),
+  domain: text('domain').notNull(),
+  title: text('title').notNull(),
+  snippet: text('snippet').notNull(),
+  source_category: text('source_category').notNull(),
+  scoring_method: text('scoring_method').notNull(),
+  score_breakdown_json: text('score_breakdown_json').notNull().default('{}'),
+  assessment_reasons_json: text('assessment_reasons_json').notNull().default('[]'),
+  rejection_reasons_json: text('rejection_reasons_json').notNull().default('[]'),
+  selection_status: text('selection_status').notNull(),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  runQuestionSelectionIdx: index('idx_research_source_assessments_run_question').on(table.run_id, table.question_id, table.selection_status),
+  runQueryIdx: index('idx_research_source_assessments_run_query').on(table.run_id, table.query_id),
+  runCandidateIdx: uniqueIndex('idx_research_source_assessments_run_candidate').on(table.run_id, table.candidate_key),
+}))
 export const research_source_snapshots = sqliteTable('research_source_snapshots', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
@@ -548,10 +585,17 @@ export const research_evidence = sqliteTable('research_evidence', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   question_id: text('question_id').notNull(),
+  source_id: text('source_id').notNull(),
   snapshot_id: text('snapshot_id').notNull(),
   passage: text('passage').notNull(),
   summary: text('summary').notNull(),
+  claim: text('claim').notNull(),
+  evidence_type: text('evidence_type').notNull(),
+  entities_json: text('entities_json').notNull(),
+  numbers_json: text('numbers_json').notNull(),
+  timeframe: text('timeframe'),
   stance: text('stance').notNull(),
+  relevance: real('relevance').notNull(),
   confidence: real('confidence').notNull(),
   start_offset: integer('start_offset').notNull(),
   end_offset: integer('end_offset').notNull(),
@@ -559,6 +603,7 @@ export const research_evidence = sqliteTable('research_evidence', {
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   runQuestionIdx: index('idx_research_evidence_run_question').on(table.run_id, table.question_id),
+  runSourceIdx: index('idx_research_evidence_run_source').on(table.run_id, table.source_id),
   runIdempotencyIdx: uniqueIndex('idx_research_evidence_run_idempotency').on(table.run_id, table.idempotency_key),
 }))
 
@@ -566,9 +611,11 @@ export const research_report_sections = sqliteTable('research_report_sections', 
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   ordinal: integer('ordinal').notNull(),
+  section_key: text('section_key'),
   title: text('title').notNull(),
   purpose: text('purpose').notNull(),
   draft: text('draft'),
+  draft_payload_json: text('draft_payload_json'),
   verified_text: text('verified_text'),
   status: text('status').notNull(),
   idempotency_key: text('idempotency_key').notNull(),
@@ -576,7 +623,19 @@ export const research_report_sections = sqliteTable('research_report_sections', 
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
   runOrdinalIdx: index('idx_research_report_sections_run_ordinal').on(table.run_id, table.ordinal),
+  runSectionKeyIdx: uniqueIndex('idx_research_report_sections_run_section_key').on(table.run_id, table.section_key),
   runIdempotencyIdx: uniqueIndex('idx_research_report_sections_run_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const research_report_section_questions = sqliteTable('research_report_section_questions', {
+  section_id: text('section_id').notNull(),
+  question_id: text('question_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  sectionQuestionIdx: uniqueIndex('idx_research_report_section_questions_section_question').on(table.section_id, table.question_id),
+  sectionOrdinalIdx: uniqueIndex('idx_research_report_section_questions_section_ordinal').on(table.section_id, table.ordinal),
+  questionIdx: index('idx_research_report_section_questions_question').on(table.question_id),
 }))
 
 export const research_claims = sqliteTable('research_claims', {
@@ -604,6 +663,8 @@ export const research_citations = sqliteTable('research_citations', {
   evidence_id: text('evidence_id').notNull(),
   entailment_status: text('entailment_status').notNull(),
   rationale: text('rationale').notNull(),
+  verification_method: text('verification_method'),
+  semantic_checks_json: text('semantic_checks_json'),
   ordinal: integer('ordinal').notNull(),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
@@ -622,6 +683,9 @@ export const research_quality_assessments = sqliteTable('research_quality_assess
   required_section_coverage: real('required_section_coverage').notNull(),
   limitations_json: text('limitations_json').notNull().default('[]'),
   assessor_version: text('assessor_version').notNull(),
+  policy_version: text('policy_version'),
+  gate_results_json: text('gate_results_json').notNull().default('[]'),
+  remedial_actions_json: text('remedial_actions_json').notNull().default('[]'),
   created_at: integer('created_at').notNull(),
 })
 

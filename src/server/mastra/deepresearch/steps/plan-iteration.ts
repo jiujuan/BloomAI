@@ -2,11 +2,60 @@ import { createStep } from '@mastra/core/workflows'
 import type { GapAnalyst } from '../agents/gap-analyst'
 import { deepResearchTelemetryContext, type DeepResearchRepositories } from '../workflow-context'
 import { recordDeepResearchBudgetExhausted, recordDeepResearchNoMaterialGain, recordDeepResearchStopReason } from '@server/telemetry/metrics'
-import { decideIteration } from '@server/deepresearch/domain/iteration-decision'
+import { decideIteration, type ResearchIterationQueryCandidate } from '@server/deepresearch/domain/iteration-decision'
 import { createIterationQueryFingerprint } from '@server/deepresearch/domain/idempotency'
 import type { ResearchBudgetReservationDto, ResearchLoopDecisionDto } from '@shared/deepresearch/contracts'
 import { iterationContextSchema, type IterationContext } from './iteration-context'
 import { assertWorkflowNotCancelled, getWorkflowExecution } from './checkpoint-replay'
+import { RESEARCH_QUERY_INTENTS, createQueryDedupeKey, dedupeResearchQueryPlans, type PlannedTopicQuery, type ResearchQueryIntent } from '../query-strategy'
+
+
+function isPublicQueryIntent(value: string | null | undefined): value is ResearchQueryIntent {
+  return typeof value === 'string' && (RESEARCH_QUERY_INTENTS as readonly string[]).includes(value)
+}
+
+function sourceTargetKey(value: string): string {
+  return value.normalize('NFKC').trim().toLocaleLowerCase('en-US').replace(/\s+/g, ' ')
+}
+
+function containsInternalCoverageDiagnostic(query: string): boolean {
+  return /required\s+evidence\s+category|(?:^|\s)(?:primary_source|independent_source|recent_update|market_data|counterevidence)(?:\s|$)/iu.test(query)
+}
+
+/**
+ * Allows follow-up work only when it changes the public query intent or reaches an
+ * untried source target. This provides a final server-side guard even when an LLM
+ * planner returns duplicated or unsafe text.
+ */
+export function prepareGapQueryCandidates(
+  candidates: readonly ResearchIterationQueryCandidate[],
+  existingQueries: ReadonlyArray<{ questionId: string; query: string; intent?: string | null; sourceTargets?: string[]; dedupeKey?: string }>,
+): ResearchIterationQueryCandidate[] {
+  const normalized = candidates
+    .filter((candidate) => candidate.questionId.trim() && candidate.query.trim() && isPublicQueryIntent(candidate.intent))
+    .filter((candidate) => !containsInternalCoverageDiagnostic(candidate.query))
+    .map((candidate) => ({
+      ...candidate,
+      questionId: candidate.questionId.trim(),
+      query: candidate.query.trim(),
+      intent: candidate.intent!,
+      sourceTargets: [...new Set((candidate.sourceTargets ?? []).map((target) => target.trim()).filter(Boolean))],
+      dedupeKey: createQueryDedupeKey(candidate.query),
+    })) as Array<ResearchIterationQueryCandidate & PlannedTopicQuery>
+
+  const uniqueCandidates = dedupeResearchQueryPlans(normalized)
+  return uniqueCandidates.filter((candidate) => {
+    const priorForQuestion = existingQueries.filter((query) => query.questionId === candidate.questionId)
+    const priorWithIntent = priorForQuestion.filter((query) => query.intent === candidate.intent)
+    if (priorWithIntent.length === 0) {
+      // A different intent is complementary by definition; exact legacy duplicates
+      // still cannot be replayed because their dedupe key remains authoritative.
+      return !priorForQuestion.some((query) => (query.dedupeKey || createQueryDedupeKey(query.query)) === candidate.dedupeKey)
+    }
+    const triedTargets = new Set(priorWithIntent.flatMap((query) => query.sourceTargets ?? []).map(sourceTargetKey))
+    return candidate.sourceTargets.some((target) => !triedTargets.has(sourceTargetKey(target)))
+  })
+}
 
 function activeReservations(repositories: DeepResearchRepositories, runId: string): ResearchBudgetReservationDto[] {
   return repositories.researchIterationRepo!.list(runId)
@@ -142,9 +191,11 @@ export async function planIteration(
   }
 
   const questions = repositories.researchQuestionRepo.list(run.id)
+  const existingQueries = repositories.researchQuestionRepo.listSearchQueries(run.id)
   assertWorkflowNotCancelled(repositories, run.id)
-  const candidates = await gapAnalyst.plan(run, questions, { signal: getWorkflowExecution(run.id)?.signal })
+  const rawCandidates = await gapAnalyst.plan(run, questions, { signal: getWorkflowExecution(run.id)?.signal })
   assertWorkflowNotCancelled(repositories, run.id)
+  const candidates = prepareGapQueryCandidates(rawCandidates, existingQueries)
   const decision = decideIteration({ ...decisionInput, queryCandidates: candidates })
   if (!decision.shouldCreateIteration || !decision.plan) {
     const persisted = persistStopDecision(repositories, run.id, decision.decision)
@@ -160,11 +211,14 @@ export async function planIteration(
     questionId: target.questionId,
     iteration: iteration.ordinal,
     query: target.query,
+    intent: target.intent ?? null,
+    sourceTargets: target.sourceTargets ?? [],
+    dedupeKey: target.dedupeKey ?? createQueryDedupeKey(target.query),
     idempotencyKey: createIterationQueryFingerprint({
       runId: run.id,
       iterationId: iteration.id,
       questionId: target.questionId,
-      intent: target.searchIntent,
+      intent: target.intent ?? target.searchIntent,
       query: target.query,
       profile: run.profile,
       timeScope: null,

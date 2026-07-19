@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { platform } from '@renderer/api'
-import type { ResearchArtifactDto, ResearchCitationDto, ResearchEvidenceDto, ResearchReportDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
+import type { ResearchArtifactDto, ResearchCitationDto, ResearchEvidenceDto, ResearchQualityDto, ResearchReportDto, ResearchRunStatus, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
 import { getEvidenceSourceContext } from './research-source-context'
+import { ResearchQualityPanel } from './ResearchQualityPanel'
 
 export function selectReportCitation(citation: ResearchCitationDto, onSelectEvidence: (evidenceId: string) => void) {
   onSelectEvidence(citation.evidenceId)
@@ -29,6 +30,8 @@ export function buildReportReferences(
 
 export function ResearchReportView({
   report,
+  quality,
+  runStatus,
   evidenceById,
   snapshotsById,
   sources,
@@ -36,6 +39,8 @@ export function ResearchReportView({
   onSelectEvidence,
 }: {
   report: ResearchReportDto | null
+  quality: ResearchQualityDto | null
+  runStatus: ResearchRunStatus
   evidenceById: Record<string, ResearchEvidenceDto>
   snapshotsById: Record<string, ResearchSourceSnapshotDto>
   sources: ResearchSourceDto[]
@@ -90,6 +95,7 @@ export function ResearchReportView({
           <button type="button" role="tab" aria-selected={language === 'en'} className="research-report-language-tab" onClick={() => setLanguage('en')}>英 EN</button>
         </div>}
       </header>
+      <ResearchQualityPanel quality={quality} runStatus={runStatus} />
       {language === 'zh' ? (
         translatedMarkdown ? <div className="research-translated-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>{translatedMarkdown}</ReactMarkdown></div>
           : <p className="research-empty" role="status">{translationError ?? '正在加载中文报告…'}</p>

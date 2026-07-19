@@ -32,6 +32,9 @@ type WebExtractOutput = {
   text: string
   truncated: boolean
   rendered: boolean
+  byline?: string
+  publishedAt?: string
+  canonicalUrl?: string
 }
 
 const DEFAULT_MAX_CHARS = 20000
@@ -49,6 +52,9 @@ export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = a
   const description = extractMetaDescription(html)
   const headings = extractHeadings(html)
   const links = extractLinks(html, finalUrl, maxLinks)
+  const byline = extractMetadata(html, ['author', 'article:author', 'byline'])
+  const publishedAt = extractMetadata(html, ['article:published_time', 'datepublished', 'publishdate', 'date'])
+  const canonicalUrl = extractCanonicalUrl(html, finalUrl)
 
   let text = htmlToText(extractMainHtml(html))
   if (text.length < 200) text = htmlToText(html)
@@ -64,6 +70,9 @@ export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = a
     text,
     truncated,
     rendered: page.rendered,
+    byline: byline || undefined,
+    publishedAt: publishedAt || undefined,
+    canonicalUrl: canonicalUrl || undefined,
   }
 }
 
@@ -95,4 +104,31 @@ function extractLinks(html: string, baseUrl: string, maxLinks: number): Extracte
     links.push({ url: abs, text: stripTags(m[2]) })
   }
   return links
+}
+
+function extractMetadata(html: string, names: readonly string[]): string {
+  const wanted = new Set(names.map((name) => name.toLowerCase()))
+  for (const match of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = match[0]
+    const name = attribute(tag, 'name') || attribute(tag, 'property') || attribute(tag, 'itemprop')
+    if (name && wanted.has(name.toLowerCase())) return attribute(tag, 'content') || ''
+  }
+  return ''
+}
+
+function extractCanonicalUrl(html: string, baseUrl: string): string {
+  for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0]
+    const rel = attribute(tag, 'rel')
+    const href = attribute(tag, 'href')
+    if (rel?.split(/\s+/).some((value) => value.toLowerCase() === 'canonical') && href) return resolveUrl(baseUrl, href)
+  }
+  return baseUrl
+}
+
+function attribute(tag: string, name: string): string | null {
+  const quoted = new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i').exec(tag)
+  if (quoted) return stripTags(quoted[2]).trim()
+  const unquoted = new RegExp(`\\b${name}\\s*=\\s*([^\\s>]+)`, 'i').exec(tag)
+  return unquoted ? stripTags(unquoted[1]).trim() : null
 }

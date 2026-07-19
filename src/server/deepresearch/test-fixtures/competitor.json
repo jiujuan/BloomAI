@@ -84,11 +84,6 @@
     "limitations",
     "references"
   ],
-  "expectedQuestionIntents": [
-    "positioning",
-    "product-capabilities",
-    "pricing"
-  ],
   "minimumIndependentDomains": 3,
   "expectedContradictions": [
     {

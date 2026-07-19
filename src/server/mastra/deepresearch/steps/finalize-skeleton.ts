@@ -2,21 +2,14 @@ import fs from 'fs'
 import path from 'path'
 import { createStep } from '@mastra/core/workflows'
 import { z } from 'zod'
+import { researchBriefSchema } from '@shared/deepresearch/schemas'
 import { getDataDir } from '@server/db/paths'
 import type { DeepResearchRepositories } from '../workflow-context'
 import { loadRunnableRun } from '../workflow-context'
 
 const inputSchema = z.object({
   runId: z.string().min(1),
-  brief: z.object({
-    title: z.string(),
-    objective: z.string().nullable(),
-    audience: z.string().nullable(),
-    scope: z.string(),
-    assumptions: z.array(z.string()),
-    plannedSections: z.array(z.string()),
-    criticalClarificationIds: z.array(z.string()),
-  }),
+  brief: researchBriefSchema,
 })
 const outputSchema = z.object({ runId: z.string().min(1), artifactId: z.string().min(1) })
 

@@ -90,7 +90,12 @@ export interface ResearchIterationPlanTargetDto {
   gapCode: CoveragePolicyV2GapCode
   severity: 'critical' | 'high' | 'medium' | 'low'
   remediation: CoveragePolicyV2Remediation
+  /** Coverage-policy intent retained for iteration audit. */
   searchIntent: string
+  /** Public query-planning intent (DRQ-04), distinct from searchIntent. */
+  intent?: string | null
+  sourceTargets?: string[]
+  dedupeKey?: string
   query: string
   expectedValue: number
 }
@@ -162,13 +167,31 @@ export interface ResearchClarificationInput {
   answer: string
 }
 
+export interface ResearchBriefQuestionPlanDto {
+  question: string
+  intent: string
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  sectionKey: string
+  questionType: string
+  needPrimarySource: boolean
+  needRecentSource: boolean
+  needQuantitativeEvidence: boolean
+  sourceTargets: string[]
+}
+
 export interface ResearchBriefDto {
   title: string
   objective: string | null
   audience: string | null
   scope: string
+  /** Additive fields are optional so Runs saved before DRQ-03 remain readable. */
+  definition?: string | null
+  timeframe?: string | null
+  geography?: string | null
+  deliverables?: string[]
   assumptions: string[]
   plannedSections: string[]
+  questions?: ResearchBriefQuestionPlanDto[]
   criticalClarificationIds: string[]
 }
 
@@ -183,6 +206,33 @@ export interface ResearchBudgetDto {
   maxDurationMs: number
   maxTokens?: number
   maxProviderCostUsd?: number
+}
+
+export interface ResearchModelUsageDto {
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  tokens: number
+  providerCostUsd: number
+}
+
+export type ResearchModelTraceParseStatus = 'valid' | 'invalid_json' | 'invalid_schema' | 'provider_error'
+export type ResearchModelTraceErrorCategory = 'timeout' | 'rate_limit' | 'provider_unavailable' | 'invalid_structured_output' | null
+
+/** Safe structured-model diagnostics: hashes and metadata only, never prompts or raw provider responses. */
+export interface ResearchModelTraceDto {
+  stage: string
+  callAttempt: number
+  iteration: number
+  inputHash: string
+  outputHash: string | null
+  inputCharacters: number
+  outputCharacters: number
+  durationMs: number
+  parseStatus: ResearchModelTraceParseStatus
+  retryReason: 'invalid_json' | 'invalid_schema' | null
+  errorCode: string | null
+  errorCategory: ResearchModelTraceErrorCategory
 }
 
 export interface ResearchUsageDto {
@@ -245,6 +295,8 @@ export interface ResearchRunAttemptDto {
   startCheckpointKey: string | null
   endCheckpointKey: string | null
   error: ResearchRunErrorDto | null
+  modelUsage: ResearchModelUsageDto
+  modelTraces: ResearchModelTraceDto[]
   startedAt: number | null
   endedAt: number | null
   createdAt: number
@@ -323,6 +375,7 @@ export interface ResearchCoverageGapV2Dto {
   severity: 'critical' | 'high' | 'medium' | 'low'
   remediable: boolean
   remediation: CoveragePolicyV2Remediation
+  /** Free-form coverage-policy intent used only for planning/audit, never query text. */
   recommendedSearchIntent: string | null
 }
 
@@ -480,6 +533,13 @@ export interface ResearchQuestionDto {
   question: string
   intent: string
   requiredEvidenceTypes: string[]
+  /** Explicit metadata for topic-driven planning. Empty/null values mean pre-DRQ-03 data. */
+  sectionKey?: string | null
+  questionType?: string | null
+  needPrimarySource?: boolean
+  needRecentSource?: boolean
+  needQuantitativeEvidence?: boolean
+  sourceTargets?: string[]
   priority: 'low' | 'medium' | 'high' | 'critical'
   status: 'planned' | 'researching' | 'covered' | 'limited'
   coverage: ResearchCoverageDto | null
@@ -517,6 +577,12 @@ export interface ResearchSearchQueryDto {
   error: ResearchRunErrorDto | null
   createdAt: number
   completedAt: number | null
+  /** Query-planning intent. Optional so legacy persisted records and fixtures remain readable. */
+  intent?: string | null
+  /** Preferred sites or domains for this query. Optional so legacy persisted records remain readable. */
+  sourceTargets?: string[]
+  /** Normalized query fingerprint used for duplicate detection. Optional for legacy compatibility. */
+  dedupeKey?: string
   /** Durable domain fingerprint; legacy callers may omit it in fixture DTOs. */
   idempotencyKey?: string
   candidates: ResearchSearchResultCandidateDto[]
@@ -550,26 +616,64 @@ export interface ResearchSourceSnapshotDto {
   httpStatus: number | null
 }
 
+export type ResearchEvidenceType = 'fact' | 'analysis' | 'marketing_claim' | 'opinion' | 'uncertain'
+
+export interface ResearchEvidenceNumberDto {
+  value: string
+  unit: string | null
+  context: string | null
+}
+
 export interface ResearchEvidenceDto {
   id: string
   runId: string
   questionId: string
+  /** Durable source identity, captured from the source snapshot rather than model output. */
+  sourceId?: string
   snapshotId: string
   passage: string
+  /** Legacy display summary retained for existing report consumers. */
   summary: string
+  /** Atomic, attributable statement extracted from this exact passage. */
+  claim?: string
+  evidenceType?: ResearchEvidenceType
+  entities?: string[]
+  numbers?: ResearchEvidenceNumberDto[]
+  timeframe?: string | null
   stance: 'supporting' | 'contradicting' | 'contextual'
+  relevance?: number
   confidence: number
   startOffset: number
   endOffset: number
+}
+
+export interface SectionDraftClaimDto {
+  text: string
+  kind: 'factual' | 'analysis' | 'recommendation' | 'limitation'
+  importance: 'low' | 'medium' | 'high' | 'critical'
+  confidence: number
+  evidenceIds: string[]
+}
+
+export interface SectionDraftDto {
+  summary: string
+  bodyMarkdown: string
+  claims: SectionDraftClaimDto[]
+  evidenceIds: string[]
+  limitations: string[]
+  missingEvidence: string[]
 }
 
 export interface ResearchReportSectionDto {
   id: string
   runId: string
   ordinal: number
+  sectionKey?: string | null
   title: string
   purpose: string
   draft: string | null
+  /** Replayable structured writer output; absent for legacy sections. */
+  draftPayload?: SectionDraftDto | null
   verifiedText: string | null
   status: 'planned' | 'drafted' | 'verified' | 'limited'
 }
@@ -586,6 +690,16 @@ export interface ResearchClaimDto {
   repairHistory: JsonValue[]
 }
 
+export type CitationVerificationMethod = 'semantic_llm' | 'conservative_structural' | 'unavailable'
+export type CitationSemanticCheck = 'supported' | 'contradicted' | 'not_applicable' | 'unclear'
+
+export interface CitationSemanticChecksDto {
+  entity: CitationSemanticCheck
+  numericTemporal: CitationSemanticCheck
+  relationship: CitationSemanticCheck
+  stance: CitationSemanticCheck
+}
+
 export interface ResearchCitationDto {
   id: string
   runId: string
@@ -593,6 +707,9 @@ export interface ResearchCitationDto {
   evidenceId: string
   entailmentStatus: 'supported' | 'partially_supported' | 'unsupported'
   rationale: string
+  /** Added by DRQ-09; legacy citations remain readable without these fields. */
+  verificationMethod?: CitationVerificationMethod
+  semanticChecks?: CitationSemanticChecksDto | null
   ordinal: number
 }
 
@@ -605,6 +722,16 @@ export interface ResearchReportDto {
   generatedAt: number | null
 }
 
+export interface ResearchQualityGateResultDto {
+  ruleId: string
+  actual: number | string
+  threshold: number | string | null
+  passed: boolean
+  blocking: boolean
+  affectedIds: string[]
+  remedialAction: string
+}
+
 export interface ResearchQualityDto {
   releaseStatus: 'completed' | 'completed_with_limitations' | 'failed'
   highPriorityQuestionCoverage: number
@@ -615,6 +742,10 @@ export interface ResearchQualityDto {
   requiredSectionCoverage: number
   limitations: string[]
   assessorVersion: string
+  /** DRQ-09 release-gate diagnostics. Optional for pre-migration Runs. */
+  policyVersion?: string
+  gateResults?: ResearchQualityGateResultDto[]
+  remedialActions?: string[]
 }
 
 export interface ResearchEventDto {
@@ -641,6 +772,108 @@ export interface ResearchArtifactDto {
 export interface ResearchArtifactContent {
   artifact: ResearchArtifactDto
   content: string
+}
+
+export type ResearchRunDiagnosticCode =
+  | 'tokens_zero'
+  | 'source_scores_uniform'
+  | 'gap_fill_no_new_sources'
+  | 'high_priority_coverage_zero'
+
+/**
+ * Safe, administrator-facing Run diagnosis. It intentionally excludes source
+ * bodies, raw provider payloads, prompts, provider credentials and storage paths.
+ */
+export interface ResearchRunDiagnosticsDto {
+  run: Pick<ResearchRunDto, 'id' | 'status' | 'phase' | 'profile' | 'depth' | 'createdAt' | 'updatedAt' | 'completedAt' | 'error'>
+  model: {
+    mode: 'llm_backed' | 'legacy_deterministic'
+    selection: ResearchModelSelectionSnapshot | null
+    usage: ResearchUsageDto
+    calls: number
+    inputTokens: number
+    outputTokens: number
+    providerCostUsd: number | null
+    latencyMs: number | null
+    traces: ResearchModelTraceDto[]
+  }
+  queries: {
+    total: number
+    completed: number
+    failed: number
+    resultCount: number
+    items: ResearchSearchQueryDto[]
+  }
+  sources: {
+    sourceTypeCounts: Record<string, number>
+    selected: Array<{
+      id: string
+      queryId: string | null
+      title: string | null
+      canonicalUrl: string
+      domain: string
+      sourceType: string
+      selectionStatus: ResearchSourceDto['selectionStatus']
+      finalScore: number | null
+    }>
+    candidates: Array<{
+      id: string
+      questionId: string
+      queryId: string
+      canonicalUrl: string | null
+      originalUrl: string
+      domain: string
+      title: string
+      category: string
+      scoringMethod: string
+      scoreBreakdown: { relevance: number; authority: number; recency: number; independence: number; fetchability: number; final: number }
+      reasons: string[]
+      rejectionReasons: string[]
+      selectionStatus: 'discovered' | 'selected' | 'rejected'
+    }>
+    rejectedByReason: Record<string, number>
+    scoresAllSame: boolean
+  }
+  fetch: {
+    attempted: number
+    succeeded: number
+    failed: number
+    successRate: number | null
+    snapshots: Array<{
+      sourceId: string
+      finalUrl: string
+      fetchedAt: number
+      httpStatus: number | null
+      parserVersion: string
+      quality: {
+        rawCharacters: number | null
+        mainCharacters: number | null
+        paragraphCount: number | null
+        contentDensity: number | null
+        navigationRatio: number | null
+        duplicateTextRatio: number | null
+        language: string | null
+        readability: number | null
+        rejectionReasons: string[]
+      }
+    }>
+    failures: Array<{ sourceId: string; errorCode: string; rejectionReason: string | null }>
+  }
+  coverage: {
+    highPriorityCoverage: number | null
+    questions: Array<ResearchQuestionDto & { evidenceCount: number }>
+    evidenceCount: number
+    latestAssessment: ResearchCoverageAssessmentDto | null
+  }
+  report: {
+    sections: Array<Pick<ResearchReportSectionDto, 'id' | 'sectionKey' | 'title' | 'status'>>
+    claims: Array<Pick<ResearchClaimDto, 'id' | 'sectionId' | 'kind' | 'importance' | 'verificationStatus' | 'confidence'>>
+    citations: Array<Pick<ResearchCitationDto, 'id' | 'claimId' | 'evidenceId' | 'entailmentStatus' | 'verificationMethod' | 'semanticChecks'>>
+    citationPassRate: number | null
+    quality: ResearchQualityDto | null
+    gateResults: ResearchQualityGateResultDto[]
+  }
+  anomalies: Array<{ code: ResearchRunDiagnosticCode; severity: 'warning'; message: string; details: JsonObject; timestamp: number }>
 }
 
 export interface ResearchRunDetailDto extends ResearchRunDto {
