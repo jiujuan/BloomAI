@@ -1,6 +1,6 @@
 # BloomAI 独立定时任务（Task Sessions）设计文档
 
-- **状态**：提案，待实施
+- **状态**：已实施（Phase 0–6）
 - **日期**：2026-08-02
 - **范围**：独立定时任务会话（不接入聊天会话）
 - **关联框架**：Mastra Schedules（beta）
@@ -35,7 +35,7 @@ BloomAI 当前已经通过 Mastra 承载聊天 Agent 和深度研究工作流，
 
 ### 2.1 当前架构
 
-- Chat Mastra 实例位于 `src/server/mastra/index.ts`，当前使用 `InMemoryStore`。
+- 共享 Mastra 实例位于 `src/server/mastra/index.ts`，定时任务使用专属的 `LibSQLStore`（`mastra-runtime.db`）；Chat 持久化仍只使用 BloomAI 应用数据库。
 - Hono 应用由 `src/server/http/app.ts` 汇总路由，服务进程由 `src/server/index.ts` 启动。
 - Chat 的 UI 数据来自 BloomAI 自有的 SQLite/Drizzle `sessions` 与 `messages`，而不是 Mastra Storage。
 - 深度研究已有独立的 Mastra `LibSQLStore` 与 `deep-research-runtime.db`，其生命周期不应与定时任务混用。
@@ -60,6 +60,21 @@ Mastra Schedules：
 ```
 
 > Schedules 是 beta API。所有 Mastra schedules 调用必须封装在单独的应用 service 中，避免未来框架 API 调整扩散到路由、UI 和数据库层。
+
+## 2.3 实施结果（Phase 0–6）
+
+截至本次实施，设计中的第一期能力已落地，实际行为如下：
+
+- 依赖固定为 `@mastra/core@1.51.0` 与 `@mastra/libsql@1.16.0`；所有调度框架调用集中在 `ScheduleTaskService`、schedule hooks 与独立 runtime 中。
+- `src/server/mastra/index.ts` 使用 `<DATA_DIR>/mastra-runtime.db` 保存 Mastra schedule runtime；`scheduled_task_runs` 位于 BloomAI 自有 `<DATA_DIR>/bloomai.db`，两个持久化边界分离。
+- 服务进程在数据库迁移、恢复检查完成后调用 `mastra.startWorkers()`，以恢复已存在的 schedule 并启用后续的 cron / manual dispatch；退出时通过 `shutdownMastraRuntime()` 停止 worker 并关闭存储。
+- V1 只注册无 memory、无 tools、无 thread/resource 输入的固定 `scheduled-task` Agent。服务端强制写入受控 metadata，前端不能选择 Agent 或透传 metadata。
+- Mastra 1.51 的 `mastra.schedules.run()` 实际是向 `agent-schedules` PubSub topic 异步提交 manual trigger；worker 消费后执行 Agent。因此“立即执行”接口返回的是已提交的 schedule，而结果会异步写入任务自己的运行历史。
+- `scheduled_task_runs` 以 `(schedule_id, trigger_fired_at)` 保证幂等，记录 manual/cron 触发、结果、错误、运行标识和可用 usage；删除任务时同时清理其应用层运行历史。
+- Hono routes 和独立“定时任务”页面均已实现创建、编辑、暂停、恢复、删除、立即执行及运行历史查看，并且不依赖 Chat store、Chat UI 或 Chat HTTP transport。
+- 集成测试使用文件型临时 `LibSQLStore`、重建 runtime、deterministic model 和真实 schedule worker 路径，验证持久化、manual execution、Task Run 写入、生命周期操作和 Chat 表零写入。
+
+> Windows 测试环境中，`@libsql/client` 偶发在 `LibSQLStore.close()` 后仍将临时文件句柄保留到 Vitest fork 退出；集成测试会在完成所有 runtime / 数据库关闭后，将该一次性目录清理作为 best effort。这不会改变应用运行时数据库关闭路径。
 
 ## 3. 领域模型
 

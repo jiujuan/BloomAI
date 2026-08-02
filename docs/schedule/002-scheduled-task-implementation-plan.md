@@ -1,6 +1,6 @@
 # BloomAI 独立定时任务（Task Sessions）逐文件实施计划
 
-- **状态**：待实施
+- **状态**：已完成（Phase 0–6）
 - **日期**：2026-08-02
 - **前置设计**：`docs/schedule/001-scheduled-task-design.md`
 - **实施原则**：先升级与封装运行时，再落库和提供 API，最后接入 UI；每一步都有可验证产物。
@@ -482,6 +482,12 @@ src/renderer/pages/Schedules/ScheduleRunHistory.test.tsx
 
 ## 8. Phase 6：端到端验证、运维与文档
 
+### 8.0 实施记录
+
+- 已新增 `src/server/schedules/schedule-task.integration.test.ts`，以临时 data directory、文件型 `LibSQLStore`、真实 Mastra worker 和 deterministic test model 覆盖 runtime 重建、持久化、manual execution、run 写入、生命周期和 Chat 隔离。
+- 已在 `src/server/index.ts` 于 HTTP 服务就绪前调用 `mastra.startWorkers()`；这是保证进程重启后恢复持久化任务和让 `runTaskNow` 的异步 PubSub dispatch 被消费的运行前提。
+- 已更新 README、设计文档与本计划，记录运行限制、数据位置、备份方式、风险边界和 Mastra 1.51 的异步 manual-run 行为。
+
 ### 8.1 新增集成测试
 
 **新文件（建议）**：`D:\codeproject\JS\bloomai\src\server\schedules\schedule-task.integration.test.ts`
@@ -515,8 +521,8 @@ src/renderer/pages/Schedules/ScheduleRunHistory.test.tsx
 **文件**：
 
 ```text
-D:\codeproject\JS\bloomai\docs\schedule\2026-08-02-scheduled-task-design.md
-D:\codeproject\JS\bloomai\docs\schedule\2026-08-02-scheduled-task-implementation-plan.md
+D:\codeproject\JS\bloomai\docs\schedule\001-scheduled-task-design.md
+D:\codeproject\JS\bloomai\docs\schedule\002-scheduled-task-implementation-plan.md
 ```
 
 **修改时机**：实现中如发现 Mastra 1.51 的实际 API 与设计存在差异，应先在这两个文档记录决策和替代方案，再调整代码。
@@ -545,13 +551,13 @@ npm run build
 
 功能可声明完成的前提：
 
-- [ ] 精确 Mastra 依赖升级后通过 typecheck、test 和 build。
-- [ ] `InMemoryStore` 已替换为持久化的 schedule-capable LibSQLStore。
-- [ ] `scheduled-task` Agent 为无状态、低风险任务执行器。
-- [ ] `scheduled_task_runs` 已迁移并具有幂等唯一约束。
-- [ ] Service、hooks、repository、routes 具备单元和集成测试。
-- [ ] 创建、编辑、暂停、恢复、删除、立即执行和历史查看均可在 UI 完成。
-- [ ] 任务不会创建或写入任何 Chat session/message。
-- [ ] UI 明确提示应用关闭后不会保证任务后台执行。
-- [ ] README 和设计文档反映最终实现行为。
+- [x] 精确 Mastra 依赖升级后通过 typecheck、test 和 build。
+- [x] `InMemoryStore` 已替换为持久化的 schedule-capable LibSQLStore。
+- [x] `scheduled-task` Agent 为无状态、低风险任务执行器。
+- [x] `scheduled_task_runs` 已迁移并具有幂等唯一约束。
+- [x] Service、hooks、repository、routes 具备单元和集成测试。
+- [x] 创建、编辑、暂停、恢复、删除、立即执行和历史查看均可在 UI 完成。
+- [x] 任务不会创建或写入任何 Chat session/message。
+- [x] UI 明确提示应用关闭后不会保证任务后台执行。
+- [x] README 和设计文档反映最终实现行为。
 

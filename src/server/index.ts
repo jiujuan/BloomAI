@@ -9,7 +9,7 @@ import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/const
 import { serverLogger } from './logger/logger'
 import { initTracing, shutdownTracing } from './telemetry/tracer'
 import { initMetrics, shutdownMetrics } from './telemetry/metrics'
-import { shutdownMastraRuntime } from './mastra'
+import { mastra, shutdownMastraRuntime } from './mastra'
 
 // On Windows, switch the attached console to UTF-8 so Chinese characters in
 // log output are not garbled (Windows default code page is GBK/CP936).
@@ -32,6 +32,9 @@ runMigrations()
     const recovered = await getDeepResearchModule().recoverInterruptedRuns()
     if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })
     if (recovered.skipped.length > 0) serverLogger.warn('Skipped Deep Research recovery conflicts after restart', { count: recovered.skipped.length })
+    // Start Mastra workers before serving requests. This restores persisted task
+    // schedules after app restart and lets newly created schedules dispatch runs.
+    await mastra.startWorkers()
     const app = createHonoApp()
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)

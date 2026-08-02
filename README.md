@@ -25,6 +25,46 @@ Building on v0.1's chat engine, v0.2 adds the complete **Tools System**:
 
 ---
 
+## 定时任务（独立 Task Sessions）
+
+BloomAI 提供与 Chat 平级的 **定时任务** 入口。每一条任务都是独立、无状态的 Task Session：它只保存自己的 cron 配置和运行历史，**不会读取、创建或写入 Chat 的 session、message、thread 或 resource 数据**。
+
+### 使用方式
+
+1. 在左侧主导航打开“定时任务”，新建一个任务；
+2. 填写任务名称、Prompt、cron 表达式和 IANA 时区（例如 `Asia/Shanghai`）；
+3. 保存后可在列表中暂停、恢复、编辑、删除或“立即执行”；
+4. “立即执行”只提交一次异步调度，结果会显示在该任务自己的“运行历史”中。
+
+常用五段 cron 示例：
+
+| 表达式 | 含义 |
+|---|---|
+| `0 9 * * *` | 每天指定时区的 09:00 |
+| `0 9 * * 1-5` | 每个工作日的 09:00 |
+| `0 9 * * 1` | 每周一的 09:00 |
+| `0 0 1 * *` | 每月 1 日的 00:00 |
+
+### 运行与运维限制
+
+- 定时任务仅在 **BloomAI 服务进程保持运行** 时执行；退出应用、电脑休眠或进程被终止期间不会由操作系统补跑，也不保证准点触发。
+- 服务启动时会启动 Mastra worker，并从持久化 runtime 恢复已有任务定义；新建任务后 worker 会处理 cron 触发和“立即执行”。
+- V1 固定使用受限的 `scheduled-task` Agent。它不接入 Chat 上下文，也不支持 Deep Research、Skills、代码执行、Shell、文件写入、外部发布或其他高风险工具能力。
+- 请只安排可安全重试、允许延迟或漏执行的文本任务；不要把它作为支付、交易、删除数据、告警升级或其他需要系统级可靠性保证的自动化机制。
+
+### 数据与备份
+
+任务定义和运行历史保存在 BloomAI 的 `DATA_DIR` 下：
+
+```text
+<DATA_DIR>/mastra-runtime.db  # Mastra schedule runtime、任务定义和 trigger 状态
+<DATA_DIR>/bloomai.db         # BloomAI 应用数据，包括 scheduled_task_runs 运行历史
+```
+
+备份前请先退出 BloomAI，随后以一致性方式复制整个 `DATA_DIR` 目录（而不是只复制单个数据库文件）。恢复时也应在应用未运行时完成，以避免 SQLite/LibSQL 的 WAL 文件处于写入中。
+
+---
+
 ## Tools Reference (22 total)
 
 ### 🌐 Web (4)
