@@ -16,6 +16,7 @@ import { imageStudioRoutes } from './routes/images'
 import { attachmentsRoutes } from './routes/attachments'
 import { articleIllustrationRoutes } from './routes/article-illustrations'
 import { deepResearchRoutes } from './routes/deep-research'
+import { schedulesRoutes } from './routes/schedules'
 
 /**
  * Single Hono HTTP server for BloomAI 鈥?replaces the previous Express app.
@@ -81,6 +82,7 @@ export function createHonoApp(): Hono {
   app.route('/api/v1', imageStudioRoutes)
   app.route('/api/v1', articleIllustrationRoutes)
   app.route('/api/v1/deep-research', deepResearchRoutes)
+  app.route('/api/v1/schedules', schedulesRoutes)
 
   app.notFound((c) => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404))
 
