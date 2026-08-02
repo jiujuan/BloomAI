@@ -9,6 +9,7 @@ import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/const
 import { serverLogger } from './logger/logger'
 import { initTracing, shutdownTracing } from './telemetry/tracer'
 import { initMetrics, shutdownMetrics } from './telemetry/metrics'
+import { shutdownMastraRuntime } from './mastra'
 
 // On Windows, switch the attached console to UTF-8 so Chinese characters in
 // log output are not garbled (Windows default code page is GBK/CP936).
@@ -42,6 +43,6 @@ runMigrations()
   })
 
 const gracefulShutdown = () =>
-  Promise.all([shutdownTracing(), shutdownMetrics()]).finally(() => process.exit(0))
+  Promise.all([shutdownMastraRuntime(), shutdownTracing(), shutdownMetrics()]).finally(() => process.exit(0))
 process.on('SIGTERM', gracefulShutdown)
 process.on('SIGINT', gracefulShutdown)
