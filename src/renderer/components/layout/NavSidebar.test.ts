@@ -9,6 +9,7 @@ describe('mainNavigationItems', () => {
       { id: 'article-illustration', label: '文章配图' },
       { id: 'tools', label: 'Tools' },
       { id: 'skills', label: 'Skills' },
+      { id: 'schedules', label: '定时任务' },
       { id: 'personas', label: 'Personas' },
     ])
   })

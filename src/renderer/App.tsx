@@ -10,6 +10,7 @@ import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
 import { SkillsMarket } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
+import { SchedulesPage } from '@renderer/pages/Schedules'
 import { useSessionStore, usePersonaStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme, applyFont } from '@renderer/api'
 
@@ -107,6 +108,7 @@ export function App() {
             <SkillsMarket />
           </div>
         )}
+        {activePage === 'schedules' && <SchedulesPage />}
         {activePage === 'settings' && (
           <div className="page-full">
             <SettingsPage />
