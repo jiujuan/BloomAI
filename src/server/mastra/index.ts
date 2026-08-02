@@ -7,7 +7,8 @@ import { readConfigValue } from '../config/config'
 import { chatAgent } from './chat-agent'
 import { planAgent } from './plan-agent'
 import { writerAgent, coderAgent } from './agents/team'
-import { createNoopScheduleTaskRunWriter, createScheduleHooks } from './schedules/hooks'
+import { createScheduleHooks } from './schedules/hooks'
+import { createScheduledTaskRunWriter } from '../db/repositories/scheduled-task-run.repo'
 import { scheduledTaskAgent } from './schedules/scheduled-task-agent'
 import { resolveScheduleRuntimeUrl } from './schedules/storage'
 
@@ -42,8 +43,8 @@ export const mastra = new Mastra({
   logger: serverLogger,
   observability,
   schedules: createScheduleHooks({
-    // Phase 2 replaces this with the durable scheduled_task_runs repository adapter.
-    taskRunWriter: createNoopScheduleTaskRunWriter(),
+    // Task run history is owned by the application database, not Mastra runtime storage.
+    taskRunWriter: createScheduledTaskRunWriter(),
   }),
   agents: {
     chat: chatAgent,

@@ -333,6 +333,26 @@ export const article_illustration_scenes = sqliteTable('article_illustration_sce
 }))
 
 
+export const scheduled_task_runs = sqliteTable('scheduled_task_runs', {
+  id: text('id').primaryKey(),
+  schedule_id: text('schedule_id').notNull(),
+  trigger_fired_at: integer('trigger_fired_at').notNull(),
+  mastra_run_id: text('mastra_run_id'),
+  trigger_kind: text('trigger_kind').notNull(),
+  status: text('status').notNull(),
+  output_text: text('output_text'),
+  error_message: text('error_message'),
+  usage_json: text('usage_json'),
+  started_at: integer('started_at').notNull(),
+  finished_at: integer('finished_at'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  scheduleTriggerUniqueIdx: uniqueIndex('idx_scheduled_task_runs_schedule_trigger_unique').on(table.schedule_id, table.trigger_fired_at),
+  scheduleTriggerIdx: index('idx_scheduled_task_runs_schedule_trigger').on(table.schedule_id, desc(table.trigger_fired_at)),
+  statusCreatedIdx: index('idx_scheduled_task_runs_status_created').on(table.status, desc(table.created_at)),
+}))
+
+
 export const research_runs = sqliteTable('research_runs', {
   id: text('id').primaryKey(),
   session_id: text('session_id'),

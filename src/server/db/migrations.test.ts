@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(23)
+    expect(migrationVersions()).toHaveLength(24)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(23)
+    expect(migrationVersions()).toHaveLength(24)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -171,6 +171,7 @@ describe('database migrations', () => {
         'research_run_checkpoints',
         'research_iterations',
         'research_coverage_assessments',
+        'scheduled_task_runs',
       ])
     )
     expect(migrationVersions()).toEqual([
@@ -197,6 +198,7 @@ describe('database migrations', () => {
       '021-deep-research-structured-evidence',
       '022-deep-research-section-drafts',
       '023-deep-research-semantic-citation-quality-gates',
+      '024-scheduled-task-runs',
     ])
     const emptyDb = openRawDb()
     try {
@@ -268,6 +270,7 @@ describe('database migrations', () => {
     expect(uniqueIndexColumnSets('research_run_checkpoints')).toContainEqual(['run_id', 'checkpoint_key', 'input_fingerprint'])
     expect(uniqueIndexColumnSets('research_iterations')).toContainEqual(['run_id', 'ordinal'])
     expect(uniqueIndexColumnSets('research_coverage_assessments')).toContainEqual(['run_id', 'iteration_ordinal', 'policy_version', 'input_fingerprint'])
+    expect(uniqueIndexColumnSets('scheduled_task_runs')).toContainEqual(['schedule_id', 'trigger_fired_at'])
 
     expect(indexNames('research_runs')).toContain('idx_research_runs_current_attempt')
     expect(indexNames('research_runs')).toContain('idx_research_runs_cancellation')
@@ -282,6 +285,11 @@ describe('database migrations', () => {
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_question')
     expect(indexNames('research_evidence')).toContain('idx_research_evidence_run_source')
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_query')
+    expect(indexNames('scheduled_task_runs')).toEqual(expect.arrayContaining([
+      'idx_scheduled_task_runs_schedule_trigger',
+      'idx_scheduled_task_runs_status_created',
+      'idx_scheduled_task_runs_schedule_trigger_unique',
+    ]))
 
     for (const tableName of [
       'research_search_queries',
@@ -330,6 +338,65 @@ describe('database migrations', () => {
     })
   })
 
+
+  it('upgrades a pre-scheduled-task database without changing Chat tables and enforces task-run uniqueness', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const legacyMigrations = migrations.filter((migration) => migration.version !== '024-scheduled-task-runs')
+      const scheduledTaskMigration = migrations.filter((migration) => migration.version === '024-scheduled-task-runs')
+      db.exec(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
+        );
+      `)
+      runSqlMigrations(db, legacyMigrations)
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, persona_id TEXT, model TEXT NOT NULL,
+          status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE messages (
+          id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+          tool_calls TEXT, parts TEXT, tokens INTEGER, created_at INTEGER NOT NULL
+        );
+        INSERT INTO sessions (id, title, model, status, created_at, updated_at)
+        VALUES ('chat-legacy', 'Existing chat', 'model', 'active', 1, 1);
+        INSERT INTO messages (id, session_id, role, content, created_at)
+        VALUES ('message-legacy', 'chat-legacy', 'user', 'Existing chat message', 1);
+      `)
+      const chatSchemasBefore = db.prepare(`
+        SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'messages') ORDER BY name
+      `).all()
+
+      runSqlMigrations(db, scheduledTaskMigration)
+
+      expect(db.prepare('SELECT title FROM sessions WHERE id = ?').get('chat-legacy')).toEqual({ title: 'Existing chat' })
+      expect(db.prepare('SELECT content FROM messages WHERE id = ?').get('message-legacy')).toEqual({ content: 'Existing chat message' })
+      expect(db.prepare(`
+        SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'messages') ORDER BY name
+      `).all()).toEqual(chatSchemasBefore)
+      expect(db.prepare("SELECT name FROM pragma_table_info('scheduled_task_runs') ORDER BY cid").all().map((row: any) => row.name)).toEqual([
+        'id', 'schedule_id', 'trigger_fired_at', 'mastra_run_id', 'trigger_kind', 'status', 'output_text',
+        'error_message', 'usage_json', 'started_at', 'finished_at', 'created_at',
+      ])
+      expect(db.prepare("SELECT name FROM pragma_table_info('scheduled_task_runs') WHERE name IN ('session_id', 'message_id', 'thread_id')").all()).toEqual([])
+      db.prepare(`
+        INSERT INTO scheduled_task_runs (
+          id, schedule_id, trigger_fired_at, trigger_kind, status, started_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('run-1', 'schedule-1', 100, 'manual', 'succeeded', 100, 100)
+      expect(() => db.prepare(`
+        INSERT INTO scheduled_task_runs (
+          id, schedule_id, trigger_fired_at, trigger_kind, status, started_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('run-2', 'schedule-1', 100, 'manual', 'succeeded', 100, 100)).toThrow(/unique|constraint/i)
+    } finally {
+      db.close()
+    }
+  })
 
   it('enforces resilience defaults, foreign keys, and checkpoint uniqueness', async () => {
     const client = await loadClient()
