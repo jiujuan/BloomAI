@@ -7,3 +7,5 @@ dist-electron/
 *.log
 .DS_Store
 coverage/
+
+.tmp/
