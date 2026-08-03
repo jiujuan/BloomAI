@@ -72,3 +72,15 @@
   - 创建项目弹窗验证 trim 后 1–80 字符名称；目录选择显示跨平台 basename，选择取消时保留原目录；创建成功后自动展开项目并打开首会话。
   - 项目会话显示工作目录上下文，普通会话不显示。若后端流返回 `PROJECT_WORKSPACE_UNAVAILABLE` 或“项目工作目录不可用”，Renderer 标记该项目、显示告警并禁用发送；提交消息与确认计划路径也会防御性阻止，其他项目与普通会话不受影响。
   - 会话行复用并拒绝空白重命名；项目与 recent 的加载/错误/重试状态都有可访问的 UI 表达。
+
+## 阶段 F：回归与验收
+
+- **验收时间：** 2026-08-03
+- **全量回归：** `npm test` 通过：173 个测试文件通过、1 个跳过；771 个测试通过、1 个跳过。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-f-full-test.log`。
+- **临时 `DATA_DIR` 服务端集成：** `npm test -- src/server/services/project.service.test.ts src/server/http/routes/projects.test.ts src/server/http/routes/sessions.test.ts src/server/mastra/workspace/project-workspace.factory.test.ts src/server/services/chat.service.test.ts` 通过：5 个测试文件、34 个断言。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-f-temp-data-integration.log`。
+  - 测试在每个场景用 `fs.mkdtempSync(...)` 设置独立 `DATA_DIR`，应用迁移至 `025-project-chat-workspaces` 后验证 HTTP/服务/Workspace 链路。
+  - 验证 selected 目录中的已有文件未被移动或删除；自动目录在已有编号间隙与已注册项目的情况下仍原子地产生下一可用 `NewProjectN`。
+  - 验证 HTTP 创建项目返回首项目会话，项目会话分页带有正确归属；普通 `POST /sessions` 仅会进入 `scope=recent`。
+  - 验证缺失或文件类型的项目根目录返回稳定的 `PROJECT_WORKSPACE_UNAVAILABLE`，不会回退到其他主机目录。
+- **静态与构建回归：** 最近一次源代码构建使用 `npm run typecheck` 和 `npm run build` 均通过；日志见阶段 E。构建仅保留既有 Renderer chunk 体积告警，退出码为 0。
+- **Electron 原生目录选择人工冒烟：** **未在本次非交互式自动化环境中执行，不能声称已通过。** 自动化已覆盖 IPC 注册、目录选择结果映射、preload 契约和 Renderer 降级；但计划第 11 节的真实原生对话框交互、两个项目内实际文件/命令任务，以及 11/7/61 条数据的人工可视化流程，仍需要在可交互桌面环境执行 `npm run dev` 后按清单复核。
