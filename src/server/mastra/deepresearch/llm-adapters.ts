@@ -43,11 +43,11 @@ export const RESEARCH_LLM_STAGE_LIMITS: Record<ResearchLlmStage, ResearchLlmStag
   brief_planning: { timeoutMs: 300_000, maxOutputTokens: 18_000 },
   query_planning: { timeoutMs: 180_000, maxOutputTokens: 8_600 },
   evidence_analysis: { timeoutMs: 60_000, maxOutputTokens: 2_400 },
-  gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 2_200 },
+  gap_analysis: { timeoutMs: 30_000, maxOutputTokens: 4_200 },
   section_writing: { timeoutMs: 75_000, maxOutputTokens: 8_000 },
   claim_extraction: { timeoutMs: 45_000, maxOutputTokens: 4_000 },
-  citation_verification: { timeoutMs: 35_000, maxOutputTokens: 2_000 },
-  report_critique: { timeoutMs: 60_000, maxOutputTokens: 3_000 },
+  citation_verification: { timeoutMs: 35_000, maxOutputTokens: 4_000 },
+  report_critique: { timeoutMs: 60_000, maxOutputTokens: 3_500 },
   report_translation: { timeoutMs: 75_000, maxOutputTokens: 4_000 },
 }
 
