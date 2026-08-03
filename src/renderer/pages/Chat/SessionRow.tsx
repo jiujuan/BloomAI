@@ -59,7 +59,6 @@ export function SessionRow({ session, isActive, onSelect, onDeleted }: {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void onSelect() }
       }}
     >
-      <div className="session-item-dot" />
       <div className="session-item-body"><div className="session-item-title">{session.title}</div></div>
       <div className="session-item-actions">
         <button className="session-item-action" onClick={(event) => { event.stopPropagation(); setDraftTitle(session.title); setTitleError(null); setEditOpen(true) }} title="修改标题" aria-label={`修改标题：${session.title}`}><Pencil size={12} /></button>

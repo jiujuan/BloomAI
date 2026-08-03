@@ -162,16 +162,12 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 }
 .session-item {
   display: flex; align-items: center; gap: 6px;
-  padding: 7px 8px; border-radius: var(--radius-md);
-  cursor: pointer; border: 0.5px solid transparent;
+  padding: 5px 8px; border-radius: var(--radius-md);
+  cursor: pointer; border: 0;
   margin-bottom: 1px; position: relative;
 }
 .session-item:hover { background: var(--bg-secondary); }
-.session-item.active { background: var(--bg-secondary); border-color: var(--border-secondary); }
-.session-item-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #7C6FF7; flex-shrink: 0;
-}
+.session-item.active { background: var(--bg-secondary); border-color: transparent; }
 .session-item-body { flex: 1; min-width: 0; }
 .session-item-title {
   font-size: 12px; font-weight: 500; color: var(--text-primary);
@@ -1729,9 +1725,9 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .sidebar-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary); }
 .sidebar-icon-button:hover { color: var(--text-primary); background: var(--bg-secondary); }
 .project-row-wrap { display: flex; align-items: center; gap: 2px; }
-.project-row { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); text-align: left; }
+.project-row { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 6px 7px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); text-align: left; }
 .project-row:hover { background: var(--bg-secondary); }
-.project-row[aria-expanded="true"] { border-color: var(--border-secondary); background: var(--bg-secondary); }
+.project-row[aria-expanded="true"] { background: transparent; }
 .project-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-size: 12px; font-weight: 500; }
 .project-row-count { font-size: 10px; color: var(--text-tertiary); }
 .project-new-session { display: none; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: var(--radius-sm); color: var(--text-secondary); }
