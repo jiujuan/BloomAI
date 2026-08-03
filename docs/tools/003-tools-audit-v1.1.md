@@ -1,8 +1,12 @@
 # BloomAI 内置 Tools 审计报告
 
-> 审计日期：2026-08-02<br>
+> 文档编号：003<br>
+> 文档版本：v1.1<br>
+> 状态：架构复核后修订<br>
+> 审计日期：2026-08-02（验证结果为当日审计快照）<br>
 > 审计范围：`D:/codeproject/JS/bloomai/src/server/tools` 中由注册表暴露的 22 个内置工具；并覆盖 Agent/Mastra、Capability Broker、HTTP 接口、数据库记录及 Tools 测试界面。<br>
-> 审计方式：静态代码审查 + 定向测试；未修改业务源码。
+> 审计方式：静态代码审查 + 定向测试；未修改业务源码。<br>
+> 关联实施：[004-tools-platform-implementation-plan-v1.1.md](004-tools-platform-implementation-plan-v1.1.md)、[001-mastra-agent-browser-web-tools-analysis-v1.1.md](001-mastra-agent-browser-web-tools-analysis-v1.1.md)、[002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md](002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md)
 
 ## 1. 执行摘要
 
@@ -40,7 +44,10 @@ Agent/Mastra 工具面：`D:/codeproject/JS/bloomai/src/server/mastra/tools.ts`
 
 ```mermaid
 flowchart LR
-  A["Chat Agent / Tools UI / HTTP"] --> B["Capability Broker"]
+  A["Chat Agent"] --> M["Mastra buildBuiltinTools"]
+  U["Tools UI / external HTTP"] --> S["Hono routes / ToolService"]
+  M --> B["Capability Broker"]
+  S --> B
   B --> C["enablement + permission + approval + timeout policy"]
   C --> D["executeToolInternal"]
   D --> E["toolRegistry"]
@@ -49,7 +56,7 @@ flowchart LR
   B --> H["tool_permissions SQLite"]
 ```
 
-目前 `Capability Broker` 作为外部调用入口的设计是正确的；问题在于其授权输入和授权存储语义尚未达到可信边界的要求。
+目前 `Capability Broker` 作为统一策略入口的分层方向正确；不过 Agent 的 `buildBuiltinTools()` 目前主要根据数据库 enabled 状态重建工具面，尚未具备异步的真实可用性探测。因此“已启用”不能等同于“依赖、配置和平台条件均可用”。Tools UI 则经 Hono HTTP API 与 `ToolService` 进入 Broker，不存在现成的可信 Electron 工具批准 IPC。
 
 ---
 
@@ -124,10 +131,12 @@ flowchart LR
 - `tool_permissions` 只存 `tool_id`、`granted`、`scope`，不存会话 ID 和过期时间。
 - `grantPermission` 无论 scope 是 `session` 还是 `permanent` 都写 SQLite。
 - `requireLegacyToolPermission` 只检查 `granted === 1`。
+- `PermissionDialog.tsx` 虽展示“仅本次 / 永久”文案，但它经 HTTP 调用持久化授权；该 UI 文案不是可信边界，根因在 Broker、Service 与 Repository 的授权语义。
 
 文件：
 
 - `D:/codeproject/JS/bloomai/src/server/db/repositories/tool.repo.ts:112-120`
+- `D:/codeproject/JS/bloomai/src/server/services/tool.service.ts`
 - `D:/codeproject/JS/bloomai/src/server/skills/policy/capability-broker.ts:153-159`
 - `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/PermissionDialog.tsx`
 
@@ -177,7 +186,7 @@ flowchart LR
 **涉及工具**：`web_fetch`、`web_extract`、`web_screenshot`（完成后）、`vision.imageUrl`。<br>
 **涉及文件**：`D:/codeproject/JS/bloomai/src/server/tools/utils/html.ts`、`D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts`、`D:/codeproject/JS/bloomai/src/server/tools/vision.ts`。
 
-**修复方向**：仅允许 HTTP(S)；DNS 解析并拒绝 loopback、private、link-local、multicast 和 unspecified 地址；每一次 redirect 后重新校验；Playwright 通过 request route 拦截所有不允许请求。
+**修复方向**：仅允许 HTTP(S)；DNS 解析并拒绝 loopback、private、link-local、multicast 和 unspecified 地址；每一次 redirect 后重新校验；浏览器 Provider 通过 request route 拦截所有不允许请求。`src/server/services/deepresearch/content-service.ts` 已有研究工作流专用的私网 URL / DNS 检查，因此整改应抽取共享 `UrlPolicy` 并保留研究错误码映射，而不是误判 Deep Research 完全没有防护或再维护一套规则。
 
 ### P1-2：下载上限未在流读取时执行
 
@@ -193,7 +202,7 @@ flowchart LR
 
 文件：`D:/codeproject/JS/bloomai/src/server/tools/execute-tool.ts:33-43`
 
-**修复方向**：在 `ToolExecutionContext` 中传递 `AbortSignal`，网络/浏览器/子进程真正中止；对同步 I/O 改为异步实现；运行记录区分 timeout、cancelled、failed。
+**修复方向**：在 `ToolExecutionContext` 中传递 `AbortSignal`，网络/浏览器/子进程真正中止；对同步 I/O 改为异步实现；timeout 发出 abort 后仅等待有界的清理宽限期，阻止 aborted executor 再写 artifact，并记录 timeout、cancelled、failed 与孤儿资源清理指标。不能无限等待忽略 signal 的第三方依赖，否则运行记录和请求会被永久卡住。
 
 ### P1-4：输入/输出契约不严格
 
@@ -237,7 +246,7 @@ flowchart LR
 
 ### 5.1 先完成已有工具
 
-1. **`web_screenshot`**：复用 `render.ts` 浏览器生命周期，提供 fullPage、viewport、格式、受控输出目录、最大像素和 URL 安全校验。
+1. **`web_screenshot`**：按 [002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md](002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md) 的 T1-T8，通过受控 AgentBrowser Provider 实现 fullPage、viewport、格式、受控输出目录、最大像素和 URL 安全校验；`render.ts` 仅作为可配置的临时 legacy Provider，不再是新截图能力的直接依赖。
 2. **`ocr`**：作为可选能力适配器；未配置后端时禁用，而不是返回成功 note。
 3. **`image_edit`**：实现 resize/crop/format/compress/metadata strip；默认不覆盖源文件，输出只能位于批准目录。
 
@@ -254,9 +263,11 @@ flowchart LR
 
 ---
 
-## 6. 测试与验证结果
+## 6. 审计时的测试与验证快照
 
-### 已执行
+以下结果在 2026-08-02 审计时获得，用于说明当时的覆盖与风险，不代表本次文档复核重新执行后的 CI 结论。
+
+### 当时已执行
 
 | 命令 | 结果 |
 |---|---|
@@ -273,7 +284,8 @@ flowchart LR
 ## 7. 最终建议
 
 1. 先实施授权与边界治理，不增加高风险新工具。
-2. 将工具能力状态改为显式可用性模型，禁用所有 placeholder。
-3. 以“统一 Tool Contract + Capability Scope + Cancellable Execution”为核心重构平台基础层。
+2. 将工具能力状态改为显式、可异步探测的可用性模型，禁用所有 placeholder，并使 Agent 工具面仅暴露 enabled 且 available 的能力。
+3. 以“统一 Tool Contract + Capability Scope + Cancellable Execution”为核心渐进重构平台基础层；未迁移的高风险工具应保持不可用或明确受兼容层约束。
 4. 随后以 `workspace_search`、`fs_stat`、`fs_apply_patch` 为优先新增能力，形成更可靠的本地开发与文件处理工作流。
-5. 完整回归通过后再逐步开放 OCR、截图、图片编辑与更高风险执行能力。
+5. 网页获取质量提升采用 AgentBrowser 作为可配置内部 Provider，而非替换四个公开 `web_*` Tool ID；详见关联的 001/002 文档。
+6. 完整回归通过后再逐步开放 OCR、图片编辑与更高风险执行能力。

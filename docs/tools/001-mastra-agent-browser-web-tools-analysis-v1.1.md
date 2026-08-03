@@ -5,7 +5,7 @@
 > 状态：建议评审  
 > 日期：2026-08-03  
 > 范围：`web_search`、`web_fetch`、`web_extract`、`web_screenshot`  
-> 关联文档：[TOOL_AUDIT.md](TOOL_AUDIT.md)、[TOOLS_PLATFORM_IMPLEMENTATION_PLAN.md](TOOLS_PLATFORM_IMPLEMENTATION_PLAN.md)  
+> 关联文档：[003-tools-audit-v1.1.md](003-tools-audit-v1.1.md)、[004-tools-platform-implementation-plan-v1.1.md](004-tools-platform-implementation-plan-v1.1.md)<br>
 > 外部参考：[Mastra AgentBrowser 文档](https://mastra.ai/docs/browser/agent-browser)
 
 ## 1. 结论
@@ -335,7 +335,7 @@ type WebBrowserConfig = {
 
 ### 8.1 URL 与 SSRF
 
-[TOOL_AUDIT.md](TOOL_AUDIT.md) 已把 URL SSRF 列为 P1。AgentBrowser 接入不得复制一份不一致的校验逻辑。
+[003-tools-audit-v1.1.md](003-tools-audit-v1.1.md) 已把 URL SSRF 列为 P1。AgentBrowser 接入不得复制一份不一致的校验逻辑。
 
 必须实现并复用一个 `UrlPolicy`：
 

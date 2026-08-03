@@ -1,8 +1,11 @@
 # BloomAI Tools 平台整改与扩展实施计划
 
-> 文档版本：1.0<br>
-> 计划日期：2026-08-02<br>
-> 关联审计：`D:/codeproject/JS/bloomai/docs/tools/TOOL_AUDIT.md`<br>
+> 文档编号：004<br>
+> 文档版本：v1.1<br>
+> 状态：架构复核后修订<br>
+> 计划日期：2026-08-03<br>
+> 关联审计：[003-tools-audit-v1.1.md](003-tools-audit-v1.1.md)<br>
+> Web Tools 专项：[001-mastra-agent-browser-web-tools-analysis-v1.1.md](001-mastra-agent-browser-web-tools-analysis-v1.1.md)、[002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md](002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md)<br>
 > 目标版本：Tools Platform v2（分阶段交付，不以单个大 PR 一次完成）
 
 ---
@@ -24,10 +27,10 @@
 
 - 没有请求体字段可以绕过工具批准。
 - “仅本次”授权在应用重启后不存在，且不会授权其他会话。
-- 所有 filesystem/document/image-local 工具都无法访问批准根目录之外的真实路径，也不能经符号链接绕过。
+- 已迁移到 PathPolicy 的 filesystem/document/image-local 工具都无法访问批准根目录之外的真实路径，也不能经符号链接绕过；未迁移的高风险工具不得被标记为 available。
 - 所有 URL 工具不能访问本机、私网、链路本地地址，也不能通过重定向绕过。
-- 任何工具的输入都经过同一份 schema 校验；缺少必填参数或越界值返回稳定错误码。
-- 超时工具被真正 abort，运行记录稳定为 `timeout` 或 `cancelled`，不继续在后台写入。
+- 已迁移到 Tool Contract 的工具输入都经过同一份 schema 校验；缺少必填参数或越界值返回稳定错误码。
+- 超时工具会收到真实 abort；运行时在有界清理宽限期内阻止后续 artifact 写入，并稳定记录 `timeout` 或 `cancelled` 及无法立即回收的资源指标。
 - 3 个 placeholder 工具不再被默认启用或暴露为可用。
 - 新增/重构工具具备成功、拒绝、越界、超时和资源截断测试。
 
@@ -40,8 +43,10 @@
 ```mermaid
 flowchart TD
   UI["Renderer Tools UI"] --> HTTP["Hono /tools API"]
-  Agent["Mastra Agent"] --> Broker["Capability Broker"]
-  HTTP --> Broker
+  HTTP --> Service["ToolService"]
+  Agent["Mastra Agent"] --> Mastra["Mastra buildBuiltinTools"]
+  Mastra --> Broker["Capability Broker"]
+  Service --> Broker
   Broker --> Executor["executeToolInternal"]
   Executor --> Registry["toolRegistry"]
   Registry --> Tools["22 tool executors"]
@@ -77,16 +82,20 @@ flowchart TD
 
 ---
 
-## 3. 目标架构
+## 3. 目标架构（含拟新增的可信批准链路）
+
+以下为目标架构，不是当前实现快照。当前 Renderer 通过 Hono HTTP API 调用 Tools，`src/preload/index.ts` 与 `src/main/index.ts` 尚未提供工具批准 IPC；可信批准链路需要作为 A1 的新增组件交付。
 
 ```mermaid
 flowchart TD
-  Renderer["Renderer"] --> IPC["Trusted Electron approval IPC"]
-  IPC --> Approval["One-time Approval Broker"]
   Renderer --> HTTP["Hono Tool API"]
+  Renderer --> Preload["Preload tool approval API (proposed)"]
+  Preload --> Main["Electron main approval handler (proposed)"]
+  Main --> Approval["One-time Approval Broker"]
   HTTP --> Service["ToolService"]
   Agent["Mastra Agent"] --> Broker["CapabilityBroker"]
   Service --> Broker
+  Approval --> Broker
   Broker --> Policy["Tool Policy: availability, permission, roots, URL rules"]
   Policy --> Runtime["Cancellable Tool Runtime"]
   Runtime --> Contract["Validated Tool Contract"]
@@ -102,7 +111,7 @@ flowchart TD
 |---|---|
 | `ToolContract` | 每个工具的 id、inputSchema、outputSchema、result policy、availability 定义 |
 | `ToolExecutionContext` | sessionId、caller、approved roots、AbortSignal、request id、redaction context |
-| `ToolAvailability` | `available`、`disabled`、`dependency_missing`、`configuration_missing`、`unsupported_platform` |
+| `ToolAvailability` | `available`、`disabled`、`dependency_missing`、`configuration_missing`、`unsupported_platform`；以 `getAvailability(): Promise<ToolAvailability>` 或带缓存的异步 probe 暴露，避免把浏览器/依赖检查错误当作同步常量 |
 | `ToolPermissionStore` | permanent SQLite grant 与进程内 session grant 的统一读取接口 |
 | `ApprovalBroker` | 只接受可信主进程发出的单次批准，验证工具、输入 hash、会话、过期和一次性消费 |
 | `PathPolicy` | realpath 之后的 allowed roots 验证、写入目录创建、符号链接防护 |
@@ -147,7 +156,7 @@ type ToolAvailability =
 ```
 
 2. `web_screenshot`、`ocr`、`image_edit` 在真实实现前返回 `dependency_missing`，而非成功 `{ note: ... }`。
-3. Agent 工具构建函数只暴露 `available && enabled` 的工具。
+3. Agent 工具构建函数只暴露 `available && enabled` 的工具；`buildBuiltinTools()` 和 Tools API/UI 必须 await 或读取经过缓存的 availability probe。
 4. Tools UI 展示状态、原因、安装/配置说明；不可用工具不可手动运行。
 5. 对现有数据库显式执行迁移：将 3 个 placeholder 工具设置为 `is_enabled = 0`。
 
@@ -160,15 +169,17 @@ type ToolAvailability =
 | 修改 | `D:/codeproject/JS/bloomai/src/server/mastra/tools.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/skills/policy/capability-broker.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/db/client.ts` |
+| 新增 | `D:/codeproject/JS/bloomai/scripts/migrations/00x-disable-placeholder-tools.sql` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/services/tool.service.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/tools.store.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/ToolDetailPage.tsx` |
 | 修改 | `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/ToolTestRunner.tsx` |
 | 新增测试 | `D:/codeproject/JS/bloomai/src/server/tools/availability.test.ts` |
+| 新增测试 | `D:/codeproject/JS/bloomai/src/server/db/migrations.test.ts`（或现有迁移测试文件） |
 
 ### 5.4 数据迁移
 
-在 `runMigrations()` 中增加可重复执行的更新：
+新增版本化 SQL migration，例如 `scripts/migrations/00x-disable-placeholder-tools.sql`。`src/server/db/migrations.ts` 的 `runSqlMigrations()` 会在 `seedTools()` 前执行该文件；不能只在 `src/server/db/client.ts` 的 `runMigrations()` 或 `seedTools()` 中追加临时更新，因为 seed 不是权限与历史数据迁移机制。
 
 ```sql
 UPDATE tools
@@ -262,14 +273,14 @@ type ToolApprovalApi = {
 ### 6.4 数据模型与 repository 变更
 
 1. `tool_permissions` 只保留 permanent grants。
-2. 增加唯一索引以匹配 repository 的“一工具一永久授权”假设：
+2. 通过版本化 SQL migration 清理历史重复授权记录后，增加唯一索引以匹配 repository 的“一工具一永久授权”假设：
 
 ```sql
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_permissions_unique_tool_id
 ON tool_permissions(tool_id);
 ```
 
-在建立索引前，迁移需要清理历史重复数据，仅保留最近一条授权记录。
+迁移需要在建立索引前清理历史重复数据，仅保留最近一条授权记录；`seedTools()` 只保持内置工具元数据最新，不能承担权限数据迁移。
 
 3. 新建内存 `SessionToolPermissionStore`，不增加持久化表。
 4. `grantPermission()` 的参数用 Zod enum 限制：
@@ -292,7 +303,10 @@ session grant 应使用专门方法，要求 sessionId。
 | 修改 | `D:/codeproject/JS/bloomai/src/server/http/routes/tools.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/db/repositories/tool.repo.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/db/client.ts` |
-| 修改 | Electron preload/main 中实际定义工具批准 IPC 的文件（实现前先定位现有 IPC 边界） |
+| 新增 | `D:/codeproject/JS/bloomai/scripts/migrations/00x-tool-permissions-permanent-only.sql` |
+| 修改 | `D:/codeproject/JS/bloomai/src/shared/constants/ipc.ts`（新增受限 approval channel） |
+| 修改 | `D:/codeproject/JS/bloomai/src/preload/index.ts`（只暴露受限 `requestApproval` API） |
+| 修改 | `D:/codeproject/JS/bloomai/src/main/index.ts`（注册可信 IPC handler；如后续拆分则迁至 `src/main/ipc/`） |
 | 修改 | `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/tools.store.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/renderer/pages/Tools/PermissionDialog.tsx` |
 | 新增测试 | `D:/codeproject/JS/bloomai/src/server/tools/approval-broker.test.ts` |
@@ -373,6 +387,10 @@ async function validateExternalUrl(rawUrl: string, options?: UrlPolicyOptions): 
 async function validateResolvedHost(url: URL): Promise<void>
 ```
 
+#### 与 Deep Research 的集成约束
+
+`src/server/services/deepresearch/content-service.ts` 已有研究专用 URL 安全检查，整改时应迁移为共享 `UrlPolicy` 的调用方并保留研究领域错误码。Deep Research 当前的 `fetchConcurrency` 分别为 standard 3、deep 5、exhaustive 6；浏览器回退必须使用独立且更低的 pool / budget，不能直接占满上述静态获取并发。
+
 #### 规则
 
 - 仅允许 HTTP(S)。
@@ -428,7 +446,8 @@ type ToolResourceLimits = {
 | 修改 | `D:/codeproject/JS/bloomai/src/server/tools/types.ts` |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/tools/utils/path.ts`（迁移后删除或保留 deprecated wrapper） |
 | 修改 | `D:/codeproject/JS/bloomai/src/server/tools/utils/html.ts` |
-| 修改 | `D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts` |
+| 修改 | `D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts`（仅保留为临时 legacy Provider；不作为新截图能力的直接依赖） |
+| 修改 | `D:/codeproject/JS/bloomai/src/server/services/deepresearch/content-service.ts`（委托共享 `UrlPolicy`，保留研究错误码） |
 | 修改 | 所有 fs/doc/vision/image 工具 executor |
 | 新增测试 | `D:/codeproject/JS/bloomai/src/server/tools/utils/path-policy.test.ts` |
 | 新增测试 | `D:/codeproject/JS/bloomai/src/server/tools/utils/url-policy.test.ts` |
@@ -461,7 +480,7 @@ export type ToolDefinition<I extends z.ZodTypeAny, O extends z.ZodTypeAny> = {
   requiresPermission?: 'fs' | 'network' | 'write' | 'shell' | 'sandbox'
   inputSchema: I
   outputSchema: O
-  getAvailability: () => ToolAvailability
+  getAvailability: () => Promise<ToolAvailability>
   execute: (input: z.infer<I>, context: ToolExecutionContext) => Promise<z.infer<O>>
 }
 ```
@@ -495,7 +514,7 @@ export interface ToolExecutionContext {
 2. 在 timeout 到期时 `controller.abort(new ToolTimeoutError(...))`。
 3. 把 signal 传入 fetch、Playwright、文件遍历和子进程。
 4. 将运行状态区分为 `success`、`error`、`timeout`、`cancelled`、`denied`。
-5. 仅在 executor 真正结束/确认 abort 后关闭记录，避免后台任务继续产生未审计副作用。
+5. timeout 后向 executor 发出 abort，并仅等待有界的清理宽限期；在 signal 已 abort 后禁止新增 artifact 写入。宽限期到期仍未结束的依赖按 timeout/cancelled 关闭记录，记录孤儿资源指标并由 runtime / browser pool 后续清理，避免无限等待造成请求或审计记录卡死。
 
 ### 8.3 子进程策略
 
@@ -663,17 +682,21 @@ z.object({
 
 #### MVP 功能
 
+`web_screenshot` 的详细逐文件实施以 [002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md](002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md) T1-T8 为准。本计划只定义平台集成边界，避免重复设计另一套浏览器实现。
+
 - 输入：`url`、`fullPage`、`viewport`、`format`、`quality`。
-- 使用 `UrlPolicy` 和 Playwright request routing。
-- 复用 `D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts` 的 browser 生命周期，不重复启动浏览器。
-- 输出仅写入受控临时目录或用户批准输出目录。
-- 限制最大 viewport、总像素、文件大小与超时。
-- 输出：`imagePath`、`mimeType`、`width`、`height`、`bytes`、`finalUrl`。
+- 使用共享 `UrlPolicy`、AgentBrowser Adapter 和浏览器网络守卫。
+- AgentBrowser 是可配置的 browser Provider；`render.ts` 仅可作为迁移期间的 legacy Provider，不能成为新截图路径的直接耦合点。
+- 仅在 URL Policy、真实 abort、独立浏览器并发池和 artifact 路径策略全部生效后，才允许将工具状态切换为 available。
+- 输出仅写入受控应用 artifact 目录，不允许网页或模型直接指定输出路径。
+- 限制最大 viewport、总像素、文件大小、保留期与超时。
+- 输出：`imagePath`、`mimeType`、`width`、`height`、`bytes`、`finalUrl`、受限 provider diagnostics。
 
 #### 文件
 
 - 修改：`D:/codeproject/JS/bloomai/src/server/tools/web-screenshot.ts`
-- 修改：`D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts`
+- 新增：`D:/codeproject/JS/bloomai/src/server/tools/web/agent-browser-provider.ts` 及其 pool / guard 相关模块，详见 002 的 T2-T6
+- 修改：`D:/codeproject/JS/bloomai/src/server/tools/utils/render.ts`（仅 legacy Provider 适配）
 - 新增测试：`D:/codeproject/JS/bloomai/src/server/tools/web-screenshot.test.ts`
 
 ### 10.2 OCR
@@ -845,13 +868,15 @@ src/server/tools/availability.test.ts
 2. **PR-2：A1 Session grants**：session store 与 permanent 数据迁移，不改变 UI 交互细节。
 3. **PR-3：A1 Trusted approval**：approval token/IPC，移除 HTTP boolean bypass。
 4. **PR-4：A2 PathPolicy**：先迁移 read-only filesystem/document 工具，再迁移 write 工具。
-5. **PR-5：A2 UrlPolicy + stream**：web fetch/extract/vision，随后 browser rendering。
-6. **PR-6：A3 Tool contracts**：从低风险 web/file read 工具开始迁移；保留 compatibility adapter。
-7. **PR-7：A3 Runtime and audit**：AbortSignal、status、redaction、retention。
-8. **PR-8：B1 Workspace tools**：`fs_stat`、`workspace_search`、deprecated wrappers。
-9. **PR-9：B1 Patch tool**：`fs_apply_patch` + preview + one-time write approval。
-10. **PR-10：B2 Screenshot**：真实截图实现、状态切换与测试。
-11. **PR-11+：OCR/image edit/controlled execution**：分别独立 ADR、实现和验收。
+5. **PR-5：A2 UrlPolicy + stream**：先统一常规 Web Tools 与 Deep Research 的 URL / redirect 策略和流式上限。
+6. **PR-6：A3 Tool contracts + runtime baseline**：从低风险 web/file read 工具开始迁移；加入 AbortSignal、bounded cleanup、状态和 compatibility adapter。
+7. **PR-7：A3 Audit**：redaction、retention、孤儿资源指标与数据库迁移。
+8. **PR-8：B2 AgentBrowser POC / Adapter**：按 002 的 T1-T5 完成依赖、打包、Provider、独立 pool 和网络守卫；此时不切换公开 Tool 行为。
+9. **PR-9：B2 Screenshot**：按 002 的 T6 交付真实截图、状态切换与测试；其前置是 PR-5、PR-6、PR-8。
+10. **PR-10：B2 Fetch / Extract**：按 002 的 T7-T9 灰度静态优先浏览器回退与 Deep Research 独立预算。
+11. **PR-11：B1 Workspace tools**：`fs_stat`、`workspace_search`、deprecated wrappers。
+12. **PR-12：B1 Patch tool**：`fs_apply_patch` + preview + one-time write approval。
+13. **PR-13+：OCR/image edit/controlled execution**：分别独立 ADR、实现和验收。
 
 每个 PR 都应限制在一个主题内；不将数据库迁移、权限策略、截图实现和执行隔离混在同一变更中。
 
@@ -875,8 +900,8 @@ src/server/tools/availability.test.ts
 Tools Platform v2 的 Release A 完成条件：
 
 - [ ] P0 授权绕过和 session 持久化问题有回归测试且已修复。
-- [ ] 所有工具输入/输出的关键路径使用统一强类型 schema。
-- [ ] 所有文件相关工具均启用 allowed roots 与符号链接防护。
+- [ ] 已迁移到 Tool Contract 的工具输入/输出关键路径使用统一强类型 schema；未迁移的高风险工具保持 unavailable 或有明确兼容期边界。
+- [ ] 已迁移的文件相关工具均启用 allowed roots 与符号链接防护；未迁移工具不得绕过该策略后对 Agent 可用。
 - [ ] 所有 URL 工具均启用 SSRF/redirect 防护和流式大小限制。
 - [ ] timeout 能真正取消底层工作，运行记录状态准确。
 - [ ] placeholder 工具默认不可用且不会暴露给 Agent。

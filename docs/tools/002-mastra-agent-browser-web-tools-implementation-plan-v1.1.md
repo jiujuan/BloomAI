@@ -5,7 +5,7 @@
 > 状态：可实施计划  
 > 日期：2026-08-03  
 > 前置方案：[001-mastra-agent-browser-web-tools-analysis-v1.1.md](001-mastra-agent-browser-web-tools-analysis-v1.1.md)  
-> 关联治理计划：[TOOLS_PLATFORM_IMPLEMENTATION_PLAN.md](TOOLS_PLATFORM_IMPLEMENTATION_PLAN.md)
+> 关联治理计划：[004-tools-platform-implementation-plan-v1.1.md](004-tools-platform-implementation-plan-v1.1.md)
 
 ## 1. 交付原则
 
@@ -39,7 +39,7 @@ flowchart LR
 - 现有用户未提交变更不可被回退。
 - Web Provider 的新增字段必须向后兼容；既有主输出字段保持稳定。
 - 所有新测试优先使用本地 HTTP fixture 或 mock，不把公网网页作为单元测试依赖。
-- URL Policy、取消和审计设计应与 `TOOLS_PLATFORM_IMPLEMENTATION_PLAN.md` 的平台治理任务合并实施，避免重复实现。
+- URL Policy、取消和审计设计应与 [004-tools-platform-implementation-plan-v1.1.md](004-tools-platform-implementation-plan-v1.1.md) 的平台治理任务合并实施，避免重复实现。
 
 ## 2. 任务总览
 
