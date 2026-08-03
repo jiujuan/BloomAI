@@ -58,6 +58,20 @@ describe('sessionService', () => {
     }
   })
 
+  it('keeps recent pages separate from project sessions and touches their project on changes', async () => {
+    const { sessionService } = await loadSessionService()
+    const { projectService } = await import('./project.service')
+    const { project, initialSession } = projectService.createProject({ name: 'Project' })
+    const recent = sessionService.create({ title: 'Recent' })
+    const { projectRepo } = await import('../db/repositories/project.repo')
+    const touch = vi.spyOn(projectRepo, 'updateTimestamp')
+
+    expect(sessionService.listRecent({ limit: 15, offset: 0 })).toMatchObject({ data: [expect.objectContaining({ id: recent.id, project_id: null })], meta: { total: 1 } })
+    sessionService.update(initialSession.id, { title: 'Updated' })
+    sessionService.remove(initialSession.id)
+    expect(touch).toHaveBeenCalledWith(project.id)
+  })
+
   it('archives an existing session and deliberately retains its messages', async () => {
     const { messageRepo, sessionService } = await loadSessionService()
     const session = sessionService.create({ title: 'Archive me' })

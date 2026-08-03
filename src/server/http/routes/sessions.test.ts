@@ -57,6 +57,20 @@ describe('sessions route contract', () => {
     })
   })
 
+  it('returns only ordinary chats in the scoped recent page while preserving the legacy list shape', async () => {
+    const { app } = await createApp()
+    const { projectService } = await import('../../services/project.service')
+    projectService.createProject({ name: 'Project' })
+    const ordinary = await app.request('/sessions', { method: 'POST' })
+    const { data: ordinarySession } = await ordinary.json() as { data: { id: string } }
+    const recent = await app.request('/sessions?scope=recent&limit=15&offset=0')
+    expect(await recent.json()).toMatchObject({ data: [expect.objectContaining({ id: ordinarySession.id, project_id: null })], meta: { total: 1, limit: 15, offset: 0 } })
+    const legacy = await app.request('/sessions')
+    expect(await legacy.json()).toMatchObject({ data: expect.any(Array) })
+    const invalid = await app.request('/sessions?scope=other')
+    expect(invalid.status).toBe(400)
+  })
+
   it('keeps message pagination metadata compatible', async () => {
     const { app } = await createApp()
     const createResponse = await app.request('/sessions', { method: 'POST' })

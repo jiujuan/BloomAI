@@ -1,10 +1,22 @@
 import { Hono } from 'hono'
 import { sessionService } from '../../services/session.service'
+import { ServiceError } from '../../services/errors'
 import { readJson, readIntQuery } from '../util'
 
 export const sessionsRoutes = new Hono()
 
-sessionsRoutes.get('/', (c) => c.json({ data: sessionService.list() }))
+sessionsRoutes.get('/', (c) => {
+  const scope = c.req.query('scope')
+  if (scope === undefined) return c.json({ data: sessionService.list() })
+  if (scope !== 'recent') throw new ServiceError('VALIDATION_ERROR', 'scope must be recent')
+  const parse = (key: string, fallback: number) => {
+    const value = c.req.query(key)
+    if (value === undefined) return fallback
+    if (!/^(0|[1-9]\d*)$/.test(value)) throw new ServiceError('VALIDATION_ERROR', `${key} must be a non-negative integer`)
+    return Number(value)
+  }
+  return c.json(sessionService.listRecent({ limit: parse('limit', 15), offset: parse('offset', 0) }))
+})
 
 sessionsRoutes.post('/', async (c) => c.json({ data: sessionService.create((await readJson(c)) || {}) }, 201))
 

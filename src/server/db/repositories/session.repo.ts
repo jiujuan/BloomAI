@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getOrmDb } from '../client'
 import { sessions } from '../schema'
@@ -6,7 +6,7 @@ import { settingsRepo } from './settings.repo'
 
 export interface Session {
   id: string; title: string; persona_id: string | null
-  model: string; status: string; created_at: number; updated_at: number
+  model: string; status: string; project_id: string | null; created_at: number; updated_at: number
 }
 
 
@@ -19,7 +19,7 @@ export const sessionRepo = {
     return getOrmDb().select().from(sessions).where(eq(sessions.id, id)).get() as Session | undefined
   },
 
-  create(data: { title?: string; persona_id?: string; model?: string }): Session {
+  create(data: { title?: string; persona_id?: string; model?: string; project_id?: string | null }): Session {
     const id = uuidv4()
     const now = Date.now()
     const settingsModel = settingsRepo.getValue('model')
@@ -30,6 +30,7 @@ export const sessionRepo = {
       persona_id: data.persona_id || null,
       model,
       status: 'active',
+      project_id: data.project_id ?? null,
       created_at: now,
       updated_at: now,
     }).run()
@@ -46,11 +47,26 @@ export const sessionRepo = {
     return this.get(id)
   },
 
-  delete(id: string): void {
-    getOrmDb().update(sessions).set({ status: 'archived' }).where(eq(sessions.id, id)).run()
+  listPage({ scope, limit, offset }: { scope: 'recent'; limit: number; offset: number }): { data: Session[]; total: number } {
+    const where = and(eq(sessions.status, 'active'), isNull(sessions.project_id))
+    const database = getOrmDb()
+    return {
+      data: database.select().from(sessions).where(where).orderBy(desc(sessions.updated_at)).limit(limit).offset(offset).all() as Session[],
+      total: Number(database.select({ count: sql<number>`count(*)` }).from(sessions).where(where).get()?.count ?? 0),
+    }
   },
 
-  touch(id: string): void {
+  delete(id: string): Session | undefined {
+    const session = this.get(id)
+    if (!session) return undefined
+    getOrmDb().update(sessions).set({ status: 'archived' }).where(eq(sessions.id, id)).run()
+    return session
+  },
+
+  touch(id: string): Session | undefined {
+    const session = this.get(id)
+    if (!session) return undefined
     getOrmDb().update(sessions).set({ updated_at: Date.now() }).where(eq(sessions.id, id)).run()
+    return this.get(id)
   },
 }

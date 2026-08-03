@@ -6,6 +6,7 @@ import { getTracer, SpanStatusCode } from '../telemetry/tracer'
 import { getMeter } from '../telemetry/metrics'
 import { chatRoutes } from './routes/chat'
 import { sessionsRoutes } from './routes/sessions'
+import { projectsRoutes } from './routes/projects'
 import { personasRoutes } from './routes/personas'
 import { settingsRoutes } from './routes/settings'
 import { llmRoutes } from './routes/llm'
@@ -71,6 +72,7 @@ export function createHonoApp(): Hono {
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.3.0', server: 'hono' }))
 
   app.route('/api/v1/chat', chatRoutes)
+  app.route('/api/v1/projects', projectsRoutes)
   app.route('/api/v1/sessions', sessionsRoutes)
   app.route('/api/v1/personas', personasRoutes)
   app.route('/api/v1/settings', settingsRoutes)

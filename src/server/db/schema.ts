@@ -14,7 +14,7 @@ export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   root_path: text('root_path').notNull(),
-  directory_kind: text('directory_kind').notNull(),
+  directory_kind: text('directory_kind', { enum: ['auto', 'selected'] }).notNull(),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({

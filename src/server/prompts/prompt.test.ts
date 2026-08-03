@@ -11,6 +11,7 @@ function session(overrides: Partial<Session> = {}): Session {
     persona_id: null,
     model: 'gpt-4o',
     status: 'active',
+    project_id: null,
     created_at: 1,
     updated_at: 1,
     ...overrides,

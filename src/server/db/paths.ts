@@ -12,6 +12,11 @@ export function getDbPath(): string {
   return path.join(getDataDir(), 'bloomai.db')
 }
 
+/** Resolves the parent directory for auto-created project workspaces without creating it. */
+export function getWorkspacesDir(): string {
+  return path.join(getDataDir(), 'workspaces')
+}
+
 export function getSkillRunArtifactsDir(runId: string): string {
   return path.join(getDataDir(), 'skills', 'runs', runId, 'artifacts')
 }
