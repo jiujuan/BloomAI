@@ -174,10 +174,11 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .session-item-actions {
-  display: none; align-items: center; gap: 2px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+  visibility: hidden; pointer-events: none;
 }
 .session-item:hover .session-item-actions,
-.session-item:focus-within .session-item-actions { display: flex; }
+.session-item:focus-within .session-item-actions { visibility: visible; pointer-events: auto; }
 .session-item-action {
   width: 18px; height: 18px; border: none; background: transparent;
   border-radius: 3px; color: var(--text-tertiary);
