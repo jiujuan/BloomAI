@@ -1716,13 +1716,16 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 
 /* ── Project chat sidebar ─────────────────────────────────── */
-.project-session-sidebar { overflow: hidden; }
-.sidebar-section { padding: 7px 5px; border-bottom: 0.5px solid var(--border-tertiary); }
-.project-sidebar-section { flex: 0 1 auto; overflow-y: auto; }
-.recent-sessions-section { flex: 1 1 auto; overflow-y: auto; min-height: 120px; }
-.sidebar-section-title { display: flex; align-items: center; justify-content: space-between; min-height: 27px; padding: 0 5px 4px; }
-.sidebar-section-title h2 { margin: 0; font-size: 11px; color: var(--text-secondary); font-weight: 650; }
-.sidebar-section-title > div { display: inline-flex; gap: 2px; }
+.project-session-sidebar { min-height: 0; overflow: hidden; }
+.sidebar-section { display: flex; min-height: 0; flex-direction: column; padding: 7px 5px; border-bottom: 0.5px solid var(--border-tertiary); }
+.project-sidebar-section, .recent-sessions-section { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.project-sidebar-section.is-collapsed, .recent-sessions-section.is-collapsed { flex: 0 0 auto; }
+.sidebar-section-content { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+.sidebar-section-title { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; min-height: 27px; padding: 0 5px 4px; }
+.sidebar-section-title h2 { min-width: 0; margin: 0; font-size: 11px; color: var(--text-secondary); font-weight: 650; }
+.sidebar-section-toggle { display: inline-flex; align-items: center; gap: 3px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.sidebar-section-toggle:hover { color: var(--text-primary); }
+.sidebar-section-actions { display: inline-flex; gap: 2px; }
 .sidebar-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary); }
 .sidebar-icon-button:hover { color: var(--text-primary); background: var(--bg-secondary); }
 .project-row-wrap { display: flex; align-items: center; gap: 2px; }
