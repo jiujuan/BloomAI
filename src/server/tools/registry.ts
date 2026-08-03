@@ -1,4 +1,5 @@
 import type { ToolExecutor } from './types'
+import { getToolContract, type ToolContract } from './contracts'
 import { bashTool } from './bash'
 import { docCsvTool } from './doc-csv'
 import { docDocxTool } from './doc-docx'
@@ -45,4 +46,23 @@ export const toolRegistry: Record<string, ToolExecutor> = {
   node_runner: nodeRunnerTool,
   python_runner: pythonRunnerTool,
   shell: shellTool,
+}
+
+export type RegisteredToolExecutor = (
+  input: unknown,
+  context: Parameters<ToolExecutor>[1],
+) => Promise<object> | object
+
+export type RegisteredToolDefinition = ToolContract & {
+  execute: RegisteredToolExecutor
+}
+
+export function getToolDefinition(toolId: string): RegisteredToolDefinition | undefined {
+  const contract = getToolContract(toolId)
+  const executor = toolRegistry[toolId]
+  if (!contract || !executor) return undefined
+  return {
+    ...contract,
+    execute: executor as RegisteredToolExecutor,
+  }
 }

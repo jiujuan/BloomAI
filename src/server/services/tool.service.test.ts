@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CapabilityError } from '../skills/policy/capability-broker'
+import { getToolContract, schemaToJsonSchema } from '../tools/contracts'
 import { createToolService } from './tool.service'
 
 describe('toolService', () => {
@@ -53,5 +54,31 @@ describe('toolService', () => {
     const service = createToolService({ repo: { get: vi.fn(() => undefined) } as any })
     expect(() => service.get('missing')).toThrowError('Tool not found')
     try { service.get('missing') } catch (error) { expect(error).toMatchObject({ code: 'NOT_FOUND' }) }
+  })
+
+  it('projects built-in params and result schemas from the shared contract', () => {
+    const tool = {
+      id: 'web_fetch',
+      category: 'web',
+      name: 'Legacy Web Fetch',
+      description: 'legacy description',
+      params_schema: '{}',
+      result_schema: '{}',
+      requires_permission: 'network',
+    }
+    const service = createToolService({
+      repo: {
+        get: vi.fn(() => tool),
+        getPermission: vi.fn(() => null),
+      } as any,
+    })
+    const projected = service.get('web_fetch')
+    const contract = getToolContract('web_fetch')!
+
+    expect(projected).toMatchObject({
+      params_schema: JSON.stringify(schemaToJsonSchema(contract.inputSchema)),
+      result_schema: JSON.stringify(schemaToJsonSchema(contract.outputSchema)),
+      description: contract.description,
+    })
   })
 })

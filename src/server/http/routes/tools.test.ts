@@ -102,6 +102,33 @@ describe('tools route contract', () => {
     expect(result.body.error.code).toBe('VALIDATION_ERROR')
   })
 
+  it('rejects invalid contract values before invoking web executors', async () => {
+    const { app } = await createApp()
+    const invalidFetch = await requestJson(app, '/tools/web_fetch/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        input: { url: 'https://example.com', maxChars: 0 },
+      }),
+    })
+    const invalidSearch = await requestJson(app, '/tools/web_search/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        input: { query: 'contract', limit: 51 },
+      }),
+    })
+
+    expect(invalidFetch.response.status).toBe(400)
+    expect(invalidFetch.body.error).toEqual(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('maxChars'),
+    }))
+    expect(invalidSearch.response.status).toBe(400)
+    expect(invalidSearch.body.error).toEqual(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('limit'),
+    }))
+  })
+
   it('keeps missing and denied execution errors in the shared HTTP error envelope', async () => {
     const { app } = await createApp()
     const missing = await requestJson(app, '/tools/missing')

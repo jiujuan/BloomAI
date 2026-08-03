@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { runSqlMigrations } from './migrations'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
+import { schemaToJsonSchema, toolContracts } from '../tools/contracts'
 
 const require = createRequire(import.meta.url)
 type RawDb = { exec(sql: string): void }
@@ -335,6 +336,21 @@ function seedTools() {
     params_schema: '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}',
     result_schema: '{"title":{"type":"string"},"byline":{"type":"string"},"publishedAt":{"type":"string"},"canonicalUrl":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}',
   }).where(eq(schema.tools.id, 'web_extract')).run()
+
+  syncBuiltinToolContracts(database)
+}
+
+function syncBuiltinToolContracts(database: ReturnType<typeof getOrmDb>): void {
+  for (const contract of Object.values(toolContracts)) {
+    database.update(schema.tools).set({
+      category: contract.category,
+      name: contract.displayName,
+      description: contract.description,
+      params_schema: JSON.stringify(schemaToJsonSchema(contract.inputSchema)),
+      result_schema: JSON.stringify(schemaToJsonSchema(contract.outputSchema)),
+      requires_permission: 'requiresPermission' in contract ? contract.requiresPermission ?? null : null,
+    }).where(eq(schema.tools.id, contract.id)).run()
+  }
 }
 
 function seedSkills() {

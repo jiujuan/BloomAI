@@ -7,6 +7,7 @@ import { runSkill } from '../skills/legacy'
 import { toLegacySkillToolId } from '../skills/legacy/mastra-tool-id'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
 import { isToolAvailable } from '../tools/availability'
+import { getToolContract } from '../tools/contracts'
 
 type MastraTool = ReturnType<typeof createTool>
 
@@ -68,10 +69,12 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
     if (!isToolAvailable(tool.id)) continue
     if (options.filter && !options.filter(tool.id)) continue
     const needsApproval = needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
+    const contract = getToolContract(tool.id)
     tools[tool.id] = createTool({
       id: tool.id,
-      description: tool.description || `Run BloomAI tool ${tool.name}`,
-      inputSchema: jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
+      description: contract?.description || tool.description || `Run BloomAI tool ${tool.name}`,
+      inputSchema: contract?.inputSchema ?? jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
+      ...(contract ? { outputSchema: contract.outputSchema } : {}),
       ...(needsApproval ? { requireApproval: true } : {}),
       execute: async (input) => {
         const result = await executeLegacyToolCapability({
