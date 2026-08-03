@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { fork } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT, IPC_CHANNELS } from '../shared/constants'
+import { registerDirectoryDialogHandler } from './ipc/dialogs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'

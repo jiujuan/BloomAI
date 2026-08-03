@@ -11,12 +11,13 @@ import { SkillsMarket } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
 import { SchedulesPage } from '@renderer/pages/Schedules'
-import { useSessionStore, usePersonaStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
+import { useSessionStore, usePersonaStore, useProjectStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme, applyFont } from '@renderer/api'
 
 export function App() {
-  const { loadSessions, createSession } = useSessionStore()
+  const { loadRecentSessions, createSession } = useSessionStore()
   const { loadPersonas } = usePersonaStore()
+  const { loadProjects } = useProjectStore()
   const { loadSettings, settings } = useSettingsStore()
   const { activePage, showOnboarding, setShowOnboarding, theme } = useUIStore()
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null)
@@ -25,7 +26,7 @@ export function App() {
     const init = async () => {
       await loadSettings()
       await loadPersonas()
-      await loadSessions()
+      await Promise.all([loadProjects(), loadRecentSessions({ replace: true, limit: 15 })])
     }
     init()
   }, [])

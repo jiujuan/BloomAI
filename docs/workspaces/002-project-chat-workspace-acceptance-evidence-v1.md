@@ -45,3 +45,16 @@
   - 普通会话不会预检或挂载 Workspace；两个并发项目会话分别写入各自的 `projectId`，并分别预检各自项目根目录。
   - Agent 动态 Workspace 回调只读取服务端写入的 `requestContext.projectId`；项目请求会排除保留的 `mastra_workspace_*` 工具 ID，避免与 Mastra Workspace 工具冲突。
   - `shutdownMastraRuntime()` 已按顺序关闭 Mastra、项目 Workspace 缓存和 schedule runtime storage。
+
+## 阶段 D：桌面桥接和 Renderer 数据层
+
+- **验收时间：** 2026-08-03
+- **执行命令：** `npm test -- src/main/ipc/dialogs.test.ts src/main/ipc/dialogs-handler.test.ts src/renderer/api/projects.test.ts src/renderer/store/project-session.store.test.ts src/server/http/routes/projects.test.ts`
+- **结果：** 5 个测试文件、15 个断言通过。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-d-tests.log`。
+- **类型检查：** `npm run typecheck` 通过。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-d-typecheck.log`。
+- **关键证据：**
+  - 主进程已注册 `dialog:select-directory` IPC；原生对话框仅允许选择目录，取消或没有路径时只返回 `{ canceled: true }`，成功时只暴露第一条选择路径。preload 与 `Window.bloomai` 声明均公开相同的 `selectDirectory()` 契约。
+  - Renderer `platform` 使用项目、项目会话与 recent HTTP API，查询参数会编码；非 Electron 环境安全降级为取消选择，不会伪造路径。
+  - project/recent Zustand 状态分别缓存实体、项目会话分页与 recent 分页；加载 101 条项目会话时按 `100 + 1` 请求全量页面，删除仅在服务端确认后同步移除缓存。
+  - 创建项目成功后，项目及首会话均进入缓存并激活首会话；创建失败不会改变现有状态。`POST /projects` 现在返回包含 `sessionCount: 1` 的完整 `ProjectSummary`，与 Renderer DTO 一致。
+  - `App` 启动时并行加载项目与 15 条普通 recent 聊天；`Ctrl/Cmd+N` 仍调用普通 `createSession`，因此不会把普通聊天错误归入项目。

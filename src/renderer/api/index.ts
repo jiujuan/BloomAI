@@ -4,10 +4,11 @@
 
 import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
+import type { CreateProjectInput, ProjectSummary, Session, SessionPage } from '@shared/schemas'
 import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
 
 const isElectron = () =>
-  typeof window !== 'undefined' && !!(window as any).bloomai
+  typeof window !== 'undefined' && !!window.bloomai
 
 // API helpers
 
@@ -126,6 +127,30 @@ export const platform = {
   async createSession(opts: { title?: string; persona_id?: string; model?: string } = {}) {
     const { data } = await apiFetch('/sessions', { method: 'POST', body: JSON.stringify(opts) })
     return data
+  },
+  async getProjects(): Promise<ProjectSummary[]> {
+    const { data } = await apiFetch('/projects')
+    return data
+  },
+  async createProject(input: CreateProjectInput): Promise<{ project: ProjectSummary; initialSession: Session }> {
+    const { data } = await apiFetch('/projects', { method: 'POST', body: JSON.stringify(input) })
+    return data
+  },
+  async getProjectSessions(projectId: string, page: { limit: number; offset: number }): Promise<SessionPage> {
+    const { data, meta } = await apiFetch(`/projects/${encodeURIComponent(projectId)}/sessions?limit=${encodeURIComponent(String(page.limit))}&offset=${encodeURIComponent(String(page.offset))}`)
+    return { data, meta }
+  },
+  async createProjectSession(projectId: string, input: { title?: string; persona_id?: string; model?: string } = {}): Promise<Session> {
+    const { data } = await apiFetch(`/projects/${encodeURIComponent(projectId)}/sessions`, { method: 'POST', body: JSON.stringify(input) })
+    return data
+  },
+  async getRecentSessions(page: { limit: number; offset: number }): Promise<SessionPage> {
+    const { data, meta } = await apiFetch(`/sessions?scope=recent&limit=${encodeURIComponent(String(page.limit))}&offset=${encodeURIComponent(String(page.offset))}`)
+    return { data, meta }
+  },
+  async selectDirectory(): Promise<{ canceled: boolean; path?: string }> {
+    if (!isElectron() || !window.bloomai?.selectDirectory) return { canceled: true }
+    return window.bloomai.selectDirectory()
   },
   async updateSession(id: string, updates: object) {
     const { data } = await apiFetch(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
@@ -327,13 +352,13 @@ export const platform = {
     async exportMarkdown(id: string): Promise<string> { const { data } = await apiFetch(`/article-illustrations/${id}/export`); return data.markdown },
   },
   // Clipboard (Electron only, graceful fallback)
-  async readClipboard(): Promise<string> {    if (isElectron()) return (window as any).bloomai.readClipboard()
+  async readClipboard(): Promise<string> {    if (isElectron() && window.bloomai) return window.bloomai.readClipboard()
     try { return await navigator.clipboard.readText() } catch { return '' }
   },
 
   // Active window (Electron only)
   async getActiveWindow(): Promise<string> {
-    if (isElectron()) return (window as any).bloomai.getActiveWindow()
+    if (isElectron() && window.bloomai) return window.bloomai.getActiveWindow()
     return ''
   },
 

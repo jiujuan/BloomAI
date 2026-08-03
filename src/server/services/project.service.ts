@@ -64,7 +64,7 @@ function removeEmptyAutoDirectory(directory: string): void {
 }
 
 export const projectService = {
-  createProject(input: CreateProjectInput): { project: Project; initialSession: Session } {
+  createProject(input: CreateProjectInput): { project: ProjectSummary; initialSession: Session } {
     const name = validateName(input?.name)
     let rootPath: string; let directoryKind: 'auto' | 'selected'; let autoDirectory: string | undefined
     if (input.sourceDirectory) {
@@ -83,7 +83,8 @@ export const projectService = {
     }
 
     try {
-      return projectRepo.createWithInitialSession({ name, root_path: rootPath, directory_kind: directoryKind })
+      const created = projectRepo.createWithInitialSession({ name, root_path: rootPath, directory_kind: directoryKind })
+      return { project: { ...created.project, sessionCount: 1 }, initialSession: created.initialSession }
     } catch (error) {
       if (autoDirectory) removeEmptyAutoDirectory(autoDirectory)
       throw error

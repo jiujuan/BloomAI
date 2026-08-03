@@ -18,7 +18,7 @@ describe('projects route contract', () => {
     const { app } = await createApp(); const selected = path.join(dataDir, 'selected'); fs.mkdirSync(selected)
     const autoResponse = await app.request('/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Auto' }) })
     expect(autoResponse.status).toBe(201); const autoBody = await autoResponse.json() as any
-    expect(autoBody.data).toMatchObject({ project: { directory_kind: 'auto' }, initialSession: { project_id: autoBody.data.project.id } })
+    expect(autoBody.data).toMatchObject({ project: { directory_kind: 'auto', sessionCount: 1 }, initialSession: { project_id: autoBody.data.project.id } })
     const selectedResponse = await app.request('/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Selected', sourceDirectory: selected }) })
     expect(selectedResponse.status).toBe(201)
     const projectId = autoBody.data.project.id

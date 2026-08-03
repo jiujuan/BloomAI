@@ -2,78 +2,280 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform } from '@renderer/api'
 import type { ImageGenerationRecord, ImageSessionSummary, LlmModelSummary } from '@renderer/api'
-import type { Message, Persona, Session } from '@shared/schemas'
+import type { CreateProjectInput, Message, Persona, ProjectSummary, Session } from '@shared/schemas'
 import { DEFAULT_ASPECT_RATIO } from '@shared/image-gen'
 import type { ImageTemplateDef } from '@shared/image-templates'
 
 // Session Store
 
+export interface RecentSessionPageOptions {
+  replace?: boolean
+  limit?: number
+}
+
 interface SessionState {
   sessions: Session[]
   activeSessionId: string | null
   loading: boolean
+  recentSessionIds: string[]
+  recentTotal: number
+  recentVisibleCount: number
+  recentLoading: boolean
+  recentError: string | null
 }
 interface SessionActions {
   loadSessions: () => Promise<void>
+  upsertSessions: (sessions: Session[]) => void
+  loadRecentSessions: (options?: RecentSessionPageOptions) => Promise<void>
   createSession: (opts?: { persona_id?: string; model?: string }) => Promise<Session>
+  createProjectSession: (projectId: string, opts?: { title?: string; persona_id?: string; model?: string }) => Promise<Session>
   deleteSession: (id: string) => Promise<void>
   setActiveSession: (id: string) => void
   updateSessionTitle: (id: string, title: string) => Promise<void>
 }
 
+export const initialProjectSessionState: SessionState = {
+  sessions: [],
+  activeSessionId: null,
+  loading: false,
+  recentSessionIds: [],
+  recentTotal: 0,
+  recentVisibleCount: 15,
+  recentLoading: false,
+  recentError: null,
+}
+
+function mergeSessionCache(current: Session[], incoming: Session[]): Session[] {
+  const incomingById = new Map(incoming.map((session) => [session.id, session]))
+  return [...incoming, ...current.filter((session) => !incomingById.has(session.id))]
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return [...new Set(ids)]
+}
+
 export const useSessionStore = create<SessionState & SessionActions>()(
   devtools((set, get) => ({
-    sessions: [],
-    activeSessionId: null,
-    loading: false,
+    ...initialProjectSessionState,
+
+    upsertSessions: (sessions) => set((state) => ({ sessions: mergeSessionCache(state.sessions, sessions) })),
 
     loadSessions: async () => {
       set({ loading: true })
       try {
         const sessions = await platform.getSessions()
-        set({ sessions, loading: false })
-      } catch (e) {
-        console.error('loadSessions', e)
+        set((state) => ({ sessions: mergeSessionCache(state.sessions, sessions), loading: false }))
+      } catch (error) {
+        console.error('loadSessions', error)
         set({ loading: false })
+      }
+    },
+
+    loadRecentSessions: async ({ replace = false, limit = 15 }: RecentSessionPageOptions = {}) => {
+      set({ recentLoading: true, recentError: null })
+      try {
+        const page = await platform.getRecentSessions({ limit, offset: 0 })
+        set((state) => ({
+          sessions: mergeSessionCache(state.sessions, page.data),
+          recentSessionIds: replace ? uniqueIds(page.data.map((session) => session.id)) : uniqueIds([...page.data.map((session) => session.id), ...state.recentSessionIds]).slice(0, page.meta.total),
+          recentTotal: page.meta.total,
+          recentVisibleCount: Math.min(limit, page.meta.total),
+          recentLoading: false,
+          recentError: null,
+        }))
+      } catch (error) {
+        set({ recentLoading: false, recentError: error instanceof Error ? error.message : '加载最近聊天失败' })
+        throw error
       }
     },
 
     createSession: async (opts = {}) => {
       const session = await platform.createSession(opts)
-      set(s => ({ sessions: [session, ...s.sessions], activeSessionId: session.id }))
+      set((state) => ({
+        sessions: mergeSessionCache(state.sessions, [session]),
+        activeSessionId: session.id,
+        recentSessionIds: uniqueIds([session.id, ...state.recentSessionIds]),
+        recentTotal: state.recentTotal + 1,
+        recentVisibleCount: Math.max(state.recentVisibleCount, Math.min(15, state.recentSessionIds.length + 1)),
+      }))
       return session
     },
 
-    deleteSession: async (id: string) => {
-      await platform.deleteSession(id)
-      set(s => {
-        const sessions = s.sessions.filter(x => x.id !== id)
-        const activeSessionId = s.activeSessionId === id
-          ? (sessions[0]?.id || null)
-          : s.activeSessionId
-        return { sessions, activeSessionId }
-      })
+    createProjectSession: async (projectId, opts = {}) => {
+      const session = await platform.createProjectSession(projectId, opts)
+      set((state) => ({ sessions: mergeSessionCache(state.sessions, [session]), activeSessionId: session.id }))
+      useProjectStore.getState().cacheProjectSession(projectId, session, { incrementCount: true })
+      return session
     },
 
-    setActiveSession: (id: string) => set({ activeSessionId: id }),
-
-    updateSessionTitle: async (id: string, title: string) => {
-      const previousTitle = get().sessions.find(x => x.id === id)?.title
-      set(s => ({
-        sessions: s.sessions.map(x => x.id === id ? { ...x, title } : x)
-      }))
-      try {
-        await platform.updateSession(id, { title })
-      } catch (error) {
-        if (previousTitle !== undefined) {
-          set(s => ({
-            sessions: s.sessions.map(x => x.id === id ? { ...x, title: previousTitle } : x)
-          }))
+    deleteSession: async (id) => {
+      const deleted = get().sessions.find((session) => session.id === id)
+      await platform.deleteSession(id)
+      set((state) => {
+        const sessions = state.sessions.filter((session) => session.id !== id)
+        return {
+          sessions,
+          activeSessionId: state.activeSessionId === id ? sessions[0]?.id ?? null : state.activeSessionId,
+          recentSessionIds: state.recentSessionIds.filter((sessionId) => sessionId !== id),
+          recentTotal: deleted?.project_id ? state.recentTotal : Math.max(0, state.recentTotal - (state.recentSessionIds.includes(id) ? 1 : 0)),
         }
+      })
+      if (deleted?.project_id) useProjectStore.getState().removeCachedProjectSession(deleted.project_id, id)
+    },
+
+    setActiveSession: (id) => set({ activeSessionId: id }),
+
+    updateSessionTitle: async (id, title) => {
+      const previousTitle = get().sessions.find((session) => session.id === id)?.title
+      set((state) => ({ sessions: state.sessions.map((session) => session.id === id ? { ...session, title } : session) }))
+      try {
+        const updated = await platform.updateSession(id, { title })
+        if (updated) set((state) => ({ sessions: mergeSessionCache(state.sessions, [updated]) }))
+      } catch (error) {
+        if (previousTitle !== undefined) set((state) => ({ sessions: state.sessions.map((session) => session.id === id ? { ...session, title: previousTitle } : session) }))
         throw error
       }
     },
   }), { name: 'bloomai-sessions' })
+)
+
+// Project Store
+
+interface ProjectState {
+  projects: ProjectSummary[]
+  loading: boolean
+  error: string | null
+  sessionIdsByProject: Record<string, string[]>
+  sessionTotalsByProject: Record<string, number>
+  projectSessionsLoading: Record<string, boolean>
+  projectSessionsError: Record<string, string | null>
+  workspaceUnavailableProjectIds: Record<string, boolean>
+}
+interface ProjectActions {
+  loadProjects: () => Promise<void>
+  refreshProject: (projectId: string) => Promise<void>
+  createProject: (input: CreateProjectInput) => Promise<{ project: ProjectSummary; initialSession: Session }>
+  loadProjectSessions: (projectId: string, page?: { limit?: number | 'all'; replace?: boolean }) => Promise<void>
+  cacheProjectSession: (projectId: string, session: Session, options?: { incrementCount?: boolean }) => void
+  removeCachedProjectSession: (projectId: string, sessionId: string) => void
+  markWorkspaceUnavailable: (projectId: string) => void
+  clearWorkspaceUnavailable: (projectId: string) => void
+}
+
+const initialProjectState: ProjectState = {
+  projects: [],
+  loading: false,
+  error: null,
+  sessionIdsByProject: {},
+  sessionTotalsByProject: {},
+  projectSessionsLoading: {},
+  projectSessionsError: {},
+  workspaceUnavailableProjectIds: {},
+}
+
+function mergeProjects(current: ProjectSummary[], incoming: ProjectSummary[]): ProjectSummary[] {
+  const incomingById = new Map(incoming.map((project) => [project.id, project]))
+  return [...incoming, ...current.filter((project) => !incomingById.has(project.id))]
+}
+
+export const useProjectStore = create<ProjectState & ProjectActions>()(
+  devtools((set) => ({
+    ...initialProjectState,
+
+    loadProjects: async () => {
+      set({ loading: true, error: null })
+      try {
+        const projects = await platform.getProjects()
+        set({ projects, loading: false, error: null })
+      } catch (error) {
+        set({ loading: false, error: error instanceof Error ? error.message : '加载项目失败' })
+        throw error
+      }
+    },
+
+    refreshProject: async (projectId) => {
+      await useProjectStore.getState().loadProjects()
+      if (!useProjectStore.getState().projects.some((project) => project.id === projectId)) {
+        set((state) => {
+          const sessionIdsByProject = { ...state.sessionIdsByProject }
+          const sessionTotalsByProject = { ...state.sessionTotalsByProject }
+          delete sessionIdsByProject[projectId]
+          delete sessionTotalsByProject[projectId]
+          return { sessionIdsByProject, sessionTotalsByProject }
+        })
+      }
+    },
+
+    createProject: async (input) => {
+      set({ error: null })
+      try {
+        const created = await platform.createProject(input)
+        set((state) => ({
+          projects: mergeProjects(state.projects, [created.project]),
+          sessionIdsByProject: { ...state.sessionIdsByProject, [created.project.id]: [created.initialSession.id] },
+          sessionTotalsByProject: { ...state.sessionTotalsByProject, [created.project.id]: created.project.sessionCount },
+        }))
+        useSessionStore.getState().upsertSessions([created.initialSession])
+        useSessionStore.getState().setActiveSession(created.initialSession.id)
+        return created
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : '创建项目失败' })
+        throw error
+      }
+    },
+
+    loadProjectSessions: async (projectId, { limit = 10, replace = false } = {}) => {
+      set((state) => ({ projectSessionsLoading: { ...state.projectSessionsLoading, [projectId]: true }, projectSessionsError: { ...state.projectSessionsError, [projectId]: null } }))
+      try {
+        const requestedTotal = limit === 'all' ? (useProjectStore.getState().sessionTotalsByProject[projectId] ?? useProjectStore.getState().projects.find((project) => project.id === projectId)?.sessionCount ?? 0) : limit
+        const allSessions: Session[] = []
+        let offset = 0
+        let total = requestedTotal
+        do {
+          const pageSize = Math.min(100, Math.max(1, requestedTotal === 0 ? 10 : requestedTotal - offset))
+          const page = await platform.getProjectSessions(projectId, { limit: pageSize, offset })
+          allSessions.push(...page.data)
+          total = page.meta.total
+          offset += page.data.length
+        } while (limit === 'all' && offset < total)
+        useSessionStore.getState().upsertSessions(allSessions)
+        set((state) => ({
+          sessionIdsByProject: { ...state.sessionIdsByProject, [projectId]: replace ? uniqueIds(allSessions.map((session) => session.id)) : uniqueIds([...allSessions.map((session) => session.id), ...(state.sessionIdsByProject[projectId] ?? [])]).slice(0, total) },
+          sessionTotalsByProject: { ...state.sessionTotalsByProject, [projectId]: total },
+          projectSessionsLoading: { ...state.projectSessionsLoading, [projectId]: false },
+          projectSessionsError: { ...state.projectSessionsError, [projectId]: null },
+        }))
+      } catch (error) {
+        set((state) => ({ projectSessionsLoading: { ...state.projectSessionsLoading, [projectId]: false }, projectSessionsError: { ...state.projectSessionsError, [projectId]: error instanceof Error ? error.message : '加载项目聊天失败' } }))
+        throw error
+      }
+    },
+
+    cacheProjectSession: (projectId, session, { incrementCount = false } = {}) => {
+      useSessionStore.getState().upsertSessions([session])
+      set((state) => ({
+        projects: state.projects.map((project) => project.id === projectId ? { ...project, sessionCount: incrementCount ? project.sessionCount + 1 : project.sessionCount } : project),
+        sessionIdsByProject: { ...state.sessionIdsByProject, [projectId]: uniqueIds([session.id, ...(state.sessionIdsByProject[projectId] ?? [])]) },
+        sessionTotalsByProject: { ...state.sessionTotalsByProject, [projectId]: (state.sessionTotalsByProject[projectId] ?? state.projects.find((project) => project.id === projectId)?.sessionCount ?? 0) + (incrementCount ? 1 : 0) },
+      }))
+    },
+
+    removeCachedProjectSession: (projectId, sessionId) => set((state) => ({
+      projects: state.projects.map((project) => project.id === projectId ? { ...project, sessionCount: Math.max(0, project.sessionCount - 1) } : project),
+      sessionIdsByProject: { ...state.sessionIdsByProject, [projectId]: (state.sessionIdsByProject[projectId] ?? []).filter((id) => id !== sessionId) },
+      sessionTotalsByProject: { ...state.sessionTotalsByProject, [projectId]: Math.max(0, (state.sessionTotalsByProject[projectId] ?? 0) - 1) },
+    })),
+
+    markWorkspaceUnavailable: (projectId) => set((state) => ({
+      workspaceUnavailableProjectIds: { ...state.workspaceUnavailableProjectIds, [projectId]: true },
+    })),
+
+    clearWorkspaceUnavailable: (projectId) => set((state) => {
+      const workspaceUnavailableProjectIds = { ...state.workspaceUnavailableProjectIds }
+      delete workspaceUnavailableProjectIds[projectId]
+      return { workspaceUnavailableProjectIds }
+    }),
+  }), { name: 'bloomai-projects' })
 )
 
 // Chat Store
@@ -459,4 +661,3 @@ export const useImageStore = create<ImageState & ImageActions>()(
     },
   }), { name: 'bloomai-image' })
 )
-

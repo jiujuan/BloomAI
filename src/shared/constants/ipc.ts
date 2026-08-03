@@ -7,4 +7,5 @@ export const IPC_CHANNELS = {
   appVersion: 'app:version',
   shellOpenExternal: 'shell:open-external',
   saveImage: 'dialog:save-image',
+  dialogSelectDirectory: 'dialog:select-directory',
 } as const
