@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { X, Play, Copy, Check } from 'lucide-react'
 import { useToolsStore, Tool } from '@renderer/pages/Tools/tools.store'
+import { canRunTool } from './tool-ui-state'
 
 export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => void }) {
   const { runTool } = useToolsStore()
@@ -9,6 +10,7 @@ export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => v
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const availability = canRunTool(tool)
 
   let params: Record<string, any> = {}
   try { params = JSON.parse(tool.params_schema) } catch {}
@@ -55,7 +57,11 @@ export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => v
                 )}
               </div>
             ))}
-            <button className="runner-run-btn" onClick={run} disabled={running}><Play size={13} /> {running ? 'Running…' : 'Run'}</button>
+            {availability.allowed ? (
+              <button className="runner-run-btn" onClick={run} disabled={running}><Play size={13} /> {running ? 'Running…' : 'Run'}</button>
+            ) : (
+              <div className="runner-status error" role="status">{availability.reason}</div>
+            )}
           </div>
           <div className="runner-right">
             {error && <div className="runner-status error">✕ {error}</div>}

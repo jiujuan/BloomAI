@@ -312,7 +312,8 @@ function seedTools() {
     ] as const
 
     for (const [id, category, name, description, params_schema, result_schema, requires_permission] of tools) {
-      database.insert(schema.tools).values({ id, category, name, description, params_schema, result_schema, is_builtin: 1, is_enabled: 1, requires_permission, created_at: now }).onConflictDoNothing().run()
+      const isPlaceholder = id === 'web_screenshot' || id === 'ocr' || id === 'image_edit'
+      database.insert(schema.tools).values({ id, category, name, description, params_schema, result_schema, is_builtin: 1, is_enabled: isPlaceholder ? 0 : 1, requires_permission, created_at: now }).onConflictDoNothing().run()
     }
   }
 

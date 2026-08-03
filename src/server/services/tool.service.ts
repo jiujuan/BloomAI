@@ -1,5 +1,6 @@
 import { toolRepo } from '../db/repositories/tool.repo'
 import { CapabilityError, executeLegacyToolCapability } from '../skills/policy/capability-broker'
+import { getToolAvailability } from '../tools/availability'
 import { ServiceError } from './errors'
 
 type ToolServiceDependencies = {
@@ -18,7 +19,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     list(input: { category?: string } = {}) {
       const tools = dependencies.repo.list(input.category)
       const permissions = Object.fromEntries(dependencies.repo.listPermissions().map((permission) => [permission.tool_id, permission]))
-      return tools.map((tool) => ({ ...tool, permission: permissions[tool.id] ?? null }))
+      return tools.map((tool) => ({ ...tool, availability: getToolAvailability(tool.id), permission: permissions[tool.id] ?? null }))
     },
 
     getStats() {
@@ -47,7 +48,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     get(id: string) {
       const tool = dependencies.repo.get(id)
       if (!tool) throw new ServiceError('NOT_FOUND', 'Tool not found')
-      return { ...tool, permission: dependencies.repo.getPermission(id) ?? null }
+      return { ...tool, availability: getToolAvailability(tool.id), permission: dependencies.repo.getPermission(id) ?? null }
     },
 
     setEnabled(id: string, enabled: unknown) {

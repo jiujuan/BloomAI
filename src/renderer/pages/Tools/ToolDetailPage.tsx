@@ -3,6 +3,7 @@ import { ArrowLeft, Play, Check } from 'lucide-react'
 import { useToolsStore } from '@renderer/pages/Tools/tools.store'
 import { ToolTestRunner } from './ToolTestRunner'
 import { cn } from '@renderer/utils'
+import { canRunTool } from './tool-ui-state'
 
 export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () => void }) {
   const { tools, toolRuns, loadRuns } = useToolsStore()
@@ -19,13 +20,14 @@ export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () 
   try { result = JSON.parse(tool.result_schema) } catch {}
 
   const runsForTool = toolRuns.filter(r => r.tool_id === toolId).slice(0, 10)
+  const availability = canRunTool(tool)
 
   return (
     <div className="tool-detail-page">
       <div className="td-topbar">
         <button className="td-back" onClick={onBack}><ArrowLeft size={14} /></button>
         <div className="td-breadcrumb">Tools <span>/</span> {tool.category} <span>/</span> <b>{tool.id}</b></div>
-        <button className="td-btn" onClick={() => setShowRunner(true)}><Play size={13} /> Test Run</button>
+        <button className="td-btn" onClick={() => setShowRunner(true)} disabled={!availability.allowed} title={availability.allowed ? 'Test run' : availability.reason}><Play size={13} /> Test Run</button>
       </div>
 
       <div className="td-hero">
@@ -37,6 +39,7 @@ export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () 
             <span className="td-tag">{tool.category}</span>
             {tool.requires_permission && <span className="td-tag perm">{tool.requires_permission} permission</span>}
             <span className="td-tag">{tool.is_builtin ? 'built-in' : 'custom'}</span>
+            {tool.availability && <span className="td-tag">{tool.availability.status}</span>}
           </div>
         </div>
         <div className={cn('td-enabled-badge', tool.is_enabled ? 'ok' : 'off')}>

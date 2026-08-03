@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(25)
+    expect(migrationVersions()).toHaveLength(26)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(25)
+    expect(migrationVersions()).toHaveLength(26)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -201,6 +201,7 @@ describe('database migrations', () => {
       '023-deep-research-semantic-citation-quality-gates',
       '024-scheduled-task-runs',
       '025-project-chat-workspaces',
+      '026-disable-placeholder-tools',
     ])
     const emptyDb = openRawDb()
     try {
@@ -406,6 +407,44 @@ describe('database migrations', () => {
           id, schedule_id, trigger_fired_at, trigger_kind, status, started_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run('run-2', 'schedule-1', 100, 'manual', 'succeeded', 100, 100)).toThrow(/unique|constraint/i)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('disables already-enabled placeholder tools during the A0 upgrade', async () => {
+    const { runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      db.exec(`
+        CREATE TABLE tools (
+          id TEXT PRIMARY KEY, category TEXT NOT NULL, name TEXT NOT NULL,
+          description TEXT NOT NULL, params_schema TEXT NOT NULL DEFAULT '{}',
+          result_schema TEXT NOT NULL DEFAULT '{}', is_builtin INTEGER DEFAULT 1,
+          is_enabled INTEGER DEFAULT 1, requires_permission TEXT, created_at INTEGER NOT NULL
+        );
+        INSERT INTO tools (id, category, name, description, created_at)
+        VALUES
+          ('web_screenshot', 'web', 'Screenshot', 'legacy placeholder', 1),
+          ('ocr', 'multimodal', 'OCR', 'legacy placeholder', 1),
+          ('image_edit', 'multimodal', 'Image edit', 'legacy placeholder', 1),
+          ('web_search', 'web', 'Search', 'real tool', 1);
+      `)
+
+      const migration = (await import('./migrations')).loadSqlMigrations().find((item) => item.version === '026-disable-placeholder-tools')
+      expect(migration).toBeDefined()
+      runSqlMigrations(db, [migration!])
+
+      expect(db.prepare(`
+        SELECT id, is_enabled FROM tools
+        ORDER BY id
+      `).all()).toEqual([
+        { id: 'image_edit', is_enabled: 0 },
+        { id: 'ocr', is_enabled: 0 },
+        { id: 'web_screenshot', is_enabled: 0 },
+        { id: 'web_search', is_enabled: 1 },
+      ])
     } finally {
       db.close()
     }
