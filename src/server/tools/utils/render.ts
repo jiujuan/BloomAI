@@ -9,6 +9,7 @@
  */
 import type { Browser } from 'playwright-core'
 import { extractMainHtml, htmlToText, fetchPage, getProxyUrl } from './html'
+import { validateExternalUrl } from './url-policy'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -74,6 +75,7 @@ export interface RenderOptions {
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle'
   /** Optional CSS selector to wait for before reading the DOM. */
   waitSelector?: string
+  signal?: AbortSignal
 }
 
 /** Render a page with a real browser and return the post-JS HTML. */
@@ -95,7 +97,8 @@ async function navigate(
   opts: RenderOptions,
   proxyServer?: string,
 ): Promise<RenderedPage> {
-  const { timeoutMs = RENDER_TIMEOUT_MS, waitUntil = 'domcontentloaded', waitSelector } = opts
+  const { timeoutMs = RENDER_TIMEOUT_MS, waitUntil = 'domcontentloaded', waitSelector, signal } = opts
+  throwIfAborted(signal)
   const context = await browser.newContext({
     userAgent: DEFAULT_UA,
     locale: 'zh-CN',
@@ -103,24 +106,49 @@ async function navigate(
   })
   try {
     const page = await context.newPage()
+    await page.route('**/*', async (route) => {
+      if (signal?.aborted) {
+        await route.abort('aborted').catch(() => {})
+        return
+      }
+      const requestUrl = route.request().url()
+      if (requestUrl.startsWith('data:') || requestUrl.startsWith('blob:') || requestUrl.startsWith('about:')) {
+        await route.continue()
+        return
+      }
+      try {
+        await validateExternalUrl(requestUrl)
+        await route.continue()
+      } catch {
+        await route.abort('blockedbyclient')
+      }
+    })
     const response = await page.goto(url, { waitUntil, timeout: timeoutMs })
+    throwIfAborted(signal)
     if (waitSelector) {
       await page.waitForSelector(waitSelector, { timeout: 5000 }).catch(() => {})
     }
     // Give late hydration a brief moment to settle.
     await page.waitForTimeout(600)
+    throwIfAborted(signal)
     const html = await page.content()
-    return { html, finalUrl: page.url(), status: response?.status() ?? 200 }
+    const finalUrl = (await validateExternalUrl(page.url())).toString()
+    return { html, finalUrl, status: response?.status() ?? 200 }
   } finally {
     await context.close().catch(() => {})
     scheduleIdleClose()
   }
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason ?? new Error('Tool execution cancelled')
+}
+
 export interface LoadOptions {
   /** true = force render, false = static only, undefined = auto (render if thin). */
   render?: boolean
   timeoutMs?: number
+  signal?: AbortSignal
 }
 
 export interface LoadedPage {
@@ -140,14 +168,14 @@ export async function loadPage(url: string, opts: LoadOptions = {}): Promise<Loa
 
   if (forced === true) {
     try {
-      const r = await renderPage(url, { timeoutMs: opts.timeoutMs })
+      const r = await renderPage(url, { timeoutMs: opts.timeoutMs, signal: opts.signal })
       return { html: r.html, finalUrl: r.finalUrl, status: r.status, charset: 'utf-8', rendered: true }
     } catch {
       // Fall back to static fetch below.
     }
   }
 
-  const staticPage = await fetchPage(url, { timeoutMs: opts.timeoutMs })
+  const staticPage = await fetchPage(url, { timeoutMs: opts.timeoutMs, signal: opts.signal })
   if (forced === false) return { ...staticPage, rendered: false }
 
   // Auto mode: only pay for rendering when the static page looks empty/thin
@@ -156,7 +184,7 @@ export async function loadPage(url: string, opts: LoadOptions = {}): Promise<Loa
   if (mainTextLen >= MIN_MAIN_TEXT) return { ...staticPage, rendered: false }
 
   try {
-    const r = await renderPage(url, { timeoutMs: opts.timeoutMs })
+    const r = await renderPage(url, { timeoutMs: opts.timeoutMs, signal: opts.signal })
     // Only prefer the rendered result if it actually produced more content.
     const renderedLen = htmlToText(extractMainHtml(r.html)).length
     if (renderedLen > mainTextLen) {

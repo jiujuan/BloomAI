@@ -62,12 +62,12 @@ export const toolRepo = {
     }).where(eq(tool_runs.id, id)).run()
   },
 
-  failRun(id: string, error: string): void {
+  failRun(id: string, error: string, status = 'error'): void {
     const now = Date.now()
     const run = getOrmDb().select({ started_at: tool_runs.started_at }).from(tool_runs).where(eq(tool_runs.id, id)).get()
     getOrmDb().update(tool_runs).set({
       error_msg: error,
-      status: 'error',
+      status,
       finished_at: now,
       duration_ms: run ? now - run.started_at : 0,
     }).where(eq(tool_runs.id, id)).run()

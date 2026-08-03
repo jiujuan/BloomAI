@@ -42,10 +42,10 @@ const DEFAULT_MAX_LINKS = 50
 const DEFAULT_MAX_HEADINGS = 40
 const DEFAULT_TIMEOUT_MS = 20000
 
-export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = async (input) => {
+export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = async (input, context) => {
   const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPage(url, { render, timeoutMs })
+  const page = await loadPage(url, { render, timeoutMs, signal: context.signal })
   const { html, finalUrl } = page
 
   const title = extractTitle(html) || finalUrl
