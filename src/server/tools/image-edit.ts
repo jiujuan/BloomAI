@@ -1,3 +1,7 @@
 import type { ToolExecutor } from './types'
+import { requireToolAvailability } from './availability'
 
-export const imageEditTool: ToolExecutor = async () => ({ note: 'Image editing requires sharp - install separately' })
+export const imageEditTool: ToolExecutor = async () => {
+  requireToolAvailability('image_edit')
+  return {}
+}

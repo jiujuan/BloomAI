@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { toolRepo, type Tool } from '../../db/repositories/tool.repo'
 import { executeToolInternal, ToolExecutionError } from '../../tools/execute-tool'
+import { getToolAvailability } from '../../tools/availability'
 import { ImageStudioCapabilityAdapter } from '../adapters/image-studio-capability-adapter'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
@@ -150,6 +151,10 @@ function requireEnabledTool(toolId: string): Tool {
   const tool = toolRepo.get(toolId)
   if (!tool) throw new CapabilityNotSupportedError(`Tool not found: ${toolId}`)
   if (tool.is_enabled !== 1) throw new CapabilityDisabledError(`Tool ${toolId} is disabled`)
+  const availability = getToolAvailability(toolId)
+  if (availability.status !== 'available') {
+    throw new CapabilityNotSupportedError(`${toolId} is unavailable: ${availability.reason}`)
+  }
   return tool
 }
 

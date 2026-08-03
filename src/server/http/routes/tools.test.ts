@@ -50,6 +50,14 @@ describe('tools route contract', () => {
     expect(result.body.data).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'fs_write', category: 'fs', permission: null }),
     ]))
+    const webResult = await requestJson(app, '/tools?category=web')
+    const screenshot = webResult.body.data.find((tool: any) => tool.id === 'web_screenshot')
+    expect(screenshot).toEqual(expect.objectContaining({
+      availability: expect.objectContaining({
+        status: 'dependency_missing',
+        dependency: 'playwright',
+      }),
+    }))
   })
 
   it('grants then revokes a tool permission through the stable response shapes', async () => {

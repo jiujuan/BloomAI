@@ -8,6 +8,13 @@ export interface Tool {
   is_builtin: number; is_enabled: number
   requires_permission: string | null; created_at: number
   permission?: { granted: number; scope: string } | null
+  availability?: {
+    status: 'available' | 'disabled' | 'dependency_missing' | 'configuration_missing' | 'unsupported_platform'
+    reason?: string
+    dependency?: string
+    setting?: string
+    platform?: string
+  }
 }
 export interface ToolRun {
   id: string; tool_id: string; session_id: string | null

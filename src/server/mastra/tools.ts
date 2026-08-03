@@ -6,6 +6,7 @@ import { executeLegacyToolCapability, needsInteractiveApprovalForTool } from '..
 import { runSkill } from '../skills/legacy'
 import { toLegacySkillToolId } from '../skills/legacy/mastra-tool-id'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
+import { isToolAvailable } from '../tools/availability'
 
 type MastraTool = ReturnType<typeof createTool>
 
@@ -64,6 +65,7 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
   const tools: Record<string, MastraTool> = {}
   for (const tool of toolRepo.list()) {
     if (tool.is_enabled !== 1) continue
+    if (!isToolAvailable(tool.id)) continue
     if (options.filter && !options.filter(tool.id)) continue
     const needsApproval = needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
     tools[tool.id] = createTool({
