@@ -11,6 +11,7 @@ import { createScheduleHooks } from './schedules/hooks'
 import { createScheduledTaskRunWriter } from '../db/repositories/scheduled-task-run.repo'
 import { scheduledTaskAgent } from './schedules/scheduled-task-agent'
 import { resolveScheduleRuntimeUrl } from './schedules/storage'
+import { projectWorkspaceFactory } from './workspace/project-workspace.factory'
 
 // Wire Mastra spans into the global OTel TracerProvider (registered by initTracing in index.ts).
 // OtelBridge.createSpan() calls trace.getTracer() at request time, so the provider only needs to
@@ -55,8 +56,23 @@ export const mastra = new Mastra({
   },
 })
 
-/** Releases the dedicated LibSQL connection during application and test shutdown. */
-export async function shutdownMastraRuntime(): Promise<void> {
-  await mastra.shutdown()
-  await scheduleRuntimeStorage.close()
+export type MastraRuntimeShutdownDependencies = {
+  mastra: Pick<typeof mastra, 'shutdown'>
+  projectWorkspaceFactory: Pick<typeof projectWorkspaceFactory, 'shutdown'>
+  scheduleRuntimeStorage: Pick<typeof scheduleRuntimeStorage, 'close'>
+}
+
+/** Releases all Mastra runtime resources during application and test shutdown. */
+export async function shutdownMastraRuntime(
+  overrides: Partial<MastraRuntimeShutdownDependencies> = {},
+): Promise<void> {
+  const runtime: MastraRuntimeShutdownDependencies = {
+    mastra,
+    projectWorkspaceFactory,
+    scheduleRuntimeStorage,
+    ...overrides,
+  }
+  await runtime.mastra.shutdown()
+  await runtime.projectWorkspaceFactory.shutdown()
+  await runtime.scheduleRuntimeStorage.close()
 }

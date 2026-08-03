@@ -10,6 +10,8 @@ import { TEAM_AGENT_BY_TAB } from '../mastra/agents/team'
 import { BLOOMAI_RESOURCE_ID } from '../mastra/memory'
 import { normalizeWriting } from '../mastra/agents/writer-prompt'
 import { streamOnError } from '../http/stream-error'
+import { projectService } from './project.service'
+import { projectWorkspaceFactory } from '../mastra/workspace/project-workspace.factory'
 import type { WritingConfig } from '@shared/writing'
 import { toClientAttachment, type Attachment } from '../../shared/attachments'
 
@@ -65,6 +67,11 @@ type PersistenceDependencies = {
   sanitizeErrorMessage: typeof sanitizeErrorMessage
 }
 
+type ProjectWorkspaceDependencies = {
+  projectService: Pick<typeof projectService, 'resolveProjectForSession'>
+  projectWorkspaceFactory: Pick<typeof projectWorkspaceFactory, 'get'>
+}
+
 type RuntimeDependencies = {
   mastra: typeof mastra
   createRequestContext: () => RequestContext
@@ -74,7 +81,7 @@ type RuntimeDependencies = {
   streamOnError: typeof streamOnError
 }
 
-export type ChatServiceDependencies = Partial<PersistenceDependencies & RuntimeDependencies>
+export type ChatServiceDependencies = Partial<PersistenceDependencies & ProjectWorkspaceDependencies & RuntimeDependencies>
 
 /**
  * Convert the untrusted HTTP payload into the stable input consumed by chat use cases.
@@ -118,7 +125,7 @@ export function normalizePlanInput(input: { body: unknown, headers: Pick<ChatReq
 }
 /** Construct chat use cases with injectable infrastructure for focused service tests. */
 export function createChatService(overrides: ChatServiceDependencies = {}) {
-  const dependencies: PersistenceDependencies & RuntimeDependencies = {
+  const dependencies: PersistenceDependencies & ProjectWorkspaceDependencies & RuntimeDependencies = {
     messageRepo,
     sessionRepo,
     extractAttachmentText,
@@ -130,6 +137,8 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     toAISdkStream,
     createUIMessageStream,
     streamOnError,
+    projectService,
+    projectWorkspaceFactory,
     ...overrides,
   }
 
@@ -184,6 +193,16 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     return ['以下是用户上传的附件内容，请结合它们回答用户的问题：', ...blocks].join('\n\n')
   }
 
+  /** Resolve a project only from the durable session ownership relationship. */
+  async function applyTrustedProjectContext(requestContext: RequestContext, sessionId: string, preflightWorkspace: boolean): Promise<void> {
+    const project = dependencies.projectService.resolveProjectForSession(sessionId)
+    if (!project) return
+    requestContext.set('projectId', project.id)
+    // Validate the saved root before streaming so an unavailable project cannot start an
+    // agent/tool turn that might otherwise use the host process working directory.
+    if (preflightWorkspace) await dependencies.projectWorkspaceFactory.get(project)
+  }
+
   async function proposePlan(input: PlanProposalInput): Promise<{ tasks: string[] }> {
     const query = typeof input.query === 'string' ? input.query.trim() : ''
     if (!query) return { tasks: [] }
@@ -194,6 +213,7 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     const requestContext = dependencies.createRequestContext()
     requestContext.set('model', input.model)
     requestContext.set('sessionId', input.sessionId)
+    await applyTrustedProjectContext(requestContext, input.sessionId, false)
     const prompt = [
       `User request: ${query}`,
       avoid.length ? `\nPropose a DIFFERENT plan; avoid repeating these tasks:\n- ${avoid.join('\n- ')}` : '',
@@ -259,6 +279,7 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     persistUserMessage(input.sessionId, input.messages, input.attachments)
 
     try {
+      await applyTrustedProjectContext(requestContext, input.sessionId, true)
       // A selected specialist always wins over deep mode, preserving the original route behavior.
       if (!input.teamAgentId && input.mode === 'deep') {
         const query = lastUserText(input.messages)

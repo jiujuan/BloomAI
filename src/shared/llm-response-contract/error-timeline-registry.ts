@@ -15,6 +15,7 @@ export type KnownResponseErrorCode =
   | 'LLM_RESPONSE_PARSE_ERROR'
   | 'TOOL_CALL_ERROR'
   | 'AGENT_RUNTIME_ERROR'
+  | 'PROJECT_WORKSPACE_UNAVAILABLE'
   | 'STREAM_ABORTED'
   | 'UNKNOWN_ERROR'
 
@@ -63,6 +64,13 @@ export const ERROR_TIMELINE_REGISTRY = {
     timelineMessage: '工具执行失败',
     groupBehavior: 'mark_related_group_failed',
     canContinue: 'depends',
+    logLevel: 'error',
+  },
+  PROJECT_WORKSPACE_UNAVAILABLE: {
+    severity: 'error',
+    timelineMessage: '项目工作目录不可用，请检查目录是否仍存在且可访问。',
+    groupBehavior: 'interrupt_running_groups',
+    canContinue: false,
     logLevel: 'error',
   },
   AGENT_RUNTIME_ERROR: {

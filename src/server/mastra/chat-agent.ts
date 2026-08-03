@@ -1,16 +1,21 @@
 import { Agent } from '@mastra/core/agent'
+import { WORKSPACE_TOOLS_PREFIX } from '@mastra/core/workspace'
 import { resolveMastraModel } from './model-resolver'
 import { buildAgentTools } from './tools'
 import { chatMemory } from './memory'
+import { projectWorkspaceFactory } from './workspace/project-workspace.factory'
+import { PROJECT_WORKSPACE_POLICY } from './workspace/project-workspace.policy'
 
 /**
- * Per-request values injected by server middleware (from headers/body) and read
+ * Per-request values supplied by the server's trusted request orchestration and read
  * by the agent's dynamic model/instructions. See docs/agent/002 §12.3.
  */
 export type ChatRequestContext = {
   mode: 'chat' | 'plan' | 'deep'
   model: string
   sessionId: string
+  /** Set server-side from the session ownership relation; never accepted from the client. */
+  projectId?: string
   /** Confirmed plan tasks (chat "plan" mode, after the user clicks 是). When present,
    *  the agent executes these numbered tasks instead of proposing a plan. */
   planTasks?: string[]
@@ -66,8 +71,27 @@ ${list}
 /** Instructions from the request context: confirmed plan tasks win over mode. */
 function resolveInstructions(requestContext: any): string {
   const tasks = requestContext?.get('planTasks') as string[] | undefined
-  if (Array.isArray(tasks) && tasks.length) return planExecuteInstructions(tasks)
-  return instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined)
+  const instructions = Array.isArray(tasks) && tasks.length
+    ? planExecuteInstructions(tasks)
+    : instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined)
+  return requestContext?.get('projectId') ? `${instructions}\n\n${PROJECT_WORKSPACE_POLICY}` : instructions
+}
+
+/** Dynamic resolver: it relies exclusively on the server-derived projectId context key. */
+export function resolveProjectWorkspace(requestContext: any) {
+  const projectId = requestContext?.get('projectId')
+  return typeof projectId === 'string' && projectId
+    ? projectWorkspaceFactory.getCached(projectId)
+    : undefined
+}
+
+/**
+ * Mastra reserves `mastra_workspace_*` for Workspace tools. Omit legacy tools that
+ * use that namespace only for project requests so a user-configured tool cannot
+ * replace a filesystem or command tool from the bound Workspace.
+ */
+export function omitWorkspaceToolCollisions<T>(tools: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(Object.entries(tools).filter(([id]) => !id.startsWith(`${WORKSPACE_TOOLS_PREFIX}_`)))
 }
 
 export const chatAgent = new Agent({
@@ -78,8 +102,11 @@ export const chatAgent = new Agent({
     resolveMastraModel(requestContext?.get('model') as string | undefined),
   // Every enabled tool + installed skill is mounted; the LLM chooses what to call.
   // Rebuilt per request so newly enabled tools / installed skills appear next turn.
-  tools: ({ requestContext }) =>
-    buildAgentTools(requestContext?.get('sessionId') as string | undefined),
+  tools: ({ requestContext }) => {
+    const tools = buildAgentTools(requestContext?.get('sessionId') as string | undefined)
+    return requestContext?.get('projectId') ? omitWorkspaceToolCollisions(tools) : tools
+  },
+  workspace: ({ requestContext }) => resolveProjectWorkspace(requestContext),
   // Memory: working memory + observational memory + bounded recent history.
   // Activated per-request when threadId + resourceId are provided (see chat.ts).
   memory: chatMemory,

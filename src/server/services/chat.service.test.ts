@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ATTACHMENT_TOTAL_BUDGET, createChatService, normalizeChatInput } from './chat.service'
 
+function noProjectService() { return { resolveProjectForSession: vi.fn(() => null) } }
+
 describe('Chat Service input normalization', () => {
   it('uses HTTP header values and normalizes plan, writer and attachment inputs', () => {
     const normalized = normalizeChatInput({
@@ -49,7 +51,12 @@ describe('Chat Service message persistence and attachments', () => {
   it('persists the user message, client-safe attachment data, session touch and first title', () => {
     const messageRepo = { count: vi.fn(() => 0), save: vi.fn() }
     const sessionRepo = { touch: vi.fn(), update: vi.fn() }
-    const service = createChatService({ messageRepo, sessionRepo, logError: vi.fn() })
+    const service = createChatService({
+      projectService: noProjectService(),
+      messageRepo,
+      sessionRepo,
+      logError: vi.fn(),
+    })
 
     service.persistUserMessage('session-1', [
       { role: 'user', parts: [{ type: 'text', text: 'Summarize this brief' }] },
@@ -72,6 +79,7 @@ describe('Chat Service message persistence and attachments', () => {
   it('does not let user persistence errors stop the request path', () => {
     const logError = vi.fn()
     const service = createChatService({
+      projectService: noProjectService(),
       messageRepo: { count: vi.fn(() => { throw new Error('database unavailable') }), save: vi.fn() },
       sessionRepo: { touch: vi.fn(), update: vi.fn() },
       logError,
@@ -83,6 +91,7 @@ describe('Chat Service message persistence and attachments', () => {
 
   it('keeps attachment extraction failures visible in the prompt block and enforces the total budget', async () => {
     const service = createChatService({
+      projectService: noProjectService(),
       extractAttachmentText: vi.fn()
         .mockRejectedValueOnce(new Error('bad PDF'))
         .mockResolvedValueOnce('x'.repeat(ATTACHMENT_TOTAL_BUDGET + 100)),
@@ -101,7 +110,12 @@ describe('Chat Service message persistence and attachments', () => {
   it('preserves assistant persistence success, empty and failure outcomes', () => {
     const messageRepo = { count: vi.fn(), save: vi.fn() }
     const sessionRepo = { touch: vi.fn(), update: vi.fn() }
-    const service = createChatService({ messageRepo, sessionRepo, logError: vi.fn() })
+    const service = createChatService({
+      projectService: noProjectService(),
+      messageRepo,
+      sessionRepo,
+      logError: vi.fn(),
+    })
 
     expect(service.persistAssistantMessage({ sessionId: '' }).kind).toBe('session-required')
     expect(service.persistAssistantMessage({ sessionId: 's', content: '', parts: null }).kind).toBe('empty')
@@ -112,6 +126,7 @@ describe('Chat Service message persistence and attachments', () => {
     expect(sessionRepo.touch).toHaveBeenCalledWith('s')
 
     const failing = createChatService({
+      projectService: noProjectService(),
       messageRepo: { count: vi.fn(), save: vi.fn(() => { throw new Error('write failed') }) },
       sessionRepo, logError: vi.fn(),
     })
@@ -125,6 +140,7 @@ describe('Chat Service plan proposal', () => {
     const generate = vi.fn().mockResolvedValue({ text: 'Here is the plan:\n```json\n[" Inspect input ", "Inspect input", "Generate output"]\n```' })
     const requestContext = { set: vi.fn() }
     const service = createChatService({
+      projectService: noProjectService(),
       mastra: { getAgent: vi.fn(() => ({ generate })) } as any,
       createRequestContext: () => requestContext as any,
       logError: vi.fn(),
@@ -145,6 +161,7 @@ describe('Chat Service plan proposal', () => {
     const generate = vi.fn().mockRejectedValue(new Error('provider unavailable'))
     const logError = vi.fn()
     const service = createChatService({
+      projectService: noProjectService(),
       mastra: { getAgent: vi.fn(() => ({ generate })) } as any,
       createRequestContext: () => ({ set: vi.fn() }) as any,
       logError,
@@ -164,6 +181,7 @@ describe('Chat Service stream orchestration', () => {
     const messageRepo = { count: vi.fn(() => 1), save: vi.fn() }
     const handleChatStream = vi.fn().mockResolvedValue(stream)
     const service = createChatService({
+      projectService: noProjectService(),
       messageRepo,
       sessionRepo: { touch: vi.fn(), update: vi.fn() },
       handleChatStream: handleChatStream as any,
@@ -195,6 +213,7 @@ describe('Chat Service stream orchestration', () => {
     const handleChatStream = vi.fn().mockResolvedValue(new ReadableStream({ start: (controller) => controller.close() }))
     const getWorkflow = vi.fn()
     const service = createChatService({
+      projectService: noProjectService(),
       handleChatStream: handleChatStream as any,
       mastra: { getWorkflow } as any,
       createRequestContext: () => ({ set: vi.fn() }) as any,
@@ -227,6 +246,7 @@ describe('Chat Service stream orchestration', () => {
     const createUIMessageStream = vi.fn((options: any) => { execute = options.execute; return stream })
     const handleChatStream = vi.fn()
     const service = createChatService({
+      projectService: noProjectService(),
       mastra: { getWorkflow } as any,
       toAISdkStream: toAISdkStream as any,
       createUIMessageStream: createUIMessageStream as any,
@@ -259,6 +279,7 @@ describe('Chat Service stream orchestration', () => {
       .mockResolvedValueOnce({ [Symbol.asyncIterator]: async function* () { yield { type: 'start' }; yield { type: 'text-delta', delta: 'A' } } })
       .mockResolvedValueOnce({ [Symbol.asyncIterator]: async function* () { yield { type: 'text-delta', delta: 'B' } } })
     const service = createChatService({
+      projectService: noProjectService(),
       createUIMessageStream: createUIMessageStream as any,
       handleChatStream: handleChatStream as any,
       createRequestContext: () => ({ set: vi.fn() }) as any,
@@ -294,6 +315,7 @@ describe('Chat Service stream orchestration', () => {
   it('caps a valid planner task list at the documented maximum', async () => {
     const tasks = Array.from({ length: 12 }, (_, index) => `Task ${index + 1}`)
     const service = createChatService({
+      projectService: noProjectService(),
       mastra: { getAgent: vi.fn(() => ({ generate: vi.fn().mockResolvedValue({ text: JSON.stringify(tasks) }) })) } as any,
       createRequestContext: () => ({ set: vi.fn() }) as any,
       logError: vi.fn(),
@@ -302,3 +324,140 @@ describe('Chat Service stream orchestration', () => {
     const result = await service.proposePlan({ sessionId: 's', model: 'm', query: 'Do it' })
     expect(result.tasks).toEqual(tasks.slice(0, 10))
   })
+
+describe('Chat Service project workspace authorization', () => {
+  function requestContext() {
+    const values = new Map<string, unknown>()
+    return {
+      values,
+      set: vi.fn((key: string, value: unknown) => values.set(key, value)),
+      get: vi.fn((key: string) => values.get(key)),
+    }
+  }
+
+  function project(id: string, root_path: string) {
+    return { id, name: id, root_path, directory_kind: 'selected' as const, created_at: 1, updated_at: 1 }
+  }
+
+  function streamDependencies(overrides: Record<string, unknown> = {}) {
+    const context = requestContext()
+    const handleChatStream = vi.fn().mockResolvedValue(new ReadableStream({ start: (controller) => controller.close() }))
+    return {
+      context,
+      handleChatStream,
+      dependencies: {
+        handleChatStream: handleChatStream as any,
+        createRequestContext: () => context as any,
+        messageRepo: { count: vi.fn(() => 1), save: vi.fn() },
+        sessionRepo: { touch: vi.fn(), update: vi.fn() },
+        logError: vi.fn(),
+        ...overrides,
+      },
+    }
+  }
+
+  it('derives the workspace project only from the persisted session, not forged request values', async () => {
+    const actualProject = project('project-from-session', 'D:/projects/actual')
+    const projectService = { resolveProjectForSession: vi.fn(() => actualProject) }
+    const projectWorkspaceFactory = { get: vi.fn().mockResolvedValue({}), dispose: vi.fn(), shutdown: vi.fn() }
+    const fixture = streamDependencies({ projectService, projectWorkspaceFactory })
+    const service = createChatService(fixture.dependencies as any)
+    const input = normalizeChatInput({
+      body: { sessionId: 'trusted-session', projectId: 'forged-body-project', rootPath: 'D:/forged', messages: [{ role: 'user', content: 'Inspect files' }] },
+      headers: { sessionId: 'trusted-session', projectId: 'forged-header-project' } as any,
+    })
+
+    await service.streamChat(input)
+
+    expect(projectService.resolveProjectForSession).toHaveBeenCalledWith('trusted-session')
+    expect(projectWorkspaceFactory.get).toHaveBeenCalledWith(actualProject)
+    expect(fixture.context.set).toHaveBeenCalledWith('projectId', 'project-from-session')
+    expect(fixture.context.values.get('projectId')).toBe('project-from-session')
+    expect(fixture.handleChatStream).toHaveBeenCalledOnce()
+  })
+
+  it('does not mount or preflight a workspace for a normal session', async () => {
+    const projectService = { resolveProjectForSession: vi.fn(() => null) }
+    const projectWorkspaceFactory = { get: vi.fn(), dispose: vi.fn(), shutdown: vi.fn() }
+    const fixture = streamDependencies({ projectService, projectWorkspaceFactory })
+    const service = createChatService(fixture.dependencies as any)
+
+    await service.streamChat(normalizeChatInput({
+      body: { messages: [{ role: 'user', content: 'Normal chat' }] },
+      headers: { sessionId: 'normal-session' },
+    }))
+
+    expect(projectService.resolveProjectForSession).toHaveBeenCalledWith('normal-session')
+    expect(projectWorkspaceFactory.get).not.toHaveBeenCalled()
+    expect(fixture.context.values.has('projectId')).toBe(false)
+    expect(fixture.handleChatStream).toHaveBeenCalledOnce()
+  })
+
+  it('returns an error stream before starting an agent when the saved project directory is unavailable', async () => {
+    const unavailable = Object.assign(new Error('Project directory is unavailable'), { code: 'PROJECT_WORKSPACE_UNAVAILABLE' })
+    const projectService = { resolveProjectForSession: vi.fn(() => project('project-a', 'D:/missing')) }
+    const projectWorkspaceFactory = { get: vi.fn().mockRejectedValue(unavailable), dispose: vi.fn(), shutdown: vi.fn() }
+    const createUIMessageStream = vi.fn(() => ({ kind: 'error-stream' }))
+    const fixture = streamDependencies({ projectService, projectWorkspaceFactory, createUIMessageStream })
+    const service = createChatService(fixture.dependencies as any)
+
+    await expect(service.streamChat(normalizeChatInput({
+      body: { messages: [{ role: 'user', content: 'Use the workspace' }] },
+      headers: { sessionId: 'project-session' },
+    }))).resolves.toEqual({ kind: 'error-stream' })
+
+    expect(projectWorkspaceFactory.get).toHaveBeenCalledOnce()
+    expect(fixture.handleChatStream).not.toHaveBeenCalled()
+    const errorStreamOptions = (createUIMessageStream as any).mock.calls[0][0]
+    expect(errorStreamOptions.onError(unavailable)).toContain('项目工作目录不可用')
+  })
+
+  it('keeps concurrent project sessions bound to their own project ids and workspace roots', async () => {
+    const projectA = project('project-a', 'D:/projects/a')
+    const projectB = project('project-b', 'D:/projects/b')
+    const contexts: ReturnType<typeof requestContext>[] = []
+    const projectService = { resolveProjectForSession: vi.fn((sessionId: string) => sessionId === 'session-a' ? projectA : projectB) }
+    const projectWorkspaceFactory = { get: vi.fn((value: any) => Promise.resolve({ root: value.root_path })), dispose: vi.fn(), shutdown: vi.fn() }
+    const handleChatStream = vi.fn().mockResolvedValue(new ReadableStream({ start: (controller) => controller.close() }))
+    const service = createChatService({
+      projectService,
+      projectWorkspaceFactory,
+      handleChatStream: handleChatStream as any,
+      createRequestContext: () => { const context = requestContext(); contexts.push(context); return context as any },
+      messageRepo: { count: vi.fn(() => 1), save: vi.fn() },
+      sessionRepo: { touch: vi.fn(), update: vi.fn() },
+      logError: vi.fn(),
+    } as any)
+
+    await Promise.all([
+      service.streamChat(normalizeChatInput({ body: { messages: [{ role: 'user', content: 'A' }] }, headers: { sessionId: 'session-a' } })),
+      service.streamChat(normalizeChatInput({ body: { messages: [{ role: 'user', content: 'B' }] }, headers: { sessionId: 'session-b' } })),
+    ])
+
+    expect(projectWorkspaceFactory.get).toHaveBeenCalledWith(projectA)
+    expect(projectWorkspaceFactory.get).toHaveBeenCalledWith(projectB)
+    expect(contexts.map((context) => context.values.get('projectId'))).toEqual(['project-a', 'project-b'])
+    expect(projectWorkspaceFactory.get.mock.results.map((result: any) => result.value)).toHaveLength(2)
+  })
+
+  it('uses the same trusted project context for plan proposals', async () => {
+    const context = requestContext()
+    const trustedProject = project('project-plan', 'D:/projects/plan')
+    const projectService = { resolveProjectForSession: vi.fn(() => trustedProject) }
+    const projectWorkspaceFactory = { get: vi.fn().mockResolvedValue({}), dispose: vi.fn(), shutdown: vi.fn() }
+    const generate = vi.fn().mockResolvedValue({ text: '["Inspect workspace"]' })
+    const service = createChatService({
+      projectService,
+      projectWorkspaceFactory,
+      mastra: { getAgent: vi.fn(() => ({ generate })) } as any,
+      createRequestContext: () => context as any,
+      logError: vi.fn(),
+    } as any)
+
+    await service.proposePlan({ sessionId: 'plan-session', model: 'm', query: 'Plan it' })
+
+    expect(projectService.resolveProjectForSession).toHaveBeenCalledWith('plan-session')
+    expect(projectWorkspaceFactory.get).not.toHaveBeenCalled()
+    expect(context.values.get('projectId')).toBe('project-plan')
+  })
+})

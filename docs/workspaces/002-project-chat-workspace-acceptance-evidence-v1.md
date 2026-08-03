@@ -32,3 +32,16 @@
   - 项目列表返回会话计数；已归档项目会话不计入统计；项目会话支持分页。
   - `GET /projects` / `POST /projects` / 项目会话路由满足 200/201/400/404/409 契约。
   - `GET /sessions?scope=recent` 只返回 `project_id = NULL` 的普通聊天，并保留无参数 `GET /sessions` 的旧 `{ data: Session[] }` 形状。
+
+## 阶段 C：Workspace 权限链路
+
+- **验收时间：** 2026-08-03
+- **执行命令：** `npm test -- src/server/mastra/workspace/project-workspace.factory.test.ts src/server/mastra/chat-agent.test.ts src/server/mastra/index.test.ts src/server/services/chat.service.test.ts`
+- **结果：** 4 个测试文件、26 个断言通过；`npm run typecheck` 通过。
+- **关键证据：**
+  - `ProjectWorkspaceFactory` 使用保存的项目根目录创建 `LocalFilesystem` 与 `LocalSandbox`；项目 ID 缓存可复用，根目录变更时会销毁旧实例再重建，单项目释放和全局 shutdown 都会清理资源。
+  - 根目录不存在或不是目录时抛出稳定错误码 `PROJECT_WORKSPACE_UNAVAILABLE`，不会退回到进程默认工作目录；流式错误会向 UI 返回“项目工作目录不可用”的可理解提示。
+  - `ChatService` 只通过可信 `sessionId -> projectService.resolveProjectForSession()` 得到项目；请求体和伪造 header 中的 `projectId` / `rootPath` 不参与授权。
+  - 普通会话不会预检或挂载 Workspace；两个并发项目会话分别写入各自的 `projectId`，并分别预检各自项目根目录。
+  - Agent 动态 Workspace 回调只读取服务端写入的 `requestContext.projectId`；项目请求会排除保留的 `mastra_workspace_*` 工具 ID，避免与 Mastra Workspace 工具冲突。
+  - `shutdownMastraRuntime()` 已按顺序关闭 Mastra、项目 Workspace 缓存和 schedule runtime storage。
