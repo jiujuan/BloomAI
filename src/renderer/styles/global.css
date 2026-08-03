@@ -1713,3 +1713,43 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .research-clarifications { display: grid; gap: 10px; }.research-clarifications label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 12px; }.research-clarifications label > div { display: flex; gap: 6px; }.research-clarifications input { min-width: 0; flex: 1; border: 0.5px solid var(--border-secondary); border-radius: var(--radius-md); padding: 7px 8px; }.research-clarifications button { border: 0; border-radius: var(--radius-md); padding: 0 10px; background: var(--bg-info); color: var(--text-info); font-size: 12px; }
 .research-activity-list li { display: grid; grid-template-columns: 28px minmax(0, 1fr) 90px; gap: 8px; align-items: center; min-height: 28px; color: var(--text-secondary); font-size: 12px; }.research-activity-list li > span { color: var(--text-tertiary); }.research-activity-list strong { overflow: hidden; color: var(--text-primary); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }.research-activity-list small { overflow: hidden; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .deep-research-workbench { padding: 12px; }.deep-research-launcher { padding: 14px; }.deep-research-scope-grid, .deep-research-run-layout { grid-template-columns: 1fr; }.research-evidence-panel { position: static; }.research-progress-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }.research-question-row { grid-template-columns: 28px minmax(0, 1fr) 64px; }.research-question-row .research-status-badge { display: none; }.research-source-header, .research-source-row { grid-template-columns: minmax(0, 1fr) 78px; }.research-source-header > :nth-child(2), .research-source-row > :nth-child(2) { display: none; }.research-source-header > :nth-child(3), .research-source-row > :nth-child(3) { justify-self: end; }.research-activity-list li { grid-template-columns: 24px minmax(0, 1fr); }.research-activity-list small { display: none; } }
+
+
+/* ── Project chat sidebar ─────────────────────────────────── */
+.project-session-sidebar { overflow: hidden; }
+.sidebar-section { padding: 7px 5px; border-bottom: 0.5px solid var(--border-tertiary); }
+.project-sidebar-section { flex: 0 1 auto; overflow-y: auto; }
+.recent-sessions-section { flex: 1 1 auto; overflow-y: auto; min-height: 120px; }
+.sidebar-section-title { display: flex; align-items: center; justify-content: space-between; min-height: 27px; padding: 0 5px 4px; }
+.sidebar-section-title h2 { margin: 0; font-size: 11px; color: var(--text-secondary); font-weight: 650; }
+.sidebar-section-title > div { display: inline-flex; gap: 2px; }
+.sidebar-icon-button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary); }
+.sidebar-icon-button:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.project-row-wrap { display: flex; align-items: center; gap: 2px; }
+.project-row { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); text-align: left; }
+.project-row:hover { background: var(--bg-secondary); }
+.project-row[aria-expanded="true"] { border-color: var(--border-secondary); background: var(--bg-secondary); }
+.project-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-size: 12px; font-weight: 500; }
+.project-row-count { font-size: 10px; color: var(--text-tertiary); }
+.project-new-session { display: none; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: var(--radius-sm); color: var(--text-secondary); }
+.project-row-wrap:hover .project-new-session, .project-new-session:focus-visible { display: inline-flex; }
+.project-new-session:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.project-sessions { padding-left: 7px; }
+.sidebar-more-button { width: 100%; margin-top: 4px; border: 0; border-radius: var(--radius-sm); padding: 5px; background: transparent; color: var(--accent-primary); font-size: 11px; text-align: center; }
+.sidebar-more-button:hover { background: var(--bg-secondary); }
+.project-session-skeleton { display: grid; gap: 5px; padding: 8px; }
+.project-session-skeleton span { display: block; height: 24px; border-radius: var(--radius-sm); background: var(--bg-secondary); animation: project-skeleton-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes project-skeleton-pulse { from { opacity: .45; } to { opacity: .9; } }
+.sidebar-inline-error, .project-workspace-warning { margin: 5px; padding: 7px; border-radius: var(--radius-sm); background: var(--bg-danger); color: var(--text-danger); font-size: 11px; }
+.sidebar-inline-error button { margin-left: 5px; border: 0; background: transparent; color: inherit; text-decoration: underline; font-size: inherit; }
+.create-project-modal { width: min(440px, calc(100vw - 32px)); }
+.create-project-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.directory-selector { display: flex; align-items: center; width: 100%; margin-top: 14px; gap: 8px; padding: 12px; border: 1px dashed var(--border-secondary); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-secondary); text-align: left; }
+.directory-selector:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+.selected-directory { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 0.5px solid var(--border-secondary); border-radius: var(--radius-sm); font-size: 12px; margin-top: 6px; }
+.selected-directory span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-tertiary); }
+.directory-help { margin: 7px 1px 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+.project-workspace-context { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px 14px; border-bottom: 0.5px solid var(--border-tertiary); background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }
+.project-workspace-context strong { color: var(--text-primary); }
+.project-workspace-context code { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.project-workspace-context small { display: block; width: 100%; color: var(--text-tertiary); padding-left: 19px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSaveSessionTitle, normalizeSessionTitleInput } from './SessionList'
+import { canSaveSessionTitle, normalizeSessionTitleInput } from './SessionRow'
 
 describe('session title editing helpers', () => {
   it('trims session titles before saving', () => {

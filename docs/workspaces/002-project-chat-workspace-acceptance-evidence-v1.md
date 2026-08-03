@@ -58,3 +58,17 @@
   - project/recent Zustand 状态分别缓存实体、项目会话分页与 recent 分页；加载 101 条项目会话时按 `100 + 1` 请求全量页面，删除仅在服务端确认后同步移除缓存。
   - 创建项目成功后，项目及首会话均进入缓存并激活首会话；创建失败不会改变现有状态。`POST /projects` 现在返回包含 `sessionCount: 1` 的完整 `ProjectSummary`，与 Renderer DTO 一致。
   - `App` 启动时并行加载项目与 15 条普通 recent 聊天；`Ctrl/Cmd+N` 仍调用普通 `createSession`，因此不会把普通聊天错误归入项目。
+
+## 阶段 E：侧栏与弹窗
+
+- **验收时间：** 2026-08-03
+- **执行命令：** `npm test -- src/renderer/pages/Chat/ChatPanelMastra.test.ts src/renderer/pages/Chat/project-sidebar.utils.test.ts src/renderer/pages/Chat/ProjectSessionSidebar.test.tsx src/renderer/pages/Chat/ProjectTree.test.tsx src/renderer/pages/Chat/ProjectSessions.test.tsx src/renderer/pages/Chat/RecentSessions.test.tsx src/renderer/pages/Chat/CreateProjectDialog.test.tsx src/renderer/pages/Chat/ProjectWorkspaceContext.test.tsx src/renderer/pages/Chat/SessionRow.test.tsx`
+- **结果：** 9 个测试文件、16 个断言通过。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-e-tests.log`。
+- **类型检查：** `npm run typecheck` 通过。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-e-typecheck.log`。
+- **构建：** `npm run build` 通过，Renderer、Electron main 和 preload 均已产出。完整输出：`C:\Users\xing\AppData\Local\Temp\bloomai-project-chat-stage-e-build.log`。构建保留已有的单个 Renderer chunk 超过 500 kB 的体积告警，但进程退出码为 0。
+- **关键证据：**
+  - 新侧栏已替换旧 `SessionList`：默认显示 6 个项目，第 7 个项目显示可访问的“更多文件夹”；项目采用手风琴展开，重复选择当前项目可收起。
+  - 每个项目默认显示 10 条会话；第 11 条时可“展开显示”，展开后可“收起显示”。recent 按累积的 `15 → 30 → 60 → 120…` 规则加载，到达总数后隐藏“更多”。
+  - 创建项目弹窗验证 trim 后 1–80 字符名称；目录选择显示跨平台 basename，选择取消时保留原目录；创建成功后自动展开项目并打开首会话。
+  - 项目会话显示工作目录上下文，普通会话不显示。若后端流返回 `PROJECT_WORKSPACE_UNAVAILABLE` 或“项目工作目录不可用”，Renderer 标记该项目、显示告警并禁用发送；提交消息与确认计划路径也会防御性阻止，其他项目与普通会话不受影响。
+  - 会话行复用并拒绝空白重命名；项目与 recent 的加载/错误/重试状态都有可访问的 UI 表达。

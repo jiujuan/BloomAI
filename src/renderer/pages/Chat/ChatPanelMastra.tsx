@@ -6,7 +6,8 @@ import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
 import { platform } from '@renderer/api'
-import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore } from '@renderer/store'
+import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore, useProjectStore } from '@renderer/store'
+import { canSendProjectWorkspaceTask, isProjectWorkspaceUnavailableError, PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE, ProjectWorkspaceContext } from './ProjectWorkspaceContext'
 import { cn } from '@renderer/utils'
 import { AssistantMarkdown } from './parts/AssistantMarkdown'
 import { ReasoningPart } from './parts/ReasoningPart'
@@ -149,6 +150,7 @@ export function ChatPanelMastra() {
   const { textModels, loadTextModels } = useLlmStore()
   const { activePersonaId } = usePersonaStore()
   const session = sessions.find((s) => s.id === activeSessionId)
+  const workspaceUnavailableProjectIds = useProjectStore((state) => state.workspaceUnavailableProjectIds)
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
@@ -289,7 +291,13 @@ export function ChatPanelMastra() {
     },
     // Execution failed (e.g. model API error). Restore the plan cards that were cleared on 是 so
     // the full turn — both drafts and the confirmed plan — stays visible above the error message.
-    onError: () => {
+    onError: (streamError) => {
+      const failedSessionId = pendingSessionIdRef.current || sessionIdRef.current || activeSessionId
+      const failedSession = useSessionStore.getState().sessions.find((item) => item.id === failedSessionId)
+      if (failedSession?.project_id && isProjectWorkspaceUnavailableError(streamError)) {
+        useProjectStore.getState().markWorkspaceUnavailable(failedSession.project_id)
+        setAttachError(PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE)
+      }
       planRef.current = null
       pendingSessionIdRef.current = null
       if (lastPlanTurnRef.current) {
@@ -469,7 +477,8 @@ export function ChatPanelMastra() {
 
   const uploading = attachments.some((a) => a.status === 'uploading')
   const readyAttachments = attachments.filter((a) => a.att)
-  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading && !queuedMessage
+  const projectWorkspaceSendBlocked = !canSendProjectWorkspaceTask(session?.project_id, workspaceUnavailableProjectIds)
+  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading && !queuedMessage && !projectWorkspaceSendBlocked
 
   const ensureActiveSessionId = async (): Promise<string> => {
     const existing = sessionIdRef.current || activeSessionId
@@ -489,6 +498,10 @@ export function ChatPanelMastra() {
     const text = input.trim()
     if (isStreaming || uploading || queuedMessage) return
     if (!text && readyAttachments.length === 0) return
+    if (!canSendProjectWorkspaceTask(session?.project_id, useProjectStore.getState().workspaceUnavailableProjectIds)) {
+      setAttachError(PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE)
+      return
+    }
     const sessionId = await ensureActiveSessionId()
     // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
     // If a proposal is already pending, a new question discards it in place (kept visible as
@@ -572,6 +585,10 @@ export function ChatPanelMastra() {
   // discarded drafts are done with) but snapshot them first so onError can restore them on failure.
   const handleConfirm = async (entry: PlanEntry) => {
     if (entry.status !== 'ready') return
+    if (!canSendProjectWorkspaceTask(session?.project_id, useProjectStore.getState().workspaceUnavailableProjectIds)) {
+      setAttachError(PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE)
+      return
+    }
     const sessionId = await ensureActiveSessionId()
     pendingSessionIdRef.current = sessionId
     planRef.current = entry.tasks
@@ -595,6 +612,7 @@ export function ChatPanelMastra() {
       <div className="chat-header">
         <span className="chat-title">{session?.title || 'Chat'}</span>
       </div>
+      <ProjectWorkspaceContext />
 
       <div className="timeline" ref={timelineRef} role="log" aria-live="polite">
         {deepResearchWorkbenchActive ? (
