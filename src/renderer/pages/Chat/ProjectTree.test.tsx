@@ -15,7 +15,7 @@ const project = (index: number): ProjectSummary => ({
 })
 
 const props = {
-  expandedProjectId: null,
+  expandedProjectIds: new Set<string>(),
   onToggleProject: () => {},
   onCreateSession: () => {},
   onToggleProjectList: () => {},
@@ -34,5 +34,11 @@ describe('ProjectTree', () => {
     expect(markup).not.toContain('项目 7')
     expect(markup).toContain('更多文件夹')
     expect(markup).toContain('aria-expanded="false"')
+  })
+
+  it('keeps each project expanded state independent', () => {
+    const markup = renderToStaticMarkup(<ProjectTree {...props} expandedProjectIds={new Set(['project-1', 'project-2'])} projects={[project(1), project(2)]} projectListExpanded={false} />)
+
+    expect((markup.match(/aria-expanded="true"/g) ?? []).length).toBe(2)
   })
 })

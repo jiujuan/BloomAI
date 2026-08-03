@@ -4,9 +4,9 @@ import type { ProjectSummary } from '@shared/schemas'
 import { ProjectSessions } from './ProjectSessions'
 import { visibleProjectCount } from './project-sidebar.utils'
 
-export function ProjectTree({ projects, expandedProjectId, projectListExpanded, onToggleProject, onCreateSession, onToggleProjectList }: {
+export function ProjectTree({ projects, expandedProjectIds, projectListExpanded, onToggleProject, onCreateSession, onToggleProjectList }: {
   projects: ProjectSummary[]
-  expandedProjectId: string | null
+  expandedProjectIds: ReadonlySet<string>
   projectListExpanded: boolean
   onToggleProject: (projectId: string) => void
   onCreateSession: (projectId: string) => void
@@ -15,7 +15,7 @@ export function ProjectTree({ projects, expandedProjectId, projectListExpanded, 
   const visible = projects.slice(0, visibleProjectCount(projects.length, projectListExpanded))
   return <>
     {visible.map((project) => {
-      const expanded = expandedProjectId === project.id
+      const expanded = expandedProjectIds.has(project.id)
       return <div key={project.id} className="project-tree-item">
         <div className="project-row-wrap">
           <button className="project-row" aria-expanded={expanded} aria-label={`${project.name}，${project.sessionCount} 个聊天`} onClick={() => onToggleProject(project.id)}>

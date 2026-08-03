@@ -9,8 +9,20 @@ import { SidebarSectionHeader } from './SidebarSectionHeader'
 const PROJECT_SECTION_MIN_RATIO = 0.2
 const PROJECT_SECTION_MAX_RATIO = 0.8
 
-export function nextExpandedProjectId(current: string | null, selected: string): string | null {
-  return current === selected ? null : selected
+export function toggleExpandedProjectId(current: ReadonlySet<string>, selected: string): Set<string> {
+  const next = new Set(current)
+  if (next.has(selected)) {
+    next.delete(selected)
+  } else {
+    next.add(selected)
+  }
+  return next
+}
+
+export function expandProjectId(current: ReadonlySet<string>, selected: string): Set<string> {
+  const next = new Set(current)
+  next.add(selected)
+  return next
 }
 
 export function clampProjectSectionRatio(ratio: number): number {
@@ -28,7 +40,7 @@ export function ProjectSessionSidebar() {
   const { createProjectSession } = useSessionStore()
   const { activePersonaId } = usePersonaStore()
   const { loadMessages } = useChatStore()
-  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null)
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
   const [projectListExpanded, setProjectListExpanded] = useState(false)
   const [projectsSectionExpanded, setProjectsSectionExpanded] = useState(true)
   const [recentSectionExpanded, setRecentSectionExpanded] = useState(true)
@@ -43,7 +55,7 @@ export function ProjectSessionSidebar() {
   const createInProject = async (projectId: string) => {
     const session = await createProjectSession(projectId, { persona_id: activePersonaId || undefined })
     await loadMessages(session.id)
-    setExpandedProjectId(projectId)
+    setExpandedProjectIds((current) => expandProjectId(current, projectId))
   }
 
   const canResizeSections = projectsSectionExpanded && recentSectionExpanded
@@ -110,7 +122,7 @@ export function ProjectSessionSidebar() {
       {projectsSectionExpanded && <div id="projects-title-content" className="sidebar-section-content">
         {loading && <div className="project-session-skeleton" aria-label="正在加载项目"><span /><span /><span /></div>}
         {error && <div className="sidebar-inline-error" role="alert">{error}<button type="button" onClick={() => void useProjectStore.getState().loadProjects()}>重试</button></div>}
-        {!loading && !error && <ProjectTree projects={projects} expandedProjectId={expandedProjectId} projectListExpanded={projectListExpanded} onToggleProject={(id) => setExpandedProjectId((active) => nextExpandedProjectId(active, id))} onCreateSession={(id) => void createInProject(id)} onToggleProjectList={() => setProjectListExpanded((value) => !value)} />}
+        {!loading && !error && <ProjectTree projects={projects} expandedProjectIds={expandedProjectIds} projectListExpanded={projectListExpanded} onToggleProject={(id) => setExpandedProjectIds((current) => toggleExpandedProjectId(current, id))} onCreateSession={(id) => void createInProject(id)} onToggleProjectList={() => setProjectListExpanded((value) => !value)} />}
       </div>}
     </section>
     <div
@@ -141,6 +153,6 @@ export function ProjectSessionSidebar() {
         onToggle={() => setRecentSectionExpanded((value) => !value)}
       />
     </section>
-    <CreateProjectDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(projectId) => { setExpandedProjectId(projectId); setProjectListExpanded(true); setProjectsSectionExpanded(true) }} />
+    <CreateProjectDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(projectId) => { setExpandedProjectIds((current) => expandProjectId(current, projectId)); setProjectListExpanded(true); setProjectsSectionExpanded(true) }} />
   </aside>
 }
