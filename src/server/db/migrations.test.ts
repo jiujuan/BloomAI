@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(24)
+    expect(migrationVersions()).toHaveLength(25)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(24)
+    expect(migrationVersions()).toHaveLength(25)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -172,6 +172,7 @@ describe('database migrations', () => {
         'research_iterations',
         'research_coverage_assessments',
         'scheduled_task_runs',
+        'projects',
       ])
     )
     expect(migrationVersions()).toEqual([
@@ -199,6 +200,7 @@ describe('database migrations', () => {
       '022-deep-research-section-drafts',
       '023-deep-research-semantic-citation-quality-gates',
       '024-scheduled-task-runs',
+      '025-project-chat-workspaces',
     ])
     const emptyDb = openRawDb()
     try {
@@ -271,6 +273,7 @@ describe('database migrations', () => {
     expect(uniqueIndexColumnSets('research_iterations')).toContainEqual(['run_id', 'ordinal'])
     expect(uniqueIndexColumnSets('research_coverage_assessments')).toContainEqual(['run_id', 'iteration_ordinal', 'policy_version', 'input_fingerprint'])
     expect(uniqueIndexColumnSets('scheduled_task_runs')).toContainEqual(['schedule_id', 'trigger_fired_at'])
+    expect(uniqueIndexColumnSets('projects')).toContainEqual(['root_path'])
 
     expect(indexNames('research_runs')).toContain('idx_research_runs_current_attempt')
     expect(indexNames('research_runs')).toContain('idx_research_runs_cancellation')
@@ -285,6 +288,11 @@ describe('database migrations', () => {
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_question')
     expect(indexNames('research_evidence')).toContain('idx_research_evidence_run_source')
     expect(indexNames('research_source_assessments')).toContain('idx_research_source_assessments_run_query')
+    expect(indexNames('projects')).toEqual(expect.arrayContaining([
+      'idx_projects_root_path_unique',
+      'idx_projects_updated',
+    ]))
+    expect(indexNames('sessions')).toContain('idx_sessions_project_updated')
     expect(indexNames('scheduled_task_runs')).toEqual(expect.arrayContaining([
       'idx_scheduled_task_runs_schedule_trigger',
       'idx_scheduled_task_runs_status_created',
@@ -345,8 +353,9 @@ describe('database migrations', () => {
     const db = openRawDb()
     try {
       const migrations = loadSqlMigrations()
-      const legacyMigrations = migrations.filter((migration) => migration.version !== '024-scheduled-task-runs')
+      const legacyMigrations = migrations.filter((migration) => !['024-scheduled-task-runs', '025-project-chat-workspaces'].includes(migration.version))
       const scheduledTaskMigration = migrations.filter((migration) => migration.version === '024-scheduled-task-runs')
+      const projectWorkspaceMigration = migrations.filter((migration) => migration.version === '025-project-chat-workspaces')
       db.exec(`
         CREATE TABLE settings (
           key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
@@ -372,12 +381,16 @@ describe('database migrations', () => {
       `).all()
 
       runSqlMigrations(db, scheduledTaskMigration)
+      runSqlMigrations(db, projectWorkspaceMigration)
 
       expect(db.prepare('SELECT title FROM sessions WHERE id = ?').get('chat-legacy')).toEqual({ title: 'Existing chat' })
       expect(db.prepare('SELECT content FROM messages WHERE id = ?').get('message-legacy')).toEqual({ content: 'Existing chat message' })
       expect(db.prepare(`
-        SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'messages') ORDER BY name
-      `).all()).toEqual(chatSchemasBefore)
+        SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'
+      `).all()).toEqual(chatSchemasBefore.filter((row: any) => row.name === 'messages'))
+      expect(db.prepare("SELECT name FROM pragma_table_info('sessions') WHERE name = 'project_id'").all()).toEqual([{ name: 'project_id' }])
+      expect(db.prepare('SELECT project_id FROM sessions WHERE id = ?').get('chat-legacy')).toEqual({ project_id: null })
+      expect(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_projects_root_path_unique'").get()).toEqual(expect.objectContaining({ sql: expect.stringContaining('COLLATE NOCASE') }))
       expect(db.prepare("SELECT name FROM pragma_table_info('scheduled_task_runs') ORDER BY cid").all().map((row: any) => row.name)).toEqual([
         'id', 'schedule_id', 'trigger_fired_at', 'mastra_run_id', 'trigger_kind', 'status', 'output_text',
         'error_message', 'usage_json', 'started_at', 'finished_at', 'created_at',

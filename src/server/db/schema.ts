@@ -10,15 +10,32 @@ export const personas = sqliteTable('personas', {
   created_at: integer('created_at').notNull(),
 })
 
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  root_path: text('root_path').notNull(),
+  directory_kind: text('directory_kind').notNull(),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  rootPathUniqueIdx: uniqueIndex('idx_projects_root_path_unique').on(table.root_path),
+  updatedIdx: index('idx_projects_updated').on(desc(table.updated_at)),
+}))
+
+export type ProjectRow = typeof projects.$inferSelect
+
 export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
   title: text('title').notNull().default('New Chat'),
   persona_id: text('persona_id'),
   model: text('model').notNull().default('claude-3-5-sonnet-20241022'),
   status: text('status').notNull().default('active'),
+  project_id: text('project_id'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
-})
+}, (table) => ({
+  projectUpdatedIdx: index('idx_sessions_project_updated').on(table.project_id, desc(table.updated_at)),
+}))
 
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
