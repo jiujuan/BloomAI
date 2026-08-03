@@ -79,7 +79,6 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
           toolId: tool.id,
           input: (input ?? {}) as Record<string, unknown>,
           sessionId,
-          approvalGranted: needsApproval,
         })
         return result.output
       },

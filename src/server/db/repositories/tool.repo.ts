@@ -109,7 +109,8 @@ export const toolRepo = {
     return getOrmDb().select().from(tool_permissions).where(eq(tool_permissions.tool_id, toolId)).get() as ToolPermission | undefined
   },
 
-  grantPermission(toolId: string, scope: string): void {
+  grantPermission(toolId: string, scope: 'permanent'): void {
+    if (scope !== 'permanent') throw new Error('Only permanent tool permissions can be persisted')
     const id = uuidv4()
     const now = Date.now()
     const existing = this.getPermission(toolId)

@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(26)
+    expect(migrationVersions()).toHaveLength(27)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(26)
+    expect(migrationVersions()).toHaveLength(27)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -202,6 +202,7 @@ describe('database migrations', () => {
       '024-scheduled-task-runs',
       '025-project-chat-workspaces',
       '026-disable-placeholder-tools',
+      '027-tool-permissions-permanent-only',
     ])
     const emptyDb = openRawDb()
     try {
@@ -354,7 +355,7 @@ describe('database migrations', () => {
     const db = openRawDb()
     try {
       const migrations = loadSqlMigrations()
-      const legacyMigrations = migrations.filter((migration) => !['024-scheduled-task-runs', '025-project-chat-workspaces'].includes(migration.version))
+      const legacyMigrations = migrations.filter((migration) => !['024-scheduled-task-runs', '025-project-chat-workspaces', '027-tool-permissions-permanent-only'].includes(migration.version))
       const scheduledTaskMigration = migrations.filter((migration) => migration.version === '024-scheduled-task-runs')
       const projectWorkspaceMigration = migrations.filter((migration) => migration.version === '025-project-chat-workspaces')
       db.exec(`
@@ -445,6 +446,37 @@ describe('database migrations', () => {
         { id: 'web_screenshot', is_enabled: 0 },
         { id: 'web_search', is_enabled: 1 },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('makes tool permissions permanent-only, revokes legacy session scopes, and deduplicates grants', async () => {
+    const { runSqlMigrations, loadSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      db.exec(`
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+        INSERT INTO tool_permissions (id, tool_id, granted, granted_at, scope)
+        VALUES
+          ('old-session', 'fs_write', 1, 100, 'session'),
+          ('old-persistent', 'fs_write', 1, 200, 'persistent'),
+          ('permanent', 'fs_read', 1, 300, 'permanent');
+      `)
+
+      const migration = loadSqlMigrations().find((item) => item.version === '027-tool-permissions-permanent-only')
+      expect(migration).toBeDefined()
+      runSqlMigrations(db, [migration!])
+
+      expect(db.prepare('SELECT tool_id, granted, scope FROM tool_permissions ORDER BY tool_id').all()).toEqual([
+        { tool_id: 'fs_read', granted: 1, scope: 'permanent' },
+        { tool_id: 'fs_write', granted: 0, scope: 'permanent' },
+      ])
+      expect(uniqueIndexColumnSets('tool_permissions')).toContainEqual(['tool_id'])
     } finally {
       db.close()
     }

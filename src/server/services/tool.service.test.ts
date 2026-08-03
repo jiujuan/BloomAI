@@ -10,17 +10,21 @@ describe('toolService', () => {
     } as any
     const service = createToolService({ repo })
 
-    expect(service.list({ category: 'web' })).toEqual([{ id: 'search', name: 'Search', permission: { tool_id: 'search', granted: 1 } }])
+    expect(service.list({ category: 'web' })).toEqual([expect.objectContaining({
+      id: 'search',
+      name: 'Search',
+      permission: { tool_id: 'search', granted: 1 },
+    })])
     expect(repo.list).toHaveBeenCalledWith('web')
   })
 
-  it('grants and revokes permissions using the historical session default', () => {
+  it('only grants durable permissions with the permanent scope', () => {
     const repo = { grantPermission: vi.fn(), revokePermission: vi.fn() } as any
     const service = createToolService({ repo })
 
-    expect(service.grantPermission('fs_write')).toEqual({ tool_id: 'fs_write', granted: true, scope: 'session' })
+    expect(service.grantPermission('fs_write', 'permanent')).toEqual({ tool_id: 'fs_write', granted: true, scope: 'permanent' })
     expect(service.revokePermission('fs_write')).toEqual({ tool_id: 'fs_write', granted: false })
-    expect(repo.grantPermission).toHaveBeenCalledWith('fs_write', 'session')
+    expect(repo.grantPermission).toHaveBeenCalledWith('fs_write', 'permanent')
     expect(repo.revokePermission).toHaveBeenCalledWith('fs_write')
   })
 
