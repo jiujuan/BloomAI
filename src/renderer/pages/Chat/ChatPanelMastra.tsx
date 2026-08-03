@@ -96,6 +96,7 @@ function hasRenderableContent(parts: any[]): boolean {
     if (p.type === 'data-workflow' || p.type === 'data-research-run') return !!p.data
     if (p.type === 'data-plan') return true
     if (p.type === 'data-tool-call-approval') return true
+    if (p.type === 'data-error') return !!p.data
     return isToolPart(p)
   })
 }
@@ -131,6 +132,44 @@ function friendlyError(error: { message?: string }): string {
     return '请求出错了，请稍后重试。'
   }
   return msg
+}
+
+type ChatErrorData = { title: string; message: string }
+
+function createErrorMessageId(): string {
+  return `error-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+export function buildErrorAssistantMessage(error: { message?: string }, id = createErrorMessageId()): {
+  id: string
+  role: 'assistant'
+  content: string
+  parts: any[]
+} {
+  return {
+    id,
+    role: 'assistant',
+    content: '',
+    parts: [{ type: 'data-error', data: { title: '请求失败', message: friendlyError(error) } }],
+  }
+}
+
+export function appendErrorAssistantMessage(messages: any[], error: { message?: string }, id?: string): any[] {
+  const last = messages.at(-1)
+  const lastParts = Array.isArray(last?.parts) ? last.parts : []
+  const hasTransientEmptyAssistant =
+    last?.role === 'assistant' && !hasAnswerContent(lastParts) && !errorDataFromParts(lastParts)
+  const history = hasTransientEmptyAssistant ? messages.slice(0, -1) : messages
+  return [...history, buildErrorAssistantMessage(error, id)]
+}
+
+function errorDataFromParts(parts: any[]): ChatErrorData | null {
+  const part = parts.find((candidate) => candidate?.type === 'data-error' && candidate?.data)
+  if (!part || typeof part.data.message !== 'string' || !part.data.message) return null
+  return {
+    title: typeof part.data.title === 'string' && part.data.title ? part.data.title : '请求失败',
+    message: part.data.message,
+  }
 }
 
 // useChat creates a new Chat instance whenever its id changes. A message intended for a newly
@@ -269,21 +308,23 @@ export function ChatPanelMastra() {
     [activeSessionId],
   )
 
-  const { messages, sendMessage, setMessages, status, stop, error, addToolApprovalResponse } = useChat({
+  const { messages, sendMessage, setMessages, status, stop, addToolApprovalResponse } = useChat({
     id: activeSessionId || undefined,
     transport,
     // Persist the finished assistant message with its full UI parts so tool/reasoning/workflow
     // cards survive reloads. Read live state to avoid stale closures across renders.
-    onFinish: ({ message }) => {
-      if (message.role !== 'assistant') return
+    onFinish: ({ message, isError }) => {
       const sid = useSessionStore.getState().activeSessionId || pendingSessionIdRef.current
-      if (!sid) return
       // Plan execution finished: the confirmed plan streamed in as a data-plan part (server
       // side), so it's already in message.parts — just release the refs for the next turn.
       if (planRef.current) planRef.current = null
       pendingSessionIdRef.current = null
       lastPlanTurnRef.current = null
+      // onError already added a durable error message. Do not persist the incomplete assistant
+      // response that AI SDK leaves in the active response when a stream fails.
+      if (isError || message.role !== 'assistant' || !sid) return
       const parts = ((message as any).parts || []) as any[]
+      if (!hasRenderableContent(parts)) return
       const content = parts.filter((p) => p?.type === 'text').map((p) => p.text || '').join('')
       void platform
         .saveAssistantMessage({ sessionId: sid, content, parts: slimParts(parts), model: modelRef.current })
@@ -297,6 +338,18 @@ export function ChatPanelMastra() {
       if (failedSession?.project_id && isProjectWorkspaceUnavailableError(streamError)) {
         useProjectStore.getState().markWorkspaceUnavailable(failedSession.project_id)
         setAttachError(PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE)
+      }
+      const errorMessage = buildErrorAssistantMessage(streamError)
+      setMessages((previous) => appendErrorAssistantMessage(previous, streamError, errorMessage.id))
+      if (failedSessionId) {
+        void platform
+          .saveAssistantMessage({
+            sessionId: failedSessionId,
+            content: errorMessage.content,
+            parts: slimParts(errorMessage.parts),
+            model: modelRef.current,
+          })
+          .catch(() => {})
       }
       planRef.current = null
       pendingSessionIdRef.current = null
@@ -672,12 +725,6 @@ export function ChatPanelMastra() {
           </React.Fragment>
         ))}
 
-        {error && (
-          <div className="timeline-error-block" role="alert">
-            <div className="timeline-error-title">请求失败</div>
-            <div className="timeline-error-message">{friendlyError(error)}</div>
-          </div>
-        )}
         </>}
       </div>
 
@@ -892,6 +939,16 @@ function MessageView({ role, parts, streaming, decidedApprovals, onDecide, onOpe
     return <UserMessageView parts={parts} />
   }
 
+  const errorData = errorDataFromParts(parts)
+  if (errorData) {
+    return (
+      <div className="timeline-error-block" role="alert">
+        <div className="timeline-error-title">{errorData.title}</div>
+        <div className="timeline-error-message">{errorData.message}</div>
+      </div>
+    )
+  }
+
   // While streaming, the assistant message can exist before any real content arrives — show the
   // animated indicator inside its bubble instead of an empty bubble until the first part lands.
   const showWaiting = streaming && !hasRenderableContent(parts)
@@ -996,6 +1053,13 @@ function renderAssistantParts(parts: any[], approval: ApprovalProps, onOpenResea
     } else if (part.type === 'data-plan' && part.data) {
       const tasks = Array.isArray(part.data.tasks) ? part.data.tasks : []
       items.push(<PlanCard key={`plan-${i}`} tasks={tasks} status="done" />)
+    } else if (part.type === 'data-error' && part.data) {
+      items.push(
+        <div key={`error-${i}`} className="timeline-error-block" role="alert">
+          <div className="timeline-error-title">{part.data.title || '请求失败'}</div>
+          <div className="timeline-error-message">{part.data.message || '请求出错了，请稍后重试。'}</div>
+        </div>,
+      )
     } else if (part.type === 'data-tool-call-approval') {
       const req = toApprovalRequest(part)
       if (req) {
