@@ -1714,9 +1714,16 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 /* ── Project chat sidebar ─────────────────────────────────── */
 .project-session-sidebar { min-height: 0; overflow: hidden; }
-.sidebar-section { display: flex; min-height: 0; flex-direction: column; padding: 7px 5px; border-bottom: 0.5px solid var(--border-tertiary); }
+.sidebar-section { display: flex; min-height: 0; flex-direction: column; padding: 7px 5px; }
 .project-sidebar-section, .recent-sessions-section { flex: 1 1 0; min-height: 0; overflow: hidden; }
 .project-sidebar-section.is-collapsed, .recent-sessions-section.is-collapsed { flex: 0 0 auto; }
+.sidebar-section-resizer { position: relative; flex: 0 0 7px; width: 100%; cursor: row-resize; touch-action: none; user-select: none; }
+.sidebar-section-resizer::before { position: absolute; top: 50%; right: 0; left: 0; border-top: 0.5px solid var(--border-tertiary); content: ''; }
+.sidebar-section-resizer:hover, .sidebar-section-resizer:focus-visible { background: var(--bg-secondary); outline: none; }
+.sidebar-section-resizer:hover::before, .sidebar-section-resizer:focus-visible::before { border-color: var(--border-secondary); }
+.sidebar-section-resizer[aria-disabled="true"] { cursor: default; }
+.sidebar-section-resizer[aria-disabled="true"]:hover { background: transparent; }
+.project-session-sidebar.is-resizing, .project-session-sidebar.is-resizing * { cursor: row-resize !important; user-select: none; }
 .sidebar-section-content { min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 .sidebar-section-title { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; min-height: 27px; padding: 0 5px 4px; }
 .sidebar-section-title h2 { min-width: 0; margin: 0; font-size: 11px; color: var(--text-secondary); font-weight: 650; }

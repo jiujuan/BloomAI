@@ -15,10 +15,10 @@ describe('SidebarSectionHeader', () => {
   })
 
   it('renders a down chevron and expanded accessibility state', () => {
-    const markup = renderToStaticMarkup(<SidebarSectionHeader title="最近" titleId="recent-title" expanded onToggle={() => {}} />)
+    const markup = renderToStaticMarkup(<SidebarSectionHeader title="最近聊天" titleId="recent-title" expanded onToggle={() => {}} />)
 
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).toContain('aria-controls="recent-title-content"')
-    expect(markup).toContain('收起最近')
+    expect(markup).toContain('收起最近聊天')
   })
 })
