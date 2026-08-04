@@ -6,6 +6,10 @@ export type WebRoutingPolicy = {
   preference: WebRoutingPreference
   browserEnabled: boolean
   allowSearchFallback: boolean
+  allowedSearchHosts?: readonly string[]
+  searchBrowserConcurrency?: 1
+  maxSearchResults?: number
+  searchLocale?: string
 }
 
 export type WebPageLoadRequest = {
@@ -77,4 +81,37 @@ export type WebScreenshotResult = {
 export interface WebScreenshotProvider {
   screenshot(request: WebScreenshotRequest): Promise<WebScreenshotResult>
   checkAvailability?(): Promise<WebProviderAvailability>
+}
+
+export type WebSearchProviderId = 'tavily' | 'duckduckgo' | 'agent_browser_serp'
+
+export type WebSearchResult = {
+  title: string
+  url: string
+  snippet: string
+}
+
+export type WebSearchRequest = {
+  query: string
+  limit: number
+  signal?: AbortSignal
+  fallbackFrom?: Exclude<WebSearchProviderId, 'agent_browser_serp'>
+  fallbackReason?: string
+}
+
+export type WebSearchOutput = {
+  query: string
+  total: number
+  results: WebSearchResult[]
+  provider?: WebSearchProviderId
+  fallbackFrom?: Exclude<WebSearchProviderId, 'agent_browser_serp'>
+  fallbackReason?: string
+  error?: string
+  errorCode?: 'WEB_SEARCH_SERP_BLOCKED'
+  diagnostics?: WebExecutionDiagnostics
+}
+
+export interface WebSearchProvider {
+  readonly id: WebSearchProviderId
+  search(request: WebSearchRequest): Promise<WebSearchOutput>
 }
