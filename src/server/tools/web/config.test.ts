@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getWebBrowserConfig } from './config'
+import { getWebBrowserConfig, getWebRoutingPolicy } from './config'
 
 describe('web browser config', () => {
   it('defaults to a disabled, bounded browser provider', () => {
@@ -34,5 +34,34 @@ describe('web browser config', () => {
     expect(config.maxPageHeight).toBe(20_000)
     expect(config.maxPixels).toBe(1_000_000)
     expect(config.maxArtifactBytes).toBe(64 * 1024)
+  })
+
+  it('defaults routing to static-first auto mode with browser search disabled', () => {
+    expect(getWebRoutingPolicy({})).toEqual({
+      preference: 'auto',
+      browserEnabled: false,
+      allowSearchFallback: false,
+    })
+  })
+
+  it('parses routing preference and falls back safely for invalid values', () => {
+    expect(getWebRoutingPolicy({
+      WEB_BROWSER_ENABLED: 'true',
+      WEB_BROWSER_ROUTING: 'browser',
+      WEB_SEARCH_BROWSER_FALLBACK: 'true',
+    })).toEqual({
+      preference: 'browser',
+      browserEnabled: true,
+      allowSearchFallback: true,
+    })
+
+    expect(getWebRoutingPolicy({
+      WEB_BROWSER_ROUTING: 'arbitrary-provider',
+      WEB_SEARCH_BROWSER_FALLBACK: 'maybe',
+    })).toEqual({
+      preference: 'auto',
+      browserEnabled: false,
+      allowSearchFallback: false,
+    })
   })
 })

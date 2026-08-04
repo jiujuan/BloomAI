@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { WebRoutingPolicy, WebRoutingPreference } from './contracts'
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -42,9 +43,24 @@ export function getWebBrowserConfig(source: Record<string, string | undefined> =
   return parsed.success ? parsed.data : webBrowserConfigSchema.parse(DEFAULT_CONFIG)
 }
 
+export function getWebRoutingPolicy(source: Record<string, string | undefined> = process.env): WebRoutingPolicy {
+  const preference = parseRoutingPreference(source.WEB_BROWSER_ROUTING)
+  const browserConfig = getWebBrowserConfig(source)
+  return {
+    preference,
+    browserEnabled: browserConfig.enabled,
+    allowSearchFallback: parseBoolean(source.WEB_SEARCH_BROWSER_FALLBACK, false),
+  }
+}
+
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (!value) return fallback
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
+}
+
+function parseRoutingPreference(value: string | undefined): WebRoutingPreference {
+  if (value === 'static' || value === 'browser' || value === 'auto') return value
+  return 'auto'
 }
 
 function clampInteger(value: string | undefined, fallback: number, min: number, max: number): number {
