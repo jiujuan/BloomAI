@@ -1,3 +1,8 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { getWebBrowserConfig } from './web/config'
+
 export type ToolAvailability =
   | { status: 'available' }
   | { status: 'disabled'; reason: string }
@@ -24,6 +29,7 @@ const PLACEHOLDER_AVAILABILITY: Record<string, Extract<ToolAvailability, { statu
 }
 
 export function getToolAvailability(toolId: string): ToolAvailability {
+  if (toolId === 'web_screenshot') return getWebScreenshotAvailability()
   return PLACEHOLDER_AVAILABILITY[toolId] ?? { status: 'available' }
 }
 
@@ -54,4 +60,39 @@ function formatAvailabilityError(toolId: string, availability: ToolAvailability)
     return `Tool ${toolId} is unavailable on ${availability.platform}. ${availability.reason}`
   }
   return `Tool ${toolId} is unavailable: ${availability.status === 'available' ? 'unknown reason' : availability.reason}`
+}
+
+function getWebScreenshotAvailability(): ToolAvailability {
+  const config = getWebBrowserConfig()
+  if (!config.enabled) {
+    return {
+      status: 'dependency_missing',
+      dependency: 'playwright',
+      reason: 'Browser provider is disabled. Set WEB_BROWSER_ENABLED=true only after browser policy and artifact checks are configured.',
+    }
+  }
+  if (!hasKnownSystemBrowser(config.channels)) {
+    return {
+      status: 'dependency_missing',
+      dependency: 'system-browser',
+      reason: `No configured browser channel is installed (${config.channels.join(', ')}).`,
+    }
+  }
+  return { status: 'available' }
+}
+
+function hasKnownSystemBrowser(channels: readonly string[]): boolean {
+  const candidates: Record<string, string[]> = {
+    msedge: [
+      path.join(process.env.ProgramFiles || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(process.env.LOCALAPPDATA || os.homedir(), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    ],
+    chrome: [
+      path.join(process.env.ProgramFiles || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env.LOCALAPPDATA || os.homedir(), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ],
+  }
+  return channels.some((channel) => (candidates[channel] || []).some((candidate) => candidate && fs.existsSync(candidate)))
 }

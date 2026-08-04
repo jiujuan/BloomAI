@@ -40,6 +40,22 @@ const webExtractInputSchema = z.object({
   timeoutMs: z.number().int().min(1).max(120_000).default(20_000),
 }).strict()
 
+const webScreenshotInputSchema = z.object({
+  url: urlSchema,
+  fullPage: z.boolean().default(true),
+  viewport: z.object({
+    width: z.number().int().min(320).max(3840).default(1280),
+    height: z.number().int().min(240).max(2160).default(720),
+  }).default({ width: 1280, height: 720 }),
+  format: z.enum(['png', 'jpeg']).default('png'),
+  quality: z.number().int().min(1).max(100).optional(),
+  timeoutMs: z.number().int().min(1).max(60_000).default(60_000),
+}).strict().superRefine((value, context) => {
+  if (value.format === 'png' && value.quality !== undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['quality'], message: 'quality is only supported for jpeg screenshots' })
+  }
+})
+
 const fileReadInputSchema = z.object({
   path: pathSchema,
   offset: z.number().int().min(0).default(0),
@@ -210,8 +226,25 @@ export const toolContracts = {
     displayName: 'Web Screenshot',
     description: 'Capture a full-page screenshot of a URL as a PNG artifact.',
     requiresPermission: 'network',
-    inputSchema: z.object({ url: urlSchema }).strict(),
-    outputSchema: outputObject({ imagePath: z.string().optional(), width: z.number().int().optional(), height: z.number().int().optional() }),
+    inputSchema: webScreenshotInputSchema,
+    outputSchema: outputObject({
+      imagePath: z.string().optional(),
+      mimeType: z.enum(['image/png', 'image/jpeg']).optional(),
+      width: z.number().int().optional(),
+      height: z.number().int().optional(),
+      bytes: z.number().int().nonnegative().optional(),
+      finalUrl: z.string().optional(),
+      provider: z.enum(['agent_browser', 'playwright_legacy']).optional(),
+      diagnostics: z.object({
+        attempts: z.array(z.object({
+          provider: z.string(),
+          outcome: z.string(),
+          reason: z.string().optional(),
+          durationMs: z.number().optional(),
+        }).passthrough()),
+        blockedRequests: z.number().int().nonnegative().optional(),
+      }).passthrough().optional(),
+    }),
     getAvailability: async () => getToolAvailability('web_screenshot'),
   },
   web_extract: {

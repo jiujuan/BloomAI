@@ -12,7 +12,9 @@
     "lint": "echo \"lint ok\"",
     "db:migrate": "node scripts/db-migrate.js",
     "start:server": "tsx src/server/index.ts",
-    "test:architecture": "vitest run src/server/architecture/dependency-boundaries.test.ts"
+    "test:architecture": "vitest run src/server/architecture/dependency-boundaries.test.ts",
+    "test:web-tools-browser": "vitest run src/server/tools/web/agent-browser-poc.test.ts",
+    "verify:web-tools-browser": "tsx scripts/verify-web-tools-agent-browser.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.91",
@@ -20,6 +22,7 @@
     "@ai-sdk/openai-compatible": "^2.0.55",
     "@ai-sdk/react": "^3.0.219",
     "@anthropic-ai/sdk": "^0.26.0",
+    "@mastra/agent-browser": "0.4.1",
     "@mastra/ai-sdk": "^1.6.0",
     "@mastra/core": "1.51.0",
     "@mastra/libsql": "1.16.0",
@@ -75,7 +78,9 @@
     "productName": "BloomAI",
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/playwright-core/**"
+      "**/node_modules/playwright-core/**",
+      "**/node_modules/@mastra/agent-browser/**",
+      "**/node_modules/agent-browser/**"
     ]
   }
 }
