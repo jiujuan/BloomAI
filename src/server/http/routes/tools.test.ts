@@ -54,8 +54,7 @@ describe('tools route contract', () => {
     const screenshot = webResult.body.data.find((tool: any) => tool.id === 'web_screenshot')
     expect(screenshot).toEqual(expect.objectContaining({
       availability: expect.objectContaining({
-        status: 'dependency_missing',
-        dependency: 'playwright',
+        status: 'disabled',
       }),
     }))
   })
@@ -151,6 +150,53 @@ describe('tools route contract', () => {
     expect(byTool.body.data).toEqual([])
     expect(all.response.status).toBe(200)
     expect(all.body.data).toEqual([])
+  })
+
+  it('serves a screenshot artifact only through the recorded tool run metadata', async () => {
+    const { app } = await createApp()
+    const { toolRepo } = await import('../../db/repositories/tool.repo')
+    const { writeScreenshotArtifact } = await import('../../tools/web/screenshot-artifacts')
+    const run = toolRepo.startRun('web_screenshot', null, { url: 'https://example.com' })
+    const artifact = await writeScreenshotArtifact({
+      dataDir,
+      runId: run.id,
+      bytes: Buffer.from('png-bytes'),
+      mimeType: 'image/png',
+      maxBytes: 100,
+    })
+    toolRepo.completeRun(run.id, artifact)
+
+    const response = await app.request(`/tools/web_screenshot/runs/${run.id}/artifact`)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('image/png')
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from('png-bytes'))
+  })
+
+  it('rejects missing, cross-tool, and mismatched screenshot artifact runs', async () => {
+    const { app } = await createApp()
+    const { toolRepo } = await import('../../db/repositories/tool.repo')
+    const { writeScreenshotArtifact } = await import('../../tools/web/screenshot-artifacts')
+    const run = toolRepo.startRun('web_screenshot', null, { url: 'https://example.com' })
+    const artifact = await writeScreenshotArtifact({
+      dataDir,
+      runId: run.id,
+      bytes: Buffer.from('png-bytes'),
+      mimeType: 'image/png',
+      maxBytes: 100,
+    })
+    toolRepo.completeRun(run.id, artifact)
+
+    const missing = await requestJson(app, '/tools/web_screenshot/runs/missing/artifact')
+    const wrongTool = await requestJson(app, `/tools/web_fetch/runs/${run.id}/artifact`)
+    const mismatched = await requestJson(app, `/tools/web_screenshot/runs/${run.id}/artifact?path=tool-artifacts%2Fweb-screenshot%2Fother%2Fscreenshot.png`)
+
+    expect(missing.response.status).toBe(404)
+    expect(missing.body.error.code).toBe('NOT_FOUND')
+    expect(wrongTool.response.status).toBe(400)
+    expect(wrongTool.body.error.code).toBe('ARTIFACT_ERROR')
+    expect(mismatched.response.status).toBe(400)
+    expect(mismatched.body.error.code).toBe('ARTIFACT_ERROR')
   })
 
   it('binds the HTTP request signal to tool execution', async () => {

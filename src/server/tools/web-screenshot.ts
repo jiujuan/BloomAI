@@ -18,7 +18,8 @@ export type WebScreenshotInput = {
 }
 
 export type WebScreenshotOutput = {
-  imagePath: string
+  runId: string
+  relativePath: string
   mimeType: 'image/png' | 'image/jpeg'
   width: number
   height: number
@@ -87,13 +88,14 @@ export function createWebScreenshotTool(options: WebScreenshotToolOptions = {}):
       bytes: result.bytes,
       mimeType: result.mimeType,
       dataDir,
-      runId: context.requestId,
+      runId: context.toolRunId ?? context.requestId,
       maxBytes: limits.maxArtifactBytes,
       signal: context.signal,
       retentionCount: limits.retentionCount,
     })
     return {
-      imagePath: artifact.imagePath,
+      runId: artifact.runId,
+      relativePath: artifact.relativePath,
       mimeType: artifact.mimeType,
       width: result.width,
       height: result.height,

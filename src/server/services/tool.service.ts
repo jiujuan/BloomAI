@@ -4,18 +4,24 @@ import { sessionToolPermissionStore } from '../tools/session-permission-store'
 import { getToolAvailability } from '../tools/availability'
 import { getToolContract, schemaToJsonSchema } from '../tools/contracts'
 import { ToolContractError } from '../tools/execute-tool'
+import { getDataDir } from '../db/paths'
+import { readScreenshotArtifact, type ScreenshotArtifactContent } from '../tools/web/screenshot-artifacts'
 import { ServiceError } from './errors'
 import { z } from 'zod'
 
 type ToolServiceDependencies = {
   repo: typeof toolRepo
   executeLegacyToolCapability: typeof executeLegacyToolCapability
+  getDataDir: typeof getDataDir
+  readScreenshotArtifact: typeof readScreenshotArtifact
 }
 
 export function createToolService(overrides: Partial<ToolServiceDependencies> = {}) {
   const dependencies: ToolServiceDependencies = {
     repo: toolRepo,
     executeLegacyToolCapability,
+    getDataDir,
+    readScreenshotArtifact,
     ...overrides,
   }
 
@@ -98,7 +104,73 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     listRuns(id: string, limit = 50) {
       return dependencies.repo.listRuns(id, limit)
     },
+
+    async getArtifact(id: string, runId: string, requestedRelativePath?: string): Promise<ScreenshotArtifactContent> {
+      const tool = dependencies.repo.get(id)
+      if (!tool) throw new ServiceError('NOT_FOUND', 'Tool not found')
+      if (id !== 'web_screenshot') {
+        throw new ServiceError('ARTIFACT_ERROR', 'Tool does not expose screenshot artifacts')
+      }
+
+      const run = dependencies.repo.getRun(id, runId)
+      if (!run) throw new ServiceError('NOT_FOUND', 'Tool run not found')
+      if (run.status !== 'success') {
+        throw new ServiceError('ARTIFACT_ERROR', 'Tool run did not produce a screenshot artifact')
+      }
+
+      const metadata = readStoredScreenshotMetadata(run.output_json, runId)
+      if (requestedRelativePath && requestedRelativePath !== metadata.relativePath) {
+        throw new ServiceError('ARTIFACT_ERROR', 'Requested artifact does not match the recorded tool run')
+      }
+
+      try {
+        const artifact = await dependencies.readScreenshotArtifact({
+          dataDir: dependencies.getDataDir(),
+          runId,
+          relativePath: metadata.relativePath,
+        })
+        if (
+          artifact.runId !== metadata.runId
+          || artifact.relativePath !== metadata.relativePath
+          || artifact.mimeType !== metadata.mimeType
+        ) {
+          throw new Error('Stored screenshot artifact metadata does not match the file')
+        }
+        return artifact
+      } catch (error) {
+        if (error instanceof ServiceError) throw error
+        throw new ServiceError('ARTIFACT_ERROR', messageOf(error, 'Screenshot artifact could not be read'))
+      }
+    },
   }
+}
+
+function readStoredScreenshotMetadata(outputJson: string | null, runId: string): {
+  runId: string
+  relativePath: string
+  mimeType: 'image/png' | 'image/jpeg'
+} {
+  let parsed: unknown
+  try {
+    parsed = outputJson ? JSON.parse(outputJson) : null
+  } catch {
+    throw new ServiceError('ARTIFACT_ERROR', 'Tool run output metadata is invalid')
+  }
+
+  const summary = isRecord(parsed) && isRecord(parsed.summary) ? parsed.summary : null
+  const storedRunId = summary?.runId
+  const relativePath = summary?.relativePath
+  const mimeType = summary?.mimeType
+  if (
+    storedRunId !== runId
+    || typeof relativePath !== 'string'
+    || !new RegExp(`^tool-artifacts/web-screenshot/${escapeRegExp(runId)}/screenshot\\.(png|jpg)$`).test(relativePath)
+    || (mimeType !== 'image/png' && mimeType !== 'image/jpeg')
+  ) {
+    throw new ServiceError('ARTIFACT_ERROR', 'Tool run does not contain valid screenshot artifact metadata')
+  }
+
+  return { runId, relativePath, mimeType }
 }
 
 function projectContract(tool: any, permission: unknown) {
@@ -120,6 +192,14 @@ function projectContract(tool: any, permission: unknown) {
 
 function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export const toolService = createToolService()

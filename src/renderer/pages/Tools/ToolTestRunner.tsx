@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
-import { X, Play, Copy, Check } from 'lucide-react'
+import { X, Play, Copy, Check, ExternalLink } from 'lucide-react'
 import { useToolsStore, Tool } from '@renderer/pages/Tools/tools.store'
 import { canRunTool } from './tool-ui-state'
+import { API_BASE } from '@shared/constants'
+import { getScreenshotArtifactView } from '@renderer/pages/Chat/parts/tool-part'
 
 export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => void }) {
   const { runTool } = useToolsStore()
@@ -74,6 +76,7 @@ export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => v
             {result && !error && (
               <>
                 <div className="runner-status ok"><Check size={13} /> Success</div>
+                <ToolResultSummary toolId={tool.id} result={result} />
                 <div className="runner-output-label">
                   <span>Output</span>
                   <button className="runner-copy" onClick={copy}>{copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Copied' : 'Copy'}</button>
@@ -85,6 +88,42 @@ export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => v
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ToolResultSummary({ toolId, result }: { toolId: string; result: any }) {
+  const artifact = getScreenshotArtifactView(result)
+  const artifactUrl = artifact
+    ? `${API_BASE}/tools/${encodeURIComponent(toolId)}/runs/${encodeURIComponent(artifact.runId)}/artifact`
+    : undefined
+  const diagnostics = result?.diagnostics
+  const attempts = Array.isArray(diagnostics?.attempts) ? diagnostics.attempts.length : 0
+  const provider = typeof result?.provider === 'string' ? result.provider : undefined
+  const rendered = result?.rendered === true ? 'rendered' : result?.rendered === false ? 'static' : undefined
+
+  if (!artifact && !provider && !rendered) return null
+  return (
+    <div className="runner-result-summary">
+      {artifact && (
+        <div className="runner-artifact">
+          {artifactUrl && <img src={artifactUrl} alt="Screenshot artifact preview" className="runner-artifact-preview" />}
+          <div className="runner-artifact-meta">
+            <b>{artifact.provider || 'screenshot'}</b>
+            {artifact.width && artifact.height && <span>{artifact.width} × {artifact.height}px</span>}
+            <span>{artifact.bytes} bytes</span>
+            {artifactUrl && <a href={artifactUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={12} /> Open</a>}
+          </div>
+        </div>
+      )}
+      {(provider || rendered || attempts > 0) && (
+        <div className="runner-diagnostics">
+          {provider && <span>Provider: {provider}</span>}
+          {rendered && <span>Mode: {rendered}</span>}
+          {attempts > 0 && <span>Attempts: {attempts}</span>}
+          {typeof diagnostics?.blockedRequests === 'number' && <span>Blocked requests: {diagnostics.blockedRequests}</span>}
+        </div>
+      )}
     </div>
   )
 }

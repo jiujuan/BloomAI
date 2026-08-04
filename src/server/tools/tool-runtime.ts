@@ -114,6 +114,7 @@ export async function executeToolRuntime(
       allowedRoots,
       signal: controller.signal,
       requestId,
+      toolRunId: run.id,
     }
     executorPromise = Promise.resolve().then(() => definition.execute(parsedInput.data, context)) as Promise<object>
     void executorPromise.catch(() => {})

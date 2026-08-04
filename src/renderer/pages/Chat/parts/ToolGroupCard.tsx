@@ -8,6 +8,8 @@ import {
   summarizeInput,
   summarizeOutput,
   extractResultLinks,
+  getScreenshotArtifactUrl,
+  getScreenshotArtifactView,
 } from './tool-part'
 
 const STATUS_META: Record<ToolStatus, { label: string; icon: React.ReactNode }> = {
@@ -65,6 +67,8 @@ function ToolCallRow({ call, index, multi }: { call: ToolCallView; index: number
   const inputLine = summarizeInput(call.input)
   const outputLine = summarizeOutput(call.output)
   const links = extractResultLinks(call.output)
+  const screenshot = getScreenshotArtifactView(call.output)
+  const screenshotUrl = getScreenshotArtifactUrl(call.name, call.output)
   const permissionMsg = status === 'permission' ? String(call.output?.error || 'Permission required') : undefined
   const softError = status === 'error' && call.output && typeof call.output.error === 'string' ? call.output.error : undefined
   const hardError = call.errorText
@@ -75,6 +79,14 @@ function ToolCallRow({ call, index, multi }: { call: ToolCallView; index: number
       {inputLine && <span className="tcg-call-main">{inputLine}</span>}
       {status === 'running' && <span className="tcg-call-summary"><Loader2 size={10} className="spin" /> running…</span>}
       {outputLine && status === 'success' && <span className="tcg-call-summary">{outputLine}</span>}
+      {call.name.startsWith('web_') && call.output?.rendered === true && status === 'success' && (
+        <span className="tcg-call-summary">rendered</span>
+      )}
+      {screenshot && screenshotUrl && status === 'success' && (
+        <a href={screenshotUrl} target="_blank" rel="noopener noreferrer" className="tcg-screenshot-link" title="Open controlled screenshot artifact">
+          <img src={screenshotUrl} alt="Screenshot artifact" className="tcg-screenshot-thumb" />
+        </a>
+      )}
       {permissionMsg && (
         <span className="tcg-call-permission"><AlertTriangle size={10} /> {permissionMsg}</span>
       )}
