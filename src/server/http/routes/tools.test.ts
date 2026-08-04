@@ -63,10 +63,10 @@ describe('tools route contract', () => {
   it('grants then revokes a tool permission through the stable response shapes', async () => {
     const { app } = await createApp()
     const granted = await requestJson(app, '/tools/permissions/fs_write/grant', {
-      method: 'POST', body: JSON.stringify({ scope: 'persistent' }),
+      method: 'POST', body: JSON.stringify({ scope: 'permanent' }),
     })
     expect(granted.response.status).toBe(200)
-    expect(granted.body.data).toEqual({ tool_id: 'fs_write', granted: true, scope: 'persistent' })
+    expect(granted.body.data).toEqual({ tool_id: 'fs_write', granted: true, scope: 'permanent' })
 
     const revoked = await requestJson(app, '/tools/permissions/fs_write/revoke', { method: 'POST', body: '{}' })
     expect(revoked.response.status).toBe(200)
@@ -74,8 +74,32 @@ describe('tools route contract', () => {
 
     const permissions = await requestJson(app, '/tools/permissions')
     expect(permissions.body.data).toEqual(expect.arrayContaining([
-      expect.objectContaining({ tool_id: 'fs_write', granted: 0, scope: 'persistent' }),
+      expect.objectContaining({ tool_id: 'fs_write', granted: 0, scope: 'permanent' }),
     ]))
+  })
+
+  it('rejects legacy scope values instead of persisting them', async () => {
+    const { app } = await createApp()
+    const result = await requestJson(app, '/tools/permissions/fs_write/grant', {
+      method: 'POST', body: JSON.stringify({ scope: 'session' }),
+    })
+
+    expect(result.response.status).toBe(400)
+    expect(result.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('does not accept approvalGranted in an HTTP run request', async () => {
+    const { app } = await createApp()
+    const result = await requestJson(app, '/tools/fs_write/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        input: { path: 'ignored.txt', content: 'should not run' },
+        approvalGranted: true,
+      }),
+    })
+
+    expect(result.response.status).toBe(400)
+    expect(result.body.error.code).toBe('VALIDATION_ERROR')
   })
 
   it('keeps missing and denied execution errors in the shared HTTP error envelope', async () => {

@@ -3,6 +3,8 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { toolRepo, type Tool } from '../../db/repositories/tool.repo'
 import { executeToolInternal, ToolExecutionError } from '../../tools/execute-tool'
 import { getToolAvailability } from '../../tools/availability'
+import { approvalBroker } from '../../tools/approval-broker'
+import { sessionToolPermissionStore } from '../../tools/session-permission-store'
 import { ImageStudioCapabilityAdapter } from '../adapters/image-studio-capability-adapter'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
@@ -99,7 +101,7 @@ export async function executeCapability(request: CapabilityRequest): Promise<Cap
       throw new CapabilityApprovalRequiredError(`Capability approval has already been used: ${parsed.capability}`)
     }
   } else {
-    requireLegacyToolPermission(tool, parsed.grantContext)
+    requireLegacyToolPermission(tool, parsed.grantContext, parsed.sessionId, parsed.input)
   }
 
   if (parsed.caller === 'package-runtime' && parsed.capability === 'image.generate') {
@@ -126,14 +128,14 @@ export async function executeLegacyToolCapability(data: {
   toolId: string
   input: Record<string, unknown>
   sessionId?: string
-  approvalGranted?: boolean
+  approvalToken?: string
 }): Promise<CapabilityResult> {
   return executeCapability({
     caller: data.caller,
     capability: `tool.${data.toolId}`,
     input: data.input,
     sessionId: data.sessionId,
-    grantContext: data.approvalGranted ? { interactiveApprovalGranted: true } : undefined,
+    grantContext: data.approvalToken ? { approvalToken: data.approvalToken } : undefined,
   })
 }
 
@@ -158,12 +160,31 @@ function requireEnabledTool(toolId: string): Tool {
   return tool
 }
 
-function requireLegacyToolPermission(tool: Tool, grantContext: Record<string, unknown> | undefined): void {
+function requireLegacyToolPermission(
+  tool: Tool,
+  grantContext: Record<string, unknown> | undefined,
+  sessionId: string | undefined,
+  input: Record<string, unknown>,
+): void {
   if (!needsInteractiveApprovalForTool(tool)) return
-  if (grantContext?.interactiveApprovalGranted === true) return
-  if (toolRepo.getPermission(tool.id)?.granted === 1) return
+
+  if (sessionToolPermissionStore.has(tool.id, sessionId)) return
+
+  const permanentPermission = toolRepo.getPermission(tool.id)
+  if (permanentPermission?.granted === 1 && permanentPermission.scope === 'permanent') return
+
+  const approvalToken = typeof grantContext?.approvalToken === 'string' ? grantContext.approvalToken : undefined
+  if (approvalToken && sessionId) {
+    try {
+      approvalBroker.consume(approvalToken, { toolId: tool.id, sessionId, input })
+      return
+    } catch {
+      // Invalid, expired, or already-consumed tokens fall through to the stable approval error.
+    }
+  }
+
   throw new CapabilityApprovalRequiredError(
-    `Permission required: "${tool.id}" needs "${tool.requires_permission}" access. Grant it in Tools settings before retrying.`,
+    `Permission required: "${tool.id}" needs "${tool.requires_permission}" access. Grant it in Tools settings or approve this exact call before retrying.`,
   )
 }
 

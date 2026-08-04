@@ -1,7 +1,9 @@
 import { toolRepo } from '../db/repositories/tool.repo'
 import { CapabilityError, executeLegacyToolCapability } from '../skills/policy/capability-broker'
+import { sessionToolPermissionStore } from '../tools/session-permission-store'
 import { getToolAvailability } from '../tools/availability'
 import { ServiceError } from './errors'
+import { z } from 'zod'
 
 type ToolServiceDependencies = {
   repo: typeof toolRepo
@@ -35,9 +37,16 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     },
 
     grantPermission(id: string, scope?: unknown) {
-      const resolvedScope = typeof scope === 'string' && scope ? scope : 'session'
-      dependencies.repo.grantPermission(id, resolvedScope)
-      return { tool_id: id, granted: true, scope: resolvedScope }
+      const parsed = z.literal('permanent').safeParse(scope ?? 'permanent')
+      if (!parsed.success) throw new ServiceError('VALIDATION_ERROR', 'Only the permanent permission scope can be stored')
+      dependencies.repo.grantPermission(id, parsed.data)
+      return { tool_id: id, granted: true, scope: parsed.data }
+    },
+
+    grantSessionPermission(id: string, sessionId: string, ttlMs?: number) {
+      if (!sessionId.trim()) throw new ServiceError('VALIDATION_ERROR', 'Session id is required for a session permission')
+      sessionToolPermissionStore.grant(id, sessionId, ttlMs)
+      return { tool_id: id, granted: true, scope: 'session', sessionId }
     },
 
     revokePermission(id: string) {
@@ -56,17 +65,27 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
       return dependencies.repo.get(id)
     },
 
-    async run(id: string, input: { input?: unknown, sessionId?: unknown, approvalGranted?: unknown }) {
+    async run(id: string, input: Record<string, unknown>) {
       try {
+        if (Object.prototype.hasOwnProperty.call(input, 'approvalGranted')) {
+          throw new ServiceError('VALIDATION_ERROR', 'approvalGranted is not accepted; use a trusted approval token')
+        }
+        const parsed = z.object({
+          input: z.record(z.unknown()).default({}),
+          sessionId: z.string().min(1).optional(),
+          approvalToken: z.string().min(1).optional(),
+        }).strict().parse(input)
         const result = await dependencies.executeLegacyToolCapability({
           caller: 'http',
           toolId: id,
-          input: isRecord(input.input) ? input.input : {},
-          sessionId: typeof input.sessionId === 'string' ? input.sessionId : undefined,
-          approvalGranted: input.approvalGranted === true,
+          input: parsed.input,
+          sessionId: parsed.sessionId,
+          approvalToken: parsed.approvalToken,
         })
         return { output: result.output, toolRunId: result.toolRunId }
       } catch (error) {
+        if (error instanceof ServiceError) throw error
+        if (error instanceof z.ZodError) throw new ServiceError('VALIDATION_ERROR', error.issues[0]?.message ?? 'Invalid tool request')
         if (error instanceof CapabilityError) throw new ServiceError(error.code, error.message)
         throw new ServiceError('TOOL_ERROR', messageOf(error, 'Tool execution failed'))
       }
@@ -76,10 +95,6 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
       return dependencies.repo.listRuns(id, limit)
     },
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 function messageOf(error: unknown, fallback: string): string {

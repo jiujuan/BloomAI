@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld('bloomai', {
 
   // Dialog
   saveImage: (srcUrl: string, defaultName: string) => ipcRenderer.invoke(IPC_CHANNELS.saveImage, srcUrl, defaultName),
+  requestToolApproval: (intent: { toolId: string; sessionId: string; input: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.toolRequestApproval, intent),
 })
