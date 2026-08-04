@@ -59,7 +59,24 @@ describe('tool availability', () => {
     expect(tools).not.toHaveProperty('web_screenshot')
     expect(tools).not.toHaveProperty('ocr')
     expect(tools).not.toHaveProperty('image_edit')
+    expect(tools).not.toHaveProperty('node_runner')
+    expect(tools).not.toHaveProperty('python_runner')
+    expect(tools).not.toHaveProperty('shell')
     expect(tools).toHaveProperty('web_search')
+  })
+
+  it('keeps execution tools disabled until C2 isolation acceptance', async () => {
+    const { getToolAvailability } = await loadRuntime()
+    const { getToolContract } = await import('./contracts')
+    const { assertPythonPackagesDisabled, getPythonCommand } = await import('./python-runner')
+
+    expect(getToolAvailability('node_runner')).toMatchObject({ status: 'disabled' })
+    expect(getToolAvailability('python_runner')).toMatchObject({ status: 'disabled' })
+    expect(getToolAvailability('shell')).toMatchObject({ status: 'disabled' })
+    expect(getToolContract('node_runner')?.description).toContain('not an OS sandbox')
+    expect(() => assertPythonPackagesDisabled(['requests'])).toThrow(/installation is disabled/)
+    expect(getPythonCommand('win32')).toBe('python')
+    expect(getPythonCommand('linux')).toBe('python3')
   })
 
   it('uses the exact shared input and output contracts in Mastra and the database projection', async () => {
