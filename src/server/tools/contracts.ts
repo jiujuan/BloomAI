@@ -217,6 +217,16 @@ export const toolContracts = {
       description: z.string().optional(),
       truncated: z.boolean().optional(),
       rendered: z.boolean().optional(),
+      provider: z.enum(['static_http', 'playwright_legacy', 'agent_browser']).optional(),
+      diagnostics: z.object({
+        attempts: z.array(z.object({
+          provider: z.string(),
+          outcome: z.string(),
+          reason: z.string().optional(),
+          durationMs: z.number().optional(),
+        }).passthrough()),
+        blockedRequests: z.number().int().nonnegative().optional(),
+      }).passthrough().optional(),
     }),
     getAvailability: async () => getToolAvailability('web_fetch'),
   },

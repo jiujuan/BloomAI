@@ -89,6 +89,8 @@ export class AgentBrowserProvider implements WebPageProvider, WebScreenshotProvi
           finalUrl: navigation.finalUrl,
           status: navigation.status,
           charset: 'utf-8',
+          contentType: 'text/html; charset=utf-8',
+          truncated: false,
           rendered: true,
           provider: 'agent_browser',
           diagnostics: {
