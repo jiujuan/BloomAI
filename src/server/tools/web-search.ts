@@ -1,11 +1,20 @@
 import { readConfigValue } from '../config/config'
 import { AgentBrowserSearchProvider } from './web/agent-browser-search-provider'
+import { createAnySearchSearchProvider } from './web/anysearch-search-provider'
 import { getWebRoutingPolicy } from './web/config'
 import type { WebSearchOutput, WebSearchRequest } from './web/contracts'
 import { createSearchProviderRouter } from './web/search-provider-router'
 import type { ToolExecutionContext, ToolExecutor } from './types'
 
-type WebSearchInput = { query: string; limit?: number }
+type WebSearchInput = {
+  query: string
+  limit?: number
+  tag?: string
+  zone?: 'cn' | 'intl'
+  language?: string
+  params?: Record<string, unknown>
+  format?: 'json' | 'markdown'
+}
 export type { WebSearchOutput }
 
 type SearchDebugContext = {
@@ -16,6 +25,7 @@ type SearchDebugContext = {
 }
 
 const TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
+const ANYSEARCH_TIMEOUT_MS = 8000
 const DUCKDUCKGO_TIMEOUT_MS = 5000
 const TAVILY_TIMEOUT_MS = 8000
 
@@ -33,6 +43,14 @@ function getTavilyApiKey(): string {
   return readConfigValue('TAVILY_API_KEY').value
 }
 
+function getAnySearchApiKey(): string {
+  return readConfigValue('ANYSEARCH_API_KEY').value
+}
+
+function getAnySearchSearchUrl(): string {
+  return readConfigValue('ANYSEARCH_SEARCH_URL_API').value
+}
+
 export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = async (input, context: ToolExecutionContext) => {
   const startedAt = Date.now()
   const { query, limit = 8 } = input
@@ -46,12 +64,22 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
 
   console.log('[web_search] start', {
     ...debugContext,
+    anysearchConfigured: Boolean(getAnySearchSearchUrl()),
     tavilyConfigured: Boolean(getTavilyApiKey()),
-    preferredProvider: 'tavily',
-    fallbackProvider: 'duckduckgo',
+    preferredProvider: 'anysearch',
+    fallbackProviders: ['tavily', 'duckduckgo'],
   })
 
+  const anysearchSearchUrl = getAnySearchSearchUrl()
+  const anysearchApiKey = getAnySearchApiKey()
   const tavilyApiKey = getTavilyApiKey()
+  if (!anysearchSearchUrl) {
+    console.warn('[web_search] provider skipped', {
+      ...debugContext,
+      provider: 'anysearch',
+      reason: 'ANYSEARCH_SEARCH_URL_API is not configured',
+    })
+  }
   if (!tavilyApiKey) {
     console.warn('[web_search] provider skipped', {
       ...debugContext,
@@ -71,8 +99,16 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
     : undefined
 
   try {
+    const anysearchProvider = anysearchSearchUrl
+      ? createAnySearchSearchProvider({
+          endpoint: anysearchSearchUrl,
+          apiKey: anysearchApiKey,
+          timeoutMs: ANYSEARCH_TIMEOUT_MS,
+        })
+      : undefined
     const router = createSearchProviderRouter({
       routingPolicy,
+      ...(anysearchProvider ? { anysearch: (request: WebSearchRequest) => anysearchProvider.search(request) } : {}),
       ...(tavilyApiKey ? {
         tavily: (request: WebSearchRequest) => searchWithTavily({
           query: request.query,
@@ -92,7 +128,16 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
       }),
       ...(browserProviderFactory ? { agentBrowser: browserProviderFactory } : {}),
     })
-    const output = await router.search({ query, limit, signal: context.signal })
+    const output = await router.search({
+      query,
+      limit,
+      signal: context.signal,
+      ...(input.tag ? { tag: input.tag } : {}),
+      ...(input.zone ? { zone: input.zone } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      ...(input.params ? { params: input.params } : {}),
+      ...(input.format ? { format: input.format } : {}),
+    })
     console.log('[web_search] done', {
       ...debugContext,
       provider: output.provider,

@@ -24,6 +24,73 @@ function browserProvider(search: WebSearchProvider['search']): WebSearchProvider
 }
 
 describe('SearchProviderRouter browser fallback', () => {
+  it('tries AnySearch before Tavily and DuckDuckGo', async () => {
+    const anysearch = vi.fn(async () => output('anysearch', [result(1)]))
+    const tavily = vi.fn(async () => output('tavily', [result(2)]))
+    const duckduckgo = vi.fn(async () => output('duckduckgo', [result(3)]))
+
+    const actual = await createSearchProviderRouter({
+      anysearch,
+      tavily,
+      duckduckgo,
+      routingPolicy: { preference: 'auto', browserEnabled: false, allowSearchFallback: false },
+    }).search({ query: 'provider order', limit: 8 })
+
+    expect(actual.provider).toBe('anysearch')
+    expect(anysearch).toHaveBeenCalledTimes(1)
+    expect(tavily).not.toHaveBeenCalled()
+    expect(duckduckgo).not.toHaveBeenCalled()
+  })
+
+  it('passes AnySearch failure metadata through Tavily to DuckDuckGo', async () => {
+    const anysearch = vi.fn(async () => { throw new Error('AnySearch unavailable') })
+    const tavily = vi.fn(async (request) => {
+      expect(request).toMatchObject({ fallbackFrom: 'anysearch', fallbackReason: 'AnySearch unavailable' })
+      return output('tavily')
+    })
+    const duckduckgo = vi.fn(async (request) => {
+      expect(request).toMatchObject({ fallbackFrom: 'tavily', fallbackReason: 'Tavily returned no usable results' })
+      return output('duckduckgo', [result(1)])
+    })
+
+    const actual = await createSearchProviderRouter({
+      anysearch,
+      tavily,
+      duckduckgo,
+      routingPolicy: { preference: 'auto', browserEnabled: false, allowSearchFallback: false },
+    }).search({ query: 'provider fallback', limit: 8 })
+
+    expect(actual).toMatchObject({
+      provider: 'duckduckgo',
+      fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily returned no usable results',
+    })
+    expect(anysearch).toHaveBeenCalledTimes(1)
+    expect(tavily).toHaveBeenCalledTimes(1)
+    expect(duckduckgo).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports the last failed provider when an earlier provider returned no results', async () => {
+    const anysearch = vi.fn(async () => output('anysearch'))
+    const tavily = vi.fn(async () => output('tavily'))
+    const duckduckgo = vi.fn(async () => { throw new Error('DuckDuckGo unavailable') })
+
+    const actual = await createSearchProviderRouter({
+      anysearch,
+      tavily,
+      duckduckgo,
+      routingPolicy: { preference: 'auto', browserEnabled: false, allowSearchFallback: false },
+    }).search({ query: 'last failure', limit: 8 })
+
+    expect(actual).toMatchObject({
+      provider: 'duckduckgo',
+      total: 0,
+      error: 'DuckDuckGo unavailable',
+      fallbackFrom: 'tavily',
+      fallbackReason: 'Tavily returned no usable results',
+    })
+  })
+
   it('keeps Tavily as the first provider and never constructs a browser search', async () => {
     const tavily = vi.fn(async () => output('tavily', [result(1)]))
     const duckduckgo = vi.fn(async () => output('duckduckgo', [result(2)]))

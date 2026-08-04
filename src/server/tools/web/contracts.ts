@@ -83,7 +83,8 @@ export interface WebScreenshotProvider {
   checkAvailability?(): Promise<WebProviderAvailability>
 }
 
-export type WebSearchProviderId = 'tavily' | 'duckduckgo' | 'agent_browser_serp'
+export type WebSearchProviderId = 'anysearch' | 'tavily' | 'duckduckgo' | 'agent_browser_serp'
+export type WebSearchFallbackProviderId = Exclude<WebSearchProviderId, 'agent_browser_serp'>
 
 export type WebSearchResult = {
   title: string
@@ -95,7 +96,12 @@ export type WebSearchRequest = {
   query: string
   limit: number
   signal?: AbortSignal
-  fallbackFrom?: Exclude<WebSearchProviderId, 'agent_browser_serp'>
+  tag?: string
+  zone?: 'cn' | 'intl'
+  language?: string
+  params?: Record<string, unknown>
+  format?: 'json' | 'markdown'
+  fallbackFrom?: WebSearchFallbackProviderId
   fallbackReason?: string
 }
 
@@ -104,7 +110,7 @@ export type WebSearchOutput = {
   total: number
   results: WebSearchResult[]
   provider?: WebSearchProviderId
-  fallbackFrom?: Exclude<WebSearchProviderId, 'agent_browser_serp'>
+  fallbackFrom?: WebSearchFallbackProviderId
   fallbackReason?: string
   error?: string
   errorCode?: 'WEB_SEARCH_SERP_BLOCKED'
