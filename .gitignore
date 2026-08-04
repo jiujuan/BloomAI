@@ -1,6 +1,9 @@
 node_modules/
 dist/
 dist-electron/
+release/
+release-t12/
+release-t12-verify/
 *.db
 .env.local
 .env

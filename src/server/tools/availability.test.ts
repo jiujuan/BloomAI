@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
 
-async function loadRuntime() {
+async function loadRuntime(runtimeDataDir = dataDir) {
   vi.resetModules()
-  process.env.DATA_DIR = dataDir
+  process.env.DATA_DIR = runtimeDataDir
   const client = await import('../db/client')
   await client.runMigrations()
   const { toolRepo } = await import('../db/repositories/tool.repo')
@@ -20,6 +20,7 @@ async function loadRuntime() {
 describe('tool availability', () => {
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-tool-availability-'))
+    fs.mkdirSync(path.join(dataDir, 'tool-artifacts', 'web-screenshot'), { recursive: true })
     originalEnv = { ...process.env }
   })
 
@@ -66,7 +67,7 @@ describe('tool availability', () => {
     fs.writeFileSync(artifactDataDir, 'not a directory')
     process.env.DATA_DIR = artifactDataDir
     vi.resetModules()
-    const reloaded = await loadRuntime()
+    const reloaded = await loadRuntime(artifactDataDir)
     expect(reloaded.getToolAvailability('web_screenshot')).toEqual({
       status: 'configuration_missing',
       setting: 'artifact_dir',

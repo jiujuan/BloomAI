@@ -75,8 +75,8 @@ export class WebPageProviderRouter {
   }
 
   async close(): Promise<void> {
-    const close = (this.browserProvider as WebPageProvider & { close?: () => Promise<void> }).close
-    await close?.()
+    const provider = this.browserProvider as WebPageProvider & { close?: () => Promise<void> }
+    await provider.close?.()
   }
 
   private async loadStatic(request: WebPageLoadRequest): Promise<WebLoadedPage> {

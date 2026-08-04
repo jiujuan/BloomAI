@@ -14,7 +14,12 @@ type RawSqliteDb = {
   }
 }
 
-const migrationsDir = path.resolve(process.cwd(), 'scripts', 'migrations')
+const migrationDirCandidates = [
+  path.resolve(process.cwd(), 'scripts', 'migrations'),
+  path.resolve(__dirname, '../../scripts', 'migrations'),
+  path.resolve(__dirname, '../../../scripts', 'migrations'),
+]
+const migrationsDir = migrationDirCandidates.find((candidate) => fs.existsSync(candidate)) ?? migrationDirCandidates[0]
 
 export function loadSqlMigrations(dir = migrationsDir): SqlMigration[] {
   if (!fs.existsSync(dir)) return []

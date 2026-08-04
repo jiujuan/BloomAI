@@ -188,6 +188,18 @@ export class AgentBrowserProvider implements WebPageProvider, WebScreenshotProvi
     await browser?.close().catch(() => {})
   }
 
+  get activeContextCount(): number {
+    return this.pool.activeCount
+  }
+
+  get peakActiveContextCount(): number {
+    return this.pool.peakActiveCount
+  }
+
+  get maxContextConcurrency(): number {
+    return this.config.maxConcurrency
+  }
+
   private async getBrowser(): Promise<Browser> {
     await this.idleClosePromise?.catch(() => {})
     if (!this.config.enabled) {

@@ -3,6 +3,23 @@ import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import path from 'path'
+import { builtinModules } from 'node:module'
+
+const localAliases = ['@main/', '@preload/', '@renderer/', '@server/', '@shared/']
+const aliases = {
+  '@main': path.resolve(__dirname, 'src/main'),
+  '@preload': path.resolve(__dirname, 'src/preload'),
+  '@renderer': path.resolve(__dirname, 'src/renderer'),
+  '@server': path.resolve(__dirname, 'src/server'),
+  '@shared': path.resolve(__dirname, 'src/shared'),
+}
+
+function externalizeServerDependencies(id: string): boolean {
+  if (id.startsWith('node:') || builtinModules.includes(id) || id === 'electron') return true
+  if (id.startsWith('.') || path.isAbsolute(id)) return false
+  if (localAliases.some((alias) => id.startsWith(alias))) return false
+  return true
+}
 
 export default defineConfig({
   root: __dirname,
@@ -22,17 +39,29 @@ export default defineConfig({
           build: { outDir: 'dist-electron', sourcemap: false },
         },
       },
+      {
+        entry: { server: 'src/server/index.ts' },
+        vite: {
+          resolve: { alias: aliases },
+          build: {
+            outDir: 'dist-electron/server',
+            sourcemap: false,
+            lib: {
+              entry: 'src/server/index.ts',
+              formats: ['cjs'],
+              fileName: () => 'index.js',
+            },
+            rollupOptions: {
+              external: externalizeServerDependencies,
+            },
+          },
+        },
+      },
     ]),
     renderer(),
   ],
   resolve: {
-    alias: {
-      '@main': path.resolve(__dirname, 'src/main'),
-      '@preload': path.resolve(__dirname, 'src/preload'),
-      '@renderer': path.resolve(__dirname, 'src/renderer'),
-      '@server': path.resolve(__dirname, 'src/server'),
-      '@shared': path.resolve(__dirname, 'src/shared'),
-    },
+    alias: aliases,
   },
   build: {
     outDir: 'dist',

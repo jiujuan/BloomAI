@@ -14,7 +14,9 @@
     "start:server": "tsx src/server/index.ts",
     "test:architecture": "vitest run src/server/architecture/dependency-boundaries.test.ts",
     "test:web-tools-browser": "vitest run src/server/tools/web/agent-browser-poc.test.ts",
-    "verify:web-tools-browser": "tsx scripts/verify-web-tools-agent-browser.ts"
+    "verify:web-tools-browser": "tsx scripts/verify-web-tools-agent-browser.ts",
+    "baseline:web-tools-browser": "tsx scripts/measure-web-tools-baseline.ts",
+    "verify:web-tools-release": "npm run typecheck && npm test && npm run build && npm run verify:web-tools-browser && npm run baseline:web-tools-browser"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.91",
@@ -76,6 +78,15 @@
   "build": {
     "appId": "com.bloomai.app",
     "productName": "BloomAI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "scripts/migrations/**/*",
+      "package.json"
+    ],
     "asar": true,
     "asarUnpack": [
       "**/node_modules/playwright-core/**",
