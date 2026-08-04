@@ -8,6 +8,7 @@ import { getWebBrowserConfig, type WebBrowserConfig } from './config'
 import type {
   WebLoadedPage,
   WebPageLoadRequest,
+  WebPageProvider,
   WebProviderAvailability,
   WebScreenshotProvider,
   WebScreenshotRequest,
@@ -26,13 +27,14 @@ export type AgentBrowserProviderOptions = {
   validateUrl?: UrlValidator
 }
 
-export class AgentBrowserProvider implements WebScreenshotProvider {
+export class AgentBrowserProvider implements WebPageProvider, WebScreenshotProvider {
   readonly id = 'agent_browser' as const
   private readonly config: WebBrowserConfig
   private readonly launch: BrowserLauncher
   private readonly validateUrl: UrlValidator
   private browserPromise: Promise<Browser> | undefined
   private readonly pool: BrowserSessionPool<BrowserContext>
+  private idleClosePromise: Promise<void> | undefined
 
   constructor(options: AgentBrowserProviderOptions = {}) {
     this.config = options.config ?? getWebBrowserConfig()
@@ -47,7 +49,12 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
           ...(getProxyUrl() ? { proxy: { server: getProxyUrl() } } : {}),
         })
       },
-      this.config.maxConcurrency,
+      {
+        maxConcurrency: this.config.maxConcurrency,
+        queueTimeoutMs: this.config.queueTimeoutMs,
+        idleTimeoutMs: this.config.idleTimeoutMs,
+        onIdle: () => this.closeIdleBrowser(),
+      },
     )
   }
 
@@ -57,7 +64,8 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
       const browser = await this.getBrowser()
       return { available: browser.isConnected(), reason: browser.isConnected() ? undefined : 'browser disconnected' }
     } catch (error) {
-      return { available: false, reason: error instanceof Error ? error.message : String(error) }
+      const reason = error instanceof Error ? error.message : String(error)
+      return { available: false, reason: reason.replace(/^WEB_BROWSER_[A-Z_]+:\s*/, '') }
     }
   }
 
@@ -71,14 +79,15 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
     let blockedRequests = 0
     try {
       page = await session.context.newPage()
+      throwIfAborted(request.signal)
       const detachAbort = closePageOnAbort(page, request.signal)
       try {
-        const finalUrl = await this.navigate(page, request, (count) => { blockedRequests += count })
+        const navigation = await this.navigate(page, request, (count) => { blockedRequests += count })
         const html = await page.content()
         return {
           html,
-          finalUrl,
-          status: 200,
+          finalUrl: navigation.finalUrl,
+          status: navigation.status,
           charset: 'utf-8',
           rendered: true,
           provider: 'agent_browser',
@@ -114,10 +123,11 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
     let blockedRequests = 0
     try {
       page = await session.context.newPage()
+      throwIfAborted(request.signal)
       await page.setViewportSize(request.viewport)
       const detachAbort = closePageOnAbort(page, request.signal)
       try {
-        const finalUrl = await this.navigate(page, {
+        const navigation = await this.navigate(page, {
           url: request.url,
           timeoutMs: request.timeoutMs,
           signal: request.signal,
@@ -144,7 +154,7 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
           mimeType: request.format === 'jpeg' ? 'image/jpeg' : 'image/png',
           width: request.viewport.width,
           height,
-          finalUrl,
+          finalUrl: navigation.finalUrl,
           provider: 'agent_browser',
           diagnostics: {
             attempts: [{
@@ -168,13 +178,16 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
   }
 
   async close(): Promise<void> {
+    await this.idleClosePromise?.catch(() => {})
     await this.pool.close()
     const browser = await this.browserPromise?.catch(() => undefined)
+    this.idleClosePromise = undefined
     this.browserPromise = undefined
     await browser?.close().catch(() => {})
   }
 
   private async getBrowser(): Promise<Browser> {
+    await this.idleClosePromise?.catch(() => {})
     if (!this.config.enabled) {
       throw new WebBrowserError('WEB_BROWSER_DISABLED', 'browser provider is disabled by configuration')
     }
@@ -196,7 +209,7 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
     page: Page,
     request: Pick<WebPageLoadRequest, 'url' | 'timeoutMs' | 'signal' | 'waitUntil' | 'waitSelector'>,
     onBlocked?: (count: number) => void,
-  ): Promise<string> {
+  ): Promise<{ finalUrl: string; status: number }> {
     const timeoutMs = Math.min(request.timeoutMs ?? this.config.timeoutMs, this.config.timeoutMs)
     throwIfAborted(request.signal)
     try {
@@ -217,9 +230,10 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
       throwIfAborted(request.signal)
       const finalUrl = (await this.validateUrl(page.url())).toString()
       onBlocked?.(blocked)
-      return finalUrl
-        || response?.url()
-        || request.url
+      return {
+        finalUrl: finalUrl || response?.url() || request.url,
+        status: response?.status() ?? 200,
+      }
     } catch (error) {
       if (error instanceof WebBrowserError) throw error
       if (error instanceof Error && error.message.toLowerCase().includes('unsafe external url')) {
@@ -227,6 +241,20 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
       }
       throw mapBrowserError(error, request.signal)
     }
+  }
+
+  private closeIdleBrowser(): Promise<void> {
+    if (this.idleClosePromise) return this.idleClosePromise
+    this.idleClosePromise = (async () => {
+      if (this.pool.activeCount !== 0) return
+      const browser = await this.browserPromise?.catch(() => undefined)
+      if (!browser || this.pool.activeCount !== 0) return
+      this.browserPromise = undefined
+      await browser.close().catch(() => {})
+    })().finally(() => {
+      this.idleClosePromise = undefined
+    })
+    return this.idleClosePromise
   }
 }
 

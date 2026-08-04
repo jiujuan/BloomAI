@@ -371,11 +371,11 @@ captureScreenshot(request, context) => {
 
 ### Done when
 
-- [ ] AgentBrowser 只存在于 Adapter 层，未直接注册给 Chat Agent。
-- [ ] Adapter 有稳定 availability 与错误码。
-- [ ] 浏览器生命周期可以复用且可在 shutdown 时完全关闭。
-- [ ] URL guard 与 AbortSignal 在导航和截图路径均生效。
-- [ ] 并发、排队、idle 和取消全部有自动化测试。
+- [x] AgentBrowser 只存在于 Adapter 层，未直接注册给 Chat Agent。
+- [x] Adapter 有稳定 availability 与错误码。
+- [x] 浏览器生命周期可以复用且可在 shutdown 时完全关闭。
+- [x] URL guard 与 AbortSignal 在导航和截图路径均生效。
+- [x] 并发、排队、idle 和取消全部有自动化测试。
 
 ### 依赖与回滚
 

@@ -9,6 +9,14 @@ type Waiter<T extends ClosableContext> = {
   resolve: (value: BrowserSession<T>) => void
   reject: (reason: unknown) => void
   onAbort?: () => void
+  timeout?: ReturnType<typeof setTimeout>
+}
+
+export type BrowserSessionPoolOptions = {
+  maxConcurrency?: number
+  queueTimeoutMs?: number
+  idleTimeoutMs?: number
+  onIdle?: () => void | Promise<void>
 }
 
 export type BrowserSession<T extends ClosableContext> = {
@@ -21,20 +29,40 @@ export class BrowserSessionPool<T extends ClosableContext> {
   private readonly waiters: Waiter<T>[] = []
   private readonly activeContexts = new Set<T>()
   private readonly closedContexts = new Set<T>()
+  private idleTimer: ReturnType<typeof setTimeout> | undefined
   private closed = false
 
   constructor(
     private readonly createContext: ContextFactory<T>,
-    private readonly maxConcurrency = 2,
+    maxConcurrencyOrOptions: number | BrowserSessionPoolOptions = 2,
   ) {
-    if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    const options = typeof maxConcurrencyOrOptions === 'number'
+      ? { maxConcurrency: maxConcurrencyOrOptions }
+      : maxConcurrencyOrOptions
+    this.maxConcurrency = options.maxConcurrency ?? 2
+    this.queueTimeoutMs = options.queueTimeoutMs ?? 5_000
+    this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000
+    this.onIdle = options.onIdle
+    if (!Number.isInteger(this.maxConcurrency) || this.maxConcurrency < 1) {
       throw new Error('Browser session pool concurrency must be a positive integer')
+    }
+    if (!Number.isInteger(this.queueTimeoutMs) || this.queueTimeoutMs < 0) {
+      throw new Error('Browser session pool queue timeout must be a non-negative integer')
+    }
+    if (!Number.isInteger(this.idleTimeoutMs) || this.idleTimeoutMs < 0) {
+      throw new Error('Browser session pool idle timeout must be a non-negative integer')
     }
   }
 
+  private readonly maxConcurrency: number
+  private readonly queueTimeoutMs: number
+  private readonly idleTimeoutMs: number
+  private readonly onIdle?: () => void | Promise<void>
+
   async acquire(signal?: AbortSignal): Promise<BrowserSession<T>> {
-    if (this.closed) throw new Error('Browser session pool is closed')
+    if (this.closed) throw new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed')
     if (signal?.aborted) throw signal.reason ?? new Error('Browser session acquisition cancelled')
+    this.clearIdleTimer()
     if (this.active < this.maxConcurrency) return this.createSession(signal)
 
     return new Promise<BrowserSession<T>>((resolve, reject) => {
@@ -42,22 +70,31 @@ export class BrowserSessionPool<T extends ClosableContext> {
       waiter.onAbort = () => {
         const index = this.waiters.indexOf(waiter)
         if (index >= 0) this.waiters.splice(index, 1)
+        this.clearWaiter(waiter)
         reject(signal?.reason ?? new Error('Browser session acquisition cancelled'))
       }
       signal?.addEventListener('abort', waiter.onAbort, { once: true })
       this.waiters.push(waiter)
+      if (this.queueTimeoutMs > 0) {
+        waiter.timeout = setTimeout(() => {
+          const index = this.waiters.indexOf(waiter)
+          if (index >= 0) this.waiters.splice(index, 1)
+          this.clearWaiter(waiter)
+          reject(new Error('WEB_BROWSER_QUEUE_TIMEOUT: browser session queue timed out'))
+        }, this.queueTimeoutMs)
+      }
     })
   }
 
   private async createSession(signal?: AbortSignal): Promise<BrowserSession<T>> {
-    if (this.closed) throw new Error('Browser session pool is closed')
+    if (this.closed) throw new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed')
     if (signal?.aborted) throw signal.reason ?? new Error('Browser session acquisition cancelled')
     this.active += 1
     try {
       const context = await this.createContext()
       if (this.closed) {
         await Promise.resolve(context.close()).catch(() => {})
-        throw new Error('Browser session pool is closed')
+        throw new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed')
       }
       this.activeContexts.add(context)
       let released = false
@@ -72,11 +109,13 @@ export class BrowserSessionPool<T extends ClosableContext> {
           }
           this.active -= 1
           this.dispatchNext()
+          this.scheduleIdleClose()
         },
       }
     } catch (error) {
       this.active -= 1
       this.dispatchNext()
+      this.scheduleIdleClose()
       throw error
     }
   }
@@ -85,7 +124,7 @@ export class BrowserSessionPool<T extends ClosableContext> {
     if (this.closed) return
     while (this.active < this.maxConcurrency && this.waiters.length > 0) {
       const waiter = this.waiters.shift()!
-      waiter.signal?.removeEventListener('abort', waiter.onAbort!)
+      this.clearWaiter(waiter)
       if (waiter.signal?.aborted) {
         waiter.reject(waiter.signal.reason ?? new Error('Browser session acquisition cancelled'))
         continue
@@ -95,13 +134,39 @@ export class BrowserSessionPool<T extends ClosableContext> {
     }
   }
 
+  private clearWaiter(waiter: Waiter<T>): void {
+    waiter.signal?.removeEventListener('abort', waiter.onAbort!)
+    if (waiter.timeout) clearTimeout(waiter.timeout)
+    waiter.timeout = undefined
+  }
+
+  private scheduleIdleClose(): void {
+    if (this.closed || this.active !== 0 || this.waiters.length !== 0 || !this.onIdle || this.idleTimeoutMs === 0) return
+    this.clearIdleTimer()
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined
+      void Promise.resolve(this.onIdle?.()).catch(() => {})
+    }, this.idleTimeoutMs)
+  }
+
+  private clearIdleTimer(): void {
+    if (!this.idleTimer) return
+    clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
+  }
+
+  get activeCount(): number {
+    return this.active
+  }
+
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.clearIdleTimer()
     const waiters = this.waiters.splice(0)
     for (const waiter of waiters) {
-      waiter.signal?.removeEventListener('abort', waiter.onAbort!)
-      waiter.reject(new Error('Browser session pool is closed'))
+      this.clearWaiter(waiter)
+      waiter.reject(new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed'))
     }
     const contexts = [...this.activeContexts]
     await Promise.all(contexts.map(async (context) => {
