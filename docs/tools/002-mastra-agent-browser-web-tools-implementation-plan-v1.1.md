@@ -113,7 +113,7 @@ POC 必须实际调用 AgentBrowser 当前版本支持的公开 API。若 SDK �
 
 - [x] `@mastra/agent-browser` 已锁定并与现有 Mastra runtime 无 peer dependency 冲突。
 - [x] 已确认并记录生产调用方式（本地 Chromium 或受控 CDP）。
-- [ ] 开发与 Electron 打包环境都能打开 fixture 并生成截图。开发环境已通过；Electron 安装包 smoke 留到 T12 发布门禁补齐。
+- [x] 开发与 Electron 安装包环境都能打开 fixture 并生成截图。开发 fixture、Electron 目录包、portable 包和 NSIS 安装器 smoke 均已通过，详见 `agent-browser-release-evidence-v1.1.md`。
 - [x] 依赖缺失时能映射为稳定错误，而不是 silent fallback。
 - [x] 不需要修改任何现有 `web_*` Tool ID。
 
@@ -182,10 +182,10 @@ export interface WebLoadedPage {
 
 ### Done when
 
-- [ ] Provider 接口、结果对象和诊断对象只有一个定义来源。
-- [ ] 配置具有严格 schema 和安全默认值。
-- [ ] Router 能解释“为何尝试、为何跳过、为何回退”。
-- [ ] 现有工具调用不因新增配置字段而改变请求格式。
+- [x] Provider 接口、结果对象和诊断对象只有一个定义来源。
+- [x] 配置具有严格 schema 和安全默认值。
+- [x] Router 能解释“为何尝试、为何跳过、为何回退”。
+- [x] 现有工具调用不因新增配置字段而改变请求格式。
 
 ### 依赖与回滚
 
@@ -238,11 +238,11 @@ export interface WebLoadedPage {
 
 ### Done when
 
-- [ ] 四个 Web Tool 都不能访问不安全初始 URL。
-- [ ] 静态与浏览器重定向都无法绕过策略。
-- [ ] 浏览器子资源同样受网络守卫约束。
-- [ ] `content-service.ts` 不再维护一套独立的 IP 分类实现。
-- [ ] 超大响应改为流式中断而不是 `arrayBuffer()` 后截断。
+- [x] 四个 Web Tool 都不能访问不安全初始 URL。
+- [x] 静态与浏览器重定向都无法绕过策略。
+- [x] 浏览器子资源同样受网络守卫约束。
+- [x] `content-service.ts` 不再维护一套独立的 IP 分类实现。
+- [x] 超大响应改为流式中断而不是 `arrayBuffer()` 后截断。
 
 ### 依赖与回滚
 
@@ -302,10 +302,10 @@ type ToolRunFailureKind = 'timeout' | 'cancelled' | 'failed'
 
 ### Done when
 
-- [ ] `ToolExecutionContext` 始终携带 `AbortSignal`。
-- [ ] tool timeout 会 abort executor，而不仅仅拒绝外层 Promise。
-- [ ] HTTP、Chat、Deep Research 可将上游取消传入 Tool Runtime。
-- [ ] timeout、cancelled、failed 在审计和调用方语义上可区分。
+- [x] `ToolExecutionContext` 始终携带 `AbortSignal`。
+- [x] tool timeout 会 abort executor，而不仅仅拒绝外层 Promise。
+- [x] HTTP、Chat、Deep Research 可将上游取消传入 Tool Runtime。
+- [x] timeout、cancelled、failed 在审计和调用方语义上可区分。
 
 ### 依赖与回滚
 
@@ -450,11 +450,11 @@ type WebScreenshotOutput = {
 
 ### Done when
 
-- [ ] `web_screenshot` 不再返回占位 `note`。
-- [ ] 截图使用 AgentBrowser Provider 并经过 URL guard。
-- [ ] artifact、像素和容量边界可验证。
-- [ ] 在开发和打包 Electron 环境均完成真实截图。
-- [ ] 未配置依赖时工具不会伪装为可用。
+- [x] `web_screenshot` 不再返回占位 `note`。
+- [x] 截图使用 AgentBrowser Provider 并经过 URL guard。
+- [x] artifact、像素和容量边界可验证。
+- [x] 在开发和 Electron 安装包环境均完成真实截图。开发环境、目录包、portable 包和 NSIS 安装器 smoke 均已通过。
+- [x] 未配置依赖时工具不会伪装为可用。
 
 ### 依赖与回滚
 
@@ -513,11 +513,11 @@ type WebScreenshotOutput = {
 
 ### Done when
 
-- [ ] `web_fetch` 不再直接调用旧 `loadPage()` 中的隐式渲染逻辑。
-- [ ] 旧输入保持可用，`render` 三种语义可测试。
-- [ ] 自动模式只在明确条件下启动浏览器。
-- [ ] 静态成功内容不会因浏览器失败丢失。
-- [ ] 取消、URL Policy、并发池和诊断贯通。
+- [x] `web_fetch` 不再直接调用旧 `loadPage()` 中的隐式渲染逻辑。
+- [x] 旧输入保持可用，`render` 三种语义可测试。
+- [x] 自动模式只在明确条件下启动浏览器。
+- [x] 静态成功内容不会因浏览器失败丢失。
+- [x] 取消、URL Policy、并发池和诊断贯通。
 
 ### 依赖与回滚
 
@@ -565,10 +565,10 @@ type WebScreenshotOutput = {
 
 ### Done when
 
-- [ ] `web_extract` 使用与 `web_fetch` 相同的 Provider Router。
-- [ ] JS 页面可抽取出渲染后的结构化内容。
-- [ ] 现有 metadata 和链接行为无回归。
-- [ ] 质量判断和结果选择有可测试理由。
+- [x] `web_extract` 使用与 `web_fetch` 相同的 Provider Router。
+- [x] JS 页面可抽取出渲染后的结构化内容。
+- [x] 现有 metadata 和链接行为无回归。
+- [x] 质量判断和结果选择有可测试理由。
 
 ### 依赖与回滚
 
@@ -625,10 +625,10 @@ type WebScreenshotOutput = {
 
 ### Done when
 
-- [ ] Deep Research 仅对符合条件的来源尝试浏览器。
-- [ ] 每个来源最多一次，整次研究受独立额度限制。
-- [ ] 取消、deadline、URL Policy 与 Tool Runtime signal 完整传递。
-- [ ] 浏览器结果改善内容时能被 snapshot 使用，失败时保留原始诊断。
+- [x] Deep Research 仅对符合条件的来源尝试浏览器。
+- [x] 每个来源最多一次，整次研究受独立额度限制。
+- [x] 取消、deadline、URL Policy 与 Tool Runtime signal 完整传递。
+- [x] 浏览器结果改善内容时能被 snapshot 使用，失败时保留原始诊断。
 
 ### 依赖与回滚
 
@@ -693,10 +693,10 @@ type WebSearchOutput = {
 
 ### Done when
 
-- [ ] Browser SERP 不会替代 Tavily / DuckDuckGo 的首选位置。
-- [ ] 默认关闭，且配置、域名、并发、数量均可证明受限。
-- [ ] CAPTCHA / 访问受限页面不会触发规避行为。
-- [ ] 搜索输出兼容现有 `results` / `provider` 字段。
+- [x] Browser SERP 不会替代 Tavily / DuckDuckGo 的首选位置。
+- [x] 默认关闭，且配置、域名、并发、数量均可证明受限。
+- [x] CAPTCHA / 访问受限页面不会触发规避行为。
+- [x] 搜索输出兼容现有 `results` / `provider` 字段。
 
 ### 依赖与回滚
 
@@ -751,10 +751,10 @@ type WebSearchOutput = {
 
 ### Done when
 
-- [ ] Tool 目录、Agent 暴露和真实依赖状态一致。
-- [ ] 四个 Web Tool 共享严格输入契约与稳定错误码。
-- [ ] Provider 诊断可被用户理解但不泄漏敏感数据。
-- [ ] 截图 artifact 在 UI 中可消费且不存在任意本地文件读取通道。
+- [x] Tool 目录、Agent 暴露和真实依赖状态一致。
+- [x] 四个 Web Tool 共享严格输入契约与稳定错误码。
+- [x] Provider 诊断可被用户理解但不泄漏敏感数据。
+- [x] 截图 artifact 在 UI 中可消费且不存在任意本地文件读取通道。
 
 ### 依赖与回滚
 
@@ -807,11 +807,12 @@ type WebSearchOutput = {
 
 ### Done when
 
-- [ ] 安全、取消、功能、打包、资源与回滚测试均有书面证据。
-- [ ] `web_screenshot` 已真实可用，其他工具静态优先且浏览器可控回退。
-- [ ] Browser search 仍默认关闭，除非单独批准开启。
-- [ ] 发布开关、默认值、已知限制和运维处理方式已写入文档。
-- [ ] 没有 P0/P1 Web Tool 安全缺陷被标记为“后续处理”后仍发布。
+- [x] 安全、取消、功能、资源与回滚测试均有书面证据；Electron 目录包、portable 包和 NSIS 安装器 smoke 均已通过。
+- [x] `web_screenshot` 已真实可用，其他工具静态优先且浏览器可控回退。
+- [x] Browser search 仍默认关闭，除非单独批准开启。
+- [x] 发布开关、默认值、已知限制和运维处理方式已写入文档。
+- [x] 没有 P0/P1 Web Tool 安全缺陷被标记为“后续处理”后仍发布。
+- [x] NSIS 安装器及安装后 fixture smoke 已通过；未签名验收包的安装、启动、健康检查和数据库迁移验证均通过。
 
 ### 依赖与回滚
 
@@ -840,13 +841,13 @@ type WebSearchOutput = {
 
 ## 4. 统一验收清单
 
-- [ ] 对外只有四个稳定 Web Tool ID，AgentBrowser 原始工具未直接进入 Chat Agent。
-- [ ] `web_fetch` / `web_extract` 在普通静态页面不启动浏览器，在 JS fixture 上可取得渲染内容。
-- [ ] `web_screenshot` 可在受控目录真实生成图片，并执行尺寸、像素、字节与保留限制。
-- [ ] Tavily / DuckDuckGo 保持 `web_search` 主路径；Browser SERP 默认关闭、低并发且可解释。
-- [ ] 初始 URL、redirect、浏览器导航和子资源均经过统一 SSRF Policy。
-- [ ] timeout / cancel 会关闭网络和浏览器工作，而不是只提前返回错误。
-- [ ] Deep Research 的浏览器尝试受来源次数、全局并发和 deadline 约束。
-- [ ] Tool 目录、HTTP、Chat 与 UI 不把 dependency_missing / disabled 的功能显示为成功。
-- [ ] 运行记录不保存 Cookie、完整页面、图片 base64 或未脱敏敏感 URL。
-- [ ] 通过配置关闭 Browser Provider 后，现有静态 Web Tools 仍可工作。
+- [x] 对外只有四个稳定 Web Tool ID，AgentBrowser 原始工具未直接进入 Chat Agent。
+- [x] `web_fetch` / `web_extract` 在普通静态页面不启动浏览器，在 JS fixture 上可取得渲染内容。
+- [x] `web_screenshot` 可在受控目录真实生成图片，并执行尺寸、像素、字节与保留限制；开发、目录包、portable 包和 NSIS 安装器 smoke 均通过。
+- [x] Tavily / DuckDuckGo 保持 `web_search` 主路径；Browser SERP 默认关闭、低并发且可解释。
+- [x] 初始 URL、redirect、浏览器导航和子资源均经过统一 SSRF Policy。
+- [x] timeout / cancel 会关闭网络和浏览器工作，而不是只提前返回错误。
+- [x] Deep Research 的浏览器尝试受来源次数、全局并发和 deadline 约束。
+- [x] Tool 目录、HTTP、Chat 与 UI 不把 dependency_missing / disabled 的功能显示为成功。
+- [x] 运行记录不保存 Cookie、完整页面、图片 base64 或未脱敏敏感 URL。
+- [x] 通过配置关闭 Browser Provider 后，现有静态 Web Tools 仍可工作。

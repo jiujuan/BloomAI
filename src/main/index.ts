@@ -22,7 +22,7 @@ let serverProcess: ChildProcess | null = null
 function startServer() {
   const serverPath = isDev
     ? path.join(__dirname, '../src/server/index.ts')
-    : path.join(__dirname, '../server/index.js')
+    : path.join(__dirname, 'server/index.js')
 
   if (isDev) {
     serverProcess = fork(serverPath, [], {

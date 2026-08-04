@@ -58,6 +58,7 @@ export class BrowserSessionPool<T extends ClosableContext> {
   private readonly queueTimeoutMs: number
   private readonly idleTimeoutMs: number
   private readonly onIdle?: () => void | Promise<void>
+  private peakActive = 0
 
   async acquire(signal?: AbortSignal): Promise<BrowserSession<T>> {
     if (this.closed) throw new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed')
@@ -90,6 +91,7 @@ export class BrowserSessionPool<T extends ClosableContext> {
     if (this.closed) throw new Error('WEB_BROWSER_SHUTDOWN: browser session pool is closed')
     if (signal?.aborted) throw signal.reason ?? new Error('Browser session acquisition cancelled')
     this.active += 1
+    this.peakActive = Math.max(this.peakActive, this.active)
     try {
       const context = await this.createContext()
       if (this.closed) {
@@ -157,6 +159,10 @@ export class BrowserSessionPool<T extends ClosableContext> {
 
   get activeCount(): number {
     return this.active
+  }
+
+  get peakActiveCount(): number {
+    return this.peakActive
   }
 
   async close(): Promise<void> {

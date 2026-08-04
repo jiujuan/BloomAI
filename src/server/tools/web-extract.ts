@@ -41,46 +41,72 @@ export type WebExtractOutput = {
   diagnostics: WebExecutionDiagnostics
 }
 
+export type WebPageLoader = (
+  url: string,
+  request?: {
+    render?: boolean
+    timeoutMs?: number
+    maxBytes?: number
+    signal?: AbortSignal
+    waitUntil?: 'load' | 'domcontentloaded' | 'networkidle'
+    waitSelector?: string
+  },
+) => Promise<{
+  html: string
+  finalUrl: string
+  status: number
+  charset: string
+  contentType?: string
+  truncated?: boolean
+  rendered: boolean
+  provider: WebProviderId
+  diagnostics: WebExecutionDiagnostics
+}>
+
 const DEFAULT_MAX_CHARS = 20000
 const DEFAULT_MAX_LINKS = 50
 const DEFAULT_MAX_HEADINGS = 40
 const DEFAULT_TIMEOUT_MS = 20000
 
-export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = async (input, context) => {
-  const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
+export function createWebExtractTool(loadPage: WebPageLoader = loadPageWithProviders): ToolExecutor<WebExtractInput, WebExtractOutput> {
+  return async (input, context) => {
+    const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPageWithProviders(url, { render, timeoutMs, signal: context.signal })
-  const { html, finalUrl } = page
+    const page = await loadPage(url, { render, timeoutMs, signal: context.signal })
+    const { html, finalUrl } = page
 
-  const title = extractTitle(html) || finalUrl
-  const description = extractMetaDescription(html)
-  const headings = extractHeadings(html)
-  const links = extractLinks(html, finalUrl, maxLinks)
-  const byline = extractMetadata(html, ['author', 'article:author', 'byline'])
-  const publishedAt = extractMetadata(html, ['article:published_time', 'datepublished', 'publishdate', 'date'])
-  const canonicalUrl = extractCanonicalUrl(html, finalUrl)
+    const title = extractTitle(html) || finalUrl
+    const description = extractMetaDescription(html)
+    const headings = extractHeadings(html)
+    const links = extractLinks(html, finalUrl, maxLinks)
+    const byline = extractMetadata(html, ['author', 'article:author', 'byline'])
+    const publishedAt = extractMetadata(html, ['article:published_time', 'datepublished', 'publishdate', 'date'])
+    const canonicalUrl = extractCanonicalUrl(html, finalUrl)
 
-  let text = htmlToText(extractMainHtml(html))
-  if (text.length < 200) text = htmlToText(html)
-  const truncated = text.length > maxChars
-  if (truncated) text = text.slice(0, maxChars)
+    let text = htmlToText(extractMainHtml(html))
+    if (text.length < 200) text = htmlToText(html)
+    const truncated = text.length > maxChars
+    if (truncated) text = text.slice(0, maxChars)
 
-  return {
-    title,
-    description: description || undefined,
-    finalUrl,
-    headings,
-    links,
-    text,
-    truncated,
-    rendered: page.rendered,
-    byline: byline || undefined,
-    publishedAt: publishedAt || undefined,
-    canonicalUrl: canonicalUrl || undefined,
-    provider: page.provider,
-    diagnostics: page.diagnostics,
+    return {
+      title,
+      description: description || undefined,
+      finalUrl,
+      headings,
+      links,
+      text,
+      truncated,
+      rendered: page.rendered,
+      byline: byline || undefined,
+      publishedAt: publishedAt || undefined,
+      canonicalUrl: canonicalUrl || undefined,
+      provider: page.provider,
+      diagnostics: page.diagnostics,
+    }
   }
 }
+
+export const webExtractTool = createWebExtractTool()
 
 function extractHeadings(html: string): string[] {
   const headings: string[] = []

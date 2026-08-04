@@ -372,7 +372,7 @@ Deep Research 现有的 `assertSafeResearchUrl` / `validatePublicResearchUrl` �
 
 ### 8.4 Chromium、依赖与打包
 
-项目当前仅依赖 `playwright-core`，Electron `asarUnpack` 也仅覆盖 `playwright-core`。AgentBrowser 文档说明本地启动需要 Playwright 可用的 Chromium；因此安装 `@mastra/agent-browser` 后必须通过一次真实打包验证确认：
+项目当前依赖 `playwright-core` 和锁定的 `@mastra/agent-browser@0.4.1`，Electron `asarUnpack` 已覆盖 AgentBrowser 运行时。AgentBrowser 文档说明本地启动需要 Playwright 可用的 Chromium；因此必须通过真实打包验证确认：
 
 - npm install 是否下载 / 声明浏览器二进制；
 - 生产包内 Chromium 与 AgentBrowser 运行文件是否未被 asar 阻断；
@@ -492,7 +492,7 @@ WEB_SEARCH_SERP_BLOCKED
 4. AgentBrowser 是否允许注入或访问底层 Playwright 网络 route，以落实统一 URL Policy；若不能，需在不降低安全边界的前提下选择 CDP / Playwright 受控适配方式。
 5. 是否有用户可接受的截图 artifact 保留天数与总容量上限。
 
-这些事项不是“先上线、之后再看”的问题；任一项不通过时，保留当前静态路径并把 AgentBrowser 状态标记为不可用。
+POC、目录包、portable 包和 NSIS 安装器及安装后 fixture smoke 均已通过。Browser Provider 仍保持默认关闭，生产开放继续由配置开关控制；portable 包与 NSIS 安装器均未被混淆为另一种发布形态。
 
 ## 13. 最终决策记录
 
@@ -504,6 +504,6 @@ WEB_SEARCH_SERP_BLOCKED
 - Tavily / DuckDuckGo 保持 `web_search` 的主路径；
 - 浏览器 SERP 是末级、受开关和低并发约束的回退；
 - 所有路径继续通过 BloomAI 的 Tool 平台治理；
-- 在 URL Policy、取消语义和 Electron 打包验证完成前，AgentBrowser 不默认开启。
+- URL Policy、取消语义、目录/portable/NSIS Electron 打包验证已完成；AgentBrowser 仍不默认开启，待单独配置批准后再开放。
 
 对应的逐文件实施任务见 [002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md](002-mastra-agent-browser-web-tools-implementation-plan-v1.1.md)。

@@ -1,0 +1,77 @@
+{
+  "fixtureOrigin": "http://127.0.0.1:62418",
+  "sampleCount": 5,
+  "staticFetch": {
+    "samplesMs": [
+      22,
+      3,
+      8,
+      15,
+      16
+    ],
+    "p50Ms": 15,
+    "p95Ms": 22,
+    "successCount": 5,
+    "failureCount": 0,
+    "errors": {}
+  },
+  "browserFetch": {
+    "samplesMs": [
+      869,
+      488,
+      521,
+      531,
+      493
+    ],
+    "p50Ms": 521,
+    "p95Ms": 869,
+    "successCount": 5,
+    "failureCount": 0,
+    "errors": {}
+  },
+  "browserExtract": {
+    "samplesMs": [
+      601,
+      641,
+      600,
+      594,
+      664
+    ],
+    "p50Ms": 601,
+    "p95Ms": 664,
+    "successCount": 5,
+    "failureCount": 0,
+    "errors": {}
+  },
+  "screenshot": {
+    "samplesMs": [
+      679,
+      634,
+      660
+    ],
+    "p50Ms": 660,
+    "p95Ms": 679,
+    "successCount": 3,
+    "failureCount": 0,
+    "errors": {},
+    "artifactBytes": [
+      13052,
+      13052,
+      13052
+    ],
+    "artifactP50Bytes": 13052,
+    "artifactP95Bytes": 13052,
+    "artifactRelativePaths": [
+      "tool-artifacts/web-screenshot/t12-baseline-0/screenshot.png",
+      "tool-artifacts/web-screenshot/t12-baseline-1/screenshot.png",
+      "tool-artifacts/web-screenshot/t12-baseline-2/screenshot.png"
+    ]
+  },
+  "concurrency": {
+    "requested": 4,
+    "maxConcurrency": 2,
+    "peakActiveContexts": 2,
+    "withinLimit": true
+  },
+  "errorClassificationProbe": "WEB_URL_UNSAFE"
+}
