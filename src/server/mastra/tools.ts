@@ -36,7 +36,7 @@ export function buildAgentTools(sessionId?: string): Record<string, MastraTool> 
 // Curated built-in tool sets per specialist agent (P6d). `null` = all enabled tools.
 export const ROLE_TOOL_IDS: Record<string, string[] | null> = {
   writing: [],
-  coding: ['fs_read', 'fs_grep', 'fs_glob', 'fs_write', 'fs_edit', 'bash', 'shell', 'node_runner', 'python_runner', 'doc_markdown', 'doc_pdf', 'doc_txt', 'doc_csv', 'doc_docx'],
+  coding: ['fs_read', 'fs_stat', 'workspace_search', 'fs_apply_patch', 'fs_grep', 'fs_glob', 'fs_write', 'fs_edit', 'bash', 'shell', 'node_runner', 'python_runner', 'doc_markdown', 'doc_pdf', 'doc_txt', 'doc_csv', 'doc_docx'],
 }
 
 export type BuildToolsOptions = {
@@ -68,8 +68,12 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
     if (tool.is_enabled !== 1) continue
     if (!isToolAvailable(tool.id)) continue
     if (options.filter && !options.filter(tool.id)) continue
-    const needsApproval = needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
     const contract = getToolContract(tool.id)
+    const needsApproval = (
+      needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
+    ) || (
+      contract?.requiresWriteApproval === true && !!options.approvalLevels?.has('write')
+    )
     tools[tool.id] = createTool({
       id: tool.id,
       description: contract?.description || tool.description || `Run BloomAI tool ${tool.name}`,

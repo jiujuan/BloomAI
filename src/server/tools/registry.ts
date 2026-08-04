@@ -7,9 +7,11 @@ import { docMarkdownTool } from './doc-markdown'
 import { docPdfTool } from './doc-pdf'
 import { docTxtTool } from './doc-txt'
 import { fsEditTool } from './fs-edit'
+import { fsApplyPatchTool } from './fs-apply-patch'
 import { fsGlobTool } from './fs-glob'
 import { fsGrepTool } from './fs-grep'
 import { fsReadTool } from './fs-read'
+import { fsStatTool } from './fs-stat'
 import { fsWriteTool } from './fs-write'
 import { imageEditTool } from './image-edit'
 import { imageGenTool } from './image-gen'
@@ -22,6 +24,7 @@ import { webExtractTool } from './web-extract'
 import { webFetchTool } from './web-fetch'
 import { webScreenshotTool } from './web-screenshot'
 import { webSearchTool } from './web-search'
+import { workspaceSearchTool } from './workspace-search'
 
 export const toolRegistry: Record<string, ToolExecutor> = {
   web_search: webSearchTool,
@@ -31,6 +34,9 @@ export const toolRegistry: Record<string, ToolExecutor> = {
   fs_read: fsReadTool,
   fs_write: fsWriteTool,
   fs_edit: fsEditTool,
+  fs_stat: fsStatTool,
+  workspace_search: workspaceSearchTool,
+  fs_apply_patch: fsApplyPatchTool,
   fs_grep: fsGrepTool,
   fs_glob: fsGlobTool,
   bash: bashTool,

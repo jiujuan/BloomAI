@@ -7,6 +7,9 @@ export type ToolContract<I extends z.ZodTypeAny = z.ZodTypeAny, O extends z.ZodT
   displayName: string
   description: string
   requiresPermission?: 'fs' | 'network' | 'write' | 'shell' | 'sandbox'
+  requiresWriteApproval?: boolean
+  deprecated?: boolean
+  replacement?: string
   inputSchema: I
   outputSchema: O
   getAvailability: () => Promise<ToolAvailability>
@@ -53,6 +56,7 @@ const fileEditInputSchema = z.object({
   path: pathSchema,
   oldText: z.string().min(1).max(1_000_000),
   newText: z.string().max(1_000_000),
+  expectedHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
 }).strict()
 
 const fileGrepInputSchema = z.object({
@@ -66,9 +70,35 @@ const fileGlobInputSchema = z.object({
   cwd: pathSchema.optional(),
 }).strict()
 
+const readOnlyBashCommands = ['ls', 'cat', 'grep', 'find', 'head', 'tail', 'pwd', 'wc', 'diff', 'sort', 'uniq', 'tr'] as const
 const commandInputSchema = z.object({
-  command: z.string().min(1).max(100_000),
+  command: z.enum(readOnlyBashCommands),
+  args: z.array(z.string().min(1).max(4_096)).max(32).default([]),
   cwd: pathSchema.optional(),
+}).strict()
+
+const fsStatInputSchema = z.object({
+  path: pathSchema,
+}).strict()
+
+const workspaceSearchInputSchema = z.object({
+  query: z.string().max(10_000).default(''),
+  include: z.union([z.string().min(1).max(1_000), z.array(z.string().min(1).max(1_000)).max(32)]).optional(),
+  exclude: z.union([z.string().min(1).max(1_000), z.array(z.string().min(1).max(1_000)).max(32)]).optional(),
+  root: pathSchema.optional(),
+  caseSensitive: z.boolean().default(false),
+  maxResults: z.number().int().min(1).max(1_000).default(100),
+  cursor: z.string().regex(/^\d+$/).optional(),
+  mode: z.enum(['text', 'files']).default('text'),
+}).strict()
+
+const applyPatchInputSchema = z.object({
+  patch: z.string().min(1).max(1_000_000),
+  root: pathSchema.optional(),
+  dryRun: z.boolean().default(true),
+  createBackup: z.boolean().default(true),
+  expectedHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  expectedHashes: z.record(z.string().regex(/^[a-f0-9]{64}$/i)).optional(),
 }).strict()
 
 const markdownInputSchema = z.object({ path: pathSchema }).strict()
@@ -241,6 +271,84 @@ export const toolContracts = {
     outputSchema: outputObject({ success: z.boolean().optional(), linesChanged: z.number().int().nonnegative().optional() }),
     getAvailability: async () => getToolAvailability('fs_edit'),
   },
+  fs_stat: {
+    id: 'fs_stat',
+    category: 'fs',
+    displayName: 'File Stat',
+    description: 'Return bounded metadata for a local file, directory, or symlink.',
+    requiresPermission: 'fs',
+    inputSchema: fsStatInputSchema,
+    outputSchema: outputObject({
+      path: z.string(),
+      type: z.enum(['file', 'directory', 'symlink']),
+      size: z.number().nonnegative(),
+      modifiedAt: z.string(),
+      extension: z.string().optional(),
+      isBinary: z.boolean().optional(),
+    }),
+    getAvailability: async () => getToolAvailability('fs_stat'),
+  },
+  workspace_search: {
+    id: 'workspace_search',
+    category: 'fs',
+    displayName: 'Workspace Search',
+    description: 'Search approved workspace files by text or glob with bounded pagination.',
+    requiresPermission: 'fs',
+    inputSchema: workspaceSearchInputSchema,
+    outputSchema: outputObject({
+      mode: z.enum(['text', 'files']),
+      results: z.array(outputObject({
+        file: z.string(),
+        relativePath: z.string(),
+        line: z.number().int().positive().optional(),
+        column: z.number().int().positive().optional(),
+        preview: z.string().optional(),
+        ranges: z.array(outputObject({
+          start: z.number().int().nonnegative(),
+          end: z.number().int().nonnegative(),
+        })).optional(),
+        size: z.number().nonnegative().optional(),
+        modifiedAt: z.string().optional(),
+      })),
+      total: z.number().int().nonnegative(),
+      scannedFiles: z.number().int().nonnegative(),
+      skippedFiles: z.number().int().nonnegative(),
+      resourceLimited: z.boolean(),
+      truncated: z.boolean(),
+      nextCursor: z.string().optional(),
+    }),
+    getAvailability: async () => getToolAvailability('workspace_search'),
+  },
+  fs_apply_patch: {
+    id: 'fs_apply_patch',
+    category: 'fs',
+    displayName: 'Apply Patch',
+    description: 'Preview or atomically apply a unified patch inside an approved workspace.',
+    requiresPermission: 'fs',
+    requiresWriteApproval: true,
+    inputSchema: applyPatchInputSchema,
+    outputSchema: outputObject({
+      dryRun: z.boolean(),
+      applied: z.boolean(),
+      files: z.array(outputObject({
+        path: z.string(),
+        relativePath: z.string(),
+        hunks: z.number().int().nonnegative(),
+        linesAdded: z.number().int().nonnegative(),
+        linesRemoved: z.number().int().nonnegative(),
+        backupPath: z.string().optional(),
+        rollbackToken: z.string().optional(),
+      })),
+      conflicts: z.array(outputObject({
+        path: z.string().optional(),
+        relativePath: z.string(),
+        reason: z.string(),
+        detail: z.string().optional(),
+      })),
+      rollbackToken: z.string().optional(),
+    }),
+    getAvailability: async () => getToolAvailability('fs_apply_patch'),
+  },
   fs_grep: {
     id: 'fs_grep',
     category: 'fs',
@@ -252,6 +360,8 @@ export const toolContracts = {
       matches: z.array(outputObject({ file: z.string().optional(), line: z.number().int().positive().optional(), text: z.string().optional() })).optional(),
       total: z.number().int().nonnegative().optional(),
     }),
+    deprecated: true,
+    replacement: 'workspace_search',
     getAvailability: async () => getToolAvailability('fs_grep'),
   },
   fs_glob: {
@@ -266,6 +376,8 @@ export const toolContracts = {
       total: z.number().int().nonnegative().optional(),
       cwd: z.string().optional(),
     }),
+    deprecated: true,
+    replacement: 'workspace_search',
     getAvailability: async () => getToolAvailability('fs_glob'),
   },
   bash: {

@@ -8,6 +8,7 @@ import { sessionToolPermissionStore } from '../../tools/session-permission-store
 import { ImageStudioCapabilityAdapter } from '../adapters/image-studio-capability-adapter'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
+import { getToolContract } from '../../tools/contracts'
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
@@ -176,7 +177,9 @@ function requireLegacyToolPermission(
   sessionId: string | undefined,
   input: Record<string, unknown>,
 ): void {
-  if (!needsInteractiveApprovalForTool(tool)) return
+  const requiresApproval = needsInteractiveApprovalForTool(tool)
+    || (getToolContract(tool.id)?.requiresWriteApproval === true && input.dryRun === false)
+  if (!requiresApproval) return
 
   if (sessionToolPermissionStore.has(tool.id, sessionId)) return
 
@@ -193,8 +196,9 @@ function requireLegacyToolPermission(
     }
   }
 
+  const permission = tool.requires_permission === 'fs' && input.dryRun === false ? 'write' : tool.requires_permission
   throw new CapabilityApprovalRequiredError(
-    `Permission required: "${tool.id}" needs "${tool.requires_permission}" access. Grant it in Tools settings or approve this exact call before retrying.`,
+    `Permission required: "${tool.id}" needs "${permission}" access. Grant it in Tools settings or approve this exact call before retrying.`,
   )
 }
 

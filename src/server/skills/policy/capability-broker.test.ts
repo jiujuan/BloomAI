@@ -225,4 +225,135 @@ describe('CapabilityBroker', () => {
       caller: 'package-runtime', capability: 'web.fetch', input: { url: 'https://docs.example.test/data' }, runId: run.id,
     })).resolves.toMatchObject({ toolId: 'web_fetch' })
   })
+
+  it('allows fs_apply_patch dry runs without write approval but gates actual writes', async () => {
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    try {
+    const dryRun = await executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'fs_apply_patch',
+      sessionId: 'session-1',
+      input: {
+        patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+        root,
+        dryRun: true,
+      },
+    })
+    expect(dryRun.output).toMatchObject({ dryRun: true, applied: false })
+
+    await expect(executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'fs_apply_patch',
+      sessionId: 'session-1',
+      input: {
+        patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+        root,
+        dryRun: false,
+      },
+    })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts session, permanent, and exact one-time grants for fs_apply_patch writes', async () => {
+    const { toolRepo, executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const sessionId = 'session-1'
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    const patchInput = {
+      patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+      root,
+      dryRun: false,
+    }
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        input: patchInput,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+
+      const { sessionToolPermissionStore } = await import('../../tools/session-permission-store')
+      sessionToolPermissionStore.grant('fs_apply_patch', sessionId)
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        input: patchInput,
+      })).resolves.toMatchObject({ output: { applied: true } })
+
+      toolRepo.grantPermission('fs_apply_patch', 'permanent')
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId: 'session-2',
+        input: {
+          ...patchInput,
+          patch: `--- a/permanent.txt
++++ b/permanent.txt
+@@ -0,0 +1 @@
++hello
+`,
+        },
+      })).resolves.toMatchObject({ output: { applied: true } })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('consumes an exact one-time fs_apply_patch approval token only once', async () => {
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const sessionId = 'session-1'
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    const input = {
+      patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+      root,
+      dryRun: false,
+    }
+    const { createApprovalToken } = await import('../../tools/approval-token')
+    const token = createApprovalToken({
+      secret: process.env.TOOL_APPROVAL_TOKEN_SECRET ?? 'bloomai-development-approval-secret',
+      toolId: 'fs_apply_patch',
+      sessionId,
+      input,
+    })
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        approvalToken: token,
+        input,
+      })).resolves.toMatchObject({ output: { applied: true } })
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        approvalToken: token,
+        input,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
