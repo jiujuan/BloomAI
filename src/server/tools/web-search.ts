@@ -1,17 +1,12 @@
 import { readConfigValue } from '../config/config'
+import { AgentBrowserSearchProvider } from './web/agent-browser-search-provider'
+import { getWebRoutingPolicy } from './web/config'
+import type { WebSearchOutput, WebSearchRequest } from './web/contracts'
+import { createSearchProviderRouter } from './web/search-provider-router'
 import type { ToolExecutionContext, ToolExecutor } from './types'
 
 type WebSearchInput = { query: string; limit?: number }
-type WebSearchResult = { title: string; url: string; snippet: string }
-type WebSearchOutput = {
-  query: string
-  total: number
-  results: WebSearchResult[]
-  provider?: 'tavily' | 'duckduckgo'
-  fallbackFrom?: 'tavily'
-  fallbackReason?: string
-  error?: string
-}
+export type { WebSearchOutput }
 
 type SearchDebugContext = {
   toolId: string
@@ -57,31 +52,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
   })
 
   const tavilyApiKey = getTavilyApiKey()
-  let fallbackReason: string | undefined
-  if (tavilyApiKey) {
-    try {
-      const output = await searchWithTavily({ query, limit, apiKey: tavilyApiKey, debugContext, signal: context.signal })
-      console.log('[web_search] done', {
-        ...debugContext,
-        provider: output.provider,
-        resultCount: output.results.length,
-        total: output.total,
-        durationMs: Date.now() - startedAt,
-      })
-      return output
-    } catch (err: unknown) {
-      throwIfAborted(context.signal, err)
-      const error = getErrorDetails(err)
-      fallbackReason = error.message
-      console.warn('[web_search] provider fallback', {
-        ...debugContext,
-        from: 'tavily',
-        to: 'duckduckgo',
-        ...error,
-        durationMs: Date.now() - startedAt,
-      })
-    }
-  } else {
+  if (!tavilyApiKey) {
     console.warn('[web_search] provider skipped', {
       ...debugContext,
       provider: 'tavily',
@@ -89,15 +60,39 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
     })
   }
 
-  try {
-    const output = await searchWithDuckDuckGo({
-      query,
-      limit,
-      debugContext,
-      signal: context.signal,
-      fallbackFrom: tavilyApiKey ? 'tavily' : undefined,
-      fallbackReason,
+  const routingPolicy = getWebRoutingPolicy()
+  let browserProvider: AgentBrowserSearchProvider | undefined
+  const browserProviderFactory = routingPolicy.allowSearchFallback
+    ? () => browserProvider ??= new AgentBrowserSearchProvider({
+      allowedSearchHosts: routingPolicy.allowedSearchHosts,
+      locale: routingPolicy.searchLocale,
+      maxResults: routingPolicy.maxSearchResults,
     })
+    : undefined
+
+  try {
+    const router = createSearchProviderRouter({
+      routingPolicy,
+      ...(tavilyApiKey ? {
+        tavily: (request: WebSearchRequest) => searchWithTavily({
+          query: request.query,
+          limit: request.limit,
+          apiKey: tavilyApiKey,
+          debugContext,
+          signal: request.signal,
+        }),
+      } : {}),
+      duckduckgo: (request: WebSearchRequest) => searchWithDuckDuckGo({
+        query: request.query,
+        limit: request.limit,
+        debugContext,
+        signal: request.signal,
+        fallbackFrom: request.fallbackFrom === 'tavily' ? 'tavily' : undefined,
+        fallbackReason: request.fallbackReason,
+      }),
+      ...(browserProviderFactory ? { agentBrowser: browserProviderFactory } : {}),
+    })
+    const output = await router.search({ query, limit, signal: context.signal })
     console.log('[web_search] done', {
       ...debugContext,
       provider: output.provider,
@@ -116,7 +111,9 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
       ...error,
       durationMs: Date.now() - startedAt,
     })
-    return { results: [], query, total: 0, provider: 'duckduckgo', fallbackFrom: tavilyApiKey ? 'tavily' : undefined, fallbackReason, error: error.message }
+    return { results: [], query, total: 0, provider: 'duckduckgo', error: error.message }
+  } finally {
+    await browserProvider?.close().catch(() => {})
   }
 }
 
@@ -214,7 +211,7 @@ async function searchWithDuckDuckGo(input: {
   if (!res.ok) throw new Error(`DuckDuckGo search failed with HTTP ${res.status}: ${await safeReadResponseText(res)}`)
 
   const data = await res.json() as any
-  const results: WebSearchResult[] = []
+  const results: WebSearchOutput['results'] = []
 
   if (data.Abstract && data.AbstractURL) {
     results.push({ title: data.Heading || input.query, url: data.AbstractURL, snippet: data.Abstract })

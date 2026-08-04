@@ -47,6 +47,10 @@ describe('web browser config', () => {
       preference: 'auto',
       browserEnabled: false,
       allowSearchFallback: false,
+      allowedSearchHosts: ['www.google.com'],
+      searchBrowserConcurrency: 1,
+      maxSearchResults: 5,
+      searchLocale: 'en-US',
     })
   })
 
@@ -59,6 +63,10 @@ describe('web browser config', () => {
       preference: 'browser',
       browserEnabled: true,
       allowSearchFallback: true,
+      allowedSearchHosts: ['www.google.com'],
+      searchBrowserConcurrency: 1,
+      maxSearchResults: 5,
+      searchLocale: 'en-US',
     })
 
     expect(getWebRoutingPolicy({
@@ -68,6 +76,23 @@ describe('web browser config', () => {
       preference: 'auto',
       browserEnabled: false,
       allowSearchFallback: false,
+      allowedSearchHosts: ['www.google.com'],
+      searchBrowserConcurrency: 1,
+      maxSearchResults: 5,
+      searchLocale: 'en-US',
+    })
+  })
+
+  it('limits configured SERP hosts and result count to safe bounds', () => {
+    expect(getWebRoutingPolicy({
+      WEB_SEARCH_ALLOWED_HOSTS: 'www.bing.com, invalid host, .private.example',
+      WEB_SEARCH_MAX_RESULTS: '99',
+      WEB_SEARCH_LOCALE: 'zh-CN',
+    })).toMatchObject({
+      allowedSearchHosts: ['www.bing.com'],
+      searchBrowserConcurrency: 1,
+      maxSearchResults: 5,
+      searchLocale: 'zh-CN',
     })
   })
 })

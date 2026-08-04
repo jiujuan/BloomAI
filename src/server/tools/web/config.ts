@@ -13,6 +13,10 @@ const DEFAULT_CONFIG = {
   queueTimeoutMs: 5_000,
   idleTimeoutMs: 30_000,
   channels: ['msedge', 'chrome'] as string[],
+  allowedSearchHosts: ['www.google.com'],
+  searchBrowserConcurrency: 1,
+  maxSearchResults: 5,
+  searchLocale: 'en-US',
 }
 
 export const webBrowserConfigSchema = z.object({
@@ -27,6 +31,10 @@ export const webBrowserConfigSchema = z.object({
   queueTimeoutMs: z.number().int().min(100).max(60_000).default(DEFAULT_CONFIG.queueTimeoutMs),
   idleTimeoutMs: z.number().int().min(0).max(300_000).default(DEFAULT_CONFIG.idleTimeoutMs),
   channels: z.array(z.string().min(1)).min(1).max(4).default(DEFAULT_CONFIG.channels),
+  allowedSearchHosts: z.array(z.string().regex(/^[a-z0-9.-]+$/i)).min(1).max(4).default(DEFAULT_CONFIG.allowedSearchHosts),
+  searchBrowserConcurrency: z.literal(1).default(DEFAULT_CONFIG.searchBrowserConcurrency as 1),
+  maxSearchResults: z.number().int().min(1).max(5).default(DEFAULT_CONFIG.maxSearchResults),
+  searchLocale: z.string().min(2).max(20).default(DEFAULT_CONFIG.searchLocale),
 })
 
 export type WebBrowserConfig = z.infer<typeof webBrowserConfigSchema>
@@ -44,6 +52,10 @@ export function getWebBrowserConfig(source: Record<string, string | undefined> =
     queueTimeoutMs: clampInteger(source.WEB_BROWSER_QUEUE_TIMEOUT_MS, DEFAULT_CONFIG.queueTimeoutMs, 100, 60_000),
     idleTimeoutMs: clampInteger(source.WEB_BROWSER_IDLE_TIMEOUT_MS, DEFAULT_CONFIG.idleTimeoutMs, 0, 300_000),
     channels: parseChannels(source.WEB_BROWSER_CHANNELS),
+    allowedSearchHosts: parseSearchHosts(source.WEB_SEARCH_ALLOWED_HOSTS),
+    searchBrowserConcurrency: 1,
+    maxSearchResults: clampInteger(source.WEB_SEARCH_MAX_RESULTS, DEFAULT_CONFIG.maxSearchResults, 1, 5),
+    searchLocale: parseSearchLocale(source.WEB_SEARCH_LOCALE),
   }
   const parsed = webBrowserConfigSchema.safeParse(candidate)
   return parsed.success ? parsed.data : webBrowserConfigSchema.parse(DEFAULT_CONFIG)
@@ -56,6 +68,10 @@ export function getWebRoutingPolicy(source: Record<string, string | undefined> =
     preference,
     browserEnabled: browserConfig.enabled,
     allowSearchFallback: parseBoolean(source.WEB_SEARCH_BROWSER_FALLBACK, false),
+    allowedSearchHosts: browserConfig.allowedSearchHosts,
+    searchBrowserConcurrency: browserConfig.searchBrowserConcurrency,
+    maxSearchResults: browserConfig.maxSearchResults,
+    searchLocale: browserConfig.searchLocale,
   }
 }
 
@@ -79,4 +95,20 @@ function parseChannels(value: string | undefined): string[] {
   if (!value?.trim()) return [...DEFAULT_CONFIG.channels]
   const channels = value.split(',').map((channel) => channel.trim()).filter(Boolean)
   return channels.length > 0 ? channels.slice(0, 4) : [...DEFAULT_CONFIG.channels]
+}
+
+function parseSearchHosts(value: string | undefined): string[] {
+  if (!value?.trim()) return [...DEFAULT_CONFIG.allowedSearchHosts]
+  const hosts = value
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => /^[a-z0-9.-]+$/i.test(host) && !host.includes('..') && !host.startsWith('.') && !host.endsWith('.'))
+  return hosts.length > 0 ? hosts.slice(0, 4) : [...DEFAULT_CONFIG.allowedSearchHosts]
+}
+
+function parseSearchLocale(value: string | undefined): string {
+  const locale = value?.trim()
+  return locale && /^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/i.test(locale)
+    ? locale
+    : DEFAULT_CONFIG.searchLocale
 }
