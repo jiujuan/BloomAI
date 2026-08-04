@@ -134,6 +134,13 @@ export async function executeIterationRetrieval(
   assertWorkflowNotCancelled(repositories, run.id)
   const fetched = await contentService.fetch(run, sources, { signal, isCancelled: isCancellationRequested })
   assertWorkflowNotCancelled(repositories, run.id)
+  const currentRun = repositories.researchRunRepo.get(run.id) ?? run
+  const browserFetches = fetched.filter((outcome) => outcome.browserRetryUsed).length
+  repositories.researchRunRepo.setUsage(run.id, {
+    ...currentRun.usage,
+    fetchedSources: currentRun.usage.fetchedSources + fetched.filter((outcome) => outcome.status === 'fetched').length,
+    browserFetches: (currentRun.usage.browserFetches ?? 0) + browserFetches,
+  })
   repositories.researchEventRepo.append({
     runId: run.id,
     type: 'research.sources.fetched',
