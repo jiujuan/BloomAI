@@ -257,11 +257,12 @@ describe('CapabilityBroker', () => {
       toolId: 'fs_apply_patch',
       sessionId: 'session-1',
       input: {
-        patch: `--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1 @@
-+hello
-`,
+        patch: [
+          '--- /dev/null',
+          '+++ b/new.txt',
+          '@@ -0,0 +1,1 @@',
+          '+hello',
+        ].join('\n'),
         root,
         dryRun: true,
       },
@@ -273,11 +274,12 @@ describe('CapabilityBroker', () => {
       toolId: 'fs_apply_patch',
       sessionId: 'session-1',
       input: {
-        patch: `--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1 @@
-+hello
-`,
+        patch: [
+          '--- /dev/null',
+          '+++ b/new.txt',
+          '@@ -0,0 +1,1 @@',
+          '+hello',
+        ].join('\n'),
         root,
         dryRun: false,
       },
@@ -292,11 +294,12 @@ describe('CapabilityBroker', () => {
     const sessionId = 'session-1'
     const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
     const patchInput = {
-      patch: `--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1 @@
-+hello
-`,
+      patch: [
+        '--- /dev/null',
+        '+++ b/new.txt',
+        '@@ -0,0 +1,1 @@',
+        '+hello',
+      ].join('\n'),
       root,
       dryRun: false,
     }
@@ -325,11 +328,12 @@ describe('CapabilityBroker', () => {
         sessionId: 'session-2',
         input: {
           ...patchInput,
-          patch: `--- a/permanent.txt
-+++ b/permanent.txt
-@@ -0,0 +1 @@
-+hello
-`,
+          patch: [
+            '--- /dev/null',
+            '+++ b/permanent.txt',
+            '@@ -0,0 +1,1 @@',
+            '+hello',
+          ].join('\n'),
         },
       })).resolves.toMatchObject({ output: { applied: true } })
     } finally {
@@ -342,11 +346,12 @@ describe('CapabilityBroker', () => {
     const sessionId = 'session-1'
     const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
     const input = {
-      patch: `--- a/new.txt
-+++ b/new.txt
-@@ -0,0 +1 @@
-+hello
-`,
+      patch: [
+        '--- /dev/null',
+        '+++ b/new.txt',
+        '@@ -0,0 +1,1 @@',
+        '+hello',
+      ].join('\n'),
       root,
       dryRun: false,
     }
