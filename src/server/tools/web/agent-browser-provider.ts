@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext, Page, Route } from 'playwright-core'
 import { chromium } from 'playwright-core'
 import { getProxyUrl } from '../utils/html'
-import { validateExternalUrl } from '../utils/url-policy'
+import { createBrowserRequestGuard, validateInitialUrl } from './url-policy'
 import { WebBrowserError, mapBrowserError } from './browser-errors'
 import { BrowserSessionPool } from './browser-session-pool'
 import { getWebBrowserConfig, type WebBrowserConfig } from './config'
@@ -37,7 +37,7 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
   constructor(options: AgentBrowserProviderOptions = {}) {
     this.config = options.config ?? getWebBrowserConfig()
     this.launch = options.launchBrowser ?? launchSystemBrowser
-    this.validateUrl = options.validateUrl ?? ((url) => validateExternalUrl(url))
+    this.validateUrl = options.validateUrl ?? ((url) => validateInitialUrl(url))
     this.pool = new BrowserSessionPool(
       async () => {
         const browser = await this.getBrowser()
@@ -202,8 +202,9 @@ export class AgentBrowserProvider implements WebScreenshotProvider {
     try {
       await this.validateUrl(request.url)
       let blocked = 0
+      const guard = createBrowserRequestGuard(this.validateUrl)
       await page.route('**/*', async (route) => {
-        const allowed = await allowBrowserRequest(route, request.signal, this.validateUrl)
+        const allowed = await guard(route, request.signal)
         if (!allowed) blocked += 1
       })
       const response = await page.goto(request.url, {
@@ -246,23 +247,7 @@ export async function allowBrowserRequest(
   signal: AbortSignal | undefined,
   validateUrl: UrlValidator,
 ): Promise<boolean> {
-  if (signal?.aborted) {
-    await route.abort('aborted').catch(() => {})
-    return false
-  }
-  const requestUrl = route.request().url()
-  if (/^(?:data|blob|about):/i.test(requestUrl)) {
-    await route.continue()
-    return true
-  }
-  try {
-    await validateUrl(requestUrl)
-    await route.continue()
-    return true
-  } catch {
-    await route.abort('blockedbyclient').catch(() => {})
-    return false
-  }
+  return createBrowserRequestGuard(validateUrl)(route, signal)
 }
 
 function closePageOnAbort(page: Page, signal: AbortSignal | undefined): () => void {

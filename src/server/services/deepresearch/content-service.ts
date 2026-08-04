@@ -1,6 +1,4 @@
 import crypto from 'crypto'
-import { promises as dns } from 'node:dns'
-import { isIP } from 'node:net'
 import type { JsonObject, ResearchRunDto, ResearchSourceDto, ResearchSourceSnapshotDto } from '@shared/deepresearch/contracts'
 import { researchEventRepo } from '@server/db/repositories/deepresearch/research-event.repo'
 import { executeLegacyToolCapability } from '@server/skills/policy/capability-broker'
@@ -9,6 +7,7 @@ import { createSnapshotFingerprint } from '@server/deepresearch/domain/idempoten
 import { SOURCE_CONTENT_PARSER_VERSION, classifySourceFetchFailure, extractMainContent, type SourceContentDiagnostics, type SourceContentRejectionReason } from '@server/deepresearch/domain/source-content'
 import type { WorkflowToolExecutor } from './search-service'
 import { isCancellationRequested, throwIfCancellationRequested, type ResearchCancellationSignal } from '@server/deepresearch/domain/cancellation'
+import { parseExternalUrl, validateInitialUrl } from '@server/tools/web/url-policy'
 
 export interface FetchOutcome {
   sourceId: string
@@ -43,54 +42,23 @@ function isRetryableError(error: unknown): boolean {
   return /timeout|timed out|rate.?limit|\b429\b|provider unavailable|\b503\b|temporar/i.test(message)
 }
 
-function isPublicAddress(address: string): boolean {
-  const version = isIP(address)
-  if (version === 4) {
-    const [a, b] = address.split('.').map(Number)
-    return !(a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && (b === 0 || b === 168)) || (a === 198 && (b === 18 || b === 19)) || a >= 224)
-  }
-  if (version === 6) {
-    const lower = address.toLowerCase()
-    if (lower === '::' || lower === '::1' || lower.startsWith('fc') || lower.startsWith('fd') || /^fe[89ab]/.test(lower) || lower.startsWith('ff')) return false
-    const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-    return !mapped || isPublicAddress(mapped[1])
-  }
-  return false
-}
-
 export function assertSafeResearchUrl(value: string): URL {
-  let url: URL
   try {
-    url = new URL(value)
+    return parseExternalUrl(value)
   } catch {
     throw new Error('RESEARCH_UNSAFE_URL: URL must be valid.')
   }
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) throw new Error('RESEARCH_UNSAFE_URL: only credential-free HTTP(S) URLs are allowed.')
-  if (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) !== 0 && !isPublicAddress(host))) {
-    throw new Error('RESEARCH_UNSAFE_URL: private or local network targets are not allowed.')
-  }
-  return url
 }
 
-async function assertPublicResearchHost(url: URL, lookup: ResearchHostLookup): Promise<void> {
-  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (isIP(hostname)) return
-  let addresses: string[]
+async function validatePublicResearchUrl(value: string, lookup?: ResearchHostLookup): Promise<string> {
   try {
-    addresses = await lookup(hostname)
-  } catch {
-    throw new Error('RESEARCH_UNSAFE_URL: source host could not be resolved safely.')
+    return (await validateInitialUrl(value, { lookup })).toString()
+  } catch (error) {
+    const detail = error instanceof Error
+      ? error.message.replace(/^unsafe external URL:\s*/i, '')
+      : 'URL could not be validated safely.'
+    throw new Error(`RESEARCH_UNSAFE_URL: ${detail}`)
   }
-  if (!addresses.length || addresses.some((address) => !isPublicAddress(address))) {
-    throw new Error('RESEARCH_UNSAFE_URL: private or local network targets are not allowed.')
-  }
-}
-
-async function validatePublicResearchUrl(value: string, lookup: ResearchHostLookup): Promise<string> {
-  const url = assertSafeResearchUrl(value)
-  await assertPublicResearchHost(url, lookup)
-  return url.toString()
 }
 
 function sanitizeContent(value: string): string {
@@ -140,11 +108,6 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, map: (i
   return results
 }
 
-const lookupPublicAddresses: ResearchHostLookup = async (hostname) => {
-  const addresses = await dns.lookup(hostname, { all: true, verbatim: true })
-  return addresses.map((entry) => entry.address)
-}
-
 export function createContentService(options: {
   repositories?: { researchSourceRepo: typeof researchSourceRepo; researchEventRepo: typeof researchEventRepo }
   executeTool?: WorkflowToolExecutor
@@ -156,7 +119,7 @@ export function createContentService(options: {
   const repositories = options.repositories ?? { researchSourceRepo, researchEventRepo }
   const executeTool: WorkflowToolExecutor = options.executeTool ?? executeLegacyToolCapability
   const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
-  const lookup = options.lookup ?? lookupPublicAddresses
+  const lookup = options.lookup
   const isCancelled = options.isCancelled ?? (() => false)
 
   function failureOutcome(

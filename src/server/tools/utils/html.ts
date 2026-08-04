@@ -127,9 +127,7 @@ async function requestOnce(
   const signal = combineSignals(parentSignal, AbortSignal.timeout(timeoutMs))
   // For the proxy path use undici's own fetch so it and ProxyAgent come from the
   // same undici version (Node's built-in fetch rejects an external dispatcher).
-  if (dispatcher) {
-    return undiciFetch(url, { redirect: 'follow', headers, signal, dispatcher }) as unknown as Response
-  }
+  if (dispatcher) return undiciFetch(url, { redirect: 'manual', headers, signal, dispatcher }) as unknown as Response
   return fetch(url, { redirect: 'manual', headers, signal })
 }
 
