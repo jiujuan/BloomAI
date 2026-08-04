@@ -22,6 +22,11 @@ const outputObject = (shape: z.ZodRawShape) => z.object(shape).passthrough()
 const webSearchInputSchema = z.object({
   query: z.string().min(1).max(10_000),
   limit: z.number().int().min(1).max(50).default(8),
+  tag: z.string().min(1).max(100).optional(),
+  zone: z.enum(['cn', 'intl']).optional(),
+  language: z.string().min(2).max(20).optional(),
+  params: z.record(z.unknown()).optional(),
+  format: z.enum(['json', 'markdown']).optional(),
 }).strict()
 
 const webFetchInputSchema = z.object({
@@ -193,8 +198,8 @@ export const toolContracts = {
       query: z.string().optional(),
       total: z.number().int().nonnegative().optional(),
       results: z.array(searchResultSchema).optional(),
-      provider: z.enum(['tavily', 'duckduckgo', 'agent_browser_serp']).optional(),
-      fallbackFrom: z.enum(['tavily', 'duckduckgo']).optional(),
+      provider: z.enum(['anysearch', 'tavily', 'duckduckgo', 'agent_browser_serp']).optional(),
+      fallbackFrom: z.enum(['anysearch', 'tavily', 'duckduckgo']).optional(),
       fallbackReason: z.string().optional(),
       error: z.string().optional(),
       errorCode: z.literal('WEB_SEARCH_SERP_BLOCKED').optional(),

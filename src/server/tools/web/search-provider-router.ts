@@ -1,5 +1,6 @@
 import type {
   WebRoutingPolicy,
+  WebSearchFallbackProviderId,
   WebSearchOutput,
   WebSearchProvider,
   WebSearchRequest,
@@ -8,6 +9,7 @@ import type {
 export type SearchProviderAttempt = (request: WebSearchRequest) => Promise<WebSearchOutput>
 
 export type SearchProviderRouterOptions = {
+  anysearch?: SearchProviderAttempt
   tavily?: SearchProviderAttempt
   duckduckgo: SearchProviderAttempt
   agentBrowser?: WebSearchProvider | (() => WebSearchProvider)
@@ -15,9 +17,9 @@ export type SearchProviderRouterOptions = {
 }
 
 type SearchFailure = {
-  provider: 'tavily' | 'duckduckgo'
+  provider: WebSearchFallbackProviderId
   message: string
-  fallbackFrom?: 'tavily' | 'duckduckgo'
+  fallbackFrom?: WebSearchFallbackProviderId
   fallbackReason?: string
 }
 
@@ -37,44 +39,46 @@ export class SearchProviderRouter {
     let lastFailure: SearchFailure | undefined
     let lastOutput: WebSearchOutput | undefined
 
-    if (this.options.tavily) {
+    const providers: Array<{ id: WebSearchFallbackProviderId; attempt: SearchProviderAttempt }> = [
+      ...(this.options.anysearch ? [{ id: 'anysearch' as const, attempt: this.options.anysearch }] : []),
+      ...(this.options.tavily ? [{ id: 'tavily' as const, attempt: this.options.tavily }] : []),
+      { id: 'duckduckgo', attempt: this.options.duckduckgo },
+    ]
+
+    for (const provider of providers) {
       try {
-        const output = await this.options.tavily(request)
-        if (output.results.length > 0) return output
+        const output = await provider.attempt({
+          ...request,
+          ...(lastFailure
+            ? { fallbackFrom: lastFailure.provider, fallbackReason: lastFailure.message }
+            : {}),
+        })
+        if (output.results.length > 0) {
+          return lastFailure
+            ? {
+                ...output,
+                fallbackFrom: output.fallbackFrom ?? lastFailure.provider,
+                fallbackReason: output.fallbackReason ?? lastFailure.message,
+              }
+            : output
+        }
         lastOutput = output
-        lastFailure = { provider: 'tavily', message: 'Tavily returned no usable results' }
+        lastFailure = {
+          provider: provider.id,
+          message: `${providerLabel(provider.id)} returned no usable results`,
+          ...(lastFailure
+            ? { fallbackFrom: lastFailure.provider, fallbackReason: lastFailure.message }
+            : {}),
+        }
       } catch (error) {
         if (request.signal?.aborted) throw error
-        lastFailure = { provider: 'tavily', message: errorMessage(error) }
-      }
-    }
-
-    try {
-      const output = await this.options.duckduckgo({
-        ...request,
-        ...(lastFailure?.provider === 'tavily'
-          ? { fallbackFrom: 'tavily', fallbackReason: lastFailure.message }
-          : {}),
-      })
-      if (output.results.length > 0) {
-        return lastFailure?.provider === 'tavily'
-          ? {
-              ...output,
-              fallbackFrom: output.fallbackFrom ?? 'tavily',
-              fallbackReason: output.fallbackReason ?? lastFailure.message,
-            }
-          : output
-      }
-      lastOutput = output
-      lastFailure = { provider: 'duckduckgo', message: 'DuckDuckGo returned no usable results' }
-    } catch (error) {
-      if (request.signal?.aborted) throw error
-      lastFailure = {
-        provider: 'duckduckgo',
-        message: errorMessage(error),
-        ...(lastFailure?.provider === 'tavily'
-          ? { fallbackFrom: 'tavily', fallbackReason: lastFailure.message }
-          : {}),
+        lastFailure = {
+          provider: provider.id,
+          message: errorMessage(error),
+          ...(lastFailure
+            ? { fallbackFrom: lastFailure.provider, fallbackReason: lastFailure.message }
+            : {}),
+        }
       }
     }
 
@@ -151,7 +155,7 @@ function buildFallbackOutput(
     query: request.query,
     total: output?.results.length ?? 0,
     results: output?.results ?? [],
-    provider: output?.provider ?? failure?.provider ?? 'duckduckgo',
+    provider: failure?.provider ?? output?.provider ?? 'duckduckgo',
     ...(failure ? { error: output?.error ?? failure.message } : {}),
     ...(failure?.fallbackFrom
       ? { fallbackFrom: failure.fallbackFrom, fallbackReason: failure.fallbackReason }
@@ -161,6 +165,12 @@ function buildFallbackOutput(
           ? { fallbackFrom: output.fallbackFrom, fallbackReason: output.fallbackReason }
           : {}),
   }
+}
+
+function providerLabel(provider: WebSearchFallbackProviderId): string {
+  if (provider === 'anysearch') return 'AnySearch'
+  if (provider === 'tavily') return 'Tavily'
+  return 'DuckDuckGo'
 }
 
 function isSerpBlocked(error: unknown): error is WebSearchSerpBlockedError {
