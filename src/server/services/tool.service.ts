@@ -2,6 +2,8 @@ import { toolRepo } from '../db/repositories/tool.repo'
 import { CapabilityError, executeLegacyToolCapability } from '../skills/policy/capability-broker'
 import { sessionToolPermissionStore } from '../tools/session-permission-store'
 import { getToolAvailability } from '../tools/availability'
+import { getToolContract, schemaToJsonSchema } from '../tools/contracts'
+import { ToolContractError } from '../tools/execute-tool'
 import { ServiceError } from './errors'
 import { z } from 'zod'
 
@@ -21,7 +23,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     list(input: { category?: string } = {}) {
       const tools = dependencies.repo.list(input.category)
       const permissions = Object.fromEntries(dependencies.repo.listPermissions().map((permission) => [permission.tool_id, permission]))
-      return tools.map((tool) => ({ ...tool, availability: getToolAvailability(tool.id), permission: permissions[tool.id] ?? null }))
+      return tools.map((tool) => projectContract(tool, permissions[tool.id] ?? null))
     },
 
     getStats() {
@@ -57,7 +59,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     get(id: string) {
       const tool = dependencies.repo.get(id)
       if (!tool) throw new ServiceError('NOT_FOUND', 'Tool not found')
-      return { ...tool, availability: getToolAvailability(tool.id), permission: dependencies.repo.getPermission(id) ?? null }
+      return projectContract(tool, dependencies.repo.getPermission(id) ?? null)
     },
 
     setEnabled(id: string, enabled: unknown) {
@@ -86,6 +88,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
       } catch (error) {
         if (error instanceof ServiceError) throw error
         if (error instanceof z.ZodError) throw new ServiceError('VALIDATION_ERROR', error.issues[0]?.message ?? 'Invalid tool request')
+        if (error instanceof ToolContractError) throw new ServiceError('VALIDATION_ERROR', error.message)
         if (error instanceof CapabilityError) throw new ServiceError(error.code, error.message)
         throw new ServiceError('TOOL_ERROR', messageOf(error, 'Tool execution failed'))
       }
@@ -94,6 +97,20 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
     listRuns(id: string, limit = 50) {
       return dependencies.repo.listRuns(id, limit)
     },
+  }
+}
+
+function projectContract(tool: any, permission: unknown) {
+  const contract = getToolContract(tool.id)
+  if (!contract) return { ...tool, availability: getToolAvailability(tool.id), permission }
+  return {
+    ...tool,
+    description: contract.description,
+    params_schema: JSON.stringify(schemaToJsonSchema(contract.inputSchema)),
+    result_schema: JSON.stringify(schemaToJsonSchema(contract.outputSchema)),
+    requires_permission: contract.requiresPermission ?? tool.requires_permission,
+    availability: getToolAvailability(tool.id),
+    permission,
   }
 }
 

@@ -40,6 +40,7 @@ const capabilityRequestSchema = z.object({
   runId: z.string().min(1).optional(),
   sessionId: z.string().min(1).optional(),
   grantContext: z.record(z.unknown()).optional(),
+  signal: z.custom<AbortSignal>((value) => value instanceof AbortSignal).optional(),
 })
 
 export type CapabilityRequest = z.infer<typeof capabilityRequestSchema>
@@ -93,10 +94,12 @@ export async function executeCapability(request: CapabilityRequest): Promise<Cap
   const parsed = capabilityRequestSchema.parse(request)
   const toolId = resolveToolId(parsed)
   const tool = requireEnabledTool(toolId)
+  let packageScope: CapabilityScope | undefined
 
   if (parsed.caller === 'package-runtime') {
     const grant = requirePackageGrant(parsed)
     enforcePackageScope(parsed, grant.scope)
+    packageScope = grant.scope
     if (grant.grantMode === 'once' && !skillPackageRepo.consumeCapabilityGrant(grant.id)) {
       throw new CapabilityApprovalRequiredError(`Capability approval has already been used: ${parsed.capability}`)
     }
@@ -114,6 +117,11 @@ export async function executeCapability(request: CapabilityRequest): Promise<Cap
       parsed.input,
       parsed.sessionId,
       TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS,
+      {
+        caller: parsed.caller,
+        signal: parsed.signal,
+        allowedRoots: packageScope?.allowedRoots,
+      },
     )
     auditPackageCall(parsed, toolId, execution.toolRunId, 'completed')
     return { capability: parsed.capability, toolId, toolRunId: execution.toolRunId, output: execution.output }
@@ -129,6 +137,7 @@ export async function executeLegacyToolCapability(data: {
   input: Record<string, unknown>
   sessionId?: string
   approvalToken?: string
+  signal?: AbortSignal
 }): Promise<CapabilityResult> {
   return executeCapability({
     caller: data.caller,
@@ -136,6 +145,7 @@ export async function executeLegacyToolCapability(data: {
     input: data.input,
     sessionId: data.sessionId,
     grantContext: data.approvalToken ? { approvalToken: data.approvalToken } : undefined,
+    signal: data.signal,
   })
 }
 

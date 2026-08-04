@@ -61,4 +61,19 @@ describe('tool availability', () => {
     expect(tools).not.toHaveProperty('image_edit')
     expect(tools).toHaveProperty('web_search')
   })
+
+  it('uses the exact shared input and output contracts in Mastra and the database projection', async () => {
+    const { buildBuiltinTools, toolRepo } = await loadRuntime()
+    const { getToolContract, schemaToJsonSchema } = await import('./contracts')
+    const contract = getToolContract('web_fetch')!
+    const agentTool = buildBuiltinTools().web_fetch as any
+    const storedTool = toolRepo.get('web_fetch')!
+
+    expect(schemaToJsonSchema(agentTool.inputSchema)).toEqual(schemaToJsonSchema(contract.inputSchema))
+    expect(agentTool.inputSchema.safeParse({ url: 'https://example.com', maxChars: 0 }).success).toBe(false)
+    expect(agentTool.inputSchema.safeParse({ url: 'https://example.com' }).success).toBe(true)
+    expect(schemaToJsonSchema(agentTool.outputSchema)).toEqual(schemaToJsonSchema(contract.outputSchema))
+    expect(JSON.parse(storedTool.params_schema)).toEqual(schemaToJsonSchema(contract.inputSchema))
+    expect(JSON.parse(storedTool.result_schema)).toEqual(schemaToJsonSchema(contract.outputSchema))
+  })
 })

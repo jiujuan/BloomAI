@@ -21,8 +21,14 @@ export function ToolTestRunner({ tool, onClose }: { tool: Tool; onClose: () => v
       const parsedInput: Record<string, any> = {}
       for (const [key, val] of Object.entries(inputs)) {
         const schema = params[key]
-        if (schema?.type === 'number') parsedInput[key] = parseFloat(val) || 0
-        else if (schema?.type === 'boolean') parsedInput[key] = val === 'true'
+        if (val.trim() === '') continue
+        if (schema?.type === 'number' || schema?.type === 'integer') {
+          const numeric = Number(val)
+          parsedInput[key] = Number.isFinite(numeric) ? numeric : val
+        }
+        else if (schema?.type === 'boolean') {
+          parsedInput[key] = val === 'true' ? true : val === 'false' ? false : val
+        }
         else if (schema?.type === 'array' || schema?.type === 'object') { try { parsedInput[key] = JSON.parse(val) } catch { parsedInput[key] = val } }
         else parsedInput[key] = val
       }
