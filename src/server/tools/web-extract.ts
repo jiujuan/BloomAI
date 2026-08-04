@@ -5,11 +5,13 @@ import {
   extractTitle,
   htmlToText,
   resolveUrl,
+  stripBoilerplate,
   stripTags,
 } from './utils/html'
 import { loadPageWithProviders } from './web/provider-router'
+import type { WebExecutionDiagnostics, WebProviderId } from './web/contracts'
 
-type WebExtractInput = {
+export type WebExtractInput = {
   url: string
   /** Max characters of main text to include (default 20000). */
   maxChars?: number
@@ -23,7 +25,7 @@ type WebExtractInput = {
 
 type ExtractedLink = { url: string; text: string }
 
-type WebExtractOutput = {
+export type WebExtractOutput = {
   title: string
   description?: string
   finalUrl: string
@@ -35,6 +37,8 @@ type WebExtractOutput = {
   byline?: string
   publishedAt?: string
   canonicalUrl?: string
+  provider: WebProviderId
+  diagnostics: WebExecutionDiagnostics
 }
 
 const DEFAULT_MAX_CHARS = 20000
@@ -80,9 +84,10 @@ export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = a
 
 function extractHeadings(html: string): string[] {
   const headings: string[] = []
+  const cleanHtml = stripBoilerplate(html)
   const re = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi
   let m: RegExpExecArray | null
-  while ((m = re.exec(html)) && headings.length < DEFAULT_MAX_HEADINGS) {
+  while ((m = re.exec(cleanHtml)) && headings.length < DEFAULT_MAX_HEADINGS) {
     const text = stripTags(m[2])
     if (text) headings.push(text)
   }
@@ -92,10 +97,11 @@ function extractHeadings(html: string): string[] {
 function extractLinks(html: string, baseUrl: string, maxLinks: number): ExtractedLink[] {
   const links: ExtractedLink[] = []
   const seen = new Set<string>()
+  const cleanHtml = stripBoilerplate(html)
   // href in single or double quotes, tolerant of other attributes and nested tags.
   const re = /<a\b[^>]*?href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
   let m: RegExpExecArray | null
-  while ((m = re.exec(html)) && links.length < maxLinks) {
+  while ((m = re.exec(cleanHtml)) && links.length < maxLinks) {
     const rawHref = m[1].trim()
     if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:') || rawHref.startsWith('mailto:')) {
       continue
