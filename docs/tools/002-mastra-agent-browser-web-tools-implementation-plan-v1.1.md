@@ -111,11 +111,11 @@ POC 必须实际调用 AgentBrowser 当前版本支持的公开 API。若 SDK �
 
 ### Done when
 
-- [ ] `@mastra/agent-browser` 已锁定并与现有 Mastra runtime 无 peer dependency 冲突。
-- [ ] 已确认并记录生产调用方式（本地 Chromium 或受控 CDP）。
-- [ ] 开发与 Electron 打包环境都能打开 fixture 并生成截图。
-- [ ] 依赖缺失时能映射为稳定错误，而不是 silent fallback。
-- [ ] 不需要修改任何现有 `web_*` Tool ID。
+- [x] `@mastra/agent-browser` 已锁定并与现有 Mastra runtime 无 peer dependency 冲突。
+- [x] 已确认并记录生产调用方式（本地 Chromium 或受控 CDP）。
+- [ ] 开发与 Electron 打包环境都能打开 fixture 并生成截图。开发环境已通过；Electron 安装包 smoke 留到 T12 发布门禁补齐。
+- [x] 依赖缺失时能映射为稳定错误，而不是 silent fallback。
+- [x] 不需要修改任何现有 `web_*` Tool ID。
 
 ### 依赖与回滚
 

@@ -3,6 +3,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { AgentBrowser } from '@mastra/agent-browser'
 import { chromium, type Browser } from 'playwright-core'
 import { AgentBrowserProvider } from '../src/server/tools/web/agent-browser-provider'
 import { WebBrowserError } from '../src/server/tools/web/browser-errors'
@@ -11,6 +12,9 @@ import { writeScreenshotArtifact } from '../src/server/tools/web/screenshot-arti
 
 export type AgentBrowserPocResult = {
   fixtureUrl: string
+  agentBrowserApiUsed: boolean
+  managerReadHydrated: boolean
+  screenshotSource: 'agent_browser'
   hydrated: boolean
   screenshot: {
     path: string
@@ -77,75 +81,147 @@ export async function runAgentBrowserPoc(): Promise<AgentBrowserPocResult> {
       enabled: true,
       channels: process.env.WEB_BROWSER_CHANNELS?.split(',').map((value) => value.trim()).filter(Boolean) || ['msedge', 'chrome'],
     }
-    const launchBrowser = async (channels: readonly string[]): Promise<Browser> => {
-      let lastError: unknown
-      for (const channel of channels) {
-        try {
-          browser = await chromium.launch({ channel, headless: true })
-          return browser
-        } catch (error) {
-          lastError = error
-        }
-      }
-      throw lastError instanceof Error ? lastError : new Error('no configured system browser could be launched')
-    }
-    provider = new AgentBrowserProvider({ config, launchBrowser, validateUrl })
-
-    const loaded = await provider.load({ url: fixtureUrl, timeoutMs: config.timeoutMs })
-    const hydrated = loaded.html.includes('Hydrated fixture') && loaded.html.includes('JavaScript ran inside')
-    if (!hydrated) throw new Error('fixture did not hydrate in the browser')
-
-    const screenshot = await provider.screenshot({
-      url: fixtureUrl,
-      fullPage: true,
+    const executablePath = findBrowserExecutable()
+    const agentBrowser = new AgentBrowser({
+      headless: true,
+      timeout: config.timeoutMs,
       viewport: { width: 1024, height: 768 },
-      format: 'png',
-      timeoutMs: config.timeoutMs,
+      ...(executablePath ? { executablePath } : {}),
     })
-    const artifact = await writeScreenshotArtifact({
-      bytes: screenshot.bytes,
-      mimeType: screenshot.mimeType,
-      dataDir,
-      runId: 'release-b2-poc',
-      maxBytes: config.maxArtifactBytes,
-    })
-    if (screenshot.diagnostics.blockedRequests !== 1) {
-      throw new Error(`expected one blocked subresource, got ${screenshot.diagnostics.blockedRequests ?? 0}`)
-    }
-
-    const controller = new AbortController()
-    const abortPromise = provider.load({ url: slowUrl, timeoutMs: config.timeoutMs, signal: controller.signal })
-    setTimeout(() => controller.abort(new Error('probe cancellation')), 75)
-    let abortCode = 'none'
+    let agentBrowserClosed = false
     try {
-      await abortPromise
-    } catch (error) {
-      abortCode = error instanceof WebBrowserError ? error.code : 'unknown'
-    }
-    if (abortCode !== 'WEB_BROWSER_ABORTED') throw new Error(`abort mapped to ${abortCode}`)
-    const contextsAfterAbort = browser?.contexts().length ?? -1
-    if (contextsAfterAbort !== 0) throw new Error(`browser context leak after abort: ${contextsAfterAbort}`)
+      const manager = await agentBrowser.getManagerForThread('release-b2-poc')
+      const page = manager.getPage()
+      let blockedRequests = 0
+      await page.route('**/*', async (route) => {
+        const requestUrl = route.request().url()
+        if (requestUrl.endsWith('/blocked-resource.png')) {
+          blockedRequests += 1
+          await route.abort('blockedbyclient')
+          return
+        }
+        await route.continue()
+      })
 
-    await provider.close()
-    const browserClosed = browser ? !browser.isConnected() : false
-    return {
-      fixtureUrl,
-      hydrated,
-      screenshot: {
-        path: artifact.imagePath,
-        width: screenshot.width,
-        height: screenshot.height,
-        bytes: artifact.bytes,
-      },
-      blockedRequests: screenshot.diagnostics.blockedRequests ?? 0,
-      abortCode,
-      contextsAfterAbort,
-      browserClosed,
+      const navigation = await agentBrowser.goto({
+        url: fixtureUrl,
+        waitUntil: 'domcontentloaded',
+        timeout: config.timeoutMs,
+      }, 'release-b2-poc')
+      assertAgentBrowserSuccess(navigation)
+      const managerHtml = await page.content()
+      const managerReadHydrated = managerHtml.includes('Hydrated fixture') && managerHtml.includes('JavaScript ran inside')
+      if (!managerReadHydrated) throw new Error('AgentBrowser manager page did not hydrate the fixture')
+
+      const screenshot = await agentBrowser.screenshot({ fullPage: false }, 'release-b2-poc')
+      if (!('base64' in screenshot)) {
+        throw new Error('message' in screenshot ? screenshot.message : 'AgentBrowser screenshot failed')
+      }
+      const screenshotBytes = Buffer.from(stripDataUrlPrefix(screenshot.base64), 'base64')
+      const viewport = page.viewportSize() || { width: 1024, height: 768 }
+      const artifact = await writeScreenshotArtifact({
+        bytes: screenshotBytes,
+        mimeType: 'image/png',
+        dataDir,
+        runId: 'release-b2-poc-agent-browser',
+        maxBytes: config.maxArtifactBytes,
+      })
+      await agentBrowser.close()
+      agentBrowserClosed = true
+
+      const launchBrowser = async (channels: readonly string[]): Promise<Browser> => {
+        let lastError: unknown
+        for (const channel of channels) {
+          try {
+            browser = await chromium.launch({ channel, headless: true })
+            return browser
+          } catch (error) {
+            lastError = error
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error('no configured system browser could be launched')
+      }
+      provider = new AgentBrowserProvider({ config, launchBrowser, validateUrl })
+
+      const controller = new AbortController()
+      const abortPromise = provider.load({ url: slowUrl, timeoutMs: config.timeoutMs, signal: controller.signal })
+      setTimeout(() => controller.abort(new Error('probe cancellation')), 75)
+      let abortCode = 'none'
+      try {
+        await abortPromise
+      } catch (error) {
+        abortCode = error instanceof WebBrowserError ? error.code : 'unknown'
+      }
+      if (abortCode !== 'WEB_BROWSER_ABORTED') throw new Error(`abort mapped to ${abortCode}`)
+      const contextsAfterAbort = browser?.contexts().length ?? -1
+      if (contextsAfterAbort !== 0) throw new Error(`browser context leak after abort: ${contextsAfterAbort}`)
+
+      await provider.close()
+      const browserClosed = browser ? !browser.isConnected() : false
+      return {
+        fixtureUrl,
+        agentBrowserApiUsed: true,
+        managerReadHydrated,
+        screenshotSource: 'agent_browser',
+        hydrated: managerReadHydrated,
+        screenshot: {
+          path: artifact.imagePath,
+          width: viewport.width,
+          height: viewport.height,
+          bytes: artifact.bytes,
+        },
+        blockedRequests,
+        abortCode,
+        contextsAfterAbort,
+        browserClosed: agentBrowserClosed && browserClosed,
+      }
+    } catch (error) {
+      if (isAgentBrowserLaunchFailure(error)) {
+        throw new WebBrowserError(
+          'WEB_BROWSER_UNAVAILABLE',
+          `AgentBrowser could not launch a configured browser: ${error instanceof Error ? error.message : String(error)}`,
+          error,
+        )
+      }
+      throw error
+    } finally {
+      if (!agentBrowserClosed) await agentBrowser.close().catch(() => {})
     }
   } finally {
     await provider?.close().catch(() => {})
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
+}
+
+function assertAgentBrowserSuccess<T extends { success: true }>(result: T | { success: false; message?: string }): asserts result is T {
+  if ('success' in result && result.success === false) throw new Error(result.message || 'AgentBrowser operation failed')
+}
+
+function stripDataUrlPrefix(value: string): string {
+  return value.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '')
+}
+
+function findBrowserExecutable(): string | undefined {
+  const candidates = [
+    process.env.BLOOMAI_WEB_BROWSER_EXECUTABLE_PATH,
+    process.env.AGENT_BROWSER_EXECUTABLE_PATH,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : undefined,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe') : undefined,
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  ].filter((candidate): candidate is string => Boolean(candidate))
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
+function isAgentBrowserLaunchFailure(error: unknown): boolean {
+  if (error instanceof WebBrowserError) return error.code === 'WEB_BROWSER_UNAVAILABLE'
+  if (!(error instanceof Error)) return false
+  const message = error.message.toLowerCase()
+  return message.includes('executable doesn\'t exist')
+    || message.includes('browser was not found')
+    || message.includes('failed to launch')
+    || message.includes('could not find')
 }
 
 async function main(): Promise<void> {
