@@ -10,6 +10,8 @@ const DEFAULT_CONFIG = {
   maxPixels: 8_000_000,
   maxArtifactBytes: 10 * 1024 * 1024,
   timeoutMs: 60_000,
+  queueTimeoutMs: 5_000,
+  idleTimeoutMs: 30_000,
   channels: ['msedge', 'chrome'] as string[],
 }
 
@@ -22,6 +24,8 @@ export const webBrowserConfigSchema = z.object({
   maxPixels: z.number().int().min(1_000_000).max(16_000_000).default(DEFAULT_CONFIG.maxPixels),
   maxArtifactBytes: z.number().int().min(64 * 1024).max(10 * 1024 * 1024).default(DEFAULT_CONFIG.maxArtifactBytes),
   timeoutMs: z.number().int().min(1_000).max(60_000).default(DEFAULT_CONFIG.timeoutMs),
+  queueTimeoutMs: z.number().int().min(100).max(60_000).default(DEFAULT_CONFIG.queueTimeoutMs),
+  idleTimeoutMs: z.number().int().min(0).max(300_000).default(DEFAULT_CONFIG.idleTimeoutMs),
   channels: z.array(z.string().min(1)).min(1).max(4).default(DEFAULT_CONFIG.channels),
 })
 
@@ -37,6 +41,8 @@ export function getWebBrowserConfig(source: Record<string, string | undefined> =
     maxPixels: clampInteger(source.WEB_BROWSER_MAX_PIXELS, DEFAULT_CONFIG.maxPixels, 1_000_000, 16_000_000),
     maxArtifactBytes: clampInteger(source.WEB_BROWSER_MAX_ARTIFACT_BYTES, DEFAULT_CONFIG.maxArtifactBytes, 64 * 1024, 10 * 1024 * 1024),
     timeoutMs: clampInteger(source.WEB_BROWSER_TIMEOUT_MS, DEFAULT_CONFIG.timeoutMs, 1_000, 60_000),
+    queueTimeoutMs: clampInteger(source.WEB_BROWSER_QUEUE_TIMEOUT_MS, DEFAULT_CONFIG.queueTimeoutMs, 100, 60_000),
+    idleTimeoutMs: clampInteger(source.WEB_BROWSER_IDLE_TIMEOUT_MS, DEFAULT_CONFIG.idleTimeoutMs, 0, 300_000),
     channels: parseChannels(source.WEB_BROWSER_CHANNELS),
   }
   const parsed = webBrowserConfigSchema.safeParse(candidate)

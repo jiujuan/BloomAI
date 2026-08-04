@@ -74,6 +74,11 @@ export class WebPageProviderRouter {
     }
   }
 
+  async close(): Promise<void> {
+    const close = (this.browserProvider as WebPageProvider & { close?: () => Promise<void> }).close
+    await close?.()
+  }
+
   private async loadStatic(request: WebPageLoadRequest): Promise<WebLoadedPage> {
     return this.loadProvider(this.staticProvider, request)
   }
@@ -133,6 +138,12 @@ export function getDefaultWebPageProviderRouter(): WebPageProviderRouter {
 
 export function resetDefaultWebPageProviderRouter(): void {
   defaultRouter = undefined
+}
+
+export async function closeDefaultWebPageProviderRouter(): Promise<void> {
+  const router = defaultRouter
+  defaultRouter = undefined
+  await router?.close()
 }
 
 export function loadPageWithProviders(url: string, request: Omit<WebPageLoadRequest, 'url'> = {}): Promise<WebLoadedPage> {

@@ -10,6 +10,7 @@ import { serverLogger } from './logger/logger'
 import { initTracing, shutdownTracing } from './telemetry/tracer'
 import { initMetrics, shutdownMetrics } from './telemetry/metrics'
 import { mastra, shutdownMastraRuntime } from './mastra'
+import { closeDefaultWebPageProviderRouter } from './tools/web/provider-router'
 
 // On Windows, switch the attached console to UTF-8 so Chinese characters in
 // log output are not garbled (Windows default code page is GBK/CP936).
@@ -46,6 +47,11 @@ runMigrations()
   })
 
 const gracefulShutdown = () =>
-  Promise.all([shutdownMastraRuntime(), shutdownTracing(), shutdownMetrics()]).finally(() => process.exit(0))
+  Promise.all([
+    shutdownMastraRuntime(),
+    shutdownTracing(),
+    shutdownMetrics(),
+    closeDefaultWebPageProviderRouter(),
+  ]).finally(() => process.exit(0))
 process.on('SIGTERM', gracefulShutdown)
 process.on('SIGINT', gracefulShutdown)

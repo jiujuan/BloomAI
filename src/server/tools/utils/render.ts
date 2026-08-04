@@ -4,7 +4,6 @@
  * Provider selection belongs to the Web Provider Router. Existing callers can
  * keep importing this module while new code uses the router directly.
  */
-import { AgentBrowserProvider } from '../web/agent-browser-provider'
 import { loadPageWithProviders } from '../web/provider-router'
 
 export interface RenderedPage {
@@ -21,7 +20,7 @@ export interface RenderOptions {
 }
 
 export async function renderPage(url: string, opts: RenderOptions = {}): Promise<RenderedPage> {
-  const result = await new AgentBrowserProvider().load({ url, ...opts })
+  const result = await loadPageWithProviders(url, { ...opts, render: true })
   return { html: result.html, finalUrl: result.finalUrl, status: result.status }
 }
 

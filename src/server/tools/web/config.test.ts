@@ -13,6 +13,8 @@ describe('web browser config', () => {
       maxPageHeight: 10_000,
       maxPixels: 8_000_000,
       maxArtifactBytes: 10 * 1024 * 1024,
+      queueTimeoutMs: 5_000,
+      idleTimeoutMs: 30_000,
     })
   })
 
@@ -25,6 +27,8 @@ describe('web browser config', () => {
       WEB_BROWSER_MAX_PAGE_HEIGHT: '100000',
       WEB_BROWSER_MAX_PIXELS: '1',
       WEB_BROWSER_MAX_ARTIFACT_BYTES: '1',
+      WEB_BROWSER_QUEUE_TIMEOUT_MS: '1',
+      WEB_BROWSER_IDLE_TIMEOUT_MS: '999999',
     })
 
     expect(config.enabled).toBe(true)
@@ -34,6 +38,8 @@ describe('web browser config', () => {
     expect(config.maxPageHeight).toBe(20_000)
     expect(config.maxPixels).toBe(1_000_000)
     expect(config.maxArtifactBytes).toBe(64 * 1024)
+    expect(config.queueTimeoutMs).toBe(100)
+    expect(config.idleTimeoutMs).toBe(300_000)
   })
 
   it('defaults routing to static-first auto mode with browser search disabled', () => {
