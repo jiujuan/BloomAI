@@ -1,56 +1,56 @@
 {
-  "fixtureOrigin": "http://127.0.0.1:62418",
+  "fixtureOrigin": "http://127.0.0.1:58353",
   "sampleCount": 5,
   "staticFetch": {
     "samplesMs": [
-      22,
-      3,
-      8,
-      15,
+      31,
+      4,
+      2,
+      4,
       16
     ],
-    "p50Ms": 15,
-    "p95Ms": 22,
+    "p50Ms": 4,
+    "p95Ms": 31,
     "successCount": 5,
     "failureCount": 0,
     "errors": {}
   },
   "browserFetch": {
     "samplesMs": [
-      869,
-      488,
-      521,
-      531,
-      493
+      1009,
+      543,
+      527,
+      510,
+      584
     ],
-    "p50Ms": 521,
-    "p95Ms": 869,
+    "p50Ms": 543,
+    "p95Ms": 1009,
     "successCount": 5,
     "failureCount": 0,
     "errors": {}
   },
   "browserExtract": {
     "samplesMs": [
-      601,
-      641,
-      600,
-      594,
-      664
+      779,
+      774,
+      886,
+      857,
+      912
     ],
-    "p50Ms": 601,
-    "p95Ms": 664,
+    "p50Ms": 857,
+    "p95Ms": 912,
     "successCount": 5,
     "failureCount": 0,
     "errors": {}
   },
   "screenshot": {
     "samplesMs": [
-      679,
-      634,
-      660
+      1029,
+      826,
+      924
     ],
-    "p50Ms": 660,
-    "p95Ms": 679,
+    "p50Ms": 924,
+    "p95Ms": 1029,
     "successCount": 3,
     "failureCount": 0,
     "errors": {},

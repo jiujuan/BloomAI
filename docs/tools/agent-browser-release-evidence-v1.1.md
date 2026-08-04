@@ -55,10 +55,10 @@ git diff --check
 
 | 路径 | 成功数 | P50 | P95 |
 |---|---:|---:|---:|
-| static fetch | 5/5 | 15 ms | 22 ms |
-| browser fetch | 5/5 | 521 ms | 869 ms |
-| browser extract | 5/5 | 601 ms | 664 ms |
-| screenshot | 3/3 | 660 ms | 679 ms |
+| static fetch | 5/5 | 4 ms | 31 ms |
+| browser fetch | 5/5 | 543 ms | 1009 ms |
+| browser extract | 5/5 | 857 ms | 912 ms |
+| screenshot | 3/3 | 924 ms | 1029 ms |
 
 截图 artifact 为 `13052` bytes，峰值 context 为 `2/2`，不安全 URL probe 返回 `WEB_URL_UNSAFE`。
 
