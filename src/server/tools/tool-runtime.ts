@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { toolRepo } from '../db/repositories/tool.repo'
 import { getToolDefinition } from './registry'
+import { ControlledProcessError } from './utils/process-runner'
 import type { ToolExecutionContext } from './types'
 
 export type ToolExecution = {
@@ -151,9 +152,11 @@ export async function executeToolRuntime(
     return { output: parsedOutput.data as object, toolRunId: run.id }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
-    const status = timeoutTriggered || error instanceof ToolTimeoutError
+    const processTimeout = error instanceof ControlledProcessError && error.code === 'PROCESS_TIMEOUT'
+    const processCancelled = error instanceof ControlledProcessError && error.code === 'PROCESS_CANCELLED'
+    const status = timeoutTriggered || error instanceof ToolTimeoutError || processTimeout
       ? 'timeout'
-      : cancelled || error instanceof ToolCancelledError
+      : cancelled || error instanceof ToolCancelledError || processCancelled
         ? 'cancelled'
         : 'error'
     if (status !== 'error') {

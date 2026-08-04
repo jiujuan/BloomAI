@@ -1,7 +1,9 @@
 import * as vm from 'vm'
+import { requireToolAvailability } from './availability'
 import type { ToolExecutor } from './types'
 
 export const nodeRunnerTool: ToolExecutor<{ code: string; context?: object }> = async (input) => {
+  requireToolAvailability('node_runner')
   const logs: string[] = []
   const sandbox = { ...(input.context || {}), console: { log: (...a: any[]) => logs.push(a.map(String).join(' ')), error: (...a: any[]) => logs.push('[ERR] ' + a.map(String).join(' ')) }, Math, JSON, Date, Array, Object, String, Number, Boolean, parseInt, parseFloat, isNaN, isFinite }
   try {

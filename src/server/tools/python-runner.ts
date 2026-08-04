@@ -1,10 +1,43 @@
-import os from 'os'
+import { requireToolAvailability } from './availability'
 import type { ToolExecutor } from './types'
-import { execFileAsync } from './utils/process'
+import { ControlledProcessError, runControlledProcess } from './utils/process-runner'
 
-export const pythonRunnerTool: ToolExecutor<{ code: string }> = async (input) => {
-  try {
-    const { stdout, stderr } = await execFileAsync('python3', ['-c', input.code], { timeout: 10000, maxBuffer: 512 * 1024, env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: os.homedir() } })
-    return { stdout, stderr, exitCode: 0 }
-  } catch (err: any) { return { stdout: '', stderr: err.message || String(err), exitCode: 1 } }
+export type PythonRunnerInput = {
+  code: string
+  packages?: string[]
+}
+
+export function assertPythonPackagesDisabled(packages?: readonly string[]): void {
+  if (packages?.length) {
+    throw new ControlledProcessError(
+      'PROCESS_DEPENDENCY_INSTALL_DISABLED',
+      'Python packages are metadata only; dependency installation is disabled.',
+    )
+  }
+}
+
+export function getPythonCommand(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' ? 'python' : 'python3'
+}
+
+export const pythonRunnerTool: ToolExecutor<PythonRunnerInput> = async (input, context) => {
+  requireToolAvailability('python_runner')
+  assertPythonPackagesDisabled(input.packages)
+  const result = await runControlledProcess({
+    command: getPythonCommand(),
+    args: ['-c', input.code],
+    cwd: context.allowedRoots?.[0],
+    allowedRoots: context.allowedRoots,
+    signal: context.signal,
+    timeoutMs: 10_000,
+    maxStdoutBytes: 512 * 1024,
+    maxStderrBytes: 512 * 1024,
+  })
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode ?? 1,
+    stdoutTruncated: result.stdoutTruncated,
+    stderrTruncated: result.stderrTruncated,
+  }
 }
