@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>BloomAI Agent Browser Fixture</title>
+    <style>
+      body { font-family: sans-serif; margin: 32px; color: #1f2937; }
+      main { max-width: 720px; }
+      h1 { color: #0f766e; }
+      .hydrated { border-left: 4px solid #14b8a6; padding-left: 12px; }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <h1>Loading fixture</h1>
+      <p id="status">Waiting for JavaScript hydration.</p>
+      <img src="/blocked-resource.png" alt="guarded resource">
+    </main>
+    <script>
+      const app = document.querySelector('#app');
+      app.className = 'hydrated';
+      app.querySelector('h1').textContent = 'Hydrated fixture';
+      app.querySelector('#status').textContent = 'JavaScript ran inside the controlled browser context.';
+    </script>
+  </body>
+</html>

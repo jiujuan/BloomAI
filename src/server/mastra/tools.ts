@@ -6,6 +6,8 @@ import { executeLegacyToolCapability, needsInteractiveApprovalForTool } from '..
 import { runSkill } from '../skills/legacy'
 import { toLegacySkillToolId } from '../skills/legacy/mastra-tool-id'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
+import { isToolAvailable } from '../tools/availability'
+import { getToolContract } from '../tools/contracts'
 
 type MastraTool = ReturnType<typeof createTool>
 
@@ -34,7 +36,7 @@ export function buildAgentTools(sessionId?: string): Record<string, MastraTool> 
 // Curated built-in tool sets per specialist agent (P6d). `null` = all enabled tools.
 export const ROLE_TOOL_IDS: Record<string, string[] | null> = {
   writing: [],
-  coding: ['fs_read', 'fs_grep', 'fs_glob', 'fs_write', 'fs_edit', 'bash', 'shell', 'node_runner', 'python_runner', 'doc_markdown', 'doc_pdf', 'doc_txt', 'doc_csv', 'doc_docx'],
+  coding: ['fs_read', 'fs_stat', 'workspace_search', 'fs_grep', 'fs_glob', 'fs_write', 'fs_edit', 'bash', 'shell', 'node_runner', 'python_runner', 'doc_markdown', 'doc_pdf', 'doc_txt', 'doc_csv', 'doc_docx'],
 }
 
 export type BuildToolsOptions = {
@@ -64,12 +66,15 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
   const tools: Record<string, MastraTool> = {}
   for (const tool of toolRepo.list()) {
     if (tool.is_enabled !== 1) continue
+    if (!isToolAvailable(tool.id)) continue
     if (options.filter && !options.filter(tool.id)) continue
+    const contract = getToolContract(tool.id)
     const needsApproval = needsInteractiveApprovalForTool(tool) && !!options.approvalLevels?.has(tool.requires_permission!)
     tools[tool.id] = createTool({
       id: tool.id,
-      description: tool.description || `Run BloomAI tool ${tool.name}`,
-      inputSchema: jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
+      description: contract?.description || tool.description || `Run BloomAI tool ${tool.name}`,
+      inputSchema: contract?.inputSchema ?? jsonSchemaToZodObject(parseParamsSchema(tool.params_schema)),
+      ...(contract ? { outputSchema: contract.outputSchema } : {}),
       ...(needsApproval ? { requireApproval: true } : {}),
       execute: async (input) => {
         const result = await executeLegacyToolCapability({
@@ -77,7 +82,6 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
           toolId: tool.id,
           input: (input ?? {}) as Record<string, unknown>,
           sessionId,
-          approvalGranted: needsApproval,
         })
         return result.output
       },

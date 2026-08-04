@@ -7,7 +7,16 @@ export interface Tool {
   params_schema: string; result_schema: string
   is_builtin: number; is_enabled: number
   requires_permission: string | null; created_at: number
+  deprecated?: boolean
+  replacement?: string
   permission?: { granted: number; scope: string } | null
+  availability?: {
+    status: 'available' | 'disabled' | 'dependency_missing' | 'configuration_missing' | 'unsupported_platform'
+    reason?: string
+    dependency?: string
+    setting?: string
+    platform?: string
+  }
 }
 export interface ToolRun {
   id: string; tool_id: string; session_id: string | null

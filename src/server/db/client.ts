@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { runSqlMigrations } from './migrations'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
+import { schemaToJsonSchema, toolContracts } from '../tools/contracts'
 
 const require = createRequire(import.meta.url)
 type RawDb = { exec(sql: string): void }
@@ -285,15 +286,17 @@ function seedTools() {
   const count = database.select({ c: sql<number>`count(*)` }).from(schema.tools).where(eq(schema.tools.is_builtin, 1)).get()?.c || 0
   const now = Date.now()
 
-  if (Number(count) === 0) {
+  if (Number(count) < 25) {
     const tools = [
       ['web_search', 'web', 'Web Search', 'Search the web and return relevant results with titles, URLs and snippets.', '{"query":{"type":"string"},"limit":{"type":"number","default":8}}', '{"results":{"type":"array"}}', null],
       ['web_fetch', 'web', 'Web Fetch', 'Fetch a webpage and return its readable main text. Handles non-UTF-8 encodings and, for JS-heavy/SPA pages, can render with a headless browser.', '{"url":{"type":"string"},"mode":{"type":"string","enum":["text","html","full"],"default":"text"},"maxChars":{"type":"number","default":20000},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto (renders only when the static page has little text, e.g. SPAs)."},"timeoutMs":{"type":"number","default":20000}}', '{"title":{"type":"string"},"content":{"type":"string"},"finalUrl":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
-      ['web_screenshot', 'web', 'Web Screenshot', 'Capture a full-page screenshot of any URL as PNG.', '{"url":{"type":"string"}}', '{"imagePath":{"type":"string"}}', 'network'],
+      ['web_screenshot', 'web', 'Web Screenshot', 'Capture a bounded screenshot of a URL as a controlled PNG or JPEG artifact.', '{"url":{"type":"string"},"fullPage":{"type":"boolean","default":true},"viewport":{"type":"object"},"format":{"type":"string","enum":["png","jpeg"],"default":"png"},"quality":{"type":"number"},"timeoutMs":{"type":"number","default":60000}}', '{"imagePath":{"type":"string"},"mimeType":{"type":"string"},"width":{"type":"number"},"height":{"type":"number"},"bytes":{"type":"number"},"finalUrl":{"type":"string"},"provider":{"type":"string"},"diagnostics":{"type":"object"}}', 'network'],
       ['web_extract', 'web', 'Web Extract', 'Extract structured data (title, headings, links, main text) from a webpage. Supports JS rendering for complex/SPA pages.', '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}', '{"title":{"type":"string"},"byline":{"type":"string"},"publishedAt":{"type":"string"},"canonicalUrl":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}', 'network'],
       ['fs_read', 'fs', 'File Read', 'Read the contents of a local file with optional line range.', '{"path":{"type":"string"},"offset":{"type":"number"},"limit":{"type":"number"}}', '{"content":{"type":"string"},"totalLines":{"type":"number"}}', 'fs'],
       ['fs_write', 'fs', 'File Write', 'Write or append content to a local file.', '{"path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["write","append"],"default":"write"}}', '{"bytesWritten":{"type":"number"}}', 'write'],
-      ['fs_edit', 'fs', 'File Edit', 'Replace an exact unique string in a file.', '{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"}}', '{"success":{"type":"boolean"},"linesChanged":{"type":"number"}}', 'write'],
+      ['fs_edit', 'fs', 'File Edit', 'Replace an exact unique string in a file.', '{"path":{"type":"string"},"oldText":{"type":"string"},"newText":{"type":"string"},"expectedHash":{"type":"string"}}', '{"success":{"type":"boolean"},"linesChanged":{"type":"number"}}', 'write'],
+      ['fs_stat', 'fs', 'File Stat', 'Return bounded metadata for a local file, directory, or symlink.', '{"path":{"type":"string"}}', '{"path":{"type":"string"},"type":{"type":"string"},"size":{"type":"number"},"modifiedAt":{"type":"string"}}', 'fs'],
+      ['workspace_search', 'fs', 'Workspace Search', 'Search approved workspace files by text or glob with bounded pagination.', '{"query":{"type":"string"},"include":{"type":"string"},"exclude":{"type":"string"},"root":{"type":"string"},"caseSensitive":{"type":"boolean"},"maxResults":{"type":"number"},"cursor":{"type":"string"},"mode":{"type":"string"}}', '{"mode":{"type":"string"},"results":{"type":"array"},"total":{"type":"number"}}', 'fs'],
       ['fs_grep', 'fs', 'File Grep', 'Search file(s) for a regex pattern, return matching lines with line numbers.', '{"pattern":{"type":"string"},"path":{"type":"string"},"recursive":{"type":"boolean"}}', '{"matches":{"type":"array"}}', 'fs'],
       ['fs_glob', 'fs', 'File Glob', 'Find files matching a glob pattern.', '{"pattern":{"type":"string"},"cwd":{"type":"string"}}', '{"files":{"type":"array"}}', 'fs'],
       ['bash', 'fs', 'Bash', 'Execute whitelisted shell commands (ls, cat, grep, find, head, tail, wc).', '{"command":{"type":"string"},"cwd":{"type":"string"}}', '{"stdout":{"type":"string"},"stderr":{"type":"string"},"exitCode":{"type":"number"}}', 'shell'],
@@ -312,7 +315,8 @@ function seedTools() {
     ] as const
 
     for (const [id, category, name, description, params_schema, result_schema, requires_permission] of tools) {
-      database.insert(schema.tools).values({ id, category, name, description, params_schema, result_schema, is_builtin: 1, is_enabled: 1, requires_permission, created_at: now }).onConflictDoNothing().run()
+      const isPlaceholder = id === 'web_screenshot' || id === 'ocr' || id === 'image_edit'
+      database.insert(schema.tools).values({ id, category, name, description, params_schema, result_schema, is_builtin: 1, is_enabled: isPlaceholder ? 0 : 1, requires_permission, created_at: now }).onConflictDoNothing().run()
     }
   }
 
@@ -334,6 +338,21 @@ function seedTools() {
     params_schema: '{"url":{"type":"string"},"maxChars":{"type":"number","default":20000},"maxLinks":{"type":"number","default":50},"render":{"type":"boolean","description":"Force JS rendering via a headless browser. Omit for auto."},"timeoutMs":{"type":"number","default":20000}}',
     result_schema: '{"title":{"type":"string"},"byline":{"type":"string"},"publishedAt":{"type":"string"},"canonicalUrl":{"type":"string"},"headings":{"type":"array"},"links":{"type":"array"},"text":{"type":"string"},"rendered":{"type":"boolean"}}',
   }).where(eq(schema.tools.id, 'web_extract')).run()
+
+  syncBuiltinToolContracts(database)
+}
+
+function syncBuiltinToolContracts(database: ReturnType<typeof getOrmDb>): void {
+  for (const contract of Object.values(toolContracts)) {
+    database.update(schema.tools).set({
+      category: contract.category,
+      name: contract.displayName,
+      description: contract.description,
+      params_schema: JSON.stringify(schemaToJsonSchema(contract.inputSchema)),
+      result_schema: JSON.stringify(schemaToJsonSchema(contract.outputSchema)),
+      requires_permission: 'requiresPermission' in contract ? contract.requiresPermission ?? null : null,
+    }).where(eq(schema.tools.id, contract.id)).run()
+  }
 }
 
 function seedSkills() {

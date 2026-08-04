@@ -1,6 +1,6 @@
 import type { ToolExecutor } from './types'
 import { extractMainHtml, extractMetaDescription, extractTitle, htmlToText } from './utils/html'
-import { loadPage } from './utils/render'
+import { loadPageWithProviders } from './web/provider-router'
 
 type WebFetchInput = {
   url: string
@@ -29,10 +29,10 @@ type WebFetchOutput = {
 const DEFAULT_MAX_CHARS = 20000
 const DEFAULT_TIMEOUT_MS = 20000
 
-export const webFetchTool: ToolExecutor<WebFetchInput, WebFetchOutput> = async (input) => {
+export const webFetchTool: ToolExecutor<WebFetchInput, WebFetchOutput> = async (input, context) => {
   const { url, mode = 'text', maxChars = DEFAULT_MAX_CHARS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPage(url, { render, timeoutMs })
+  const page = await loadPageWithProviders(url, { render, timeoutMs, signal: context.signal })
   const title = extractTitle(page.html) || page.finalUrl
   const description = extractMetaDescription(page.html)
 
@@ -61,5 +61,7 @@ export const webFetchTool: ToolExecutor<WebFetchInput, WebFetchOutput> = async (
     description: description || undefined,
     truncated,
     rendered: page.rendered,
+    provider: page.provider,
+    diagnostics: page.diagnostics,
   }
 }

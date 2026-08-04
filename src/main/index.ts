@@ -4,8 +4,10 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { fork } from 'child_process'
 import type { ChildProcess } from 'child_process'
+import { randomBytes } from 'node:crypto'
 import { BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT, IPC_CHANNELS } from '../shared/constants'
 import { registerDirectoryDialogHandler } from './ipc/dialogs'
+import { createApprovalToken, getApprovalTokenSecret } from '../server/tools/approval-token'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = process.env.NODE_ENV === 'development'
@@ -138,6 +140,36 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.windowOpenMain, () => { mainWindow?.show(); mainWindow?.focus() })
   ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
   ipcMain.handle(IPC_CHANNELS.shellOpenExternal, (_e, url: string) => shell.openExternal(url))
+  ipcMain.handle(IPC_CHANNELS.toolRequestApproval, async (_event, intent: { toolId: string; sessionId: string; input: Record<string, unknown> }) => {
+    if (!intent || typeof intent.toolId !== 'string' || !intent.toolId.trim()) throw new Error('Tool id is required')
+    if (typeof intent.sessionId !== 'string' || !intent.sessionId.trim()) throw new Error('Session id is required')
+    if (!intent.input || typeof intent.input !== 'object' || Array.isArray(intent.input)) throw new Error('Tool input must be an object')
+
+    const messageBoxOptions = {
+      type: 'question' as const,
+      buttons: ['Allow', 'Deny'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Tool approval required',
+      message: `Allow ${intent.toolId} to run this exact request?`,
+      detail: 'This approval is single-use and bound to the current session and input.',
+    }
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const result = parentWindow
+      ? await dialog.showMessageBox(parentWindow, messageBoxOptions)
+      : await dialog.showMessageBox(messageBoxOptions)
+    if (result.response !== 0) return { approved: false }
+
+    return {
+      approved: true,
+      approvalToken: createApprovalToken({
+        secret: getApprovalTokenSecret(),
+        toolId: intent.toolId,
+        sessionId: intent.sessionId,
+        input: intent.input,
+      }),
+    }
+  })
 
   ipcMain.handle(IPC_CHANNELS.saveImage, async (_e, srcUrl: string, defaultName: string) => {
     const win = BrowserWindow.getFocusedWindow()
@@ -155,6 +187,7 @@ function setupIPC() {
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  process.env.TOOL_APPROVAL_TOKEN_SECRET ??= randomBytes(32).toString('hex')
   // Wait a moment for server to start
   startServer()
   await new Promise(r => setTimeout(r, 1500))

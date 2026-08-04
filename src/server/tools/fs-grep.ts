@@ -1,19 +1,30 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import type { ToolExecutor } from './types'
-import { resolveSafePath } from './utils/path'
+import { workspaceSearchTool } from './workspace-search'
+import { resolveToolPath } from './utils/tool-resource'
 
-export const fsGrepTool: ToolExecutor<{ pattern: string; path: string; recursive?: boolean }> = async (input) => {
-  const filePath = resolveSafePath(input.path)
-  const regex = new RegExp(input.pattern, 'g')
-  const matches: any[] = []
-  const searchFile = (fp: string) => {
-    const lines = fs.readFileSync(fp, 'utf-8').split('\n')
-    lines.forEach((line, i) => { if (regex.test(line)) matches.push({ file: fp, line: i + 1, text: line.trim() }); regex.lastIndex = 0 })
+export const fsGrepTool: ToolExecutor<{ pattern: string; path: string; recursive?: boolean }> = async (input, context) => {
+  const filePath = await resolveToolPath(input.path, context, 'read')
+  const stat = await fs.promises.lstat(filePath)
+  const root = stat.isDirectory() ? filePath : path.dirname(filePath)
+  const include = stat.isDirectory()
+    ? (input.recursive ? '**/*' : '*')
+    : path.basename(filePath)
+  const result = await workspaceSearchTool({
+    mode: 'text',
+    query: input.pattern,
+    root,
+    include,
+    caseSensitive: true,
+    maxResults: 100,
+  }, context)
+  return {
+    matches: result.results.map((match) => ({
+      file: match.file,
+      line: match.line,
+      text: match.preview?.trim(),
+    })),
+    total: result.total,
   }
-  if (fs.statSync(filePath).isDirectory() && input.recursive) {
-    const walk = (dir: string) => { for (const f of fs.readdirSync(dir)) { const fp = path.join(dir, f); if (fs.statSync(fp).isDirectory()) walk(fp); else { try { searchFile(fp) } catch {} } } }
-    walk(filePath)
-  } else searchFile(filePath)
-  return { matches: matches.slice(0, 100), total: matches.length }
 }

@@ -13,6 +13,7 @@
  */
 import { fetch as undiciFetch, ProxyAgent } from 'undici'
 import { readConfigValue } from '../../config/config'
+import { validateExternalUrl, validateRedirectTarget, type UrlLookup } from './url-policy'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -47,6 +48,8 @@ export interface FetchedPage {
   charset: string
   /** Fully decoded HTML/text body. */
   html: string
+  /** Whether the response exceeded the byte cap and was cancelled. */
+  truncated: boolean
 }
 
 export interface FetchPageOptions {
@@ -54,23 +57,45 @@ export interface FetchPageOptions {
   userAgent?: string
   /** Optional cap on bytes read from the response (defaults to 5 MB). */
   maxBytes?: number
+  signal?: AbortSignal
+  lookup?: UrlLookup
+  maxRedirects?: number
 }
 
 /** Fetch a page and decode it with the correct charset. */
 export async function fetchPage(url: string, opts: FetchPageOptions = {}): Promise<FetchedPage> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, userAgent = DEFAULT_UA, maxBytes = 5 * 1024 * 1024 } = opts
+  const {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    userAgent = DEFAULT_UA,
+    maxBytes = 5 * 1024 * 1024,
+    signal,
+    lookup,
+    maxRedirects = 5,
+  } = opts
+  let currentUrl = (await validateExternalUrl(url, { lookup })).toString()
 
   let res: Response
   let viaProxy = false
-  try {
-    res = await requestOnce(url, userAgent, timeoutMs)
-  } catch (err) {
-    // Direct connection failed (timeout / DNS / refused / reset). If a local
-    // proxy is configured, retry through it before giving up.
-    const proxy = getProxyDispatcher()
-    if (!proxy) throw err
-    viaProxy = true
-    res = await requestOnce(url, userAgent, timeoutMs, proxy)
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    try {
+      res = await requestOnce(currentUrl, userAgent, timeoutMs, signal)
+    } catch (err) {
+      // Direct connection failed (timeout / DNS / refused / reset). If a local
+      // proxy is configured, retry through it before giving up.
+      const proxy = getProxyDispatcher()
+      if (!proxy || isAbortError(err)) throw err
+      viaProxy = true
+      res = await requestOnce(currentUrl, userAgent, timeoutMs, signal, proxy)
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location')
+      if (!location) break
+      if (redirectCount >= maxRedirects) throw new Error(`Too many redirects for ${url}`)
+      currentUrl = (await validateRedirectTarget(location, currentUrl, { lookup })).toString()
+      continue
+    }
+    break
   }
 
   if (!res.ok) {
@@ -78,17 +103,19 @@ export async function fetchPage(url: string, opts: FetchPageOptions = {}): Promi
   }
 
   const contentType = res.headers.get('content-type') || ''
-  const buffer = await readBodyLimited(res, maxBytes)
-  const charset = detectCharset(buffer, contentType)
-  const html = decodeBuffer(buffer, charset)
+  const limited = await readBodyLimited(res, maxBytes, signal)
+  const charset = detectCharset(limited.bytes, contentType)
+  const html = decodeBuffer(limited.bytes, charset)
 
-  return { url, finalUrl: res.url || url, status: res.status, contentType, charset, html }
+  const finalUrl = (await validateExternalUrl(res.url || currentUrl, { lookup })).toString()
+  return { url, finalUrl, status: res.status, contentType, charset, html, truncated: limited.truncated }
 }
 
 async function requestOnce(
   url: string,
   userAgent: string,
   timeoutMs: number,
+  parentSignal?: AbortSignal,
   dispatcher?: ProxyAgent,
 ): Promise<Response> {
   const headers = {
@@ -97,18 +124,80 @@ async function requestOnce(
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Cache-Control': 'no-cache',
   }
-  const signal = AbortSignal.timeout(timeoutMs)
+  const signal = combineSignals(parentSignal, AbortSignal.timeout(timeoutMs))
   // For the proxy path use undici's own fetch so it and ProxyAgent come from the
   // same undici version (Node's built-in fetch rejects an external dispatcher).
   if (dispatcher) {
     return undiciFetch(url, { redirect: 'follow', headers, signal, dispatcher }) as unknown as Response
   }
-  return fetch(url, { redirect: 'follow', headers, signal })
+  return fetch(url, { redirect: 'manual', headers, signal })
 }
 
-async function readBodyLimited(res: Response, maxBytes: number): Promise<Uint8Array> {
-  const buf = new Uint8Array(await res.arrayBuffer())
-  return buf.length > maxBytes ? buf.subarray(0, maxBytes) : buf
+export type LimitedBody = {
+  bytes: Uint8Array
+  truncated: boolean
+  bytesRead: number
+}
+
+export async function readBodyLimited(res: Response, maxBytes: number, signal?: AbortSignal): Promise<LimitedBody> {
+  if (!Number.isInteger(maxBytes) || maxBytes <= 0) throw new Error('maxBytes must be a positive integer')
+  if (signal?.aborted) throw signal.reason ?? new Error('Operation cancelled')
+
+  if (!res.body) {
+    const buffer = new Uint8Array(await res.arrayBuffer())
+    return buffer.length > maxBytes
+      ? { bytes: buffer.subarray(0, maxBytes), truncated: true, bytesRead: buffer.length }
+      : { bytes: buffer, truncated: false, bytesRead: buffer.length }
+  }
+
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let bytesRead = 0
+  let truncated = false
+  try {
+    while (true) {
+      if (signal?.aborted) throw signal.reason ?? new Error('Operation cancelled')
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value)
+      if (bytesRead + chunk.byteLength > maxBytes) {
+        const remaining = maxBytes - bytesRead
+        if (remaining > 0) chunks.push(chunk.subarray(0, remaining))
+        bytesRead += chunk.byteLength
+        truncated = true
+        await reader.cancel('response byte limit reached').catch(() => {})
+        break
+      }
+      chunks.push(chunk)
+      bytesRead += chunk.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const result = new Uint8Array(Math.min(bytesRead, maxBytes))
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk.subarray(0, result.length - offset), offset)
+    offset += chunk.byteLength
+    if (offset >= result.length) break
+  }
+  return { bytes: result, truncated, bytesRead }
+}
+
+function combineSignals(parent: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
+  if (!parent) return timeout
+  if (parent.aborted) return parent
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([parent, timeout])
+  const controller = new AbortController()
+  const abort = (event: Event) => controller.abort((event.target as AbortSignal).reason)
+  parent.addEventListener('abort', abort, { once: true })
+  timeout.addEventListener('abort', abort, { once: true })
+  return controller.signal
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')
 }
 
 /** Decode a byte buffer using the given charset, falling back to UTF-8. */

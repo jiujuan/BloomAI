@@ -2,6 +2,7 @@ import { asc, desc, eq, gte, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getOrmDb } from '../client'
 import { tool_permissions, tool_runs, tools } from '../schema'
+import { redactRunPayload, redactRunText } from '../../tools/audit-redactor'
 
 export interface Tool {
   id: string; category: string; name: string; description: string
@@ -37,37 +38,39 @@ export const toolRepo = {
     getOrmDb().update(tools).set({ is_enabled: enabled ? 1 : 0 }).where(eq(tools.id, id)).run()
   },
 
-  startRun(toolId: string, sessionId: string | null, input: object): ToolRun {
+  startRun(toolId: string, sessionId: string | null, input: unknown): ToolRun {
     const id = uuidv4()
     const now = Date.now()
+    const auditInput = redactRunPayload(input)
     getOrmDb().insert(tool_runs).values({
       id,
       tool_id: toolId,
       session_id: sessionId,
-      input_json: JSON.stringify(input),
+      input_json: JSON.stringify(auditInput),
       status: 'running',
       started_at: now,
     }).run()
     return getOrmDb().select().from(tool_runs).where(eq(tool_runs.id, id)).get() as ToolRun
   },
 
-  completeRun(id: string, output: object): void {
+  completeRun(id: string, output: unknown): void {
     const now = Date.now()
     const run = getOrmDb().select({ started_at: tool_runs.started_at }).from(tool_runs).where(eq(tool_runs.id, id)).get()
+    const auditOutput = redactRunPayload(output)
     getOrmDb().update(tool_runs).set({
-      output_json: JSON.stringify(output),
+      output_json: JSON.stringify(auditOutput),
       status: 'success',
       finished_at: now,
       duration_ms: run ? now - run.started_at : 0,
     }).where(eq(tool_runs.id, id)).run()
   },
 
-  failRun(id: string, error: string): void {
+  failRun(id: string, error: string, status = 'error'): void {
     const now = Date.now()
     const run = getOrmDb().select({ started_at: tool_runs.started_at }).from(tool_runs).where(eq(tool_runs.id, id)).get()
     getOrmDb().update(tool_runs).set({
-      error_msg: error,
-      status: 'error',
+      error_msg: redactRunText(error),
+      status,
       finished_at: now,
       duration_ms: run ? now - run.started_at : 0,
     }).where(eq(tool_runs.id, id)).run()
@@ -109,7 +112,8 @@ export const toolRepo = {
     return getOrmDb().select().from(tool_permissions).where(eq(tool_permissions.tool_id, toolId)).get() as ToolPermission | undefined
   },
 
-  grantPermission(toolId: string, scope: string): void {
+  grantPermission(toolId: string, scope: 'permanent'): void {
+    if (scope !== 'permanent') throw new Error('Only permanent tool permissions can be persisted')
     const id = uuidv4()
     const now = Date.now()
     const existing = this.getPermission(toolId)

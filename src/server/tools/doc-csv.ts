@@ -1,9 +1,10 @@
-import * as fs from 'fs'
 import type { ToolExecutor } from './types'
-import { resolveSafePath } from './utils/path'
+import { readTextFileLimited, resolveToolPath } from './utils/tool-resource'
 
-export const docCsvTool: ToolExecutor<{ path: string; limit?: number }> = async (input) => {
-  const content = fs.readFileSync(resolveSafePath(input.path), 'utf-8')
+export const docCsvTool: ToolExecutor<{ path: string; limit?: number }> = async (input, context) => {
+  const filePath = await resolveToolPath(input.path, context, 'read')
+  const limited = await readTextFileLimited(filePath, context)
+  const content = limited.text
   const lines = content.split('\n').filter(l => l.trim())
   const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
   const limit = input.limit || 100
@@ -14,5 +15,5 @@ export const docCsvTool: ToolExecutor<{ path: string; limit?: number }> = async 
     const nums = vals.map(v => parseFloat(v)).filter(n => !isNaN(n))
     stats[h] = nums.length > 0 ? { count: nums.length, min: Math.min(...nums), max: Math.max(...nums), avg: nums.reduce((a,b)=>a+b,0)/nums.length } : { count: vals.length, unique: new Set(vals).size }
   })
-  return { headers, rows: rows.slice(0, 20), totalRows: lines.length - 1, stats }
+  return { headers, rows: rows.slice(0, 20), totalRows: lines.length - 1, stats, truncated: limited.truncated }
 }

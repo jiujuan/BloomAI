@@ -8,4 +8,5 @@ export const IPC_CHANNELS = {
   shellOpenExternal: 'shell:open-external',
   saveImage: 'dialog:save-image',
   dialogSelectDirectory: 'dialog:select-directory',
+  toolRequestApproval: 'tool:request-approval',
 } as const
