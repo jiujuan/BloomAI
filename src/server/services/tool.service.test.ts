@@ -38,6 +38,26 @@ describe('toolService', () => {
     await expect(service.run('search', { input: {}, sessionId: 's1' })).rejects.toMatchObject({ code: 'CAPABILITY_DENIED', message: 'Permission denied' })
   })
 
+  it('forwards an upstream abort signal to the capability broker', async () => {
+    const signal = new AbortController().signal
+    const executeLegacyToolCapability = vi.fn(async () => ({
+      capability: 'tool.search',
+      toolId: 'search',
+      output: { ok: true },
+      toolRunId: 'run-1',
+    }))
+    const service = createToolService({
+      repo: {} as any,
+      executeLegacyToolCapability,
+    })
+
+    await expect(service.run('search', { input: {} }, signal)).resolves.toEqual({
+      output: { ok: true },
+      toolRunId: 'run-1',
+    })
+    expect(executeLegacyToolCapability).toHaveBeenCalledWith(expect.objectContaining({ signal }))
+  })
+
   it('maps an unexpected legacy tool exception to TOOL_ERROR and forwards run pagination', async () => {
     const repo = { listRuns: vi.fn(() => [{ id: 'run-1' }]) } as any
     const service = createToolService({

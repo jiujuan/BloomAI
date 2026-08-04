@@ -38,4 +38,43 @@ describe('executeToolInternal cancellation', () => {
     expect(aborted).toBe(true)
     expect(toolRepo.listRuns('web_search')[0]).toMatchObject({ status: 'timeout' })
   })
+
+  it('does not create a run or invoke an executor when the upstream signal is already aborted', async () => {
+    vi.resetModules()
+    const client = await import('../db/client')
+    await client.runMigrations()
+    const { toolRegistry } = await import('./registry')
+    const { executeToolInternal, ToolCancelledError } = await import('./execute-tool')
+    const { toolRepo } = await import('../db/repositories/tool.repo')
+    const executor = vi.fn(async () => ({ results: [] }))
+    toolRegistry.web_search = executor
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(executeToolInternal('web_search', { query: 'pre-cancelled' }, undefined, 100, {
+      signal: controller.signal,
+    })).rejects.toBeInstanceOf(ToolCancelledError)
+
+    expect(executor).not.toHaveBeenCalled()
+    expect(toolRepo.listRuns('web_search')).toEqual([])
+  })
+
+  it('removes both upstream abort listeners after a signal-aware execution completes', async () => {
+    vi.resetModules()
+    const client = await import('../db/client')
+    await client.runMigrations()
+    const { toolRegistry } = await import('./registry')
+    const { executeToolInternal } = await import('./execute-tool')
+    const controller = new AbortController()
+    const addListener = vi.spyOn(controller.signal, 'addEventListener')
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    toolRegistry.web_search = vi.fn(async () => ({ query: 'done', total: 0, results: [] }))
+
+    await expect(executeToolInternal('web_search', { query: 'done' }, undefined, 100, {
+      signal: controller.signal,
+    })).resolves.toMatchObject({ output: { query: 'done' } })
+
+    expect(addListener).toHaveBeenCalledTimes(2)
+    expect(removeListener).toHaveBeenCalledTimes(2)
+  })
 })

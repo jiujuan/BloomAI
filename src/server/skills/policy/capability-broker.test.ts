@@ -117,60 +117,26 @@ describe('CapabilityBroker', () => {
     expect(toolRepo.listRuns('web_search')).toEqual([])
   })
 
-  it('allows patch preview without approval and requires a trusted one-time token for writes', async () => {
-    process.env.TOOL_APPROVAL_TOKEN_SECRET = 'patch-test-secret'
-    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
-    const { createApprovalToken } = await import('../../tools/approval-token')
-    const workspace = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-fs-apply-patch-'))
-    const filePath = path.join(workspace, 'notes.txt')
-    const patch = [
-      '--- a/notes.txt',
-      '+++ b/notes.txt',
-      '@@ -1,1 +1,1 @@',
-      '-before',
-      '+after',
-    ].join('\n')
-    fs.writeFileSync(filePath, 'before\n', 'utf8')
+  it('propagates an upstream abort to the tool executor and records a cancelled run', async () => {
+    const { toolRegistry, executeLegacyToolCapability } = await loadRuntime()
+    const controller = new AbortController()
+    let executorSignal: AbortSignal | undefined
+    toolRegistry.web_search = vi.fn(async (_input, context) => new Promise((resolve) => {
+      executorSignal = context.signal
+      context.signal?.addEventListener('abort', () => resolve({ query: 'cancelled', total: 0, results: [] }), { once: true })
+    }))
 
-    try {
-      await expect(executeLegacyToolCapability({
-        caller: 'http',
-        toolId: 'fs_apply_patch',
-        input: { patch, root: workspace },
-      })).resolves.toMatchObject({ output: { dryRun: true, applied: false } })
+    const pending = executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'web_search',
+      input: { query: 'cancelled' },
+      signal: controller.signal,
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    controller.abort()
 
-      await expect(executeLegacyToolCapability({
-        caller: 'http',
-        toolId: 'fs_apply_patch',
-        input: { patch, root: workspace, dryRun: false, createBackup: true },
-        sessionId: 'patch-session',
-      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
-
-      const approvalToken = createApprovalToken({
-        secret: 'patch-test-secret',
-        toolId: 'fs_apply_patch',
-        sessionId: 'patch-session',
-        input: { patch, root: workspace, dryRun: false, createBackup: true },
-      })
-      await expect(executeLegacyToolCapability({
-        caller: 'http',
-        toolId: 'fs_apply_patch',
-        input: { patch, root: workspace, dryRun: false, createBackup: true },
-        sessionId: 'patch-session',
-        approvalToken,
-      })).resolves.toMatchObject({ output: { dryRun: false, applied: true, rollbackToken: expect.any(String) } })
-      expect(fs.readFileSync(filePath, 'utf8')).toBe('after\n')
-
-      await expect(executeLegacyToolCapability({
-        caller: 'http',
-        toolId: 'fs_apply_patch',
-        input: { patch, root: workspace, dryRun: false, createBackup: true },
-        sessionId: 'patch-session',
-        approvalToken,
-      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
-    } finally {
-      fs.rmSync(workspace, { recursive: true, force: true })
-    }
+    await expect(pending).rejects.toMatchObject({ status: 'cancelled' })
+    expect(executorSignal?.aborted).toBe(true)
   })
 
   it('enforces image model allowlists and per-run call budgets for package capabilities', async () => {
@@ -280,5 +246,192 @@ describe('CapabilityBroker', () => {
     await expect(executeCapability({
       caller: 'package-runtime', capability: 'web.fetch', input: { url: 'https://docs.example.test/data' }, runId: run.id,
     })).resolves.toMatchObject({ toolId: 'web_fetch' })
+  })
+
+  it('allows fs_apply_patch dry runs without write approval but gates actual writes', async () => {
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    try {
+    const dryRun = await executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'fs_apply_patch',
+      sessionId: 'session-1',
+      input: {
+        patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+        root,
+        dryRun: true,
+      },
+    })
+    expect(dryRun.output).toMatchObject({ dryRun: true, applied: false })
+
+    await expect(executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'fs_apply_patch',
+      sessionId: 'session-1',
+      input: {
+        patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+        root,
+        dryRun: false,
+      },
+    })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts session, permanent, and exact one-time grants for fs_apply_patch writes', async () => {
+    const { toolRepo, executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const sessionId = 'session-1'
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    const patchInput = {
+      patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+      root,
+      dryRun: false,
+    }
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        input: patchInput,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+
+      const { sessionToolPermissionStore } = await import('../../tools/session-permission-store')
+      sessionToolPermissionStore.grant('fs_apply_patch', sessionId)
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        input: patchInput,
+      })).resolves.toMatchObject({ output: { applied: true } })
+
+      toolRepo.grantPermission('fs_apply_patch', 'permanent')
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId: 'session-2',
+        input: {
+          ...patchInput,
+          patch: `--- a/permanent.txt
++++ b/permanent.txt
+@@ -0,0 +1 @@
++hello
+`,
+        },
+      })).resolves.toMatchObject({ output: { applied: true } })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('consumes an exact one-time fs_apply_patch approval token only once', async () => {
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const sessionId = 'session-1'
+    const root = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-b1-capability-'))
+    const input = {
+      patch: `--- a/new.txt
++++ b/new.txt
+@@ -0,0 +1 @@
++hello
+`,
+      root,
+      dryRun: false,
+    }
+    const { createApprovalToken } = await import('../../tools/approval-token')
+    const token = createApprovalToken({
+      secret: process.env.TOOL_APPROVAL_TOKEN_SECRET ?? 'bloomai-development-approval-secret',
+      toolId: 'fs_apply_patch',
+      sessionId,
+      input,
+    })
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        approvalToken: token,
+        input,
+      })).resolves.toMatchObject({ output: { applied: true } })
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        sessionId,
+        approvalToken: token,
+        input,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('allows patch preview without approval and requires a trusted one-time token for writes', async () => {
+    process.env.TOOL_APPROVAL_TOKEN_SECRET = 'patch-test-secret'
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const { createApprovalToken } = await import('../../tools/approval-token')
+    const workspace = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-fs-apply-patch-'))
+    const filePath = path.join(workspace, 'notes.txt')
+    const patch = [
+      '--- a/notes.txt',
+      '+++ b/notes.txt',
+      '@@ -1,1 +1,1 @@',
+      '-before',
+      '+after',
+    ].join('\n')
+    fs.writeFileSync(filePath, 'before\n', 'utf8')
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace },
+      })).resolves.toMatchObject({ output: { dryRun: true, applied: false } })
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+
+      const approvalToken = createApprovalToken({
+        secret: 'patch-test-secret',
+        toolId: 'fs_apply_patch',
+        sessionId: 'patch-session',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+      })
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+        approvalToken,
+      })).resolves.toMatchObject({ output: { dryRun: false, applied: true, rollbackToken: expect.any(String) } })
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('after\n')
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+        approvalToken,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })

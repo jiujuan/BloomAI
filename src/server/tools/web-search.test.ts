@@ -131,4 +131,26 @@ describe('webSearchTool', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer tvly-dotenv-key' }),
     }))
   })
+
+  it('passes a combined timeout signal and does not fall back after upstream cancellation', async () => {
+    process.env.TAVILY_API_KEY = 'tvly-test-key'
+    const controller = new AbortController()
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      const signal = init.signal as AbortSignal
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+    }))
+
+    const pending = webSearchTool(
+      { query: 'cancelled', limit: 3 },
+      { toolId: 'web_search', signal: controller.signal },
+    )
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const requestSignal = fetchMock.mock.calls[0][1].signal as AbortSignal
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal).not.toBe(controller.signal)
+    expect(requestSignal.aborted).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

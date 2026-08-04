@@ -67,7 +67,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
       return dependencies.repo.get(id)
     },
 
-    async run(id: string, input: Record<string, unknown>) {
+    async run(id: string, input: Record<string, unknown>, signal?: AbortSignal) {
       try {
         if (Object.prototype.hasOwnProperty.call(input, 'approvalGranted')) {
           throw new ServiceError('VALIDATION_ERROR', 'approvalGranted is not accepted; use a trusted approval token')
@@ -83,6 +83,7 @@ export function createToolService(overrides: Partial<ToolServiceDependencies> = 
           input: parsed.input,
           sessionId: parsed.sessionId,
           approvalToken: parsed.approvalToken,
+          signal,
         })
         return { output: result.output, toolRunId: result.toolRunId }
       } catch (error) {

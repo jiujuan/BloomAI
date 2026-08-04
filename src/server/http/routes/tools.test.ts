@@ -152,4 +152,18 @@ describe('tools route contract', () => {
     expect(all.response.status).toBe(200)
     expect(all.body.data).toEqual([])
   })
+
+  it('binds the HTTP request signal to tool execution', async () => {
+    const { app } = await createApp()
+    const { toolService } = await import('../../services/tool.service')
+    const run = vi.spyOn(toolService, 'run').mockResolvedValue({ output: { ok: true }, toolRunId: 'run-1' })
+
+    const result = await requestJson(app, '/tools/web_search/run', {
+      method: 'POST',
+      body: JSON.stringify({ input: { query: 'signal' } }),
+    })
+
+    expect(result.response.status).toBe(200)
+    expect(run).toHaveBeenCalledWith('web_search', { input: { query: 'signal' } }, expect.any(AbortSignal))
+  })
 })
