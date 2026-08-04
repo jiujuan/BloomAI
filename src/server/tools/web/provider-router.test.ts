@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { WebLoadedPage, WebPageProvider } from './contracts'
 import { createWebPageProviderRouter } from './provider-router'
 import { WebBrowserError } from './browser-errors'
+import { UrlPolicyError } from './url-policy'
 
 const enabledAutoPolicy = {
   preference: 'auto' as const,
@@ -73,6 +74,7 @@ describe('web provider router', () => {
     expect(result.diagnostics.attempts).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: 'agent_browser', outcome: 'failed' }),
     ]))
+    expect(browserProvider.load).toHaveBeenCalledTimes(1)
   })
 
   it('honors explicit static and browser preferences', async () => {
@@ -145,6 +147,48 @@ describe('web provider router', () => {
     } satisfies Partial<WebBrowserError>)
 
     expect(staticProvider.load).not.toHaveBeenCalled()
+    expect(browserProvider.load).not.toHaveBeenCalled()
+  })
+
+  it('checks browser availability before falling back after a static fetch failure', async () => {
+    const staticProvider: WebPageProvider = {
+      id: 'static_http',
+      load: vi.fn(async () => { throw new Error('upstream connection reset') }),
+    }
+    const browserProvider: WebPageProvider = {
+      id: 'agent_browser',
+      checkAvailability: vi.fn(async () => ({ available: false, reason: 'missing browser binary' })),
+      load: vi.fn(async () => page('agent_browser', '<main>never</main>')),
+    }
+
+    await expect(createWebPageProviderRouter({
+      staticProvider,
+      browserProvider,
+      routingPolicy: enabledAutoPolicy,
+    }).loadPage({ url: 'https://example.com' })).rejects.toMatchObject({
+      code: 'WEB_BROWSER_UNAVAILABLE',
+    } satisfies Partial<WebBrowserError>)
+    expect(browserProvider.checkAvailability).toHaveBeenCalledOnce()
+    expect(browserProvider.load).not.toHaveBeenCalled()
+  })
+
+  it('does not retry an unsafe static URL through the browser', async () => {
+    const staticProvider: WebPageProvider = {
+      id: 'static_http',
+      load: vi.fn(async () => { throw new UrlPolicyError('private or local host') }),
+    }
+    const browserProvider: WebPageProvider = {
+      id: 'agent_browser',
+      checkAvailability: vi.fn(async () => ({ available: true })),
+      load: vi.fn(async () => page('agent_browser', '<main>never</main>')),
+    }
+
+    await expect(createWebPageProviderRouter({
+      staticProvider,
+      browserProvider,
+      routingPolicy: enabledAutoPolicy,
+    }).loadPage({ url: 'https://example.com' })).rejects.toBeInstanceOf(UrlPolicyError)
+    expect(browserProvider.checkAvailability).not.toHaveBeenCalled()
     expect(browserProvider.load).not.toHaveBeenCalled()
   })
 })

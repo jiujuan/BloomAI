@@ -1,8 +1,9 @@
 import type { ToolExecutor } from './types'
 import { extractMainHtml, extractMetaDescription, extractTitle, htmlToText } from './utils/html'
 import { loadPageWithProviders } from './web/provider-router'
+import type { WebLoadedPage, WebPageLoadRequest } from './web/contracts'
 
-type WebFetchInput = {
+export type WebFetchInput = {
   url: string
   /** 'text' (default) = readable article text, 'html' = raw html, 'full' = full-page text. */
   mode?: 'text' | 'html' | 'full'
@@ -14,7 +15,7 @@ type WebFetchInput = {
   timeoutMs?: number
 }
 
-type WebFetchOutput = {
+export type WebFetchOutput = {
   title: string
   content: string
   url: string
@@ -24,44 +25,58 @@ type WebFetchOutput = {
   description?: string
   truncated: boolean
   rendered: boolean
+  provider: 'static_http' | 'playwright_legacy' | 'agent_browser'
+  diagnostics: {
+    attempts: Array<{ provider: string; outcome: string; reason?: string; durationMs?: number }>
+    blockedRequests?: number
+  }
 }
 
 const DEFAULT_MAX_CHARS = 20000
 const DEFAULT_TIMEOUT_MS = 20000
 
-export const webFetchTool: ToolExecutor<WebFetchInput, WebFetchOutput> = async (input, context) => {
-  const { url, mode = 'text', maxChars = DEFAULT_MAX_CHARS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
+export type WebPageLoader = (
+  url: string,
+  request?: Omit<WebPageLoadRequest, 'url'>,
+) => Promise<WebLoadedPage>
 
-  const page = await loadPageWithProviders(url, { render, timeoutMs, signal: context.signal })
-  const title = extractTitle(page.html) || page.finalUrl
-  const description = extractMetaDescription(page.html)
+export function createWebFetchTool(loadPage: WebPageLoader = loadPageWithProviders): ToolExecutor<WebFetchInput, WebFetchOutput> {
+  return async (input, context) => {
+    const { url, mode = 'text', maxChars = DEFAULT_MAX_CHARS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  let content: string
-  if (mode === 'html') {
-    content = page.html
-  } else if (mode === 'full') {
-    content = htmlToText(page.html)
-  } else {
-    // Readable-article mode: isolate main content, fall back to full text if thin.
-    const main = htmlToText(extractMainHtml(page.html))
-    const full = htmlToText(page.html)
-    content = main.length >= 200 ? main : full
-  }
+    const page = await loadPage(url, { render, timeoutMs, signal: context.signal })
+    const title = extractTitle(page.html) || page.finalUrl
+    const description = extractMetaDescription(page.html)
 
-  const truncated = content.length > maxChars
-  if (truncated) content = content.slice(0, maxChars)
+    let content: string
+    if (mode === 'html') {
+      content = page.html
+    } else if (mode === 'full') {
+      content = htmlToText(page.html)
+    } else {
+      // Readable-article mode: isolate main content, fall back to full text if thin.
+      const main = htmlToText(extractMainHtml(page.html))
+      const full = htmlToText(page.html)
+      content = main.length >= 200 ? main : full
+    }
 
-  return {
-    title,
-    content,
-    url: url,
-    finalUrl: page.finalUrl,
-    status: page.status,
-    charset: page.charset,
-    description: description || undefined,
-    truncated,
-    rendered: page.rendered,
-    provider: page.provider,
-    diagnostics: page.diagnostics,
+    const contentTruncated = content.length > maxChars
+    if (contentTruncated) content = content.slice(0, maxChars)
+
+    return {
+      title,
+      content,
+      url,
+      finalUrl: page.finalUrl,
+      status: page.status,
+      charset: page.charset,
+      description: description || undefined,
+      truncated: contentTruncated || page.truncated === true,
+      rendered: page.rendered,
+      provider: page.provider,
+      diagnostics: page.diagnostics,
+    }
   }
 }
+
+export const webFetchTool = createWebFetchTool()

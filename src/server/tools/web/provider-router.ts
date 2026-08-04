@@ -4,6 +4,7 @@ import { createDiagnostics, reasonFromError, recordAttempt } from './browser-dia
 import { WebBrowserError } from './browser-errors'
 import { getWebRoutingPolicy } from './config'
 import type { WebLoadedPage, WebPageLoadRequest, WebPageProvider, WebRoutingPolicy } from './contracts'
+import { UrlPolicyError } from './url-policy'
 
 const MIN_MAIN_TEXT = 200
 
@@ -38,6 +39,8 @@ export class WebPageProviderRouter {
     try {
       staticPage = await this.loadStatic(request)
     } catch (staticError) {
+      if (isNonRetryableStaticError(staticError, request.signal)) throw staticError
+      await this.assertBrowserAvailable()
       const browserPage = await this.loadBrowser(request)
       return browserPage
     }
@@ -53,17 +56,14 @@ export class WebPageProviderRouter {
       await this.assertBrowserAvailable()
       const browserPage = await this.loadBrowser(request)
       const browserTextLength = htmlToText(extractMainHtml(browserPage.html)).length
-      return browserTextLength > mainTextLength ? browserPage : withAttempt(staticPage, {
-        provider: 'agent_browser',
-        outcome: 'success',
-        reason: 'rendered page did not contain more readable text',
-      })
+      if (browserTextLength > mainTextLength) return mergePages(staticPage, browserPage)
+      return withBrowserAttempts(staticPage, browserPage, 'rendered page did not contain more readable text')
     } catch (browserError) {
-      if (browserError instanceof WebBrowserError && browserError.code === 'WEB_BROWSER_UNAVAILABLE') {
+      if (isBrowserUnavailable(browserError)) {
         return withAttempt(staticPage, {
           provider: 'agent_browser',
           outcome: 'skipped',
-          reason: `unavailable: ${browserError.message.replace(/^WEB_BROWSER_UNAVAILABLE:\s*/, '')}`,
+        reason: `unavailable: ${browserError.message.replace(/^WEB_BROWSER_(?:UNAVAILABLE|DISABLED):\s*/, '')}`,
         })
       }
       return withAttempt(staticPage, {
@@ -89,11 +89,15 @@ export class WebPageProviderRouter {
 
   private async assertBrowserAvailable(): Promise<void> {
     if (!this.routingPolicy.browserEnabled) {
-      throw new WebBrowserError('WEB_BROWSER_UNAVAILABLE', 'browser provider is disabled by configuration')
+      throw new WebBrowserError('WEB_BROWSER_DISABLED', 'browser provider is disabled by configuration')
     }
     const availability = await this.browserProvider.checkAvailability?.()
     if (availability && !availability.available) {
-      throw new WebBrowserError('WEB_BROWSER_UNAVAILABLE', availability.reason ?? 'browser provider is unavailable')
+      const disabled = /disabled/i.test(availability.reason ?? '')
+      throw new WebBrowserError(
+        disabled ? 'WEB_BROWSER_DISABLED' : 'WEB_BROWSER_UNAVAILABLE',
+        availability.reason ?? 'browser provider is unavailable',
+      )
     }
   }
 
@@ -164,6 +168,8 @@ function createStaticHttpProvider(): WebPageProvider {
         finalUrl: page.finalUrl,
         status: page.status,
         charset: page.charset,
+        contentType: page.contentType,
+        truncated: page.truncated,
         rendered: false,
         provider: 'static_http',
         diagnostics: createDiagnostics(),
@@ -174,4 +180,49 @@ function createStaticHttpProvider(): WebPageProvider {
 
 function withAttempt(page: WebLoadedPage, attempt: Parameters<typeof recordAttempt>[1]): WebLoadedPage {
   return { ...page, diagnostics: recordAttempt(page.diagnostics ?? createDiagnostics(), attempt) }
+}
+
+function mergePages(staticPage: WebLoadedPage, browserPage: WebLoadedPage): WebLoadedPage {
+  return {
+    ...browserPage,
+    diagnostics: {
+      ...browserPage.diagnostics,
+      attempts: [...staticPage.diagnostics.attempts, ...browserPage.diagnostics.attempts],
+      ...(staticPage.diagnostics.blockedRequests !== undefined || browserPage.diagnostics.blockedRequests !== undefined
+        ? { blockedRequests: (staticPage.diagnostics.blockedRequests ?? 0) + (browserPage.diagnostics.blockedRequests ?? 0) }
+        : {}),
+    },
+  }
+}
+
+function withBrowserAttempts(
+  staticPage: WebLoadedPage,
+  browserPage: WebLoadedPage,
+  reason: string,
+): WebLoadedPage {
+  const attempts = browserPage.diagnostics.attempts.map((attempt) => (
+    attempt.provider === 'agent_browser' && !attempt.reason ? { ...attempt, reason } : attempt
+  ))
+  return {
+    ...staticPage,
+    diagnostics: {
+      ...staticPage.diagnostics,
+      attempts: [...staticPage.diagnostics.attempts, ...attempts],
+      ...(browserPage.diagnostics.blockedRequests !== undefined
+        ? { blockedRequests: browserPage.diagnostics.blockedRequests }
+        : {}),
+    },
+  }
+}
+
+function isBrowserUnavailable(error: unknown): error is WebBrowserError {
+  return error instanceof WebBrowserError
+    && (error.code === 'WEB_BROWSER_UNAVAILABLE' || error.code === 'WEB_BROWSER_DISABLED')
+}
+
+function isNonRetryableStaticError(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted) return true
+  if (error instanceof UrlPolicyError) return true
+  return error instanceof WebBrowserError
+    && (error.code === 'WEB_BROWSER_ABORTED' || error.code === 'WEB_URL_UNSAFE')
 }

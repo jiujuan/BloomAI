@@ -36,6 +36,8 @@ export type WebLoadedPage = {
   finalUrl: string
   status: number
   charset: string
+  contentType?: string
+  truncated?: boolean
   rendered: boolean
   provider: WebProviderId
   diagnostics: WebExecutionDiagnostics
