@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('./utils/render', () => ({ loadPage: vi.fn() }))
+vi.mock('./web/provider-router', () => ({ loadPageWithProviders: vi.fn() }))
 
-import { loadPage } from './utils/render'
+import { loadPageWithProviders } from './web/provider-router'
 import { webExtractTool } from './web-extract'
 
 describe('webExtractTool', () => {
   it('returns provenance metadata alongside main text and excludes boilerplate from the body', async () => {
-    vi.mocked(loadPage).mockResolvedValue({
+    vi.mocked(loadPageWithProviders).mockResolvedValue({
       finalUrl: 'https://news.example/article?ref=source',
       rendered: false,
+      provider: 'static_http',
+      diagnostics: { attempts: [] },
       html: `<!doctype html><html><head>
         <title>CRM intelligence report</title>
         <meta name="author" content="Ada Analyst">

@@ -7,7 +7,7 @@ import {
   resolveUrl,
   stripTags,
 } from './utils/html'
-import { loadPage } from './utils/render'
+import { loadPageWithProviders } from './web/provider-router'
 
 type WebExtractInput = {
   url: string
@@ -45,7 +45,7 @@ const DEFAULT_TIMEOUT_MS = 20000
 export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = async (input, context) => {
   const { url, maxChars = DEFAULT_MAX_CHARS, maxLinks = DEFAULT_MAX_LINKS, render, timeoutMs = DEFAULT_TIMEOUT_MS } = input
 
-  const page = await loadPage(url, { render, timeoutMs, signal: context.signal })
+  const page = await loadPageWithProviders(url, { render, timeoutMs, signal: context.signal })
   const { html, finalUrl } = page
 
   const title = extractTitle(html) || finalUrl
@@ -73,6 +73,8 @@ export const webExtractTool: ToolExecutor<WebExtractInput, WebExtractOutput> = a
     byline: byline || undefined,
     publishedAt: publishedAt || undefined,
     canonicalUrl: canonicalUrl || undefined,
+    provider: page.provider,
+    diagnostics: page.diagnostics,
   }
 }
 
