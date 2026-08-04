@@ -249,7 +249,8 @@ export const toolContracts = {
     requiresPermission: 'network',
     inputSchema: webScreenshotInputSchema,
     outputSchema: outputObject({
-      imagePath: z.string().optional(),
+      runId: z.string().optional(),
+      relativePath: z.string().optional(),
       mimeType: z.enum(['image/png', 'image/jpeg']).optional(),
       width: z.number().int().optional(),
       height: z.number().int().optional(),

@@ -11,4 +11,5 @@ export interface ToolExecutionContext {
   allowedRoots?: readonly string[]
   signal?: AbortSignal
   requestId?: string
+  toolRunId?: string
 }

@@ -68,9 +68,12 @@ export const useToolsStore = create<ToolsState & ToolsActions>()(
       set(s => ({ tools: s.tools.map(t => t.id === id ? { ...t, is_enabled: enabled ? 1 : 0 } : t) }))
     },
     runTool: async (id, input, sessionId) => {
-      const { data } = await apiFetch(`/tools/${id}/run`, { method: 'POST', body: JSON.stringify({ input, sessionId }) })
+      const response = await apiFetch(`/tools/${id}/run`, { method: 'POST', body: JSON.stringify({ input, sessionId }) })
       await get().loadRuns(); await get().loadStats()
-      return data
+      const output = response.data
+      return output && typeof output === 'object' && !Array.isArray(output)
+        ? { ...output, toolRunId: response.meta?.toolRunId }
+        : { value: output, toolRunId: response.meta?.toolRunId }
     },
     grantPermission: async (toolId, scope) => {
       await apiFetch(`/tools/permissions/${toolId}/grant`, { method: 'POST', body: JSON.stringify({ scope }) })

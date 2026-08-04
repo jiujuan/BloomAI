@@ -101,4 +101,68 @@ describe('toolService', () => {
       description: contract.description,
     })
   })
+
+  it('reads a screenshot artifact from the run-owned relative path and rejects tampered metadata', async () => {
+    const readScreenshotArtifact = vi.fn(async (input: any) => ({
+      bytes: Buffer.from('png'),
+      bytesCount: 3,
+      mimeType: 'image/png' as const,
+      runId: input.runId,
+      relativePath: input.relativePath,
+    }))
+    const service = createToolService({
+      repo: {
+        get: vi.fn(() => ({ id: 'web_screenshot' })),
+        getRun: vi.fn(() => ({
+          id: 'run-1',
+          tool_id: 'web_screenshot',
+          status: 'success',
+          output_json: JSON.stringify({
+            summary: {
+              runId: 'run-1',
+              relativePath: 'tool-artifacts/web-screenshot/run-1/screenshot.png',
+              mimeType: 'image/png',
+            },
+          }),
+        })),
+      } as any,
+      getDataDir: vi.fn(() => 'C:\\data'),
+      readScreenshotArtifact,
+    })
+
+    await expect(service.getArtifact('web_screenshot', 'run-1')).resolves.toMatchObject({
+      bytes: Buffer.from('png'),
+      mimeType: 'image/png',
+      relativePath: 'tool-artifacts/web-screenshot/run-1/screenshot.png',
+    })
+    expect(readScreenshotArtifact).toHaveBeenCalledWith({
+      dataDir: 'C:\\data',
+      runId: 'run-1',
+      relativePath: 'tool-artifacts/web-screenshot/run-1/screenshot.png',
+    })
+
+    const tampered = createToolService({
+      repo: {
+        get: vi.fn(() => ({ id: 'web_screenshot' })),
+        getRun: vi.fn(() => ({
+          id: 'run-1',
+          tool_id: 'web_screenshot',
+          status: 'success',
+          output_json: JSON.stringify({
+            summary: {
+              runId: 'run-1',
+              relativePath: 'tool-artifacts/web-screenshot/other-run/screenshot.png',
+              mimeType: 'image/png',
+            },
+          }),
+        })),
+      } as any,
+      getDataDir: vi.fn(() => 'C:\\data'),
+      readScreenshotArtifact,
+    })
+
+    await expect(tampered.getArtifact('web_screenshot', 'run-1')).rejects.toMatchObject({
+      code: 'ARTIFACT_ERROR',
+    })
+  })
 })

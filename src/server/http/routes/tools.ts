@@ -32,6 +32,24 @@ toolsRoutes.post('/permissions/:id/revoke', (c) => {
   try { return c.json({ data: toolService.revokePermission(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })
 
+toolsRoutes.get('/:id/runs/:runId/artifact', async (c) => {
+  try {
+    const artifact = await toolService.getArtifact(
+      c.req.param('id'),
+      c.req.param('runId'),
+      c.req.query('path') || undefined,
+    )
+    return new Response(Uint8Array.from(artifact.bytes), {
+      headers: {
+        'Cache-Control': 'private, no-store',
+        'Content-Length': String(artifact.bytes.byteLength),
+        'Content-Type': artifact.mimeType,
+        'X-Content-Type-Options': 'nosniff',
+      },
+    })
+  } catch (error) { return errorResponse(c, error) }
+})
+
 toolsRoutes.get('/:id', (c) => {
   try { return c.json({ data: toolService.get(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })

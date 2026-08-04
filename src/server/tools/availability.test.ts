@@ -35,8 +35,7 @@ describe('tool availability', () => {
     const { toolRepo, getToolAvailability } = await loadRuntime()
 
     expect(getToolAvailability('web_screenshot')).toEqual({
-      status: 'dependency_missing',
-      dependency: 'playwright',
+      status: 'disabled',
       reason: expect.any(String),
     })
     expect(getToolAvailability('ocr')).toEqual({
@@ -50,6 +49,38 @@ describe('tool availability', () => {
       reason: expect.any(String),
     })
     expect(toolRepo.list().filter((tool) => ['web_screenshot', 'ocr', 'image_edit'].includes(tool.id)).every((tool) => tool.is_enabled === 0)).toBe(true)
+  })
+
+  it('reports browser dependency and artifact configuration failures with stable states', async () => {
+    process.env.WEB_BROWSER_ENABLED = 'true'
+    process.env.WEB_BROWSER_CHANNELS = 'missing-channel'
+    const { getToolAvailability } = await loadRuntime()
+
+    expect(getToolAvailability('web_screenshot')).toEqual({
+      status: 'dependency_missing',
+      dependency: 'system-browser',
+      reason: expect.any(String),
+    })
+
+    const artifactDataDir = path.join(dataDir, 'artifact-file')
+    fs.writeFileSync(artifactDataDir, 'not a directory')
+    process.env.DATA_DIR = artifactDataDir
+    vi.resetModules()
+    const reloaded = await loadRuntime()
+    expect(reloaded.getToolAvailability('web_screenshot')).toEqual({
+      status: 'configuration_missing',
+      setting: 'artifact_dir',
+      reason: expect.any(String),
+    })
+  })
+
+  it('keeps static web tools available while the browser provider is disabled', async () => {
+    const { getToolAvailability, buildBuiltinTools } = await loadRuntime()
+
+    expect(getToolAvailability('web_fetch')).toEqual({ status: 'available' })
+    expect(getToolAvailability('web_extract')).toEqual({ status: 'available' })
+    expect(buildBuiltinTools()).toHaveProperty('web_fetch')
+    expect(buildBuiltinTools()).toHaveProperty('web_extract')
   })
 
   it('does not expose unavailable tools to the Mastra agent', async () => {

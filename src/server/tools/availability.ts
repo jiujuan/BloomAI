@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { getDataDir } from '../db/paths'
 import { getWebBrowserConfig } from './web/config'
 
 export type ToolAvailability =
@@ -82,11 +83,12 @@ function getWebScreenshotAvailability(): ToolAvailability {
   const config = getWebBrowserConfig()
   if (!config.enabled) {
     return {
-      status: 'dependency_missing',
-      dependency: 'playwright',
+      status: 'disabled',
       reason: 'Browser provider is disabled. Set WEB_BROWSER_ENABLED=true only after browser policy and artifact checks are configured.',
     }
   }
+  const artifactAvailability = checkScreenshotArtifactDirectory()
+  if (artifactAvailability) return artifactAvailability
   if (!hasKnownSystemBrowser(config.channels)) {
     return {
       status: 'dependency_missing',
@@ -95,6 +97,28 @@ function getWebScreenshotAvailability(): ToolAvailability {
     }
   }
   return { status: 'available' }
+}
+
+function checkScreenshotArtifactDirectory(): Extract<ToolAvailability, { status: 'configuration_missing' }> | undefined {
+  const artifactDir = path.join(getDataDir(), 'tool-artifacts', 'web-screenshot')
+  try {
+    const stats = fs.lstatSync(artifactDir)
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      return {
+        status: 'configuration_missing',
+        setting: 'artifact_dir',
+        reason: 'Screenshot artifact directory must be a regular writable directory.',
+      }
+    }
+    fs.accessSync(artifactDir, fs.constants.W_OK)
+    return undefined
+  } catch {
+    return {
+      status: 'configuration_missing',
+      setting: 'artifact_dir',
+      reason: 'Screenshot artifact directory is missing or not writable.',
+    }
+  }
 }
 
 function hasKnownSystemBrowser(channels: readonly string[]): boolean {

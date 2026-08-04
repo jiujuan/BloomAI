@@ -1,4 +1,4 @@
-import { asc, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getOrmDb } from '../client'
 import { tool_permissions, tool_runs, tools } from '../schema'
@@ -78,6 +78,13 @@ export const toolRepo = {
 
   listRuns(toolId: string, limit = 50): ToolRun[] {
     return getOrmDb().select().from(tool_runs).where(eq(tool_runs.tool_id, toolId)).orderBy(desc(tool_runs.started_at)).limit(limit).all() as ToolRun[]
+  },
+
+  getRun(toolId: string, runId: string): ToolRun | undefined {
+    return getOrmDb().select().from(tool_runs).where(and(
+      eq(tool_runs.tool_id, toolId),
+      eq(tool_runs.id, runId),
+    )).get() as ToolRun | undefined
   },
 
   listAllRuns(limit = 100): any[] {

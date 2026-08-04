@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { ArrowLeft, Play, Check } from 'lucide-react'
+import { ArrowLeft, Play, Check, ExternalLink } from 'lucide-react'
 import { useToolsStore } from '@renderer/pages/Tools/tools.store'
 import { ToolTestRunner } from './ToolTestRunner'
 import { cn } from '@renderer/utils'
 import { canRunTool } from './tool-ui-state'
+import { API_BASE } from '@shared/constants'
+import { getScreenshotArtifactView } from '@renderer/pages/Chat/parts/tool-part'
 
 export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () => void }) {
   const { tools, toolRuns, loadRuns } = useToolsStore()
@@ -46,6 +48,7 @@ export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () 
           {tool.is_enabled ? <><Check size={12} /> Enabled</> : 'Disabled'}
         </div>
       </div>
+      {!availability.allowed && <div className="td-availability-reason" role="status">{availability.reason}</div>}
 
       <div className="td-body">
         <div className="td-section">
@@ -87,6 +90,7 @@ export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () 
               <div key={r.id} className="td-run-item">
                 <span className={cn('td-run-pill', r.status)}>{r.status === 'success' ? <Check size={10} /> : '✕'} {r.status}</span>
                 <span className="td-run-input">{r.input_json.slice(0, 60)}</span>
+                <RunSummary toolId={tool.id} run={r} />
                 <span className="td-run-dur">{r.duration_ms}ms</span>
               </div>
             ))}
@@ -97,4 +101,28 @@ export function ToolDetailPage({ toolId, onBack }: { toolId: string; onBack: () 
       {showRunner && <ToolTestRunner tool={tool} onClose={() => setShowRunner(false)} />}
     </div>
   )
+}
+
+function RunSummary({ toolId, run }: { toolId: string; run: any }) {
+  if (!run.output_json) return null
+  try {
+    const output = JSON.parse(run.output_json)
+    const summary = output?.summary ?? output
+    const artifact = getScreenshotArtifactView(output)
+    const provider = typeof summary?.provider === 'string' ? summary.provider : undefined
+    const rendered = summary?.rendered === true ? 'rendered' : summary?.rendered === false ? 'static' : undefined
+    const artifactUrl = artifact
+      ? `${API_BASE}/tools/${encodeURIComponent(toolId)}/runs/${encodeURIComponent(artifact.runId)}/artifact`
+      : undefined
+    if (!provider && !rendered && !artifactUrl) return null
+    return (
+      <span className="td-run-summary">
+        {provider && <span>{provider}</span>}
+        {rendered && <span>{rendered}</span>}
+        {artifactUrl && <a href={artifactUrl} target="_blank" rel="noopener noreferrer" title="Open controlled screenshot artifact"><ExternalLink size={11} /></a>}
+      </span>
+    )
+  } catch {
+    return null
+  }
 }
