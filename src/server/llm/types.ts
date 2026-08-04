@@ -74,6 +74,9 @@ export type ImageGenerationRequest = {
   // via @shared/image-gen. A caller may still pass size directly to override.
   aspectRatioId?: string
   styleId?: string
+  /** Internal tool-runtime context; not sent to provider request bodies. */
+  allowedRoots?: readonly string[]
+  signal?: AbortSignal
 }
 
 export type ResolvedImageGenerationRequest = ImageGenerationRequest & {

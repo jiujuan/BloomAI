@@ -4,6 +4,8 @@ import { LlmProviderError, LlmUnsupportedModelError } from '../../errors'
 import { getProviderBaseUrl } from '../../settings'
 import type { ImageGenerationResult, ResolvedImageGenerationRequest } from '../../types'
 import type { ImageProviderAdapter } from '../image-adapter-registry'
+import { resolvePathWithinAllowedRoots } from '../../../tools/utils/path-policy'
+import { MAX_IMAGE_BYTES } from '../../../tools/utils/binary-limit'
 
 type OllamaGenerateResponse = {
   response?: string
@@ -12,11 +14,27 @@ type OllamaGenerateResponse = {
   error?: string
 }
 
-function saveBase64(b64: string, filePath: string): void {
-  const dir = path.dirname(filePath)
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+async function saveBase64(
+  b64: string,
+  filePath: string,
+  allowedRoots?: readonly string[],
+): Promise<string> {
+  const resolvedPath = allowedRoots?.length
+    ? await resolvePathWithinAllowedRoots(filePath, {
+        allowedRoots,
+        access: 'write',
+        createParents: true,
+      })
+    : path.resolve(filePath)
   const data = b64.includes(',') ? b64.slice(b64.indexOf(',') + 1) : b64
-  fs.writeFileSync(filePath, Buffer.from(data, 'base64'))
+  const decoded = Buffer.from(data, 'base64')
+  if (decoded.byteLength > MAX_IMAGE_BYTES) {
+    throw new LlmProviderError(`Generated image exceeds the ${MAX_IMAGE_BYTES}-byte limit`)
+  }
+  const dir = path.dirname(resolvedPath)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(resolvedPath, decoded)
+  return resolvedPath
 }
 
 /**
@@ -34,11 +52,13 @@ export const ollamaImageAdapter: ImageProviderAdapter = {
     const body: Record<string, unknown> = { model, prompt: input.prompt, stream: false }
     if (input.image) body.images = Array.isArray(input.image) ? input.image : [input.image]
 
-    const response = await fetch(`${baseUrl}/api/generate`, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }
+    if (input.signal) requestInit.signal = input.signal
+    const response = await fetch(`${baseUrl}/api/generate`, requestInit)
     if (!response.ok) {
       const text = await response.text().catch(() => `HTTP ${response.status}`)
       throw new LlmProviderError(`Ollama image generation failed: ${text}`)
@@ -59,8 +79,7 @@ export const ollamaImageAdapter: ImageProviderAdapter = {
       b64_json: b64,
     }
     if (input.saveTo) {
-      saveBase64(b64, input.saveTo)
-      result.localPath = input.saveTo
+      result.localPath = await saveBase64(b64, input.saveTo, input.allowedRoots)
     }
     return result
   },

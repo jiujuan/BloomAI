@@ -46,13 +46,20 @@ export const agnesImageAdapter: ImageProviderAdapter = {
     if (input.quality) body.quality = input.quality
     if (Object.keys(extraBody).length) body.extra_body = extraBody
 
-    const response = await fetch(`${baseUrl}/images/generations`, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }
+    if (input.signal) requestInit.signal = input.signal
+    const response = await fetch(`${baseUrl}/images/generations`, requestInit)
     const result = getImageOutput(await readImageResponse(response), input.resolved.provider.id, model)
-    if (input.saveTo && result.url) result.localPath = await saveGeneratedImage(result.url, input.saveTo)
+    if (input.saveTo && result.url) {
+      result.localPath = await saveGeneratedImage(result.url, input.saveTo, {
+        allowedRoots: input.allowedRoots,
+        signal: input.signal,
+      })
+    }
     return result
   },
 }

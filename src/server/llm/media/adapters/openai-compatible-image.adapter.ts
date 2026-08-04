@@ -43,11 +43,13 @@ export const openaiCompatibleImageAdapter: ImageProviderAdapter = {
     // Some providers accept negative_prompt as a top-level field
     if (input.negativePrompt) body.negative_prompt = input.negativePrompt
 
-    const response = await fetch(`${baseUrl}/images/generations`, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }
+    if (input.signal) requestInit.signal = input.signal
+    const response = await fetch(`${baseUrl}/images/generations`, requestInit)
     const data = await readResponse(response)
     const first = data.data?.[0]
     if (!first?.url && !first?.b64_json) {
@@ -59,7 +61,12 @@ export const openaiCompatibleImageAdapter: ImageProviderAdapter = {
       ...(first.url ? { url: first.url } : {}),
       ...(first.b64_json ? { b64_json: first.b64_json } : {}),
     }
-    if (input.saveTo && result.url) result.localPath = await saveGeneratedImage(result.url, input.saveTo)
+    if (input.saveTo && result.url) {
+      result.localPath = await saveGeneratedImage(result.url, input.saveTo, {
+        allowedRoots: input.allowedRoots,
+        signal: input.signal,
+      })
+    }
     return result
   },
 }
