@@ -45,7 +45,7 @@ toolsRoutes.patch('/:id', async (c) => {
 
 toolsRoutes.post('/:id/run', async (c) => {
   try {
-    const result = await toolService.run(c.req.param('id'), await readJson<any>(c))
+    const result = await toolService.run(c.req.param('id'), await readJson<any>(c), c.req.raw.signal)
     return c.json({ data: result.output, meta: { toolRunId: result.toolRunId } })
   } catch (error) { return errorResponse(c, error) }
 })

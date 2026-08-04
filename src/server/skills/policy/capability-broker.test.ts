@@ -117,6 +117,28 @@ describe('CapabilityBroker', () => {
     expect(toolRepo.listRuns('web_search')).toEqual([])
   })
 
+  it('propagates an upstream abort to the tool executor and records a cancelled run', async () => {
+    const { toolRegistry, executeLegacyToolCapability } = await loadRuntime()
+    const controller = new AbortController()
+    let executorSignal: AbortSignal | undefined
+    toolRegistry.web_search = vi.fn(async (_input, context) => new Promise((resolve) => {
+      executorSignal = context.signal
+      context.signal?.addEventListener('abort', () => resolve({ query: 'cancelled', total: 0, results: [] }), { once: true })
+    }))
+
+    const pending = executeLegacyToolCapability({
+      caller: 'http',
+      toolId: 'web_search',
+      input: { query: 'cancelled' },
+      signal: controller.signal,
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ status: 'cancelled' })
+    expect(executorSignal?.aborted).toBe(true)
+  })
+
   it('enforces image model allowlists and per-run call budgets for package capabilities', async () => {
     const { skillPackageRepo, toolRegistry, executeCapability, CapabilityDeniedError } = await loadRuntime()
     const { version, run } = await createPackageRun(skillPackageRepo)

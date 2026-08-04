@@ -73,6 +73,7 @@ export async function executeToolRuntime(
 
   const parsedInput = definition.inputSchema.safeParse(rawInput)
   if (!parsedInput.success) throw new ToolContractError('input', toolId, parsedInput.error.issues)
+  if (options.signal?.aborted) throw new ToolCancelledError()
 
   const run = toolRepo.startRun(toolId, sessionId || null, parsedInput.data)
   const controller = new AbortController()
@@ -82,6 +83,7 @@ export async function executeToolRuntime(
   const cleanupGraceMs = Math.max(0, options.cleanupGraceMs ?? 100)
   let timeout: NodeJS.Timeout | undefined
   let externalAbortHandler: (() => void) | undefined
+  let cancellationAbortHandler: (() => void) | undefined
   let timeoutTriggered = false
   let cancelled = false
   let executorPromise: Promise<object> | undefined
@@ -127,9 +129,9 @@ export async function executeToolRuntime(
 
     const cancellationPromise = options.signal
       ? new Promise<never>((_, reject) => {
-          const rejectOnAbort = () => reject(abortForCancellation())
-          if (options.signal!.aborted) rejectOnAbort()
-          else options.signal!.addEventListener('abort', rejectOnAbort, { once: true })
+          cancellationAbortHandler = () => reject(abortForCancellation())
+          if (options.signal!.aborted) cancellationAbortHandler()
+          else options.signal!.addEventListener('abort', cancellationAbortHandler, { once: true })
         })
       : null
 
@@ -171,6 +173,9 @@ export async function executeToolRuntime(
     if (timeout) clearTimeout(timeout)
     if (externalAbortHandler && options.signal) {
       options.signal.removeEventListener('abort', externalAbortHandler)
+    }
+    if (cancellationAbortHandler && options.signal) {
+      options.signal.removeEventListener('abort', cancellationAbortHandler)
     }
   }
 }

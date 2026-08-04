@@ -41,6 +41,7 @@ function getTavilyApiKey(): string {
 export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = async (input, context: ToolExecutionContext) => {
   const startedAt = Date.now()
   const { query, limit = 8 } = input
+  throwIfAborted(context.signal)
   const debugContext: SearchDebugContext = {
     toolId: context.toolId,
     sessionId: context.sessionId,
@@ -59,7 +60,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
   let fallbackReason: string | undefined
   if (tavilyApiKey) {
     try {
-      const output = await searchWithTavily({ query, limit, apiKey: tavilyApiKey, debugContext })
+      const output = await searchWithTavily({ query, limit, apiKey: tavilyApiKey, debugContext, signal: context.signal })
       console.log('[web_search] done', {
         ...debugContext,
         provider: output.provider,
@@ -69,6 +70,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
       })
       return output
     } catch (err: unknown) {
+      throwIfAborted(context.signal, err)
       const error = getErrorDetails(err)
       fallbackReason = error.message
       console.warn('[web_search] provider fallback', {
@@ -88,7 +90,14 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
   }
 
   try {
-    const output = await searchWithDuckDuckGo({ query, limit, debugContext, fallbackFrom: tavilyApiKey ? 'tavily' : undefined, fallbackReason })
+    const output = await searchWithDuckDuckGo({
+      query,
+      limit,
+      debugContext,
+      signal: context.signal,
+      fallbackFrom: tavilyApiKey ? 'tavily' : undefined,
+      fallbackReason,
+    })
     console.log('[web_search] done', {
       ...debugContext,
       provider: output.provider,
@@ -99,6 +108,7 @@ export const webSearchTool: ToolExecutor<WebSearchInput, WebSearchOutput> = asyn
     })
     return output
   } catch (err: unknown) {
+    throwIfAborted(context.signal, err)
     const error = getErrorDetails(err)
     console.error('[web_search] error', {
       ...debugContext,
@@ -115,6 +125,7 @@ async function searchWithTavily(input: {
   limit: number
   apiKey: string
   debugContext: SearchDebugContext
+  signal?: AbortSignal
 }): Promise<WebSearchOutput> {
   const startedAt = Date.now()
   const body = {
@@ -140,7 +151,7 @@ async function searchWithTavily(input: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TAVILY_TIMEOUT_MS),
+    signal: combineSignals(input.signal, TAVILY_TIMEOUT_MS),
   })
 
   console.log('[web_search] response', {
@@ -175,6 +186,7 @@ async function searchWithDuckDuckGo(input: {
   query: string
   limit: number
   debugContext: SearchDebugContext
+  signal?: AbortSignal
   fallbackFrom?: 'tavily'
   fallbackReason?: string
 }): Promise<WebSearchOutput> {
@@ -188,7 +200,7 @@ async function searchWithDuckDuckGo(input: {
     fallbackReason: input.fallbackReason,
   })
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(DUCKDUCKGO_TIMEOUT_MS) })
+  const res = await fetch(url, { signal: combineSignals(input.signal, DUCKDUCKGO_TIMEOUT_MS) })
 
   console.log('[web_search] response', {
     ...input.debugContext,
@@ -255,4 +267,15 @@ function firstString(...values: unknown[]): string | undefined {
 
 function toArray(value: unknown): any[] {
   return Array.isArray(value) ? value : []
+}
+
+function combineSignals(upstream: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  return upstream ? AbortSignal.any([upstream, timeoutSignal]) : timeoutSignal
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, cause?: unknown): void {
+  if (!signal?.aborted) return
+  if (cause instanceof Error) throw cause
+  throw new DOMException('The operation was aborted', 'AbortError')
 }
