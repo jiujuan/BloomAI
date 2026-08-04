@@ -424,4 +424,285 @@ describe('Deep Research retrieval services', () => {
     expect(researchSourceRepo.listSnapshots(storedRun.id)).toHaveLength(0)
     expect(researchEventRepo.list(storedRun.id).filter((event) => event.type === 'research.source.fetch_failed')).toHaveLength(0)
   })
+
+  it('keeps normal static retrieval on the static provider without starting a browser retry', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Static retrieval', profile: 'market', depth: 'deep', objective: undefined },
+      budget: getResearchBudget('deep'),
+    })
+    const source = researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: 'https://static.fixture.example/report',
+      domain: 'static.fixture.example',
+      title: 'Static fixture',
+      sourceType: 'official-statistics',
+      selectionStatus: 'selected',
+      scores: {},
+    })
+    const readable = 'Enterprise teams compare source provenance, accountable workflows, measured outcomes, and independent evidence before adopting automated recommendations. '.repeat(8)
+    const calls: WorkflowToolRequest[] = []
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      calls.push(request)
+      if (request.toolId === 'web_fetch') return { output: { finalUrl: request.input.url, status: 200, provider: 'static_http' } }
+      return { output: { finalUrl: request.input.url, text: readable, rendered: false, provider: 'static_http' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const [outcome] = await contentService.fetch(createRun({ id: storedRun.id }), [source])
+
+    expect(outcome).toMatchObject({
+      status: 'fetched',
+      provider: 'static_http',
+      retryReason: null,
+      browserRetryAttempted: false,
+      browserRetryUsed: false,
+    })
+    expect(calls).toHaveLength(2)
+    expect(calls.every((call) => call.input.render === false)).toBe(true)
+    expect(researchEventRepo.list(storedRun.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'research.source.fetch_diagnostics',
+        payload: expect.objectContaining({ provider: 'static_http', browserRetryUsed: false }),
+      }),
+    ]))
+  })
+
+  it('retries thin content once with the browser and persists the improved snapshot', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Rendered retrieval', profile: 'market', depth: 'deep', objective: undefined },
+      budget: getResearchBudget('deep'),
+    })
+    const source = researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: 'https://render.fixture.example/app',
+      domain: 'render.fixture.example',
+      title: 'Rendered fixture',
+      sourceType: 'reputable-secondary',
+      selectionStatus: 'selected',
+      scores: {},
+    })
+    const rendered = 'The hydrated application exposes the full research result after JavaScript execution, including provenance, operational ownership, independent corroboration, and measurable outcomes. '.repeat(8)
+    const calls: WorkflowToolRequest[] = []
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      calls.push(request)
+      const renderedCall = request.input.render === true
+      if (request.toolId === 'web_fetch') {
+        return {
+          output: {
+            finalUrl: renderedCall ? 'https://render.fixture.example/app?hydrated=1' : request.input.url,
+            status: 200,
+            provider: renderedCall ? 'agent_browser' : 'static_http',
+          },
+        }
+      }
+      return {
+        output: {
+          finalUrl: renderedCall ? 'https://render.fixture.example/app?hydrated=1' : request.input.url,
+          text: renderedCall ? rendered : 'Loading... please enable JavaScript',
+          title: 'Rendered fixture',
+          rendered: renderedCall,
+          provider: renderedCall ? 'agent_browser' : 'static_http',
+          headings: renderedCall ? ['Findings'] : [],
+        },
+      }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const [outcome] = await contentService.fetch(createRun({ id: storedRun.id }), [source])
+    const snapshot = researchSourceRepo.getLatestSnapshotForSource(storedRun.id, source.id)
+    const diagnostics = researchEventRepo.list(storedRun.id).find((event) => event.type === 'research.source.fetch_diagnostics')
+
+    expect(calls.filter((call) => call.input.render === true)).toHaveLength(2)
+    expect(outcome).toMatchObject({
+      status: 'fetched',
+      provider: 'agent_browser',
+      retryReason: 'needs_rendering',
+      browserRetryAttempted: true,
+      browserRetryUsed: true,
+    })
+    expect(snapshot).toMatchObject({
+      finalUrl: 'https://render.fixture.example/app?hydrated=1',
+      metadata: { fetch: expect.objectContaining({ provider: 'agent_browser', retryReason: 'needs_rendering', browserRetryUsed: true }) },
+    })
+    expect(snapshot?.content).toContain('hydrated application')
+    expect(diagnostics?.payload).toMatchObject({
+      provider: 'agent_browser',
+      retryReason: 'needs_rendering',
+      browserRetryAttempted: true,
+      browserRetryUsed: true,
+    })
+  })
+
+  it('honors the run-wide browser retry budget across sources', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Browser budget', profile: 'market', depth: 'deep', objective: undefined },
+      budget: { ...getResearchBudget('deep'), maxBrowserFetches: 1, browserFetchConcurrency: 2, fetchConcurrency: 2 },
+    })
+    const sources = ['one', 'two'].map((name) => researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: `https://${name}.fixture.example/app`,
+      domain: `${name}.fixture.example`,
+      title: name,
+      sourceType: 'reputable-secondary',
+      selectionStatus: 'selected',
+      scores: {},
+    }))
+    const rendered = 'Browser budget fixture content contains enough independent evidence, source provenance, and operational context to become a durable research snapshot. '.repeat(8)
+    let browserFetches = 0
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      const renderedCall = request.input.render === true
+      if (request.toolId === 'web_fetch' && renderedCall) browserFetches += 1
+      if (request.toolId === 'web_fetch') return { output: { finalUrl: request.input.url, status: 200, provider: renderedCall ? 'agent_browser' : 'static_http' } }
+      return { output: { finalUrl: request.input.url, text: renderedCall ? rendered : 'Loading... please enable JavaScript', rendered: renderedCall, provider: renderedCall ? 'agent_browser' : 'static_http' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      maxConcurrency: 2,
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const outcomes = await contentService.fetch(createRun({ id: storedRun.id, budget: { ...storedRun.budget, maxBrowserFetches: 1, browserFetchConcurrency: 2, fetchConcurrency: 2 } }), sources)
+
+    expect(browserFetches).toBe(1)
+    expect(outcomes.filter((outcome) => outcome.browserRetryUsed)).toHaveLength(1)
+    expect(outcomes.filter((outcome) => outcome.browserRetryAttempted === false)).toHaveLength(1)
+    expect(researchSourceRepo.listSnapshots(storedRun.id)).toHaveLength(1)
+  })
+
+  it('keeps browser retries within their independent concurrency cap', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Browser concurrency', profile: 'market', depth: 'deep', objective: undefined },
+      budget: { ...getResearchBudget('deep'), maxBrowserFetches: 2, browserFetchConcurrency: 1, fetchConcurrency: 2 },
+    })
+    const sources = ['one', 'two'].map((name) => researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: `https://${name}.concurrency.fixture.example/app`,
+      domain: `${name}.concurrency.fixture.example`,
+      title: name,
+      sourceType: 'reputable-secondary',
+      selectionStatus: 'selected',
+      scores: {},
+    }))
+    const rendered = 'The browser concurrency fixture provides a complete hydrated article with provenance, independent corroboration, and operational evidence for research use. '.repeat(8)
+    let activeBrowser = 0
+    let maxActiveBrowser = 0
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      const renderedCall = request.input.render === true
+      if (renderedCall) {
+        activeBrowser += 1
+        maxActiveBrowser = Math.max(maxActiveBrowser, activeBrowser)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        activeBrowser -= 1
+      }
+      if (request.toolId === 'web_fetch') return { output: { finalUrl: request.input.url, status: 200, provider: renderedCall ? 'agent_browser' : 'static_http' } }
+      return { output: { finalUrl: request.input.url, text: renderedCall ? rendered : 'Loading... please enable JavaScript', rendered: renderedCall, provider: renderedCall ? 'agent_browser' : 'static_http' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      maxConcurrency: 2,
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const outcomes = await contentService.fetch(createRun({ id: storedRun.id, budget: { ...storedRun.budget, maxBrowserFetches: 2, browserFetchConcurrency: 1, fetchConcurrency: 2 } }), sources)
+
+    expect(maxActiveBrowser).toBe(1)
+    expect(outcomes.every((outcome) => outcome.browserRetryUsed)).toBe(true)
+  })
+
+  it('does not enqueue a browser retry after cancellation and preserves the static rejection when browser fails', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Browser cancellation', profile: 'market', depth: 'deep', objective: undefined },
+      budget: getResearchBudget('deep'),
+    })
+    const source = researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: 'https://cancel.fixture.example/app',
+      domain: 'cancel.fixture.example',
+      title: 'Cancel fixture',
+      sourceType: 'reputable-secondary',
+      selectionStatus: 'selected',
+      scores: {},
+    })
+    let cancelled = false
+    const calls: WorkflowToolRequest[] = []
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      calls.push(request)
+      if (request.toolId === 'web_fetch') return { output: { finalUrl: request.input.url, status: 200, provider: 'static_http' } }
+      cancelled = true
+      return { output: { finalUrl: request.input.url, text: 'Loading... please enable JavaScript', rendered: false, provider: 'static_http' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool,
+      isCancelled: () => cancelled,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const [outcome] = await contentService.fetch(createRun({ id: storedRun.id }), [source])
+
+    expect(calls.filter((call) => call.input.render === true)).toHaveLength(0)
+    expect(outcome).toMatchObject({ status: 'failed', error: { code: 'RESEARCH_CANCELLED' }, browserRetryAttempted: false })
+    expect(researchEventRepo.list(storedRun.id).filter((event) => event.type === 'research.source.fetch_failed')).toHaveLength(0)
+  })
+
+  it('preserves static diagnostics when a browser retry fails', async () => {
+    const { researchRunRepo, researchSourceRepo, researchEventRepo } = await loadTestContext()
+    const storedRun = researchRunRepo.create({
+      input: { topic: 'Browser failure', profile: 'market', depth: 'deep', objective: undefined },
+      budget: getResearchBudget('deep'),
+    })
+    const source = researchSourceRepo.createSource({
+      runId: storedRun.id,
+      canonicalUrl: 'https://failure.fixture.example/app',
+      domain: 'failure.fixture.example',
+      title: 'Failure fixture',
+      sourceType: 'reputable-secondary',
+      selectionStatus: 'selected',
+      scores: {},
+    })
+    const executeTool = vi.fn(async (request: WorkflowToolRequest) => {
+      if (request.toolId === 'web_fetch' && request.input.render === true) {
+        throw Object.assign(new Error('browser provider unavailable'), { code: 'WEB_BROWSER_UNAVAILABLE' })
+      }
+      if (request.toolId === 'web_fetch') return { output: { finalUrl: request.input.url, status: 200, provider: 'static_http' } }
+      return { output: { finalUrl: request.input.url, text: 'Loading... please enable JavaScript', rendered: false, provider: 'static_http' } }
+    })
+    const contentService = createContentService({
+      repositories: { researchSourceRepo, researchEventRepo },
+      executeTool,
+      lookup: async () => ['93.184.216.34'],
+    })
+
+    const [outcome] = await contentService.fetch(createRun({ id: storedRun.id }), [source])
+    const failed = researchEventRepo.list(storedRun.id).find((event) => event.type === 'research.source.fetch_failed')
+
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      error: { code: 'RESEARCH_CONTENT_NEEDS_RENDERING' },
+      provider: 'static_http',
+      browserRetryAttempted: true,
+      browserRetryUsed: false,
+      browserRetryErrorCode: 'WEB_BROWSER_UNAVAILABLE',
+    })
+    expect(failed?.payload).toMatchObject({
+      rejectionReason: 'needs_rendering',
+      browserRetryErrorCode: 'WEB_BROWSER_UNAVAILABLE',
+      contentDiagnostics: expect.objectContaining({ rejectionReasons: ['needs_rendering'] }),
+    })
+  })
 })

@@ -12,6 +12,7 @@ export type ResearchEventType =
   | 'research.source.selected'
   | 'research.source.rejected'
   | 'research.source.fetch_failed'
+  | 'research.source.fetch_diagnostics'
   | 'research.sources.fetched'
   | 'research.evidence.extracted'
   | 'research.coverage.assessed'
@@ -66,6 +67,7 @@ export type ResearchEvent =
   | ResearchEventBase<'research.source.selected', IdentifierPayload>
   | ResearchEventBase<'research.source.rejected', JsonObject & { queryId: string; url: string; reason: string }>
   | ResearchEventBase<'research.source.fetch_failed', IdentifierPayload & { errorCode: string; rejectionReason?: string | null; finalUrl?: string | null; contentDiagnostics?: JsonObject | null }>
+  | ResearchEventBase<'research.source.fetch_diagnostics', IdentifierPayload & { provider: string | null; retryReason: string | null; browserRetryUsed: boolean; browserRetryAttempted?: boolean; browserRetryErrorCode?: string | null }>
   | ResearchEventBase<'research.sources.fetched', JsonObject & { sourceIds: string[]; fetchedCount: number; failedCount: number }>
   | ResearchEventBase<'research.evidence.extracted', CountPayload>
   | ResearchEventBase<'research.coverage.assessed', IdentifierPayload & { score: number }>

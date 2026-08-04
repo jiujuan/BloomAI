@@ -12,8 +12,10 @@ const RESEARCH_BUDGETS: Readonly<Record<ResearchDepth, Readonly<ResearchBudgetDt
     maxSearchQueries: 20,
     maxNormalizedSources: 24,
     maxFetchedSources: 16,
+    maxBrowserFetches: 3,
     searchConcurrency: 4,
     fetchConcurrency: 3,
+    browserFetchConcurrency: 1,
     maxDurationMs: 10 * 60 * 1000,
   }),
   deep: freezeBudget({
@@ -22,8 +24,10 @@ const RESEARCH_BUDGETS: Readonly<Record<ResearchDepth, Readonly<ResearchBudgetDt
     maxSearchQueries: 48,
     maxNormalizedSources: 50,
     maxFetchedSources: 36,
+    maxBrowserFetches: 8,
     searchConcurrency: 6,
     fetchConcurrency: 5,
+    browserFetchConcurrency: 2,
     maxDurationMs: 30 * 60 * 1000,
   }),
   exhaustive: freezeBudget({
@@ -32,8 +36,10 @@ const RESEARCH_BUDGETS: Readonly<Record<ResearchDepth, Readonly<ResearchBudgetDt
     maxSearchQueries: 90,
     maxNormalizedSources: 100,
     maxFetchedSources: 70,
+    maxBrowserFetches: 16,
     searchConcurrency: 8,
     fetchConcurrency: 6,
+    browserFetchConcurrency: 2,
     maxDurationMs: 60 * 60 * 1000,
   }),
 })

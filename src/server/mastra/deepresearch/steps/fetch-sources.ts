@@ -33,7 +33,12 @@ export function createFetchSourcesStep({ repositories, contentService }: { repos
       assertWorkflowNotCancelled(repositories, run.id)
       recordDeepResearchFetchLatency(Date.now() - startedAt, deepResearchTelemetryContext(run, { sources: sources.length }))
       const fetchedCount = outcomes.filter((outcome) => outcome.status === 'fetched').length
-      repositories.researchRunRepo.setUsage(run.id, { ...run.usage, fetchedSources: run.usage.fetchedSources + fetchedCount })
+      const browserFetches = outcomes.filter((outcome) => outcome.browserRetryUsed).length
+      repositories.researchRunRepo.setUsage(run.id, {
+        ...run.usage,
+        fetchedSources: run.usage.fetchedSources + fetchedCount,
+        browserFetches: (run.usage.browserFetches ?? 0) + browserFetches,
+      })
       repositories.researchEventRepo.append({
         runId: run.id,
         type: 'research.sources.fetched',

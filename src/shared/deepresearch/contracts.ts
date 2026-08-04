@@ -201,8 +201,12 @@ export interface ResearchBudgetDto {
   maxSearchQueries: number
   maxNormalizedSources: number
   maxFetchedSources: number
+  /** Maximum number of sources allowed one browser retry during a Run. */
+  maxBrowserFetches?: number
   searchConcurrency: number
   fetchConcurrency: number
+  /** Independent cap for concurrent browser retries. */
+  browserFetchConcurrency?: number
   maxDurationMs: number
   maxTokens?: number
   maxProviderCostUsd?: number
@@ -241,6 +245,8 @@ export interface ResearchUsageDto {
   searchQueries: number
   normalizedSources: number
   fetchedSources: number
+  /** Additive V1-compatible usage counter for browser retries. */
+  browserFetches?: number
   tokens: number
   providerCostUsd: number
   startedAt: number | null
