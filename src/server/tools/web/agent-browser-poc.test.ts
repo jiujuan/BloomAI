@@ -7,6 +7,9 @@ describe('Agent Browser real browser POC', () => {
   it.skipIf(!enabled)('hydrates the fixture, captures PNG, blocks unsafe subresources, and cleans up aborts', async () => {
     const result = await runAgentBrowserPoc()
 
+    expect(result.agentBrowserApiUsed).toBe(true)
+    expect(result.managerReadHydrated).toBe(true)
+    expect(result.screenshotSource).toBe('agent_browser')
     expect(result.hydrated).toBe(true)
     expect(result.screenshot.bytes).toBeGreaterThan(0)
     expect(result.screenshot.width).toBe(1024)
