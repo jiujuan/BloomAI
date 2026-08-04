@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(28)
+    expect(migrationVersions()).toHaveLength(29)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(28)
+    expect(migrationVersions()).toHaveLength(29)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -204,6 +204,7 @@ describe('database migrations', () => {
       '026-disable-placeholder-tools',
       '027-tool-permissions-permanent-only',
       '028-tools-platform-b1',
+      '029-tools-platform-b1-patch',
     ])
     const emptyDb = openRawDb()
     try {

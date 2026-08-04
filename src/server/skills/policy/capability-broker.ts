@@ -177,6 +177,7 @@ function requireLegacyToolPermission(
   input: Record<string, unknown>,
 ): void {
   if (!needsInteractiveApprovalForTool(tool)) return
+  if (tool.id === 'fs_apply_patch' && input.dryRun !== false) return
 
   if (sessionToolPermissionStore.has(tool.id, sessionId)) return
 
