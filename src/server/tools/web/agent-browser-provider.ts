@@ -139,7 +139,7 @@ export class AgentBrowserProvider implements WebPageProvider, WebScreenshotProvi
         )) as number
         const height = request.fullPage ? documentHeight : request.viewport.height
         if (height > this.config.maxPageHeight || request.viewport.width * height > this.config.maxPixels) {
-          throw new WebBrowserError('WEB_BROWSER_LIMIT', 'screenshot dimensions exceed the configured limit')
+          throw new WebBrowserError('WEB_SCREENSHOT_LIMIT_EXCEEDED', 'screenshot dimensions exceed the configured limit')
         }
         const bytes = await page.screenshot({
           fullPage: request.fullPage,
@@ -147,7 +147,7 @@ export class AgentBrowserProvider implements WebPageProvider, WebScreenshotProvi
           ...(request.format === 'jpeg' && request.quality !== undefined ? { quality: request.quality } : {}),
         })
         if (bytes.byteLength > this.config.maxArtifactBytes) {
-          throw new WebBrowserError('WEB_BROWSER_LIMIT', 'screenshot artifact exceeds the configured limit')
+          throw new WebBrowserError('WEB_SCREENSHOT_LIMIT_EXCEEDED', 'screenshot artifact exceeds the configured limit')
         }
         return {
           bytes,
@@ -299,6 +299,6 @@ function assertViewport(width: number, height: number, config: WebBrowserConfig)
     || width > config.maxViewportWidth
     || height > config.maxViewportHeight
   ) {
-    throw new WebBrowserError('WEB_BROWSER_LIMIT', 'viewport exceeds the configured limit')
+    throw new WebBrowserError('WEB_SCREENSHOT_LIMIT_EXCEEDED', 'viewport exceeds the configured limit')
   }
 }

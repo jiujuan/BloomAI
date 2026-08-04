@@ -7,6 +7,7 @@ export type WebBrowserErrorCode =
   | 'WEB_BROWSER_NAVIGATION_FAILED'
   | 'WEB_BROWSER_SHUTDOWN'
   | 'WEB_BROWSER_LIMIT'
+  | 'WEB_SCREENSHOT_LIMIT_EXCEEDED'
   | 'WEB_URL_UNSAFE'
 
 export class WebBrowserError extends Error {
