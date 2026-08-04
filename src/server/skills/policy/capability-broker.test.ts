@@ -117,6 +117,62 @@ describe('CapabilityBroker', () => {
     expect(toolRepo.listRuns('web_search')).toEqual([])
   })
 
+  it('allows patch preview without approval and requires a trusted one-time token for writes', async () => {
+    process.env.TOOL_APPROVAL_TOKEN_SECRET = 'patch-test-secret'
+    const { executeLegacyToolCapability, CapabilityApprovalRequiredError } = await loadRuntime()
+    const { createApprovalToken } = await import('../../tools/approval-token')
+    const workspace = fs.mkdtempSync(path.join(process.cwd(), '.bloomai-fs-apply-patch-'))
+    const filePath = path.join(workspace, 'notes.txt')
+    const patch = [
+      '--- a/notes.txt',
+      '+++ b/notes.txt',
+      '@@ -1,1 +1,1 @@',
+      '-before',
+      '+after',
+    ].join('\n')
+    fs.writeFileSync(filePath, 'before\n', 'utf8')
+
+    try {
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace },
+      })).resolves.toMatchObject({ output: { dryRun: true, applied: false } })
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+
+      const approvalToken = createApprovalToken({
+        secret: 'patch-test-secret',
+        toolId: 'fs_apply_patch',
+        sessionId: 'patch-session',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+      })
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+        approvalToken,
+      })).resolves.toMatchObject({ output: { dryRun: false, applied: true, rollbackToken: expect.any(String) } })
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('after\n')
+
+      await expect(executeLegacyToolCapability({
+        caller: 'http',
+        toolId: 'fs_apply_patch',
+        input: { patch, root: workspace, dryRun: false, createBackup: true },
+        sessionId: 'patch-session',
+        approvalToken,
+      })).rejects.toBeInstanceOf(CapabilityApprovalRequiredError)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   it('enforces image model allowlists and per-run call budgets for package capabilities', async () => {
     const { skillPackageRepo, toolRegistry, executeCapability, CapabilityDeniedError } = await loadRuntime()
     const { version, run } = await createPackageRun(skillPackageRepo)

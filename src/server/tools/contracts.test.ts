@@ -54,4 +54,14 @@ describe('tool contracts', () => {
     expect(grep).toMatchObject({ deprecated: true, replacement: 'workspace_search' })
     expect(glob).toMatchObject({ deprecated: true, replacement: 'workspace_search' })
   })
+
+  it('defaults patch execution to a dry-run and requires write permission for commits', () => {
+    const patch = getToolContract('fs_apply_patch')
+    expect(patch).toMatchObject({ requiresPermission: 'write' })
+    expect(patch!.inputSchema.parse({ patch: '--- a/a.txt\n+++ b/a.txt\n' })).toMatchObject({
+      dryRun: true,
+      createBackup: true,
+    })
+    expect(() => patch!.inputSchema.parse({ patch: '', dryRun: false })).toThrow()
+  })
 })

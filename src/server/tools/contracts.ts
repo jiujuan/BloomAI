@@ -78,6 +78,13 @@ const fileEditInputSchema = z.object({
   expectedHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
 }).strict()
 
+const fsApplyPatchInputSchema = z.object({
+  patch: z.string().min(1).max(1_000_000),
+  root: pathSchema.optional(),
+  dryRun: z.boolean().default(true),
+  createBackup: z.boolean().default(true),
+}).strict()
+
 const fileGrepInputSchema = z.object({
   pattern: z.string().min(1).max(10_000),
   path: pathSchema,
@@ -297,6 +304,34 @@ export const toolContracts = {
     inputSchema: fileEditInputSchema,
     outputSchema: outputObject({ success: z.boolean().optional(), linesChanged: z.number().int().nonnegative().optional() }),
     getAvailability: async () => getToolAvailability('fs_edit'),
+  },
+  fs_apply_patch: {
+    id: 'fs_apply_patch',
+    category: 'fs',
+    displayName: 'Apply Patch',
+    description: 'Preview or apply a bounded unified diff inside an approved workspace root.',
+    requiresPermission: 'write',
+    inputSchema: fsApplyPatchInputSchema,
+    outputSchema: outputObject({
+      dryRun: z.boolean(),
+      applied: z.boolean(),
+      files: z.array(outputObject({
+        path: z.string(),
+        relativePath: z.string(),
+        status: z.enum(['modified', 'created', 'deleted', 'conflict']),
+        hunks: z.number().int().nonnegative(),
+        additions: z.number().int().nonnegative(),
+        deletions: z.number().int().nonnegative(),
+        preview: z.string(),
+        conflict: z.string().optional(),
+        backupPath: z.string().optional(),
+      })),
+      modifiedFiles: z.array(z.string()),
+      conflicts: z.array(outputObject({ path: z.string(), reason: z.string() })),
+      backupPaths: z.array(z.string()),
+      rollbackToken: z.string().optional(),
+    }),
+    getAvailability: async () => getToolAvailability('fs_apply_patch'),
   },
   fs_stat: {
     id: 'fs_stat',
