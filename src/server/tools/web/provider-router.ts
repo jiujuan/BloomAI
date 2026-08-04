@@ -1,7 +1,9 @@
 import { extractMainHtml, htmlToText, fetchPage } from '../utils/html'
 import { AgentBrowserProvider } from './agent-browser-provider'
 import { createDiagnostics, reasonFromError, recordAttempt } from './browser-diagnostics'
-import type { WebLoadedPage, WebPageLoadRequest, WebPageProvider } from './contracts'
+import { WebBrowserError } from './browser-errors'
+import { getWebRoutingPolicy } from './config'
+import type { WebLoadedPage, WebPageLoadRequest, WebPageProvider, WebRoutingPolicy } from './contracts'
 
 const MIN_MAIN_TEXT = 200
 
@@ -9,38 +11,46 @@ export class WebPageProviderRouter {
   constructor(
     private readonly staticProvider: WebPageProvider,
     private readonly browserProvider: WebPageProvider,
+    private readonly routingPolicy: WebRoutingPolicy = getWebRoutingPolicy(),
   ) {}
 
   async loadPage(request: WebPageLoadRequest): Promise<WebLoadedPage> {
-    if (request.render === false) return this.loadStatic(request)
-    if (request.render === true) {
-      try {
-        return await this.loadBrowser(request)
-      } catch (browserError) {
-        const staticPage = await this.loadStatic(request)
-        return withAttempt(staticPage, {
-          provider: 'agent_browser',
-          outcome: 'failed',
-          reason: reasonFromError(browserError),
-        })
-      }
+    const preference = request.render === false
+      ? 'static'
+      : request.render === true
+        ? 'browser'
+        : this.routingPolicy.preference
+
+    if (preference === 'static') {
+      const staticPage = await this.loadStatic(request)
+      return withAttempt(staticPage, {
+        provider: 'agent_browser',
+        outcome: 'skipped',
+        reason: 'routing_preference_static',
+      })
+    }
+    if (preference === 'browser') {
+      await this.assertBrowserAvailable()
+      return this.loadBrowser(request)
     }
 
     let staticPage: WebLoadedPage
     try {
       staticPage = await this.loadStatic(request)
     } catch (staticError) {
-      try {
-        return await this.loadBrowser(request)
-      } catch (browserError) {
-        throw new Error(`Web page providers failed: static=${reasonFromError(staticError)}; browser=${reasonFromError(browserError)}`)
-      }
+      const browserPage = await this.loadBrowser(request)
+      return browserPage
     }
 
     const mainTextLength = htmlToText(extractMainHtml(staticPage.html)).length
-    if (mainTextLength >= MIN_MAIN_TEXT) return staticPage
+    if (mainTextLength >= MIN_MAIN_TEXT) return withAttempt(staticPage, {
+      provider: 'agent_browser',
+      outcome: 'skipped',
+      reason: 'static_content_sufficient',
+    })
 
     try {
+      await this.assertBrowserAvailable()
       const browserPage = await this.loadBrowser(request)
       const browserTextLength = htmlToText(extractMainHtml(browserPage.html)).length
       return browserTextLength > mainTextLength ? browserPage : withAttempt(staticPage, {
@@ -49,6 +59,13 @@ export class WebPageProviderRouter {
         reason: 'rendered page did not contain more readable text',
       })
     } catch (browserError) {
+      if (browserError instanceof WebBrowserError && browserError.code === 'WEB_BROWSER_UNAVAILABLE') {
+        return withAttempt(staticPage, {
+          provider: 'agent_browser',
+          outcome: 'skipped',
+          reason: `unavailable: ${browserError.message.replace(/^WEB_BROWSER_UNAVAILABLE:\s*/, '')}`,
+        })
+      }
       return withAttempt(staticPage, {
         provider: 'agent_browser',
         outcome: 'failed',
@@ -63,6 +80,16 @@ export class WebPageProviderRouter {
 
   private async loadBrowser(request: WebPageLoadRequest): Promise<WebLoadedPage> {
     return this.loadProvider(this.browserProvider, request)
+  }
+
+  private async assertBrowserAvailable(): Promise<void> {
+    if (!this.routingPolicy.browserEnabled) {
+      throw new WebBrowserError('WEB_BROWSER_UNAVAILABLE', 'browser provider is disabled by configuration')
+    }
+    const availability = await this.browserProvider.checkAvailability?.()
+    if (availability && !availability.available) {
+      throw new WebBrowserError('WEB_BROWSER_UNAVAILABLE', availability.reason ?? 'browser provider is unavailable')
+    }
   }
 
   private async loadProvider(provider: WebPageProvider, request: WebPageLoadRequest): Promise<WebLoadedPage> {
@@ -90,10 +117,11 @@ export class WebPageProviderRouter {
 export function createWebPageProviderRouter(options: {
   staticProvider?: WebPageProvider
   browserProvider?: WebPageProvider
+  routingPolicy?: WebRoutingPolicy
 } = {}): WebPageProviderRouter {
   const staticProvider = options.staticProvider ?? createStaticHttpProvider()
   const browserProvider = options.browserProvider ?? new AgentBrowserProvider()
-  return new WebPageProviderRouter(staticProvider, browserProvider)
+  return new WebPageProviderRouter(staticProvider, browserProvider, options.routingPolicy)
 }
 
 let defaultRouter: WebPageProviderRouter | undefined

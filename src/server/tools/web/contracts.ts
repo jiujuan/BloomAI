@@ -1,5 +1,13 @@
 export type WebProviderId = 'static_http' | 'playwright_legacy' | 'agent_browser'
 
+export type WebRoutingPreference = 'auto' | 'static' | 'browser'
+
+export type WebRoutingPolicy = {
+  preference: WebRoutingPreference
+  browserEnabled: boolean
+  allowSearchFallback: boolean
+}
+
 export type WebPageLoadRequest = {
   url: string
   render?: boolean
