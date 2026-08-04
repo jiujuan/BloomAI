@@ -40,6 +40,7 @@ export type WebScreenshotToolOptions = {
     maxPageHeight?: number
     maxPixels?: number
     maxArtifactBytes?: number
+    retentionCount?: number
     timeoutMs?: number
   }
 }
@@ -52,20 +53,22 @@ export function createWebScreenshotTool(options: WebScreenshotToolOptions = {}):
     maxPageHeight: options.limits?.maxPageHeight ?? config.maxPageHeight,
     maxPixels: options.limits?.maxPixels ?? config.maxPixels,
     maxArtifactBytes: options.limits?.maxArtifactBytes ?? config.maxArtifactBytes,
+    retentionCount: options.limits?.retentionCount ?? 20,
     timeoutMs: options.limits?.timeoutMs ?? config.timeoutMs,
   }
   const provider = options.provider ?? new AgentBrowserProvider({ config })
   const dataDir = options.dataDir ?? getDataDir()
 
   return async (input, context) => {
+    throwIfAborted(context.signal)
     const viewport = input.viewport ?? { width: 1280, height: 720 }
     const format = input.format ?? 'png'
     const timeoutMs = Math.min(input.timeoutMs ?? 60_000, limits.timeoutMs)
     if (viewport.width > limits.maxViewportWidth || viewport.height > limits.maxViewportHeight) {
-      throw new WebBrowserError('WEB_BROWSER_LIMIT', 'viewport exceeds the configured limit')
+      throwScreenshotLimit('viewport exceeds the configured limit')
     }
     if (input.fullPage && viewport.width * limits.maxPageHeight > limits.maxPixels) {
-      throw new WebBrowserError('WEB_BROWSER_LIMIT', 'full-page screenshot pixel budget is too large')
+      throwScreenshotLimit('full-page screenshot pixel budget is too large')
     }
 
     const result = await provider.screenshot({
@@ -78,7 +81,7 @@ export function createWebScreenshotTool(options: WebScreenshotToolOptions = {}):
       signal: context.signal,
     })
     if (result.height > limits.maxPageHeight || result.width * result.height > limits.maxPixels) {
-      throw new WebBrowserError('WEB_BROWSER_LIMIT', 'screenshot dimensions exceed the configured limit')
+      throwScreenshotLimit('screenshot dimensions exceed the configured limit')
     }
     const artifact = await writeScreenshotArtifact({
       bytes: result.bytes,
@@ -86,6 +89,8 @@ export function createWebScreenshotTool(options: WebScreenshotToolOptions = {}):
       dataDir,
       runId: context.requestId,
       maxBytes: limits.maxArtifactBytes,
+      signal: context.signal,
+      retentionCount: limits.retentionCount,
     })
     return {
       imagePath: artifact.imagePath,
@@ -101,3 +106,11 @@ export function createWebScreenshotTool(options: WebScreenshotToolOptions = {}):
 }
 
 export const webScreenshotTool = createWebScreenshotTool()
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new WebBrowserError('WEB_BROWSER_ABORTED', 'screenshot operation was cancelled', signal.reason)
+}
+
+function throwScreenshotLimit(message: string): never {
+  throw new WebBrowserError('WEB_SCREENSHOT_LIMIT_EXCEEDED', message)
+}
