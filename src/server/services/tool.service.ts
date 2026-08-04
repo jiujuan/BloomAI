@@ -109,6 +109,8 @@ function projectContract(tool: any, permission: unknown) {
     params_schema: JSON.stringify(schemaToJsonSchema(contract.inputSchema)),
     result_schema: JSON.stringify(schemaToJsonSchema(contract.outputSchema)),
     requires_permission: contract.requiresPermission ?? tool.requires_permission,
+    ...(contract.deprecated ? { deprecated: true } : {}),
+    ...(contract.replacement ? { replacement: contract.replacement } : {}),
     availability: getToolAvailability(tool.id),
     permission,
   }

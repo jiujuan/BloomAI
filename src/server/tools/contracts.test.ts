@@ -37,4 +37,21 @@ describe('tool contracts', () => {
       maxChars: { type: 'integer', maximum: 1_000_000 },
     })
   })
+
+  it('exposes bounded workspace contracts and deprecation metadata', () => {
+    const stat = getToolContract('fs_stat')
+    const search = getToolContract('workspace_search')
+    const grep = getToolContract('fs_grep')
+    const glob = getToolContract('fs_glob')
+
+    expect(stat!.inputSchema.parse({ path: 'src' })).toEqual({ path: 'src' })
+    expect(search!.inputSchema.parse({ query: 'needle' })).toMatchObject({
+      query: 'needle',
+      caseSensitive: false,
+      maxResults: 100,
+      mode: 'text',
+    })
+    expect(grep).toMatchObject({ deprecated: true, replacement: 'workspace_search' })
+    expect(glob).toMatchObject({ deprecated: true, replacement: 'workspace_search' })
+  })
 })
