@@ -28,8 +28,24 @@ const PLACEHOLDER_AVAILABILITY: Record<string, Extract<ToolAvailability, { statu
   },
 }
 
+const EXECUTION_AVAILABILITY: Record<string, Extract<ToolAvailability, { status: 'disabled' }>> = {
+  node_runner: {
+    status: 'disabled',
+    reason: 'Node execution is disabled until the C2 OS isolation threat model and acceptance are complete. node:vm is only a restricted execution environment, not an OS sandbox.',
+  },
+  python_runner: {
+    status: 'disabled',
+    reason: 'Python execution is disabled until a cross-platform OS isolation boundary and acceptance are complete.',
+  },
+  shell: {
+    status: 'disabled',
+    reason: 'Shell execution is disabled until a cross-platform OS isolation boundary and acceptance are complete.',
+  },
+}
+
 export function getToolAvailability(toolId: string): ToolAvailability {
   if (toolId === 'web_screenshot') return getWebScreenshotAvailability()
+  if (EXECUTION_AVAILABILITY[toolId]) return EXECUTION_AVAILABILITY[toolId]
   return PLACEHOLDER_AVAILABILITY[toolId] ?? { status: 'available' }
 }
 

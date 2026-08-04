@@ -52,7 +52,7 @@ describe('tool runtime contracts and cancellation', () => {
     const client = await import('../db/client')
     await client.runMigrations()
     const { toolRegistry } = await import('./registry')
-    const { executeToolInternal } = await import('./execute-tool')
+    const { executeToolInternal, ToolExecutionError } = await import('./execute-tool')
     const { toolRepo } = await import('../db/repositories/tool.repo')
     toolRegistry.web_fetch = vi.fn(async () => ({
       finalUrl: 'https://example.com/result?token=output-secret',
@@ -105,6 +105,32 @@ describe('tool runtime contracts and cancellation', () => {
 
     await expect(pending).rejects.toBeInstanceOf(ToolExecutionError)
     expect(aborted).toBe(true)
+    expect(toolRepo.listRuns('web_search')[0]).toMatchObject({ status: 'cancelled' })
+  })
+
+  it('maps controlled process timeout and cancellation errors to run statuses', async () => {
+    vi.resetModules()
+    const client = await import('../db/client')
+    await client.runMigrations()
+    const { toolRegistry } = await import('./registry')
+    const { executeToolInternal } = await import('./execute-tool')
+    const { toolRepo } = await import('../db/repositories/tool.repo')
+    const { ControlledProcessError } = await import('./utils/process-runner')
+
+    toolRegistry.web_search = vi.fn(async () => {
+      throw new ControlledProcessError('PROCESS_TIMEOUT', 'child process timed out')
+    })
+
+    await expect(executeToolInternal('web_search', { query: 'process-timeout' }, undefined, 5_000))
+      .rejects.toMatchObject({ status: 'timeout' })
+    expect(toolRepo.listRuns('web_search')[0]).toMatchObject({ status: 'timeout' })
+
+    toolRegistry.web_search = vi.fn(async () => {
+      throw new ControlledProcessError('PROCESS_CANCELLED', 'child process cancelled')
+    })
+
+    await expect(executeToolInternal('web_search', { query: 'process-cancelled' }, undefined, 5_000))
+      .rejects.toMatchObject({ status: 'cancelled' })
     expect(toolRepo.listRuns('web_search')[0]).toMatchObject({ status: 'cancelled' })
   })
 })
