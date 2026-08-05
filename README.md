@@ -260,19 +260,6 @@ Windows 图标资源位于 public/icons/bloomai.ico，包含多个尺寸，主�
 
 ## 数据与运行限制
 
-### 数据位置
-
-默认数据目录为 ~/.bloomai，其中可能包含：
-
-~~~text
-<DATADIR>/bloomai.db          # BloomAI 应用数据
-<DATADIR>/mastra-runtime.db  # Mastra Runtime 与定时任务状态
-<DATADIR>/memory/            # Working Memory / Observational Memory
-<DATADIR>/attachment/        # Chat 附件（可由 DATA_DIR_ATTACHMENT 覆盖）
-~~~
-
-备份或迁移数据时，建议先退出 BloomAI，再复制整个数据目录，以便同时保留 SQLite/LibSQL 的相关文件。
-
 ### 定时任务限制
 
 定时任务只在 BloomAI 服务进程运行时执行。退出应用、电脑休眠或进程被终止期间，不保证系统会补跑或准点触发。因此不要把它当作支付、交易、删除数据、生产告警升级等需要系统级可靠性的自动化机制。
