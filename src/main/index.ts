@@ -10,8 +10,16 @@ import { registerDirectoryDialogHandler } from './ipc/dialogs'
 import { createApprovalToken, getApprovalTokenSecret } from '../server/tools/approval-token'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const isDev = process.env.NODE_ENV === 'development'
+const isDev = !app.isPackaged || process.env.NODE_ENV === 'development'
 const PORT = DEFAULT_SERVER_PORT
+
+function getAppIconPath(): string | undefined {
+  const iconPath = path.join(
+    app.getAppPath(),
+    ...(isDev ? ['public', 'icons', 'bloomai.ico'] : ['dist', 'icons', 'bloomai.ico']),
+  )
+  return fs.existsSync(iconPath) ? iconPath : undefined
+}
 
 let mainWindow: BrowserWindow | null = null
 let overlayWindow: BrowserWindow | null = null
@@ -51,6 +59,7 @@ function createMainWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 13 },
     backgroundColor: '#ffffff',
+    icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -105,8 +114,9 @@ function createOverlayWindow() {
 
 // ── Tray ─────────────────────────────────────────────────────────────────────
 function createTray() {
-  const icon = nativeImage.createEmpty()
-  tray = new Tray(icon)
+  const iconPath = getAppIconPath()
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty()
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }))
   tray.setToolTip('BloomAI')
 
   const menu = Menu.buildFromTemplate([
