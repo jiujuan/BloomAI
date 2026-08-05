@@ -65,7 +65,7 @@ describe('SkillRunCoordinator', () => {
       expect.objectContaining({
         schemaVersion: 1,
         type: 'run.status_changed',
-        payload: { from: 'created', to: 'validating', revision: 1 },
+        payload: { from: 'created', to: 'validating', revision: 1, reason: 'validation_started' },
       }),
     ])
   })

@@ -85,11 +85,16 @@ export type RunSnapshot = {
   readonly imageSessionId: string | null
   readonly waitingReason: string | null
   readonly cancelRequested: boolean
+  readonly cancelRequestedAt: number | null
   readonly startedAt: number | null
   readonly updatedAt: number
   readonly finishedAt: number | null
   readonly errorCode: string | null
   readonly errorMessage: string | null
+  readonly currentStep: string | null
+  readonly requiredAction: JsonObject | null
+  readonly workerId: string | null
+  readonly heartbeatAt: number | null
 }
 
 export type RunEventSnapshot = {
@@ -108,10 +113,15 @@ export type RunChange = {
   readonly output?: JsonObject | null
   readonly waitingReason?: string | null
   readonly cancelRequested?: boolean
+  readonly cancelRequestedAt?: number | null
   readonly startedAt?: number | null
   readonly finishedAt?: number | null
   readonly errorCode?: string | null
   readonly errorMessage?: string | null
+  readonly currentStep?: string | null
+  readonly requiredAction?: JsonObject | null
+  readonly workerId?: string | null
+  readonly heartbeatAt?: number | null
 }
 
 export type RunChangeEvent = {
@@ -234,6 +244,11 @@ export interface SkillRunRepository {
     sessionId?: string | null
     imageSessionId?: string | null
     availableAt?: number
+    initialEvent?: {
+      schemaVersion: number
+      type: string
+      payload: JsonObject
+    }
   }): { run: RunSnapshot; queue: SkillRunQueueSnapshot }
   compareAndSet(data: ApplyRunChangeRequest): ApplyRunChangeResult | undefined
   claimNextRun?(input: { workerId: string; leaseMs: number; now?: number }): RunSnapshot | undefined

@@ -29,6 +29,10 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
+function cloneNullable<T>(value: T | null): T | null {
+  return value === null ? null : clone(value)
+}
+
 export class FakeIdGenerator implements IdGenerator {
   private sequence = 0
 
@@ -223,11 +227,16 @@ export class FakeSkillRunRepository implements SkillRunRepository {
       imageSessionId: data.imageSessionId ?? null,
       waitingReason: null,
       cancelRequested: false,
+      cancelRequestedAt: null,
       startedAt: data.status === 'running' ? now : null,
       updatedAt: now,
       finishedAt: null,
       errorCode: null,
       errorMessage: null,
+      currentStep: null,
+      requiredAction: null,
+      workerId: null,
+      heartbeatAt: null,
     }
     this.runs.set(run.id, run)
     return clone(run)
@@ -266,10 +275,15 @@ export class FakeSkillRunRepository implements SkillRunRepository {
       ...(changes.output === undefined ? {} : { output: changes.output === null ? null : clone(changes.output) }),
       ...(changes.waitingReason === undefined ? {} : { waitingReason: changes.waitingReason }),
       ...(changes.cancelRequested === undefined ? {} : { cancelRequested: changes.cancelRequested }),
+      ...(changes.cancelRequestedAt === undefined ? {} : { cancelRequestedAt: changes.cancelRequestedAt }),
       ...(changes.startedAt === undefined ? {} : { startedAt: changes.startedAt }),
       ...(changes.finishedAt === undefined ? {} : { finishedAt: changes.finishedAt }),
       ...(changes.errorCode === undefined ? {} : { errorCode: changes.errorCode }),
       ...(changes.errorMessage === undefined ? {} : { errorMessage: changes.errorMessage }),
+      ...(changes.currentStep === undefined ? {} : { currentStep: changes.currentStep }),
+      ...(changes.requiredAction === undefined ? {} : { requiredAction: cloneNullable(changes.requiredAction) }),
+      ...(changes.workerId === undefined ? {} : { workerId: changes.workerId }),
+      ...(changes.heartbeatAt === undefined ? {} : { heartbeatAt: changes.heartbeatAt }),
       revision: current.revision + 1,
       updatedAt: this.clock.now(),
     }
@@ -392,13 +406,15 @@ export function createFakeSkillRuntimePorts(options: { now?: number } = {}): Ski
   const queue = new FakeSkillRunQueueRepository(ids, clock)
   const runs = new FakeSkillRunRepository(ids, clock, events)
   const atomicRuns = runs as FakeSkillRunRepository & {
-    createRunAndEnqueue: (data: Parameters<SkillRunRepository['createRun']>[0] & { availableAt?: number }) => ReturnType<NonNullable<SkillRunRepository['createRunAndEnqueue']>>
+    createRunAndEnqueue: (data: Parameters<SkillRunRepository['createRun']>[0] & { availableAt?: number; initialEvent?: { schemaVersion: number; type: string; payload: JsonObject } }) => ReturnType<NonNullable<SkillRunRepository['createRunAndEnqueue']>>
   }
 
   atomicRuns.createRunAndEnqueue = (data) => {
     const run = runs.createRun(data)
     try {
-      return { run, queue: queue.enqueue({ runId: run.id, availableAt: data.availableAt }) }
+      const queued = queue.enqueue({ runId: run.id, availableAt: data.availableAt })
+      if (data.initialEvent) events.appendEvent({ runId: run.id, seq: 1, ...data.initialEvent })
+      return { run, queue: queued }
     } catch (error) {
       // Keep the fake's atomic contract aligned with the SQLite adapter.
       runs.removeRunForAtomicRollback(run.id)

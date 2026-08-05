@@ -184,11 +184,16 @@ export const skillPackageRepo = {
       image_session_id: data.imageSessionId ?? null,
       waiting_reason: null,
       cancel_requested: 0,
+      cancel_requested_at: null,
       started_at: data.status === 'running' ? now : null,
       updated_at: now,
       finished_at: null,
       error_code: null,
       error_message: null,
+      current_step: null,
+      required_action_json: null,
+      worker_id: null,
+      heartbeat_at: null,
     }
     getOrmDb().insert(skill_runs_v2).values(row).run()
     return row
@@ -204,6 +209,7 @@ export const skillPackageRepo = {
     sessionId?: string | null
     imageSessionId?: string | null
     availableAt?: number
+    initialEvent?: { schemaVersion: number; type: string; payload: Record<string, unknown> }
   }) {
     const now = Date.now()
     const run = {
@@ -219,11 +225,16 @@ export const skillPackageRepo = {
       image_session_id: data.imageSessionId ?? null,
       waiting_reason: null,
       cancel_requested: 0,
+      cancel_requested_at: null,
       started_at: data.status === 'running' ? now : null,
       updated_at: now,
       finished_at: null,
       error_code: null,
       error_message: null,
+      current_step: null,
+      required_action_json: null,
+      worker_id: null,
+      heartbeat_at: null,
     }
     const queue = {
       id: uuidv4(),
@@ -240,6 +251,17 @@ export const skillPackageRepo = {
     getOrmDb().transaction((tx) => {
       tx.insert(skill_runs_v2).values(run).run()
       tx.insert(skill_run_queue).values(queue).run()
+      if (data.initialEvent) {
+        tx.insert(skill_run_events).values({
+          id: uuidv4(),
+          run_id: run.id,
+          seq: 1,
+          schema_version: data.initialEvent.schemaVersion,
+          type: data.initialEvent.type,
+          payload_json: JSON.stringify(data.initialEvent.payload),
+          created_at: now,
+        }).run()
+      }
     })
     return { run, queue }
   },
@@ -265,10 +287,15 @@ export const skillPackageRepo = {
       output?: Record<string, unknown> | null
       waitingReason?: string | null
       cancelRequested?: boolean
+      cancelRequestedAt?: number | null
       startedAt?: number | null
       finishedAt?: number | null
       errorCode?: string | null
       errorMessage?: string | null
+      currentStep?: string | null
+      requiredAction?: Record<string, unknown> | null
+      workerId?: string | null
+      heartbeatAt?: number | null
     }
     event: { schemaVersion: number; type: string; payload: Record<string, unknown> }
     command?: { idempotencyKey: string }
@@ -290,10 +317,15 @@ export const skillPackageRepo = {
         ...(changes.output === undefined ? {} : { output_json: changes.output === null ? null : stringifyJsonObject(changes.output, 'output') }),
         ...(changes.waitingReason === undefined ? {} : { waiting_reason: changes.waitingReason }),
         ...(changes.cancelRequested === undefined ? {} : { cancel_requested: changes.cancelRequested ? 1 : 0 }),
+        ...(changes.cancelRequestedAt === undefined ? {} : { cancel_requested_at: changes.cancelRequestedAt }),
         ...(changes.startedAt === undefined ? {} : { started_at: changes.startedAt }),
         ...(changes.finishedAt === undefined ? {} : { finished_at: changes.finishedAt }),
         ...(changes.errorCode === undefined ? {} : { error_code: changes.errorCode }),
         ...(changes.errorMessage === undefined ? {} : { error_message: changes.errorMessage }),
+        ...(changes.currentStep === undefined ? {} : { current_step: changes.currentStep }),
+        ...(changes.requiredAction === undefined ? {} : { required_action_json: changes.requiredAction === null ? null : stringifyJsonObject(changes.requiredAction, 'requiredAction') }),
+        ...(changes.workerId === undefined ? {} : { worker_id: changes.workerId }),
+        ...(changes.heartbeatAt === undefined ? {} : { heartbeat_at: changes.heartbeatAt }),
         revision: data.expectedRevision + 1,
         updated_at: now,
       }).where(and(
@@ -738,10 +770,15 @@ export function createSqliteRunRepository(): SkillRunRepository {
           ...(data.changes.output === undefined ? {} : { output: data.changes.output }),
           ...(data.changes.waitingReason === undefined ? {} : { waitingReason: data.changes.waitingReason }),
           ...(data.changes.cancelRequested === undefined ? {} : { cancelRequested: data.changes.cancelRequested }),
+          ...(data.changes.cancelRequestedAt === undefined ? {} : { cancelRequestedAt: data.changes.cancelRequestedAt }),
           ...(data.changes.startedAt === undefined ? {} : { startedAt: data.changes.startedAt }),
           ...(data.changes.finishedAt === undefined ? {} : { finishedAt: data.changes.finishedAt }),
           ...(data.changes.errorCode === undefined ? {} : { errorCode: data.changes.errorCode }),
           ...(data.changes.errorMessage === undefined ? {} : { errorMessage: data.changes.errorMessage }),
+          ...(data.changes.currentStep === undefined ? {} : { currentStep: data.changes.currentStep }),
+          ...(data.changes.requiredAction === undefined ? {} : { requiredAction: data.changes.requiredAction }),
+          ...(data.changes.workerId === undefined ? {} : { workerId: data.changes.workerId }),
+          ...(data.changes.heartbeatAt === undefined ? {} : { heartbeatAt: data.changes.heartbeatAt }),
         },
         event: data.event,
         command: data.command,
@@ -876,7 +913,30 @@ function mapInstallation(row: any): InstallationSnapshot {
 }
 
 function mapRun(row: any): RunSnapshot {
-  return { id: row.id, skillVersionId: row.skill_version_id, status: row.status as SkillRunStatus, revision: row.revision, input: parseObject(row.input_json, 'run input'), output: row.output_json === null ? null : parseObject(row.output_json, 'run output'), context: parseObject(row.context_json, 'run context'), surface: row.surface, sessionId: row.session_id, imageSessionId: row.image_session_id, waitingReason: row.waiting_reason, cancelRequested: row.cancel_requested === 1, startedAt: row.started_at, updatedAt: row.updated_at, finishedAt: row.finished_at, errorCode: row.error_code, errorMessage: row.error_message }
+  return {
+    id: row.id,
+    skillVersionId: row.skill_version_id,
+    status: row.status as SkillRunStatus,
+    revision: row.revision,
+    input: parseObject(row.input_json, 'run input'),
+    output: row.output_json === null ? null : parseObject(row.output_json, 'run output'),
+    context: parseObject(row.context_json, 'run context'),
+    surface: row.surface,
+    sessionId: row.session_id,
+    imageSessionId: row.image_session_id,
+    waitingReason: row.waiting_reason,
+    cancelRequested: row.cancel_requested === 1,
+    cancelRequestedAt: row.cancel_requested_at ?? null,
+    startedAt: row.started_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    currentStep: row.current_step ?? null,
+    requiredAction: row.required_action_json === null || row.required_action_json === undefined ? null : parseObject(row.required_action_json, 'required action'),
+    workerId: row.worker_id ?? null,
+    heartbeatAt: row.heartbeat_at ?? null,
+  }
 }
 
 function mapEvent(row: any): RunEventSnapshot {
