@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createLogger, LogLevel } from '@mastra/core/logger'
+import { ConsoleLogger, LogLevel } from '@mastra/core/logger'
 import { resolveErrorTimeline, type ResponseError } from '@shared/llm-response-contract/error-timeline-registry'
 import { expandPath, readConfigValue } from '../config/config'
 
@@ -9,8 +9,8 @@ function resolveLogLevel(raw: string): LogLevel {
   return (Object.values(LogLevel) as string[]).includes(raw) ? (raw as LogLevel) : LogLevel.INFO
 }
 
-/** Structured stdout logger powered by Mastra / Pino. Level controlled by LOG_LEVEL env var. */
-export const serverLogger = createLogger({
+/** Structured stdout logger powered by Mastra. Level controlled by LOG_LEVEL env var. */
+export const serverLogger = new ConsoleLogger({
   name: 'bloomai',
   level: resolveLogLevel(readConfigValue('LOG_LEVEL', 'info').value),
 })

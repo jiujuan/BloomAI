@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let tempDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -63,5 +63,33 @@ describe('server logger', () => {
       level: 'error',
       message: 'odd failure',
     })
+  })
+
+  it('constructs the server logger with ConsoleLogger instead of the deprecated factory', async () => {
+    vi.resetModules()
+    process.env.LOG_LEVEL = 'info'
+    const deprecatedFactory = vi.fn(() => {
+      throw new Error('deprecated logger factory must not be called')
+    })
+    class MockConsoleLogger {
+      constructor(readonly options: Record<string, unknown>) {}
+      error(): void {}
+      warn(): void {}
+    }
+
+    vi.doMock('@mastra/core/logger', () => ({
+      ConsoleLogger: MockConsoleLogger,
+      ['create' + 'Logger']: deprecatedFactory,
+      LogLevel: { DEBUG: 'debug', INFO: 'info', WARN: 'warn', ERROR: 'error', NONE: 'silent' },
+    }))
+
+    const { serverLogger } = await import('./logger')
+
+    expect(serverLogger).toBeInstanceOf(MockConsoleLogger)
+    expect(deprecatedFactory).not.toHaveBeenCalled()
+    expect((serverLogger as unknown as MockConsoleLogger).options).toMatchObject({ name: 'bloomai', level: 'info' })
+
+    vi.doUnmock('@mastra/core/logger')
+    vi.resetModules()
   })
 })

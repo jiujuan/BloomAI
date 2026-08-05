@@ -78,28 +78,16 @@ export const mastra = new Mastra({
 
 ## 3. Mastra 原生可观测能力
 
-### 3.1 Logger — `createLogger`
+### 3.1 Logger — `ConsoleLogger`
 
-`@mastra/core` 导出 `createLogger`，底层基于 **Pino**，支持四种输出类型：
-
-| type | 说明 | 适用场景 |
-|------|------|---------|
-| `CONSOLE` | 带颜色的 pretty-print 输出到 stdout | 本地开发 |
-| `FILE` | 追加写到指定文件路径 | 生产备份 |
-| `UPSTASH` | 推送到 Upstash Redis（云托管） | SaaS 场景 |
-| `CUSTOM` | 传入任意 Pino transport | 自定义接入 |
+`@mastra/core/logger` 导出 `ConsoleLogger` 和 `LogLevel`。新的 logger 通过构造函数配置名称和日志级别，直接输出到 stdout；持久化 JSONL 文件仍由 BloomAI 的 `appendLog` 兼容层负责。
 
 ```typescript
-import { createLogger, LogLevel } from '@mastra/core/logger'
+import { ConsoleLogger, LogLevel } from '@mastra/core/logger'
 
-// 开发环境 — console pretty
-const logger = createLogger({ type: 'CONSOLE', level: LogLevel.DEBUG })
-
-// 生产环境 — 同时写文件 + stdout
-const logger = createLogger({
-  type: 'FILE',
+const logger = new ConsoleLogger({
+  name: 'bloomai',
   level: LogLevel.INFO,
-  dirPath: '~/.bloomai/logs',
 })
 ```
 
@@ -186,7 +174,7 @@ const mastra = new Mastra({
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                       │
 │  ┌────────────────────────────────┐                                  │
-│  │  Pino Logger (Mastra createLogger)                               │  │
+│  │  ConsoleLogger (Mastra)                                             │  │
 │  │  → stdout  → ~/.bloomai/logs/  │                                  │
 │  └────────────────────────────────┘                                  │
 │                                                                       │
@@ -217,26 +205,22 @@ const mastra = new Mastra({
 
 #### 目标状态
 
-- 统一使用 Mastra `createLogger`（基于 Pino），替代现有手写 `appendLog`
+- 统一使用 Mastra `ConsoleLogger`，替代已废弃的旧 logger 工厂
 - 保留原有文件输出 + 增加 stdout 输出（对接容器日志采集）
 - 所有日志自动携带 `traceId`（从 OTel Context 读取）
 - 保留现有 `sanitizeForLog` API 密钥脱敏逻辑
 
 #### 实现要点
 
-**Step 1 — 创建统一 logger 工厂** (`src/server/logger/index.ts`)
+**Step 1 — 创建统一 logger 实例** (`src/server/logger/index.ts`)
 
 ```typescript
-import { createLogger, LogLevel } from '@mastra/core/logger'
-import { getLogDir } from './logger'  // 复用现有路径逻辑
+import { ConsoleLogger, LogLevel } from '@mastra/core/logger'
 
-const isDev = process.env.NODE_ENV !== 'production'
-
-export const serverLogger = createLogger(
-  isDev
-    ? { type: 'CONSOLE', level: LogLevel.DEBUG }
-    : { type: 'FILE', level: LogLevel.INFO, dirPath: getLogDir() }
-)
+export const serverLogger = new ConsoleLogger({
+  name: 'bloomai',
+  level: LogLevel.INFO,
+})
 ```
 
 **Step 2 — 兼容层**：现有 `logError` / `appendLog` 调用者无需修改，通过薄包装对接新 logger：
@@ -550,8 +534,8 @@ new OtelExporter({
 
 **改动范围**：仅 `src/server/logger/` 和 `src/server/mastra/index.ts`
 
-- [ ] 安装依赖：无新包（`@mastra/core` 已包含 `createLogger`）
-- [ ] 创建 `src/server/logger/index.ts` — `createLogger` 工厂，读取 `LOG_LEVEL` env var
+- [ ] 安装依赖：无新包（`@mastra/core` 已包含 `ConsoleLogger`）
+- [ ] 创建 `src/server/logger/index.ts` — `ConsoleLogger` 实例，读取 `LOG_LEVEL` env var
 - [ ] 在 `src/server/mastra/index.ts` 注入 `logger` 选项
 - [ ] 兼容适配：`logError` / `appendLog` 委托给新 logger，现有调用者无改动
 - [ ] `src/server/http/app.ts` 增加请求日志中间件（requestId + method + path + status + duration）
@@ -742,7 +726,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 src/server/
 ├── index.ts                          ← 修改：最顶部初始化 OTel SDK
 ├── logger/
-│   └── index.ts                      ← 新增：createLogger 工厂
+│   └── index.ts                      ← logger 实现
 ├── telemetry/                         ← 新增目录
 │   ├── tracer.ts                      ← OTel TracerProvider 初始化
 │   ├── metrics.ts                     ← OTel MeterProvider + 全局 meter
