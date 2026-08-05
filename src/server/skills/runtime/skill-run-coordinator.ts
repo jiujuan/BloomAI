@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { createSqliteSkillRuntimePorts } from '../../db/repositories/skill-package.repo'
 import { SkillDomainError } from '../application/errors'
-import type { Clock, RunEventSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository, SkillRunStatus as PortSkillRunStatus } from '../application/ports'
+import type { Clock, RunEventSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunQueueRepository, SkillRunRepository, SkillRunStatus as PortSkillRunStatus } from '../application/ports'
 import { normalizeSkillRunEvent } from './skill-run-events'
 
 const runStatusSchema = z.enum([
@@ -97,17 +97,20 @@ export type SkillRunCoordinatorDependencies = {
   runs: SkillRunRepository
   events: SkillRunEventRepository
   clock: Clock
+  queue?: SkillRunQueueRepository
 }
 
 export class SkillRunCoordinator {
   private readonly runs: SkillRunRepository
   private readonly events: SkillRunEventRepository
   private readonly clock: Clock
+  private readonly queue?: SkillRunQueueRepository
 
   constructor(dependencies: SkillRunCoordinatorDependencies = createDefaultDependencies()) {
     this.runs = dependencies.runs
     this.events = dependencies.events
     this.clock = dependencies.clock
+    this.queue = dependencies.queue
   }
 
   startRun(input: {
@@ -118,7 +121,19 @@ export class SkillRunCoordinator {
     sessionId?: string
     imageSessionId?: string
   }): { runId: string } {
-    const run = this.runs.createRun({
+    const created = this.runs.createRunAndEnqueue && this.queue
+      ? this.runs.createRunAndEnqueue({
+        skillVersionId: input.skillVersionId,
+        status: 'created',
+        input: input.input,
+        context: input.context,
+        surface: input.surface,
+        sessionId: input.sessionId,
+        imageSessionId: input.imageSessionId,
+        availableAt: this.clock.now(),
+      })
+      : undefined
+    const run = created?.run ?? this.runs.createRun({
       skillVersionId: input.skillVersionId,
       status: 'created',
       input: input.input,
@@ -127,6 +142,7 @@ export class SkillRunCoordinator {
       sessionId: input.sessionId,
       imageSessionId: input.imageSessionId,
     })
+    if (!created && this.queue) this.queue.enqueue({ runId: run.id, availableAt: this.clock.now() })
     this.events.appendEvent({
       runId: run.id,
       seq: 1,
@@ -257,7 +273,7 @@ export class SkillRunCoordinator {
 
 function createDefaultDependencies(): SkillRunCoordinatorDependencies {
   const ports = createSqliteSkillRuntimePorts()
-  return { runs: ports.runs, events: ports.events, clock: ports.clock }
+  return { runs: ports.runs, events: ports.events, clock: ports.clock, queue: ports.queue }
 }
 
 function isWaiting(status: SkillRunStatus): boolean {

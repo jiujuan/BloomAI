@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { resolvePackageSkillId } from '../../../shared/skill-references'
@@ -10,6 +10,7 @@ import {
   skill_run_commands,
   skill_packages,
   skill_run_events,
+  skill_run_queue,
   skill_runs_v2,
   skill_versions,
 } from '../schema'
@@ -29,6 +30,9 @@ import type {
   RunEventSnapshot,
   RunSnapshot,
   SkillRunEventRepository,
+  SkillRunQueueRepository,
+  SkillRunQueueSnapshot,
+  SkillRunQueueStatus,
   SkillRunRepository,
   SkillRunStatus,
   SkillRuntimePorts,
@@ -188,6 +192,56 @@ export const skillPackageRepo = {
     }
     getOrmDb().insert(skill_runs_v2).values(row).run()
     return row
+  },
+
+  createRunAndEnqueue(data: {
+    skillVersionId: string
+    status: string
+    input: Record<string, unknown>
+    context: Record<string, unknown>
+    output?: Record<string, unknown> | null
+    surface?: string | null
+    sessionId?: string | null
+    imageSessionId?: string | null
+    availableAt?: number
+  }) {
+    const now = Date.now()
+    const run = {
+      id: uuidv4(),
+      skill_version_id: data.skillVersionId,
+      status: data.status,
+      revision: 0,
+      input_json: stringifyJsonObject(data.input, 'input'),
+      output_json: data.output ? stringifyJsonObject(data.output, 'output') : null,
+      context_json: stringifyJsonObject(data.context, 'context'),
+      surface: data.surface ?? null,
+      session_id: data.sessionId ?? null,
+      image_session_id: data.imageSessionId ?? null,
+      waiting_reason: null,
+      cancel_requested: 0,
+      started_at: data.status === 'running' ? now : null,
+      updated_at: now,
+      finished_at: null,
+      error_code: null,
+      error_message: null,
+    }
+    const queue = {
+      id: uuidv4(),
+      run_id: run.id,
+      status: 'queued',
+      available_at: data.availableAt ?? now,
+      lease_owner: null,
+      lease_until: null,
+      attempt: 0,
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    }
+    getOrmDb().transaction((tx) => {
+      tx.insert(skill_runs_v2).values(run).run()
+      tx.insert(skill_run_queue).values(queue).run()
+    })
+    return { run, queue }
   },
 
   getRun(id: string) {
@@ -470,6 +524,127 @@ export const skillPackageRepo = {
     return result.changes === 1
   },
 
+  enqueueRun(data: { runId: string; availableAt?: number }) {
+    const now = Date.now()
+    const row = {
+      id: uuidv4(),
+      run_id: data.runId,
+      status: 'queued',
+      available_at: data.availableAt ?? now,
+      lease_owner: null,
+      lease_until: null,
+      attempt: 0,
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    }
+    getOrmDb().insert(skill_run_queue).values(row).run()
+    return row
+  },
+
+  claimNextRunQueue(data: { workerId: string; leaseMs: number; now?: number }) {
+    const now = data.now ?? Date.now()
+    return getOrmDb().transaction((tx) => {
+      const candidate = tx.select().from(skill_run_queue)
+        .where(or(
+          and(or(eq(skill_run_queue.status, 'queued'), eq(skill_run_queue.status, 'retry_wait')), lte(skill_run_queue.available_at, now)),
+          and(eq(skill_run_queue.status, 'leased'), lte(skill_run_queue.lease_until, now)),
+        ))
+        .orderBy(asc(skill_run_queue.available_at), asc(skill_run_queue.created_at))
+        .get()
+      if (!candidate) return undefined
+      const result = tx.update(skill_run_queue).set({
+        status: 'leased',
+        lease_owner: data.workerId,
+        lease_until: now + data.leaseMs,
+        attempt: candidate.attempt + 1,
+        updated_at: now,
+      }).where(and(
+        eq(skill_run_queue.id, candidate.id),
+        or(
+          and(or(eq(skill_run_queue.status, 'queued'), eq(skill_run_queue.status, 'retry_wait')), lte(skill_run_queue.available_at, now)),
+          and(eq(skill_run_queue.status, 'leased'), lte(skill_run_queue.lease_until, now)),
+        ),
+      )).run()
+      if (result.changes !== 1) return undefined
+      return tx.select().from(skill_run_queue).where(eq(skill_run_queue.id, candidate.id)).get()
+    })
+  },
+
+  heartbeatRunQueue(data: { queueId: string; workerId: string; leaseMs: number; now?: number }) {
+    const now = data.now ?? Date.now()
+    const result = getOrmDb().update(skill_run_queue).set({
+      lease_until: now + data.leaseMs,
+      updated_at: now,
+    }).where(and(
+      eq(skill_run_queue.id, data.queueId),
+      eq(skill_run_queue.status, 'leased'),
+      eq(skill_run_queue.lease_owner, data.workerId),
+    )).run()
+    return result.changes === 1 ? getOrmDb().select().from(skill_run_queue).where(eq(skill_run_queue.id, data.queueId)).get() : undefined
+  },
+
+  ackRunQueue(data: { queueId: string; workerId: string; now?: number }): boolean {
+    const result = getOrmDb().update(skill_run_queue).set({
+      status: 'done',
+      lease_owner: null,
+      lease_until: null,
+      updated_at: data.now ?? Date.now(),
+    }).where(and(
+      eq(skill_run_queue.id, data.queueId),
+      eq(skill_run_queue.status, 'leased'),
+      eq(skill_run_queue.lease_owner, data.workerId),
+    )).run()
+    return result.changes === 1
+  },
+
+  retryRunQueue(data: { queueId: string; workerId: string; error: string; delayMs: number; now?: number }) {
+    const now = data.now ?? Date.now()
+    const result = getOrmDb().update(skill_run_queue).set({
+      status: 'retry_wait',
+      available_at: now + Math.max(0, data.delayMs),
+      lease_owner: null,
+      lease_until: null,
+      last_error: data.error,
+      updated_at: now,
+    }).where(and(
+      eq(skill_run_queue.id, data.queueId),
+      eq(skill_run_queue.status, 'leased'),
+      eq(skill_run_queue.lease_owner, data.workerId),
+    )).run()
+    return result.changes === 1 ? getOrmDb().select().from(skill_run_queue).where(eq(skill_run_queue.id, data.queueId)).get() : undefined
+  },
+
+  failRunQueue(data: { queueId: string; workerId: string; error: string; now?: number }) {
+    const now = data.now ?? Date.now()
+    const result = getOrmDb().update(skill_run_queue).set({
+      status: 'dead',
+      lease_owner: null,
+      lease_until: null,
+      last_error: data.error,
+      updated_at: now,
+    }).where(and(
+      eq(skill_run_queue.id, data.queueId),
+      eq(skill_run_queue.status, 'leased'),
+      eq(skill_run_queue.lease_owner, data.workerId),
+    )).run()
+    return result.changes === 1 ? getOrmDb().select().from(skill_run_queue).where(eq(skill_run_queue.id, data.queueId)).get() : undefined
+  },
+
+  getRunQueue(id: string) {
+    return getOrmDb().select().from(skill_run_queue).where(eq(skill_run_queue.id, id)).get()
+  },
+
+  listRunQueue(options: { runId?: string; status?: SkillRunQueueStatus } = {}) {
+    const conditions = [
+      options.runId === undefined ? undefined : eq(skill_run_queue.run_id, options.runId),
+      options.status === undefined ? undefined : eq(skill_run_queue.status, options.status),
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_run_queue)
+    return (where === undefined ? query.orderBy(asc(skill_run_queue.created_at)).all() : query.where(where).orderBy(asc(skill_run_queue.created_at)).all())
+  },
+
 }
 
 
@@ -482,7 +657,8 @@ export function createSqliteSkillRuntimePorts(): SkillRuntimePorts {
   const packages = createSqlitePackageRepository()
   const grants = createSqliteGrantRepository()
   const artifacts = createSqliteArtifactRepository()
-  return { packages, runs, events, grants, artifacts, clock, ids }
+  const queue = createSqliteQueueRepository(clock)
+  return { packages, runs, events, grants, artifacts, queue, clock, ids }
 }
 
 export function createSqlitePackageRepository(): PackageSkillRepository {
@@ -540,6 +716,10 @@ export function createSqliteRunRepository(): SkillRunRepository {
     createRun(data) {
       return mapRun(skillPackageRepo.createRun(data))
     },
+    createRunAndEnqueue(data) {
+      const result = skillPackageRepo.createRunAndEnqueue(data)
+      return { run: mapRun(result.run), queue: mapQueue(result.queue) }
+    },
     getRun(id) {
       const row = skillPackageRepo.getRun(id)
       return row ? mapRun(row) : undefined
@@ -581,6 +761,40 @@ export function createSqliteRunRepository(): SkillRunRepository {
     listRuns(options) {
       const result = skillPackageRepo.listRuns(options)
       return { data: result.data.map(mapRun), total: result.total }
+    },
+  }
+}
+
+export function createSqliteQueueRepository(_clock: Clock = { now: () => Date.now() }): SkillRunQueueRepository {
+  return {
+    enqueue(data) {
+      return mapQueue(skillPackageRepo.enqueueRun(data))
+    },
+    claimNext(data) {
+      const row = skillPackageRepo.claimNextRunQueue(data)
+      return row ? mapQueue(row) : undefined
+    },
+    heartbeat(data) {
+      const row = skillPackageRepo.heartbeatRunQueue(data)
+      return row ? mapQueue(row) : undefined
+    },
+    ack(data) {
+      return skillPackageRepo.ackRunQueue(data)
+    },
+    retry(data) {
+      const row = skillPackageRepo.retryRunQueue(data)
+      return row ? mapQueue(row) : undefined
+    },
+    fail(data) {
+      const row = skillPackageRepo.failRunQueue(data)
+      return row ? mapQueue(row) : undefined
+    },
+    get(id) {
+      const row = skillPackageRepo.getRunQueue(id)
+      return row ? mapQueue(row) : undefined
+    },
+    list(options) {
+      return skillPackageRepo.listRunQueue(options).map(mapQueue)
     },
   }
 }
@@ -675,4 +889,19 @@ function mapGrant(row: any): CapabilityGrantSnapshot {
 
 function mapArtifact(row: any): ArtifactSnapshot {
   return { id: row.id, runId: row.run_id, kind: row.kind, mimeType: row.mime_type, path: row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at }
+}
+
+function mapQueue(row: any): SkillRunQueueSnapshot {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    status: row.status as SkillRunQueueStatus,
+    availableAt: row.available_at,
+    leaseOwner: row.lease_owner,
+    leaseUntil: row.lease_until,
+    attempt: row.attempt,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
 }

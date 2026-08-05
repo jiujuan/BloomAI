@@ -187,6 +187,26 @@ for (const kind of ['fake', 'sqlite'] as const) {
       expect(ports.events.nextSequence(run.id)).toBe(4)
       expect(ports.events.appendEvent({ runId: run.id, schemaVersion: 1, type: 'fourth', payload: {} }).seq).toBe(4)
     })
+
+    it('creates a run and queue item atomically and enforces lease ownership', () => {
+      if (!ports.runs.createRunAndEnqueue) throw new Error('adapter does not implement atomic run creation')
+      const created = ports.runs.createRunAndEnqueue({
+        skillVersionId: versionId,
+        status: 'created',
+        input: { queued: true },
+        context: {},
+        availableAt: 100,
+      })
+      expect(created.queue).toMatchObject({ runId: created.run.id, status: 'queued', attempt: 0 })
+
+      const first = ports.queue.claimNext({ workerId: 'worker-a', leaseMs: 50, now: 100 })
+      expect(first).toMatchObject({ id: created.queue.id, status: 'leased', leaseOwner: 'worker-a', attempt: 1 })
+      expect(ports.queue.claimNext({ workerId: 'worker-b', leaseMs: 50, now: 100 })).toBeUndefined()
+      expect(ports.queue.claimNext({ workerId: 'worker-b', leaseMs: 50, now: 151 })).toMatchObject({ leaseOwner: 'worker-b', attempt: 2 })
+      expect(ports.queue.ack({ queueId: created.queue.id, workerId: 'worker-a', now: 151 })).toBe(false)
+      expect(ports.queue.ack({ queueId: created.queue.id, workerId: 'worker-b', now: 151 })).toBe(true)
+      expect(ports.queue.get(created.queue.id)).toMatchObject({ status: 'done', leaseOwner: null, leaseUntil: null })
+    })
   })
 }
 

@@ -3,7 +3,7 @@ import { serve } from '@hono/node-server'
 import { loadDotEnv } from './config/load-env'
 import { createHonoApp } from './http/app'
 import { runMigrations } from './db/client'
-import { SkillRunCoordinator } from './skills/runtime'
+import { createSkillRuntime } from './skills/runtime'
 import { getDeepResearchModule } from './deepresearch'
 import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
 import { serverLogger } from './logger/logger'
@@ -29,9 +29,12 @@ const PORT = parseInt(process.env[BLOOMAI_PORT_ENV] || String(DEFAULT_SERVER_POR
 
 serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT, skillRuntime: getSkillRuntimeCapabilities(skillRuntimeConfig) })
 
+let skillRuntime: ReturnType<typeof createSkillRuntime> | undefined
+
 runMigrations()
   .then(async () => {
-    const interrupted = new SkillRunCoordinator().markInterruptedRuns()
+    skillRuntime = createSkillRuntime({ config: skillRuntimeConfig })
+    const interrupted = skillRuntime.markInterruptedRuns()
     if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
     const recovered = await getDeepResearchModule().recoverInterruptedRuns()
     if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })
@@ -39,6 +42,8 @@ runMigrations()
     // Start Mastra workers before serving requests. This restores persisted task
     // schedules after app restart and lets newly created schedules dispatch runs.
     await mastra.startWorkers()
+    const workerStart = skillRuntime.start()
+    if (!workerStart.started) serverLogger.info('Skill Runtime worker not started', { reason: workerStart.reason })
     const app = createHonoApp()
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)
@@ -49,12 +54,13 @@ runMigrations()
     process.exit(1)
   })
 
-const gracefulShutdown = () =>
-  Promise.all([
-    shutdownMastraRuntime(),
-    shutdownTracing(),
-    shutdownMetrics(),
-    closeDefaultWebPageProviderRouter(),
-  ]).finally(() => process.exit(0))
+const gracefulShutdown = async () => {
+  await skillRuntime?.stop({ drain: false, timeoutMs: 5_000 })
+  await shutdownMastraRuntime()
+  await shutdownTracing()
+  await shutdownMetrics()
+  await closeDefaultWebPageProviderRouter()
+  process.exit(0)
+}
 process.on('SIGTERM', gracefulShutdown)
 process.on('SIGINT', gracefulShutdown)

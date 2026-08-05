@@ -57,6 +57,21 @@ export type SkillRunStatus =
   | 'cancelled'
   | 'interrupted'
 
+export type SkillRunQueueStatus = 'queued' | 'leased' | 'retry_wait' | 'done' | 'dead'
+
+export type SkillRunQueueSnapshot = {
+  readonly id: string
+  readonly runId: string
+  readonly status: SkillRunQueueStatus
+  readonly availableAt: number
+  readonly leaseOwner: string | null
+  readonly leaseUntil: number | null
+  readonly attempt: number
+  readonly lastError: string | null
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
 export type RunSnapshot = {
   readonly id: string
   readonly skillVersionId: string
@@ -204,10 +219,37 @@ export interface SkillRunRepository {
   getCommandResult(runId: string, idempotencyKey: string): RunSnapshot | undefined
   listRunsByStatus(status: SkillRunStatus): readonly RunSnapshot[]
   listRuns(options: { limit: number; offset: number; status?: string; skillVersionId?: string }): Page<RunSnapshot>
+  /**
+   * Atomically creates a run and its durable queue item when the adapter can
+   * provide a single database transaction. The coordinator falls back to the
+   * two port calls for test doubles that do not implement this optimization.
+   */
+  createRunAndEnqueue?(data: {
+    skillVersionId: string
+    status: SkillRunStatus
+    input: JsonObject
+    context: JsonObject
+    output?: JsonObject | null
+    surface?: string | null
+    sessionId?: string | null
+    imageSessionId?: string | null
+    availableAt?: number
+  }): { run: RunSnapshot; queue: SkillRunQueueSnapshot }
   compareAndSet(data: ApplyRunChangeRequest): ApplyRunChangeResult | undefined
   claimNextRun?(input: { workerId: string; leaseMs: number; now?: number }): RunSnapshot | undefined
   releaseLease?(runId: string, workerId: string): boolean
   markInterrupted?(workerId?: string): number
+}
+
+export interface SkillRunQueueRepository {
+  enqueue(data: { runId: string; availableAt?: number }): SkillRunQueueSnapshot
+  claimNext(data: { workerId: string; leaseMs: number; now?: number }): SkillRunQueueSnapshot | undefined
+  heartbeat(data: { queueId: string; workerId: string; leaseMs: number; now?: number }): SkillRunQueueSnapshot | undefined
+  ack(data: { queueId: string; workerId: string; now?: number }): boolean
+  retry(data: { queueId: string; workerId: string; error: string; delayMs: number; now?: number }): SkillRunQueueSnapshot | undefined
+  fail(data: { queueId: string; workerId: string; error: string; now?: number }): SkillRunQueueSnapshot | undefined
+  get(queueId: string): SkillRunQueueSnapshot | undefined
+  list(options?: { runId?: string; status?: SkillRunQueueStatus }): readonly SkillRunQueueSnapshot[]
 }
 
 export interface SkillRunEventRepository {
@@ -275,6 +317,7 @@ export type SkillRuntimePorts = {
   readonly events: SkillRunEventRepository
   readonly grants: CapabilityGrantRepository
   readonly artifacts: ArtifactRepository
+  readonly queue: SkillRunQueueRepository
   readonly audit?: AuditRepository
   readonly clock: Clock
   readonly ids: IdGenerator

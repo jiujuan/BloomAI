@@ -3,6 +3,7 @@ import {
   createSqliteEventRepository,
   createSqliteGrantRepository,
   createSqlitePackageRepository,
+  createSqliteQueueRepository,
   createSqliteRunRepository,
 } from '../db/repositories/skill-package.repo'
 import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
@@ -14,7 +15,7 @@ import {
   SkillRunNotFoundError,
   SkillRunTransitionError,
 } from '../skills/runtime/skill-run-coordinator'
-import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunRepository } from '../skills/application/ports'
+import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunQueueRepository, SkillRunRepository } from '../skills/application/ports'
 import { ServiceError } from './errors'
 
 export type SkillPackageRuntimeDependencies = {
@@ -22,6 +23,7 @@ export type SkillPackageRuntimeDependencies = {
   runRepository: SkillRunRepository
   grantRepository: CapabilityGrantRepository
   artifactRepository: ArtifactRepository
+  queueRepository: SkillRunQueueRepository
   createInstaller: () => PackageInstaller
   coordinator: SkillRunCoordinator
   artifactStore: ArtifactStore
@@ -50,17 +52,20 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
   const runRepository = overrides.runRepository ?? createSqliteRunRepository()
   const grantRepository = overrides.grantRepository ?? createSqliteGrantRepository()
   const artifactRepository = overrides.artifactRepository ?? createSqliteArtifactRepository()
+  const queueRepository = overrides.queueRepository ?? createSqliteQueueRepository()
   const dependencies: SkillPackageRuntimeDependencies = {
     ...overrides,
     packageRepository,
     runRepository,
     grantRepository,
     artifactRepository,
+    queueRepository,
     createInstaller: overrides.createInstaller ?? (() => new PackageInstaller()),
     coordinator: overrides.coordinator ?? new SkillRunCoordinator({
       runs: runRepository,
       events: createSqliteEventRepository(),
       clock: { now: () => Date.now() },
+      queue: queueRepository,
     }),
     artifactStore: overrides.artifactStore ?? new ArtifactStore(),
   }

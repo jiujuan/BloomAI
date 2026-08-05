@@ -16,6 +16,9 @@ import type {
   RunEventSnapshot,
   RunSnapshot,
   SkillRunEventRepository,
+  SkillRunQueueRepository,
+  SkillRunQueueSnapshot,
+  SkillRunQueueStatus,
   SkillRunRepository,
   SkillRunStatus,
   SkillRuntimePorts,
@@ -90,6 +93,102 @@ export class FakeSkillRunEventRepository implements SkillRunEventRepository {
   }
 }
 
+export class FakeSkillRunQueueRepository implements SkillRunQueueRepository {
+  private readonly items = new Map<string, SkillRunQueueSnapshot>()
+
+  constructor(private readonly ids: IdGenerator, private readonly clock: Clock) {}
+
+  enqueue(data: { runId: string; availableAt?: number }): SkillRunQueueSnapshot {
+    const active = [...this.items.values()].find((item) =>
+      item.runId === data.runId && ['queued', 'leased', 'retry_wait'].includes(item.status))
+    if (active) throw new Error(`Active queue item already exists for run: ${data.runId}`)
+    const now = this.clock.now()
+    const item: SkillRunQueueSnapshot = {
+      id: this.ids.next(),
+      runId: data.runId,
+      status: 'queued',
+      availableAt: data.availableAt ?? now,
+      leaseOwner: null,
+      leaseUntil: null,
+      attempt: 0,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.items.set(item.id, item)
+    return clone(item)
+  }
+
+  claimNext(data: { workerId: string; leaseMs: number; now?: number }): SkillRunQueueSnapshot | undefined {
+    const now = data.now ?? this.clock.now()
+    const candidate = [...this.items.values()]
+      .filter((item) => (
+        ((item.status === 'queued' || item.status === 'retry_wait') && item.availableAt <= now) ||
+        (item.status === 'leased' && item.leaseUntil !== null && item.leaseUntil <= now)
+      ))
+      .sort((left, right) => left.availableAt - right.availableAt || left.createdAt - right.createdAt)[0]
+    if (!candidate) return undefined
+    const next: SkillRunQueueSnapshot = {
+      ...candidate,
+      status: 'leased',
+      leaseOwner: data.workerId,
+      leaseUntil: now + data.leaseMs,
+      attempt: candidate.attempt + 1,
+      updatedAt: now,
+    }
+    this.items.set(next.id, next)
+    return clone(next)
+  }
+
+  heartbeat(data: { queueId: string; workerId: string; leaseMs: number; now?: number }): SkillRunQueueSnapshot | undefined {
+    const current = this.items.get(data.queueId)
+    if (!current || current.status !== 'leased' || current.leaseOwner !== data.workerId) return undefined
+    const now = data.now ?? this.clock.now()
+    const next = { ...current, leaseUntil: now + data.leaseMs, updatedAt: now }
+    this.items.set(next.id, next)
+    return clone(next)
+  }
+
+  ack(data: { queueId: string; workerId: string; now?: number }): boolean {
+    const current = this.items.get(data.queueId)
+    if (!current || current.status !== 'leased' || current.leaseOwner !== data.workerId) return false
+    const now = data.now ?? this.clock.now()
+    this.items.set(current.id, { ...current, status: 'done', leaseOwner: null, leaseUntil: null, updatedAt: now })
+    return true
+  }
+
+  retry(data: { queueId: string; workerId: string; error: string; delayMs: number; now?: number }): SkillRunQueueSnapshot | undefined {
+    const current = this.items.get(data.queueId)
+    if (!current || current.status !== 'leased' || current.leaseOwner !== data.workerId) return undefined
+    const now = data.now ?? this.clock.now()
+    const next = { ...current, status: 'retry_wait' as const, availableAt: now + Math.max(0, data.delayMs), leaseOwner: null, leaseUntil: null, lastError: data.error, updatedAt: now }
+    this.items.set(next.id, next)
+    return clone(next)
+  }
+
+  fail(data: { queueId: string; workerId: string; error: string; now?: number }): SkillRunQueueSnapshot | undefined {
+    const current = this.items.get(data.queueId)
+    if (!current || current.status !== 'leased' || current.leaseOwner !== data.workerId) return undefined
+    const now = data.now ?? this.clock.now()
+    const next = { ...current, status: 'dead' as const, leaseOwner: null, leaseUntil: null, lastError: data.error, updatedAt: now }
+    this.items.set(next.id, next)
+    return clone(next)
+  }
+
+  get(queueId: string): SkillRunQueueSnapshot | undefined {
+    const item = this.items.get(queueId)
+    return item ? clone(item) : undefined
+  }
+
+  list(options: { runId?: string; status?: SkillRunQueueStatus } = {}): readonly SkillRunQueueSnapshot[] {
+    return [...this.items.values()]
+      .filter((item) => options.runId === undefined || item.runId === options.runId)
+      .filter((item) => options.status === undefined || item.status === options.status)
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map(clone)
+  }
+}
+
 export class FakeSkillRunRepository implements SkillRunRepository {
   private readonly runs = new Map<string, RunSnapshot>()
   private readonly commands = new Map<string, RunSnapshot>()
@@ -137,6 +236,10 @@ export class FakeSkillRunRepository implements SkillRunRepository {
   getRun(id: string): RunSnapshot | undefined {
     const run = this.runs.get(id)
     return run ? clone(run) : undefined
+  }
+
+  removeRunForAtomicRollback(id: string): void {
+    this.runs.delete(id)
   }
 
   setRunImageSessionId(runId: string, imageSessionId: string): RunSnapshot | undefined {
@@ -286,12 +389,29 @@ export function createFakeSkillRuntimePorts(options: { now?: number } = {}): Ski
   const clock = new FakeClock(options.now ?? 0)
   const ids = new FakeIdGenerator()
   const events = new FakeSkillRunEventRepository(ids, clock)
+  const queue = new FakeSkillRunQueueRepository(ids, clock)
+  const runs = new FakeSkillRunRepository(ids, clock, events)
+  const atomicRuns = runs as FakeSkillRunRepository & {
+    createRunAndEnqueue: (data: Parameters<SkillRunRepository['createRun']>[0] & { availableAt?: number }) => ReturnType<NonNullable<SkillRunRepository['createRunAndEnqueue']>>
+  }
+
+  atomicRuns.createRunAndEnqueue = (data) => {
+    const run = runs.createRun(data)
+    try {
+      return { run, queue: queue.enqueue({ runId: run.id, availableAt: data.availableAt }) }
+    } catch (error) {
+      // Keep the fake's atomic contract aligned with the SQLite adapter.
+      runs.removeRunForAtomicRollback(run.id)
+      throw error
+    }
+  }
   return {
     packages: new FakePackageSkillRepository(ids, clock),
-    runs: new FakeSkillRunRepository(ids, clock, events),
+    runs: atomicRuns,
     events,
     grants: new FakeCapabilityGrantRepository(ids, clock),
     artifacts: new FakeArtifactRepository(ids, clock),
+    queue,
     clock,
     ids,
   }
