@@ -6,4 +6,5 @@ export type { SkillRunExecutionResult, SkillRunExecutor, SkillRunWorkerOptions }
 export { createSkillRuntime } from './skill-runtime.composition-root'
 export type { SkillRuntimeComposition, SkillRuntimeCompositionOptions } from './skill-runtime.composition-root'
 export { normalizeSkillRunEvent, skillRunEventSchemaVersion } from './skill-run-events'
-export type { SkillRunEventInput, SkillRunEventType } from './skill-run-events'
+export type { SkillRunEventInput } from './skill-run-events'
+export type { SkillRunEventType } from './skill-run-event-registry'

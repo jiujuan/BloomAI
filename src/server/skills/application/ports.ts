@@ -102,8 +102,11 @@ export type RunEventSnapshot = {
   readonly runId: string
   readonly seq: number
   readonly schemaVersion: number
+  readonly producer: string
   readonly type: string
   readonly payload: JsonObject
+  readonly occurredAt: number
+  /** Legacy alias retained for existing consumers. */
   readonly createdAt: number
 }
 
@@ -126,6 +129,8 @@ export type RunChange = {
 
 export type RunChangeEvent = {
   readonly schemaVersion: number
+  readonly producer?: string
+  readonly occurredAt?: number
   readonly type: string
   readonly payload: JsonObject
 }
@@ -246,6 +251,8 @@ export interface SkillRunRepository {
     availableAt?: number
     initialEvent?: {
       schemaVersion: number
+      producer?: string
+      occurredAt?: number
       type: string
       payload: JsonObject
     }
@@ -272,10 +279,13 @@ export interface SkillRunEventRepository {
     runId: string
     seq?: number
     schemaVersion: number
+    producer?: string
+    occurredAt?: number
     type: string
     payload: JsonObject
   }): RunEventSnapshot
-  listEvents(runId: string): readonly RunEventSnapshot[]
+  listEvents(runId: string, options?: { afterSeq?: number; limit?: number }): readonly RunEventSnapshot[]
+  listEventsPage?(data: { runId: string; afterSeq?: number; limit?: number }): { data: readonly RunEventSnapshot[]; nextAfterSeq: number | null }
   nextSequence(runId: string): number
 }
 

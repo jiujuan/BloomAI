@@ -185,7 +185,9 @@ for (const kind of ['fake', 'sqlite'] as const) {
       ports.events.appendEvent({ runId: run.id, seq: 1, schemaVersion: 1, type: 'first', payload: {} })
       ports.events.appendEvent({ runId: run.id, seq: 3, schemaVersion: 1, type: 'third', payload: {} })
       expect(ports.events.nextSequence(run.id)).toBe(4)
-      expect(ports.events.appendEvent({ runId: run.id, schemaVersion: 1, type: 'fourth', payload: {} }).seq).toBe(4)
+      expect(ports.events.appendEvent({ runId: run.id, schemaVersion: 1, producer: 'worker', occurredAt: 1_700_000_000_000, type: 'fourth', payload: {} }).seq).toBe(4)
+      expect(ports.events.listEvents(run.id, { afterSeq: 1, limit: 1 })).toHaveLength(1)
+      expect(ports.events.listEventsPage?.({ runId: run.id, afterSeq: 1, limit: 2 })).toMatchObject({ nextAfterSeq: null })
     })
 
     it('creates a run and queue item atomically and enforces lease ownership', () => {

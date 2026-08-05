@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lte, max, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { resolvePackageSkillId } from '../../../shared/skill-references'
@@ -209,7 +209,7 @@ export const skillPackageRepo = {
     sessionId?: string | null
     imageSessionId?: string | null
     availableAt?: number
-    initialEvent?: { schemaVersion: number; type: string; payload: Record<string, unknown> }
+    initialEvent?: { schemaVersion: number; type: string; payload: Record<string, unknown>; producer?: string; occurredAt?: number }
   }) {
     const now = Date.now()
     const run = {
@@ -257,6 +257,8 @@ export const skillPackageRepo = {
           run_id: run.id,
           seq: 1,
           schema_version: data.initialEvent.schemaVersion,
+          producer: data.initialEvent.producer ?? 'runtime',
+          occurred_at: data.initialEvent.occurredAt ?? now,
           type: data.initialEvent.type,
           payload_json: JSON.stringify(data.initialEvent.payload),
           created_at: now,
@@ -297,7 +299,7 @@ export const skillPackageRepo = {
       workerId?: string | null
       heartbeatAt?: number | null
     }
-    event: { schemaVersion: number; type: string; payload: Record<string, unknown> }
+    event: { schemaVersion: number; producer?: string; occurredAt?: number; type: string; payload: Record<string, unknown> }
     command?: { idempotencyKey: string }
   }): { run: typeof skill_runs_v2.$inferSelect; duplicate: boolean } | undefined {
     return getOrmDb().transaction((tx) => {
@@ -343,6 +345,8 @@ export const skillPackageRepo = {
         run_id: data.runId,
         seq: Number(lastSeq) + 1,
         schema_version: data.event.schemaVersion,
+        producer: data.event.producer ?? 'runtime',
+        occurred_at: data.event.occurredAt ?? now,
         type: data.event.type,
         payload_json: JSON.stringify(data.event.payload),
         created_at: now,
@@ -416,31 +420,52 @@ export const skillPackageRepo = {
 
   appendEvent(data: {
     runId: string
-    seq: number
+    seq?: number
     schemaVersion: number
+    producer?: string
+    occurredAt?: number
     type: string
     payload: Record<string, unknown>
   }) {
-    const row = {
-      id: uuidv4(),
-      run_id: data.runId,
-      seq: data.seq,
-      schema_version: data.schemaVersion,
-      type: data.type,
-      payload_json: JSON.stringify(data.payload),
-      created_at: Date.now(),
-    }
-    getOrmDb().insert(skill_run_events).values(row).run()
-    return row
+    return getOrmDb().transaction((tx) => {
+      const now = Date.now()
+      const seq = data.seq ?? ((tx.select({ maxSeq: max(skill_run_events.seq) })
+        .from(skill_run_events)
+        .where(eq(skill_run_events.run_id, data.runId))
+        .get()?.maxSeq ?? 0) + 1)
+      const row = {
+        id: uuidv4(),
+        run_id: data.runId,
+        seq,
+        schema_version: data.schemaVersion,
+        producer: data.producer ?? 'runtime',
+        occurred_at: data.occurredAt ?? now,
+        type: data.type,
+        payload_json: JSON.stringify(data.payload),
+        created_at: now,
+      }
+      tx.insert(skill_run_events).values(row).run()
+      return row
+    })
   },
 
-  listEvents(runId: string) {
-    return getOrmDb()
-      .select()
-      .from(skill_run_events)
-      .where(eq(skill_run_events.run_id, runId))
-      .orderBy(asc(skill_run_events.seq))
-      .all()
+  listEvents(runId: string, options: { afterSeq?: number; limit?: number } = {}) {
+    const afterSeq = options.afterSeq ?? 0
+    const limit = options.limit === undefined ? undefined : Math.max(1, Math.min(500, Math.trunc(options.limit)))
+    const conditions = [
+      eq(skill_run_events.run_id, runId),
+      gt(skill_run_events.seq, afterSeq),
+    ]
+    const query = getOrmDb().select().from(skill_run_events).where(and(...conditions)).orderBy(asc(skill_run_events.seq))
+    return limit === undefined ? query.all() : query.limit(limit).all()
+  },
+
+  listEventsPage(runId: string, options: { afterSeq?: number; limit?: number } = {}) {
+    const limit = options.limit === undefined ? 100 : Math.max(1, Math.min(500, Math.trunc(options.limit)))
+    const rows = this.listEvents(runId, { afterSeq: options.afterSeq, limit: limit + 1 })
+    const hasMore = rows.length > limit
+    const data = hasMore ? rows.slice(0, limit) : rows
+    return { data, nextAfterSeq: hasMore ? data[data.length - 1]?.seq ?? null : null }
   },
 
   createArtifact(data: {
@@ -841,15 +866,21 @@ export function createSqliteEventRepository(clock: Clock = { now: () => Date.now
     appendEvent(data) {
       const row = skillPackageRepo.appendEvent({
         runId: data.runId,
-        seq: data.seq ?? this.nextSequence(data.runId),
+        seq: data.seq,
         schemaVersion: data.schemaVersion,
+        producer: data.producer,
+        occurredAt: data.occurredAt,
         type: data.type,
         payload: data.payload,
       })
       return mapEvent(row)
     },
-    listEvents(runId) {
-      return skillPackageRepo.listEvents(runId).map(mapEvent)
+    listEvents(runId, options) {
+      return skillPackageRepo.listEvents(runId, options).map(mapEvent)
+    },
+    listEventsPage(data) {
+      const page = skillPackageRepo.listEventsPage(data.runId, data)
+      return { data: page.data.map(mapEvent), nextAfterSeq: page.nextAfterSeq }
     },
     nextSequence(runId) {
       const events = skillPackageRepo.listEvents(runId)
@@ -940,7 +971,7 @@ function mapRun(row: any): RunSnapshot {
 }
 
 function mapEvent(row: any): RunEventSnapshot {
-  return { id: row.id, runId: row.run_id, seq: row.seq, schemaVersion: row.schema_version, type: row.type, payload: parseObject(row.payload_json, 'event payload'), createdAt: row.created_at }
+  return { id: row.id, runId: row.run_id, seq: row.seq, schemaVersion: row.schema_version, producer: row.producer ?? 'runtime', type: row.type, payload: parseObject(row.payload_json, 'event payload'), occurredAt: row.occurred_at ?? row.created_at, createdAt: row.created_at }
 }
 
 function mapGrant(row: any): CapabilityGrantSnapshot {

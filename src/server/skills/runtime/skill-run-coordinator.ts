@@ -70,8 +70,10 @@ export type SkillRunEvent = {
   runId: string
   seq: number
   schemaVersion: number
+  producer: string
   type: string
   payload: Record<string, unknown>
+  occurredAt: number
   createdAt: number
 }
 
@@ -396,6 +398,8 @@ function mapEvent(event: RunEventSnapshot): SkillRunEvent {
     schemaVersion: event.schemaVersion,
     type: event.type,
     payload: event.payload,
+    producer: event.producer,
+    occurredAt: event.occurredAt,
     createdAt: event.createdAt,
   }
 }

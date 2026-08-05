@@ -144,12 +144,15 @@ export function getExpectedSchemaContract(): SchemaContract {
           run_id: required,
           seq: required,
           schema_version: required,
+          producer: required,
+          occurred_at: required,
           type: required,
           payload_json: required,
           created_at: required,
         },
         indexes: {
           idx_skill_run_events_run_seq: { columns: ['run_id', 'seq'] },
+          idx_skill_run_events_run_occurred: { columns: ['run_id', 'occurred_at', 'seq'] },
         },
       },
       skill_run_commands: {

@@ -232,11 +232,14 @@ export const skill_run_events = sqliteTable('skill_run_events', {
   run_id: text('run_id').notNull(),
   seq: integer('seq').notNull(),
   schema_version: integer('schema_version').notNull().default(1),
+  producer: text('producer').notNull().default('runtime'),
+  occurred_at: integer('occurred_at').notNull(),
   type: text('type').notNull(),
   payload_json: text('payload_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   runSeqIdx: index('idx_skill_run_events_run_seq').on(table.run_id, table.seq),
+  runOccurredIdx: index('idx_skill_run_events_run_occurred').on(table.run_id, table.occurred_at, table.seq),
 }))
 
 export const skill_run_commands = sqliteTable('skill_run_commands', {

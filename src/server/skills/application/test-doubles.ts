@@ -69,6 +69,8 @@ export class FakeSkillRunEventRepository implements SkillRunEventRepository {
     runId: string
     seq?: number
     schemaVersion: number
+    producer?: string
+    occurredAt?: number
     type: string
     payload: JsonObject
   }): RunEventSnapshot {
@@ -78,8 +80,10 @@ export class FakeSkillRunEventRepository implements SkillRunEventRepository {
       runId: data.runId,
       seq: data.seq ?? this.nextSequence(data.runId),
       schemaVersion: data.schemaVersion,
+      producer: data.producer ?? 'runtime',
       type: data.type,
       payload: clone(data.payload),
+      occurredAt: data.occurredAt ?? this.clock.now(),
       createdAt: this.clock.now(),
     }
     events.push(event)
@@ -88,8 +92,19 @@ export class FakeSkillRunEventRepository implements SkillRunEventRepository {
     return clone(event)
   }
 
-  listEvents(runId: string): readonly RunEventSnapshot[] {
-    return clone(this.events.get(runId) ?? [])
+  listEvents(runId: string, options: { afterSeq?: number; limit?: number } = {}): readonly RunEventSnapshot[] {
+    const afterSeq = options.afterSeq ?? 0
+    const limit = options.limit === undefined ? undefined : Math.max(1, Math.min(500, Math.trunc(options.limit)))
+    const rows = (this.events.get(runId) ?? []).filter((event) => event.seq > afterSeq)
+    return clone(limit === undefined ? rows : rows.slice(0, limit))
+  }
+
+  listEventsPage(data: { runId: string; afterSeq?: number; limit?: number }) {
+    const limit = data.limit === undefined ? 100 : Math.max(1, Math.min(500, Math.trunc(data.limit)))
+    const rows = this.listEvents(data.runId, { afterSeq: data.afterSeq, limit: limit + 1 })
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    return { data: page, nextAfterSeq: hasMore ? page[page.length - 1]?.seq ?? null : null }
   }
 
   nextSequence(runId: string): number {
@@ -288,7 +303,7 @@ export class FakeSkillRunRepository implements SkillRunRepository {
       updatedAt: this.clock.now(),
     }
     this.runs.set(next.id, next)
-    this.events.appendEvent({ runId: data.runId, schemaVersion: data.event.schemaVersion, type: data.event.type, payload: data.event.payload })
+    this.events.appendEvent({ runId: data.runId, schemaVersion: data.event.schemaVersion, producer: data.event.producer, occurredAt: data.event.occurredAt, type: data.event.type, payload: data.event.payload })
     if (data.command) this.commands.set(`${data.runId}\u0000${data.command.idempotencyKey}`, next)
     return { run: clone(next), duplicate: false }
   }
