@@ -1,4 +1,10 @@
-import { skillPackageRepo } from '../db/repositories/skill-package.repo'
+import {
+  createSqliteArtifactRepository,
+  createSqliteEventRepository,
+  createSqliteGrantRepository,
+  createSqlitePackageRepository,
+  createSqliteRunRepository,
+} from '../db/repositories/skill-package.repo'
 import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
 import { PackageInstallError, PackageInstaller, type PackageInstallSource } from '../skills/packages/package-installer'
 import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
@@ -8,13 +14,24 @@ import {
   SkillRunNotFoundError,
   SkillRunTransitionError,
 } from '../skills/runtime/skill-run-coordinator'
+import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunRepository } from '../skills/application/ports'
 import { ServiceError } from './errors'
 
-type SkillPackageRuntimeDependencies = {
-  repo: typeof skillPackageRepo
+export type SkillPackageRuntimeDependencies = {
+  packageRepository: PackageSkillRepository
+  runRepository: SkillRunRepository
+  grantRepository: CapabilityGrantRepository
+  artifactRepository: ArtifactRepository
   createInstaller: () => PackageInstaller
   coordinator: SkillRunCoordinator
   artifactStore: ArtifactStore
+  /** @deprecated Compatibility seam for callers still assembling the old adapter. */
+  repo?: Record<string, any>
+}
+
+type RuntimeServiceOverrides = Partial<SkillPackageRuntimeDependencies> & {
+  /** @deprecated Use packageRepository/runRepository/grantRepository/artifactRepository. */
+  repo?: Record<string, any>
 }
 
 export type StartSkillRunInput = {
@@ -28,13 +45,24 @@ export type StartSkillRunInput = {
   target?: { kind: 'chat' | 'image_session' | 'artifact_only', id?: string }
 }
 
-export function createSkillPackageRuntimeService(overrides: Partial<SkillPackageRuntimeDependencies> = {}) {
+export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverrides = {}) {
+  const packageRepository = overrides.packageRepository ?? (overrides.repo as PackageSkillRepository | undefined) ?? createSqlitePackageRepository()
+  const runRepository = overrides.runRepository ?? createSqliteRunRepository()
+  const grantRepository = overrides.grantRepository ?? createSqliteGrantRepository()
+  const artifactRepository = overrides.artifactRepository ?? createSqliteArtifactRepository()
   const dependencies: SkillPackageRuntimeDependencies = {
-    repo: skillPackageRepo,
-    createInstaller: () => new PackageInstaller(),
-    coordinator: new SkillRunCoordinator(),
-    artifactStore: new ArtifactStore(),
     ...overrides,
+    packageRepository,
+    runRepository,
+    grantRepository,
+    artifactRepository,
+    createInstaller: overrides.createInstaller ?? (() => new PackageInstaller()),
+    coordinator: overrides.coordinator ?? new SkillRunCoordinator({
+      runs: runRepository,
+      events: createSqliteEventRepository(),
+      clock: { now: () => Date.now() },
+    }),
+    artifactStore: overrides.artifactStore ?? new ArtifactStore(),
   }
 
   return {
@@ -47,21 +75,35 @@ export function createSkillPackageRuntimeService(overrides: Partial<SkillPackage
     },
 
     listPackages(page: { limit: number, offset: number }) {
-      return mapRuntimeError(() => dependencies.repo.listPackages(page))
+      return mapRuntimeError(() => dependencies.packageRepository.listPackages(page))
     },
 
     getPackageDetail(id: string) {
       return mapRuntimeError(() => {
-        const packageRecord = dependencies.repo.getPackage(id)
+        if (dependencies.repo?.getPackage) {
+          const packageRecord = dependencies.repo.getPackage(id)
+          if (!packageRecord) throw new ServiceError('NOT_FOUND', 'Skill package not found')
+          const versions = dependencies.repo!.listVersions(id)
+          return {
+            package: packageRecord,
+            versions,
+            installations: dependencies.repo!.listInstallations(id),
+            capabilityGrants: versions.flatMap((version: any) => dependencies.repo!.listCapabilityGrants(version.id).map((grant: any) => ({
+              ...grant,
+              skill_version_id: version.id,
+            }))),
+          }
+        }
+        const packageRecord = dependencies.packageRepository.getPackage(id)
         if (!packageRecord) throw new ServiceError('NOT_FOUND', 'Skill package not found')
-        const versions = dependencies.repo.listVersions(id)
+        const versions = dependencies.packageRepository.listVersions(id)
         return {
           package: packageRecord,
           versions,
-          installations: dependencies.repo.listInstallations(id),
-          capabilityGrants: versions.flatMap((version) => dependencies.repo.listCapabilityGrants(version.id).map((grant) => ({
+          installations: dependencies.packageRepository.listInstallations(id),
+          capabilityGrants: versions.flatMap((version) => dependencies.grantRepository.listCapabilityGrants(version.id).map((grant) => ({
             ...grant,
-            skill_version_id: version.id,
+            skill_version_id: grant.skillVersionId,
           }))),
         }
       })
@@ -69,7 +111,7 @@ export function createSkillPackageRuntimeService(overrides: Partial<SkillPackage
 
     setInstallationEnabled(id: string, enabled: boolean) {
       return mapRuntimeError(() => {
-        const installation = dependencies.repo.setInstallationEnabled(id, enabled)
+        const installation = dependencies.packageRepository.setInstallationEnabled(id, enabled)
         if (!installation) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
         return installation
       })
@@ -77,23 +119,25 @@ export function createSkillPackageRuntimeService(overrides: Partial<SkillPackage
 
     revokeCapabilityGrant(id: string) {
       return mapRuntimeError(() => {
-        if (!dependencies.repo.revokeCapabilityGrant(id)) throw new ServiceError('NOT_FOUND', 'Active capability grant not found')
+        if (!dependencies.grantRepository.revokeCapabilityGrant(id)) throw new ServiceError('NOT_FOUND', 'Active capability grant not found')
         return { revoked: true }
       })
     },
 
     removeInstallation(id: string) {
       return mapRuntimeError(() => {
-        if (!dependencies.repo.deleteInstallation(id)) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
+        const removed = dependencies.repo?.deleteInstallation ? dependencies.repo.deleteInstallation(id) : dependencies.packageRepository.deleteInstallation(id)
+        if (!removed) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
         return { uninstalled: true }
       })
     },
 
     startRun(input: StartSkillRunInput) {
       return mapRuntimeError(() => {
-        const version = dependencies.repo.resolveRunnableVersion(input.skillVersionId ?? input.skillId!)
+        const version: any = dependencies.packageRepository.resolveRunnableVersion(input.skillVersionId ?? input.skillId!)
         if (!version) throw new ServiceError('NOT_FOUND', 'Installed and enabled Package Skill was not found')
-        if (version.is_compatible !== 1) throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Skill version is incompatible with the Package Runtime')
+        const compatible = version.isCompatible === undefined ? version.is_compatible === 1 : version.isCompatible
+        if (!compatible) throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Skill version is incompatible with the Package Runtime')
         const context = { ...(input.context ?? {}), ...(input.target ? { target: input.target } : {}) }
         const started = dependencies.coordinator.startRun({
           skillVersionId: version.id,
@@ -110,7 +154,7 @@ export function createSkillPackageRuntimeService(overrides: Partial<SkillPackage
 
     listRuns(page: { limit: number, offset: number, status?: string, skillVersionId?: string }) {
       return mapRuntimeError(() => {
-        const result = dependencies.repo.listRuns(page)
+        const result = dependencies.runRepository.listRuns(page)
         return { data: result.data.map((run) => dependencies.coordinator.getRun(run.id)), total: result.total }
       })
     },
@@ -137,7 +181,7 @@ export function createSkillPackageRuntimeService(overrides: Partial<SkillPackage
     listRunArtifacts(runId: string) {
       return mapRuntimeError(() => {
         dependencies.coordinator.getRun(runId)
-        return dependencies.repo.listArtifacts(runId)
+        return dependencies.repo?.listArtifacts ? dependencies.repo.listArtifacts(runId) : dependencies.artifactRepository.listArtifacts(runId)
       })
     },
 

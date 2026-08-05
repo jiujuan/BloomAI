@@ -13,6 +13,27 @@ import {
   skill_runs_v2,
   skill_versions,
 } from '../schema'
+import type {
+  ApplyRunChangeRequest,
+  ArtifactRepository,
+  ArtifactSnapshot,
+  CapabilityGrantRepository,
+  CapabilityGrantSnapshot,
+  Clock,
+  IdGenerator,
+  InstallationSnapshot,
+  JsonObject,
+  PackageSkillRepository,
+  PackageSnapshot,
+  Page,
+  RunEventSnapshot,
+  RunSnapshot,
+  SkillRunEventRepository,
+  SkillRunRepository,
+  SkillRunStatus,
+  SkillRuntimePorts,
+  VersionSnapshot,
+} from '../../skills/application/ports'
 
 const jsonObjectSchema = z.record(z.unknown())
 
@@ -449,4 +470,209 @@ export const skillPackageRepo = {
     return result.changes === 1
   },
 
+}
+
+
+/** SQLite adapter for the application ports. Keep all row/JSON translation here. */
+export function createSqliteSkillRuntimePorts(): SkillRuntimePorts {
+  const clock: Clock = { now: () => Date.now() }
+  const ids: IdGenerator = { next: () => uuidv4() }
+  const events = createSqliteEventRepository(clock)
+  const runs = createSqliteRunRepository()
+  const packages = createSqlitePackageRepository()
+  const grants = createSqliteGrantRepository()
+  const artifacts = createSqliteArtifactRepository()
+  return { packages, runs, events, grants, artifacts, clock, ids }
+}
+
+export function createSqlitePackageRepository(): PackageSkillRepository {
+  return {
+    createPackage(data) {
+      return mapPackage(skillPackageRepo.createPackage(data))
+    },
+    getPackage(id) {
+      const row = skillPackageRepo.getPackage(id)
+      return row ? mapPackage(row) : undefined
+    },
+    listPackages(options): Page<PackageSnapshot> {
+      const result = skillPackageRepo.listPackages(options)
+      return { data: result.data.map(mapPackage), total: result.total }
+    },
+    createVersion(data) {
+      return mapVersion(skillPackageRepo.createVersion(data))
+    },
+    getVersion(id) {
+      const row = skillPackageRepo.getVersion(id)
+      return row ? mapVersion(row) : undefined
+    },
+    listVersions(packageId) {
+      return skillPackageRepo.listVersions(packageId).map(mapVersion)
+    },
+    createInstallation(data) {
+      return mapInstallation(skillPackageRepo.createInstallation(data))
+    },
+    getInstallation(id) {
+      const row = skillPackageRepo.getInstallation(id)
+      return row ? mapInstallation(row) : undefined
+    },
+    setInstallationEnabled(id, enabled) {
+      const row = skillPackageRepo.setInstallationEnabled(id, enabled)
+      return row ? mapInstallation(row) : undefined
+    },
+    listInstallations(packageId) {
+      return skillPackageRepo.listInstallations(packageId).map(mapInstallation)
+    },
+    deleteInstallation(id) {
+      return skillPackageRepo.deleteInstallation(id)
+    },
+    resolveRunnableVersion(referenceId) {
+      const row = skillPackageRepo.resolveRunnableVersion(referenceId)
+      return row ? mapVersion(row) : undefined
+    },
+    isPackageReference(referenceId) {
+      return skillPackageRepo.isPackageReference(referenceId)
+    },
+  }
+}
+
+export function createSqliteRunRepository(): SkillRunRepository {
+  return {
+    createRun(data) {
+      return mapRun(skillPackageRepo.createRun(data))
+    },
+    getRun(id) {
+      const row = skillPackageRepo.getRun(id)
+      return row ? mapRun(row) : undefined
+    },
+    setRunImageSessionId(runId, imageSessionId) {
+      const row = skillPackageRepo.setRunImageSessionId(runId, imageSessionId)
+      return row ? mapRun(row) : undefined
+    },
+    applyRunChange(data: ApplyRunChangeRequest) {
+      const result = skillPackageRepo.applyRunChange({
+        runId: data.runId,
+        expectedRevision: data.expectedRevision,
+        changes: {
+          ...(data.changes.status === undefined ? {} : { status: data.changes.status }),
+          ...(data.changes.input === undefined ? {} : { input: data.changes.input }),
+          ...(data.changes.output === undefined ? {} : { output: data.changes.output }),
+          ...(data.changes.waitingReason === undefined ? {} : { waitingReason: data.changes.waitingReason }),
+          ...(data.changes.cancelRequested === undefined ? {} : { cancelRequested: data.changes.cancelRequested }),
+          ...(data.changes.startedAt === undefined ? {} : { startedAt: data.changes.startedAt }),
+          ...(data.changes.finishedAt === undefined ? {} : { finishedAt: data.changes.finishedAt }),
+          ...(data.changes.errorCode === undefined ? {} : { errorCode: data.changes.errorCode }),
+          ...(data.changes.errorMessage === undefined ? {} : { errorMessage: data.changes.errorMessage }),
+        },
+        event: data.event,
+        command: data.command,
+      })
+      return result ? { run: mapRun(result.run), duplicate: result.duplicate } : undefined
+    },
+    compareAndSet(data) {
+      return this.applyRunChange(data)
+    },
+    getCommandResult(runId, idempotencyKey) {
+      const row = skillPackageRepo.getCommandResult(runId, idempotencyKey)
+      return row ? mapRun(row) : undefined
+    },
+    listRunsByStatus(status) {
+      return skillPackageRepo.listRunsByStatus(status).map(mapRun)
+    },
+    listRuns(options) {
+      const result = skillPackageRepo.listRuns(options)
+      return { data: result.data.map(mapRun), total: result.total }
+    },
+  }
+}
+
+export function createSqliteEventRepository(clock: Clock = { now: () => Date.now() }): SkillRunEventRepository {
+  return {
+    appendEvent(data) {
+      const row = skillPackageRepo.appendEvent({
+        runId: data.runId,
+        seq: data.seq ?? this.nextSequence(data.runId),
+        schemaVersion: data.schemaVersion,
+        type: data.type,
+        payload: data.payload,
+      })
+      return mapEvent(row)
+    },
+    listEvents(runId) {
+      return skillPackageRepo.listEvents(runId).map(mapEvent)
+    },
+    nextSequence(runId) {
+      const events = skillPackageRepo.listEvents(runId)
+      return events.reduce((max, event) => Math.max(max, event.seq), 0) + 1
+    },
+  }
+}
+
+export function createSqliteGrantRepository(): CapabilityGrantRepository {
+  return {
+    createCapabilityGrant(data) {
+      return mapGrant(skillPackageRepo.createCapabilityGrant(data))
+    },
+    listCapabilityGrants(skillVersionId) {
+      return skillPackageRepo.listCapabilityGrants(skillVersionId).map(mapGrant)
+    },
+    findActiveCapabilityGrant(data) {
+      const row = skillPackageRepo.findActiveCapabilityGrant(data)
+      return row ? mapGrant(row) : undefined
+    },
+    consumeCapabilityGrant(id, now) {
+      return skillPackageRepo.consumeCapabilityGrant(id, now)
+    },
+    revokeCapabilityGrant(id, now) {
+      return skillPackageRepo.revokeCapabilityGrant(id, now)
+    },
+  }
+}
+
+export function createSqliteArtifactRepository(): ArtifactRepository {
+  return {
+    createArtifact(data) {
+      return mapArtifact(skillPackageRepo.createArtifact(data))
+    },
+    getArtifact(id) {
+      const row = skillPackageRepo.getArtifact(id)
+      return row ? mapArtifact(row) : undefined
+    },
+    listArtifacts(runId) {
+      return skillPackageRepo.listArtifacts(runId).map(mapArtifact)
+    },
+  }
+}
+
+function parseObject(value: string, fieldName: string): JsonObject {
+  const parsed = jsonObjectSchema.safeParse(JSON.parse(value))
+  if (!parsed.success) throw new Error(`Invalid ${fieldName}`)
+  return parsed.data
+}
+
+function mapPackage(row: any): PackageSnapshot {
+  return { id: row.id, name: row.name, description: row.description, sourceType: row.source_type, sourceUri: row.source_uri, sourceRef: row.source_ref, createdAt: row.created_at, updatedAt: row.updated_at }
+}
+
+function mapVersion(row: any): VersionSnapshot {
+  return { id: row.id, packageId: row.package_id, version: row.version, runtime: row.runtime, manifest: parseObject(row.manifest_json, 'manifest'), manifestHash: row.manifest_hash, packagePath: row.package_path, sourceSnapshot: parseObject(row.source_snapshot_json, 'source snapshot'), isCompatible: row.is_compatible === 1, createdAt: row.created_at }
+}
+
+function mapInstallation(row: any): InstallationSnapshot {
+  return { id: row.id, packageId: row.package_id, currentVersionId: row.current_version_id, status: row.status, enabled: row.enabled === 1, installedAt: row.installed_at, updatedAt: row.updated_at }
+}
+
+function mapRun(row: any): RunSnapshot {
+  return { id: row.id, skillVersionId: row.skill_version_id, status: row.status as SkillRunStatus, revision: row.revision, input: parseObject(row.input_json, 'run input'), output: row.output_json === null ? null : parseObject(row.output_json, 'run output'), context: parseObject(row.context_json, 'run context'), surface: row.surface, sessionId: row.session_id, imageSessionId: row.image_session_id, waitingReason: row.waiting_reason, cancelRequested: row.cancel_requested === 1, startedAt: row.started_at, updatedAt: row.updated_at, finishedAt: row.finished_at, errorCode: row.error_code, errorMessage: row.error_message }
+}
+
+function mapEvent(row: any): RunEventSnapshot {
+  return { id: row.id, runId: row.run_id, seq: row.seq, schemaVersion: row.schema_version, type: row.type, payload: parseObject(row.payload_json, 'event payload'), createdAt: row.created_at }
+}
+
+function mapGrant(row: any): CapabilityGrantSnapshot {
+  return { id: row.id, skillVersionId: row.skill_version_id, capability: row.capability, grantMode: row.grant_mode, scope: parseObject(row.scope_json, 'grant scope'), grantedBy: row.granted_by, grantedAt: row.granted_at, expiresAt: row.expires_at, revokedAt: row.revoked_at, sessionId: row.session_id, consumedAt: row.consumed_at }
+}
+
+function mapArtifact(row: any): ArtifactSnapshot {
+  return { id: row.id, runId: row.run_id, kind: row.kind, mimeType: row.mime_type, path: row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at }
 }

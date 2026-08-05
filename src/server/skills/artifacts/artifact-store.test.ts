@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createFakeSkillRuntimePorts } from '../application/test-doubles'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -135,5 +136,22 @@ describe('ArtifactStore', () => {
     expect(() => store.writeText({ runId: 'missing-run', kind: 'markdown', fileName: 'summary.md', content: '# Result' })).toThrow(ArtifactStoreError)
     expect(() => store.writeText({ runId: '../escape', kind: 'markdown', fileName: 'summary.md', content: '# Result' })).toThrow(ArtifactStoreError)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'runs', 'missing-run'))).toBe(false)
+  })
+  it('accepts injected runtime ports without requiring a database repository', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 10 })
+    const version = ports.packages.createVersion({ packageId: 'pkg-1', version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: '/pkg' })
+    const run = ports.runs.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
+    const { ArtifactStore } = await import('./artifact-store')
+    const store = new ArtifactStore({
+      runs: ports.runs,
+      events: ports.events,
+      artifacts: ports.artifacts,
+      clock: ports.clock,
+    })
+
+    const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'injected.md', content: '# injected' })
+
+    expect(ports.artifacts.getArtifact(artifact.id)).toMatchObject({ runId: run.id, path: 'injected.md' })
+    expect(ports.events.listEvents(run.id)).toHaveLength(1)
   })
 })

@@ -59,10 +59,13 @@ skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return c.json({ data: toPackageDetailHttpDto(skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id')))) }) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.setInstallationEnabled(idSchema.parse(c.req.param('id')), (await readValidated(c, installationUpdateSchema)).enabled) }) } catch (error) { return errorResponse(c, error) }
+  try {
+    const installation = skillPackageRuntimeService.setInstallationEnabled(idSchema.parse(c.req.param('id')), (await readValidated(c, installationUpdateSchema)).enabled)
+    return c.json({ data: toInstallationHttpDto(installation) })
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
   try { return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
@@ -117,6 +120,27 @@ async function readValidated<T extends z.ZodTypeAny>(c: Context, schema: T): Pro
   try { body = await c.req.json() } catch { throw new ServiceError('VALIDATION_ERROR', 'Request body must be valid JSON') }
   return schema.parse(body)
 }
+function toPackageDetailHttpDto(detail: any) {
+  if (!detail || typeof detail !== 'object') return detail
+  return {
+    ...detail,
+    installations: Array.isArray(detail.installations) ? detail.installations.map(toInstallationHttpDto) : detail.installations,
+    capabilityGrants: Array.isArray(detail.capabilityGrants)
+      ? detail.capabilityGrants.map((grant: any) => ({
+        ...grant,
+        skill_version_id: grant.skill_version_id ?? grant.skillVersionId,
+        revoked_at: grant.revoked_at ?? grant.revokedAt,
+        consumed_at: grant.consumed_at ?? grant.consumedAt,
+      }))
+      : detail.capabilityGrants,
+  }
+}
+
+function toInstallationHttpDto(installation: any) {
+  if (!installation || typeof installation !== 'object') return installation
+  return { ...installation, enabled: typeof installation.enabled === 'boolean' ? (installation.enabled ? 1 : 0) : installation.enabled }
+}
+
 function pageMeta(page: { limit: number; offset: number }, total: number) { return { ...page, total } }
 function errorResponse(c: Context, error: unknown) {
   if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)

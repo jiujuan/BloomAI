@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
+import { createSqliteSkillRuntimePorts } from '../../db/repositories/skill-package.repo'
+import { SkillDomainError } from '../application/errors'
+import type { Clock, RunEventSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository, SkillRunStatus as PortSkillRunStatus } from '../application/ports'
 import { normalizeSkillRunEvent } from './skill-run-events'
 
 const runStatusSchema = z.enum([
@@ -55,23 +57,23 @@ export type SkillRunEvent = {
   createdAt: number
 }
 
-export class SkillRunConflictError extends Error {
+export class SkillRunConflictError extends SkillDomainError {
   constructor(runId: string) {
-    super(`Skill run revision conflict: ${runId}`)
+    super('REVISION_CONFLICT', `Skill run revision conflict: ${runId}`)
     this.name = 'SkillRunConflictError'
   }
 }
 
-export class SkillRunNotFoundError extends Error {
+export class SkillRunNotFoundError extends SkillDomainError {
   constructor(runId: string) {
-    super(`Skill run not found: ${runId}`)
+    super('NOT_FOUND', `Skill run not found: ${runId}`)
     this.name = 'SkillRunNotFoundError'
   }
 }
 
-export class SkillRunTransitionError extends Error {
+export class SkillRunTransitionError extends SkillDomainError {
   constructor(from: SkillRunStatus, to: SkillRunStatus) {
-    super(`Invalid skill run transition: ${from} -> ${to}`)
+    super('INVALID_TRANSITION', `Invalid skill run transition: ${from} -> ${to}`)
     this.name = 'SkillRunTransitionError'
   }
 }
@@ -91,7 +93,23 @@ const allowedTransitions: Record<SkillRunStatus, readonly SkillRunStatus[]> = {
 
 const terminalStatuses = new Set<SkillRunStatus>(['completed', 'completed_with_errors', 'failed', 'cancelled'])
 
+export type SkillRunCoordinatorDependencies = {
+  runs: SkillRunRepository
+  events: SkillRunEventRepository
+  clock: Clock
+}
+
 export class SkillRunCoordinator {
+  private readonly runs: SkillRunRepository
+  private readonly events: SkillRunEventRepository
+  private readonly clock: Clock
+
+  constructor(dependencies: SkillRunCoordinatorDependencies = createDefaultDependencies()) {
+    this.runs = dependencies.runs
+    this.events = dependencies.events
+    this.clock = dependencies.clock
+  }
+
   startRun(input: {
     skillVersionId: string
     input: Record<string, unknown>
@@ -100,7 +118,7 @@ export class SkillRunCoordinator {
     sessionId?: string
     imageSessionId?: string
   }): { runId: string } {
-    const run = skillPackageRepo.createRun({
+    const run = this.runs.createRun({
       skillVersionId: input.skillVersionId,
       status: 'created',
       input: input.input,
@@ -109,7 +127,7 @@ export class SkillRunCoordinator {
       sessionId: input.sessionId,
       imageSessionId: input.imageSessionId,
     })
-    skillPackageRepo.appendEvent({
+    this.events.appendEvent({
       runId: run.id,
       seq: 1,
       ...normalizeSkillRunEvent({ type: 'input.summarized', payload: inputSummary(input.input) }),
@@ -119,23 +137,15 @@ export class SkillRunCoordinator {
   }
 
   getRun(runId: string): SkillRun {
-    const run = skillPackageRepo.getRun(runId)
+    const run = this.runs.getRun(runId)
     if (!run) throw new SkillRunNotFoundError(runId)
     return mapRun(run)
   }
 
   subscribeEvents(runId: string, afterSeq = 0): SkillRunEvent[] {
-    return skillPackageRepo.listEvents(runId)
+    return this.events.listEvents(runId)
       .filter((event) => event.seq > afterSeq)
-      .map((event) => ({
-        id: event.id,
-        runId: event.run_id,
-        seq: event.seq,
-        schemaVersion: event.schema_version,
-        type: event.type,
-        payload: parseJsonObject(event.payload_json, 'event payload'),
-        createdAt: event.created_at,
-      }))
+      .map(mapEvent)
   }
 
   transition(runId: string, targetStatus: SkillRunStatus, data: {
@@ -150,8 +160,8 @@ export class SkillRunCoordinator {
     if (!allowedTransitions[current.status].includes(targetStatus)) {
       throw new SkillRunTransitionError(current.status, targetStatus)
     }
-    const now = Date.now()
-    const result = skillPackageRepo.applyRunChange({
+    const now = this.clock.now()
+    const result = this.runs.applyRunChange({
       runId,
       expectedRevision: data.expectedRevision,
       changes: {
@@ -171,7 +181,7 @@ export class SkillRunCoordinator {
 
   dispatchCommand(runId: string, command: SkillRunCommand): SkillRun {
     const parsed = commandSchema.parse(command)
-    const previous = skillPackageRepo.getCommandResult(runId, parsed.idempotencyKey)
+    const previous = this.runs.getCommandResult(runId, parsed.idempotencyKey)
     if (previous) return mapRun(previous)
     const current = this.getRun(runId)
     if (parsed.type === 'confirm') {
@@ -195,7 +205,7 @@ export class SkillRunCoordinator {
 
   markInterruptedRuns(): number {
     let count = 0
-    for (const run of skillPackageRepo.listRunsByStatus('running')) {
+    for (const run of this.runs.listRunsByStatus('running')) {
       this.transition(run.id, 'interrupted', { expectedRevision: run.revision, errorCode: 'PROCESS_INTERRUPTED' })
       count += 1
     }
@@ -210,7 +220,7 @@ export class SkillRunCoordinator {
     changes: Record<string, never>,
   ): SkillRun {
     if (current.status !== 'waiting_approval') throw new SkillRunTransitionError(current.status, targetStatus)
-    const result = skillPackageRepo.applyRunChange({
+    const result = this.runs.applyRunChange({
       runId,
       expectedRevision: command.expectedRevision,
       changes: { status: targetStatus, waitingReason: null, ...changes },
@@ -231,7 +241,7 @@ export class SkillRunCoordinator {
     changes: { input?: Record<string, unknown>; waitingReason?: string | null; cancelRequested?: boolean },
     eventType: string,
   ): SkillRun {
-    const result = skillPackageRepo.applyRunChange({
+    const result = this.runs.applyRunChange({
       runId,
       expectedRevision: command.expectedRevision,
       changes,
@@ -243,6 +253,11 @@ export class SkillRunCoordinator {
     if (!result) throw new SkillRunConflictError(runId)
     return mapRun(result.run)
   }
+}
+
+function createDefaultDependencies(): SkillRunCoordinatorDependencies {
+  const ports = createSqliteSkillRuntimePorts()
+  return { runs: ports.runs, events: ports.events, clock: ports.clock }
 }
 
 function isWaiting(status: SkillRunStatus): boolean {
@@ -273,31 +288,36 @@ function inputSummary(input: Record<string, unknown>) {
   return { keys: Object.keys(input).sort(), byteLength: Buffer.byteLength(JSON.stringify(input), 'utf8') }
 }
 
-function parseJsonObject(value: string, fieldName: string): Record<string, unknown> {
-  const parsed = z.record(z.unknown()).safeParse(JSON.parse(value))
-  if (!parsed.success) throw new Error(`Invalid ${fieldName}`)
-  return parsed.data
-}
-
-function mapRun(row: ReturnType<typeof skillPackageRepo.getRun> & {}): SkillRun {
-  if (!row) throw new Error('Run is required')
+function mapRun(row: RunSnapshot): SkillRun {
   return {
     id: row.id,
-    skillVersionId: row.skill_version_id,
+    skillVersionId: row.skillVersionId,
     status: runStatusSchema.parse(row.status),
     revision: row.revision,
-    input: parseJsonObject(row.input_json, 'run input'),
-    output: row.output_json === null ? null : parseJsonObject(row.output_json, 'run output'),
-    context: parseJsonObject(row.context_json, 'run context'),
+    input: row.input,
+    output: row.output,
+    context: row.context,
     surface: row.surface,
-    sessionId: row.session_id,
-    imageSessionId: row.image_session_id,
-    waitingReason: row.waiting_reason,
-    cancelRequested: row.cancel_requested === 1,
-    startedAt: row.started_at,
-    updatedAt: row.updated_at,
-    finishedAt: row.finished_at,
-    errorCode: row.error_code,
-    errorMessage: row.error_message,
+    sessionId: row.sessionId,
+    imageSessionId: row.imageSessionId,
+    waitingReason: row.waitingReason,
+    cancelRequested: row.cancelRequested,
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    finishedAt: row.finishedAt,
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+  }
+}
+
+function mapEvent(event: RunEventSnapshot): SkillRunEvent {
+  return {
+    id: event.id,
+    runId: event.runId,
+    seq: event.seq,
+    schemaVersion: event.schemaVersion,
+    type: event.type,
+    payload: event.payload,
+    createdAt: event.createdAt,
   }
 }
