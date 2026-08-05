@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(29)
+    expect(migrationVersions()).toHaveLength(31)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(29)
+    expect(migrationVersions()).toHaveLength(31)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -151,6 +151,12 @@ describe('database migrations', () => {
         'skill_run_events',
         'skill_artifacts',
         'skill_capability_grants',
+        'skill_run_queue',
+        'skill_import_reviews',
+        'skill_audit_events',
+        'skill_drafts',
+        'skill_version_snapshots',
+        'skill_version_diffs',
         'research_runs',
         'research_questions',
         'research_search_queries',
@@ -205,6 +211,8 @@ describe('database migrations', () => {
       '027-tool-permissions-permanent-only',
       '028-tools-platform-b1',
       '029-tools-platform-b1-patch',
+      '030-skill-runtime-queue-and-control-plane',
+      '031-skill-version-drafts-and-snapshots',
     ])
     const emptyDb = openRawDb()
     try {
@@ -746,6 +754,8 @@ describe('database migrations', () => {
       const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row: any) => row.name)
       expect(names).not.toContain('rollback_probe')
       expect(db.prepare('SELECT COUNT(*) as c FROM schema_migrations').get()).toEqual({ c: 0 })
+      expect(() => runSqlMigrations(db, [{ version: '100-identifiable-failure', sql: 'INSERT INTO missing_table VALUES (1);' }]))
+        .toThrow('[db:migrate] Failed to apply 100-identifiable-failure:')
     } finally {
       db.close()
     }

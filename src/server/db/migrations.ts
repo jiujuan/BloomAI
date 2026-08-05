@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+export { assertSchemaContract, getExpectedSchemaContract } from './schema-contract'
 
 export interface SqlMigration {
   version: string
@@ -36,17 +37,18 @@ export function loadSqlMigrations(dir = migrationsDir): SqlMigration[] {
     }))
 }
 
-export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations()): void {
+export function getAppliedMigrationVersions(db: RawSqliteDb): string[] {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT PRIMARY KEY,
       applied_at INTEGER NOT NULL
     );
   `)
+  return db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row: any) => String(row.version))
+}
 
-  const applied = new Set(
-    db.prepare('SELECT version FROM schema_migrations').all().map((row: any) => row.version as string)
-  )
+export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations()): void {
+  const applied = new Set(getAppliedMigrationVersions(db))
   let appliedCount = 0
 
   for (const migration of migrations) {

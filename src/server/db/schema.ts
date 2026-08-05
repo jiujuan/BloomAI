@@ -273,6 +273,89 @@ export const skill_capability_grants = sqliteTable('skill_capability_grants', {
   versionIdx: index('idx_skill_capability_grants_version').on(table.skill_version_id),
 }))
 
+export const skill_run_queue = sqliteTable('skill_run_queue', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  status: text('status').notNull(),
+  available_at: integer('available_at').notNull(),
+  lease_owner: text('lease_owner'),
+  lease_until: integer('lease_until'),
+  attempt: integer('attempt').notNull().default(0),
+  last_error: text('last_error'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  claimIdx: index('idx_skill_run_queue_claim').on(table.status, table.available_at, table.lease_until),
+}))
+
+export const skill_import_reviews = sqliteTable('skill_import_reviews', {
+  id: text('id').primaryKey(),
+  source: text('source').notNull(),
+  source_sha: text('source_sha').notNull(),
+  source_ref: text('source_ref'),
+  inspection_json: text('inspection_json').notNull().default('{}'),
+  status: text('status').notNull(),
+  reviewer: text('reviewer'),
+  decision: text('decision'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  sourceUniqueIdx: uniqueIndex('idx_skill_import_reviews_source').on(table.source, table.source_sha, table.source_ref),
+  statusIdx: index('idx_skill_import_reviews_status').on(table.status, table.updated_at),
+}))
+
+export const skill_audit_events = sqliteTable('skill_audit_events', {
+  id: text('id').primaryKey(),
+  actor: text('actor'),
+  action: text('action').notNull(),
+  resource_type: text('resource_type').notNull(),
+  resource_id: text('resource_id'),
+  payload_json: text('payload_json').notNull().default('{}'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  resourceIdx: index('idx_skill_audit_events_resource').on(table.resource_type, table.resource_id, table.created_at),
+  createdIdx: index('idx_skill_audit_events_created').on(table.created_at),
+}))
+
+export const skill_drafts = sqliteTable('skill_drafts', {
+  id: text('id').primaryKey(),
+  owner_id: text('owner_id').notNull(),
+  status: text('status').notNull(),
+  revision: integer('revision').notNull().default(1),
+  content_json: text('content_json').notNull().default('{}'),
+  validation_json: text('validation_json').notNull().default('{}'),
+  base_version_id: text('base_version_id'),
+  published_version_id: text('published_version_id'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  ownerStatusIdx: index('idx_skill_drafts_owner_status').on(table.owner_id, table.status, table.updated_at),
+}))
+
+export const skill_version_snapshots = sqliteTable('skill_version_snapshots', {
+  id: text('id').primaryKey(),
+  version_id: text('version_id').notNull(),
+  files_manifest_json: text('files_manifest_json').notNull().default('{}'),
+  total_bytes: integer('total_bytes').notNull().default(0),
+  file_count: integer('file_count').notNull().default(0),
+  snapshot_root: text('snapshot_root').notNull(),
+  snapshot_hash: text('snapshot_hash').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  versionIdx: uniqueIndex('idx_skill_version_snapshots_version').on(table.version_id),
+  hashIdx: index('idx_skill_version_snapshots_hash').on(table.snapshot_hash),
+}))
+
+export const skill_version_diffs = sqliteTable('skill_version_diffs', {
+  id: text('id').primaryKey(),
+  from_version_id: text('from_version_id').notNull(),
+  to_version_id: text('to_version_id').notNull(),
+  diff_json: text('diff_json').notNull().default('{}'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  versionsUniqueIdx: uniqueIndex('idx_skill_version_diffs_versions').on(table.from_version_id, table.to_version_id),
+}))
+
 // AI 画图 (Image Studio) — independent feature. Sessions are decoupled from chat `sessions`
 // (Plan A); the conversation itself reuses the `messages` table (session_id points here).
 export const image_sessions = sqliteTable('image_sessions', {

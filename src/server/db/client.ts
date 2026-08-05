@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { createRequire } from 'node:module'
 import { runSqlMigrations } from './migrations'
+import { assertSchemaContract } from './schema-contract'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
 import { schemaToJsonSchema, toolContracts } from '../tools/contracts'
@@ -69,7 +70,33 @@ export function closeDb() {
   syncExports()
 }
 
-function runBootstrapSql() {
+/**
+ * A deliberately tiny legacy prerequisite bootstrap. A few historical numbered
+ * migrations update old tables (settings, sessions, tool_permissions) before the
+ * full compatibility bootstrap can run. It must never create Package Runtime
+ * tables or seed business data.
+ */
+export function runLegacyMigrationPrerequisites() {
+  const rawDb = getState().db
+  if (!rawDb) throw new Error('Database has not been initialized. Call initDb() first.')
+
+  rawDb.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+      persona_id TEXT, model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022',
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS tool_permissions (
+      id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+      granted_at INTEGER, scope TEXT DEFAULT 'session'
+    );
+  `)
+}
+
+export function runBootstrapSql() {
   const rawDb = getState().db
   if (!rawDb) throw new Error('Database has not been initialized. Call initDb() first.')
 
@@ -380,10 +407,16 @@ function seedSkills() {
 
 export async function runMigrations() {
   await initDb()
-  runBootstrapSql()
   const state = getState()
   if (!state.dbInstance) throw new Error('Database has not been initialized. Call initDb() first.')
+
+  // Historical migrations 015/025/027 update three legacy tables. Create only
+  // those prerequisites before SQL migrations; Package Runtime tables remain
+  // exclusively owned by numbered migrations.
+  runLegacyMigrationPrerequisites()
   runSqlMigrations(state.dbInstance)
+  assertSchemaContract(state.dbInstance)
+  runBootstrapSql()
   seedPersonas()
   seedSettings()
   seedLlm()
