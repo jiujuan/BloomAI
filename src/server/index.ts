@@ -11,6 +11,7 @@ import { initTracing, shutdownTracing } from './telemetry/tracer'
 import { initMetrics, shutdownMetrics } from './telemetry/metrics'
 import { mastra, shutdownMastraRuntime } from './mastra'
 import { closeDefaultWebPageProviderRouter } from './tools/web/provider-router'
+import { ensureSkillRuntimeDirectories, getSkillRuntimeCapabilities, loadSkillRuntimeConfig } from './skills/config/skill-runtime.config'
 
 // On Windows, switch the attached console to UTF-8 so Chinese characters in
 // log output are not garbled (Windows default code page is GBK/CP936).
@@ -19,12 +20,14 @@ if (process.platform === 'win32') {
 }
 
 loadDotEnv()
+const skillRuntimeConfig = loadSkillRuntimeConfig()
+ensureSkillRuntimeDirectories(skillRuntimeConfig)
 initTracing() // start OTel TracerProvider before any requests arrive
 initMetrics() // start OTel MeterProvider after tracing (both need loadDotEnv first)
 
 const PORT = parseInt(process.env[BLOOMAI_PORT_ENV] || String(DEFAULT_SERVER_PORT), 10)
 
-serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT })
+serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT, skillRuntime: getSkillRuntimeCapabilities(skillRuntimeConfig) })
 
 runMigrations()
   .then(async () => {

@@ -1,14 +1,13 @@
-import { settingsRepo } from '../../db/repositories/settings.repo'
+import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 
 export const skillPackageRuntimeFeatureKey = 'skill_package_runtime_enabled'
 
+/**
+ * Backwards-compatible package execution gate. The legacy environment key is
+ * parsed by the shared runtime configuration, so all package runtime callers
+ * observe the same validated snapshot.
+ */
 export function isSkillPackageRuntimeEnabled(): boolean {
-  const envValue = process.env.SKILL_PACKAGE_RUNTIME_ENABLED?.trim().toLowerCase()
-  if (envValue) return ['1', 'true', 'yes', 'on'].includes(envValue)
-
-  try {
-    return settingsRepo.getValue(skillPackageRuntimeFeatureKey) === 'true'
-  } catch {
-    return false
-  }
+  const config = getSkillRuntimeConfig()
+  return config.runtimeEnabled && config.packageExecutionEnabled
 }

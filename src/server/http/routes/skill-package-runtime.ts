@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { mapErrorToHttpResponse } from '../error-mapper'
 import { ServiceError } from '../../services/errors'
 import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
+import { getSkillRuntimeCapabilities } from '../../skills/config/skill-runtime.config'
 
 const jsonObjectSchema = z.record(z.unknown())
 const idSchema = z.string().min(1).max(200)
@@ -39,6 +40,10 @@ const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.strin
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
+
+skillPackageRuntimeRoutes.get('/skill-runtime/capabilities', (c) => {
+  return c.json({ data: getSkillRuntimeCapabilities() })
+})
 
 skillPackageRuntimeRoutes.post('/skill-packages/inspect', async (c) => {
   try { return c.json({ data: await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source) }) } catch (error) { return errorResponse(c, error) }

@@ -3,15 +3,10 @@ import fs from 'fs'
 import path from 'path'
 import { inflateRawSync } from 'zlib'
 import { runMigrations } from '../../db/client'
-import { getDataDir } from '../../db/paths'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { isSkillPackageRuntimeEnabled } from './feature-flag'
+import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 
-const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-const MAX_FILE_COUNT = 10_000
-const MAX_FILE_BYTES = 10 * 1024 * 1024
-const MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
 type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
 type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string }
@@ -42,9 +37,12 @@ export type InspectedPackage = {
 export type PackageInstallResult = { status: 'awaiting_permission_review'; packages: InstalledPackage[] }
 
 export class PackageInstallError extends Error {
-  constructor(message: string) {
+  readonly code: 'PACKAGE_INSTALL_ERROR' | 'FEATURE_DISABLED'
+
+  constructor(message: string, code: 'PACKAGE_INSTALL_ERROR' | 'FEATURE_DISABLED' = 'PACKAGE_INSTALL_ERROR') {
     super(message)
     this.name = 'PackageInstallError'
+    this.code = code
   }
 }
 
@@ -60,7 +58,7 @@ type ZipEntry = {
 
 export class PackageInstaller {
   async inspect(source: PackageInstallSource): Promise<{ packages: InspectedPackage[] }> {
-    if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
+    assertPackageImportEnabled()
     const roots = getPackageRoots()
     fs.mkdirSync(roots.staging, { recursive: true })
     const stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
@@ -91,7 +89,8 @@ export class PackageInstaller {
   }
 
   async install(source: PackageInstallSource): Promise<PackageInstallResult> {
-    if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
+    assertPackageImportEnabled()
+    if (source.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
 
     const roots = getPackageRoots()
     fs.mkdirSync(roots.staging, { recursive: true })
@@ -162,9 +161,27 @@ export class PackageInstaller {
   }
 }
 
+function assertPackageImportEnabled(): void {
+  try { assertSkillRuntimeFeature('importEnabled') } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Skill Package import is disabled', 'FEATURE_DISABLED') }
+}
+
+function assertPackageFeatureEnabled(feature: 'githubImportEnabled' | 'npxImportEnabled'): void {
+  try { assertSkillRuntimeFeature(feature) } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Skill Runtime feature is disabled: ${feature}`, 'FEATURE_DISABLED') }
+}
+
 function getPackageRoots() {
-  const root = path.join(getDataDir(), 'skills')
-  return { root, packages: path.join(root, 'packages'), staging: path.join(root, 'staging') }
+  const root = getSkillRuntimeConfig().packageDataRoot
+  return { root: path.dirname(root), packages: root, staging: path.join(path.dirname(root), 'staging') }
+}
+
+function getPackageLimits() {
+  const config = getSkillRuntimeConfig()
+  return {
+    maxArchiveBytes: config.maxPackageBytes,
+    maxFileCount: config.maxPackageFiles,
+    maxFileBytes: config.maxFileBytes,
+    maxUnpackedBytes: config.maxPackageBytes,
+  }
 }
 
 async function materializeSource(source: PackageInstallSource, target: string) {
@@ -189,8 +206,9 @@ async function materializeSource(source: PackageInstallSource, target: string) {
   const archiveResponse = await fetch(`https://github.com/${owner}/${repository}/archive/${commit.sha}.zip`)
   if (!archiveResponse.ok) throw new PackageInstallError(`Unable to download GitHub archive for ${commit.sha}`)
   const contentLength = Number(archiveResponse.headers.get('content-length'))
-  if (Number.isFinite(contentLength) && contentLength > MAX_ARCHIVE_BYTES) throw new PackageInstallError('Archive exceeds the maximum allowed size')
-  const archive = await readResponseBuffer(archiveResponse, MAX_ARCHIVE_BYTES)
+  const limits = getPackageLimits()
+  if (Number.isFinite(contentLength) && contentLength > limits.maxArchiveBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
+  const archive = await readResponseBuffer(archiveResponse, limits.maxArchiveBytes)
   extractZip(archive, target)
   return { sourceSha256: hashBuffer(archive), sourceCommit: commit.sha, sourceRef: source.ref }
 }
@@ -225,9 +243,10 @@ function parseGitHubRepository(repositoryUrl: string) {
 }
 
 function extractZip(archive: Buffer, target: string): void {
-  if (archive.length > MAX_ARCHIVE_BYTES) throw new PackageInstallError('Archive exceeds the maximum allowed size')
+  if (archive.length > getPackageLimits().maxArchiveBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
+  const limits = getPackageLimits()
   const entries = parseZipEntries(archive)
-  if (entries.length > MAX_FILE_COUNT) throw new PackageInstallError('Archive contains too many files')
+  if (entries.length > limits.maxFileCount) throw new PackageInstallError('Archive contains too many files')
   let totalBytes = 0
   const seen = new Set<string>()
   for (const entry of entries) {
@@ -235,9 +254,9 @@ function extractZip(archive: Buffer, target: string): void {
     const name = normalizeArchivePath(entry.name)
     if (seen.has(name)) throw new PackageInstallError(`Archive contains duplicate file path: ${name}`)
     seen.add(name)
-    if (entry.uncompressedSize > MAX_FILE_BYTES) throw new PackageInstallError(`Archive file exceeds the maximum size: ${name}`)
+    if (entry.uncompressedSize > limits.maxFileBytes) throw new PackageInstallError(`Archive file exceeds the maximum size: ${name}`)
     totalBytes += entry.uncompressedSize
-    if (totalBytes > MAX_UNPACKED_BYTES) throw new PackageInstallError('Archive expands beyond the maximum allowed size')
+    if (totalBytes > limits.maxUnpackedBytes) throw new PackageInstallError('Archive expands beyond the maximum allowed size')
     const unixType = (entry.externalAttributes >>> 16) & 0o170000
     if (unixType === 0o120000 || unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new PackageInstallError(`Archive contains a non-regular file: ${name}`)
     if (isDirectory) continue
@@ -313,12 +332,12 @@ function copySafeDirectoryWithBudget(source: string, target: string, budget: { f
     if (entry.isDirectory()) { if (!isSensitivePath(entry.name)) copySafeDirectoryWithBudget(sourcePath, targetPath, budget); continue }
     if (!entry.isFile()) throw new PackageInstallError(`Non-regular package file is not allowed: ${sourcePath}`)
     if (entryStat.nlink > 1) throw new PackageInstallError(`Hard-linked package files are not allowed: ${sourcePath}`)
-    if (entryStat.size > MAX_FILE_BYTES) throw new PackageInstallError(`Package file exceeds the maximum size: ${sourcePath}`)
+    if (entryStat.size > getPackageLimits().maxFileBytes) throw new PackageInstallError(`Package file exceeds the maximum size: ${sourcePath}`)
     if (isSensitivePath(entry.name)) continue
     budget.fileCount += 1
-    if (budget.fileCount > MAX_FILE_COUNT) throw new PackageInstallError('Package source contains too many files')
+    if (budget.fileCount > getPackageLimits().maxFileCount) throw new PackageInstallError('Package source contains too many files')
     budget.totalBytes += entryStat.size
-    if (budget.totalBytes > MAX_UNPACKED_BYTES) throw new PackageInstallError('Package source exceeds the maximum allowed size')
+    if (budget.totalBytes > getPackageLimits().maxUnpackedBytes) throw new PackageInstallError('Package source exceeds the maximum allowed size')
     fs.mkdirSync(path.dirname(targetPath), { recursive: true })
     fs.copyFileSync(sourcePath, targetPath)
   }

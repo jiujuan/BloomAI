@@ -33,6 +33,19 @@ export type ArticleIllustrationSceneDto = { id: string; ordinal: number; title: 
 export type ArticleIllustrationJobDto = { id: string; source_type: 'text' | 'url' | 'file'; source_label: string; source_url: string | null; article_text: string; mode: 'skill' | 'fallback'; skill_version_id: string | null; run_id: string | null; image_session_id: string | null; config: Record<string, unknown>; status: string; error_message: string | null; scenes: ArticleIllustrationSceneDto[] }
 export type EligibleImageSkillDto = { packageId: string; packageName: string; skillVersionId: string; version: string; requiredCapabilities: string[]; activeImageGrant: { grantMode: string; maxCalls: number | null; allowedModels: string[] | null } | null }
 
+export type SkillRuntimeCapabilitiesDto = {
+  protocolVersion: string
+  configVersion: string
+  runtimeEnabled: boolean
+  packageExecutionEnabled: boolean
+  importEnabled: boolean
+  githubImportEnabled: boolean
+  npxImportEnabled: boolean
+  creatorEnabled: boolean
+  creatorPublishEnabled: boolean
+  limits: Record<string, number>
+}
+
 export type LlmProviderSummary = {
   id: string
   name: string
@@ -119,6 +132,10 @@ export function imageMediaUrl(genId: string): string {
 // Platform API
 
 export const platform = {
+  async getSkillRuntimeCapabilities(): Promise<SkillRuntimeCapabilitiesDto> {
+    const { data } = await apiFetch('/skill-runtime/capabilities')
+    return data
+  },
   // Sessions
   async getSessions() {
     const { data } = await apiFetch('/sessions')

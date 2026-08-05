@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { SkillRuntimeCapabilities } from './skill-runtime.types'
 import { devtools } from 'zustand/middleware'
 import { API_BASE } from '@shared/constants'
 import type { CapabilityGrant, InspectedPackage, PackageDetail, PackageSource, SkillArtifact, SkillPackage, SkillRun, SkillRunEvent } from './skill-runtime.types'
@@ -22,6 +23,7 @@ type RuntimeState = {
   runArtifacts: SkillArtifact[]
   loading: boolean
   error: string | null
+  capabilities: SkillRuntimeCapabilities | null
 }
 
 type RuntimeActions = {
@@ -39,11 +41,17 @@ type RuntimeActions = {
   startRun: (input: { skillVersionId: string; input: Record<string, unknown>; surface?: 'skills' }) => Promise<SkillRun>
   commandRun: (id: string, command: { type: 'confirm' | 'cancel'; expectedRevision: number }) => Promise<SkillRun>
   clearError: () => void
+  loadCapabilities: () => Promise<SkillRuntimeCapabilities>
 }
 
 export const useSkillRuntimeStore = create<RuntimeState & RuntimeActions>()(devtools((set, get) => ({
-  packages: [], runs: [], selectedPackage: null, selectedRun: null, runEvents: [], runArtifacts: [], loading: false, error: null,
+  packages: [], runs: [], selectedPackage: null, selectedRun: null, runEvents: [], runArtifacts: [], loading: false, error: null, capabilities: null,
   clearError: () => set({ error: null }),
+  loadCapabilities: async () => {
+    const capabilities = await runtimeFetch<SkillRuntimeCapabilities>('/skill-runtime/capabilities')
+    set({ capabilities })
+    return capabilities
+  },
   loadPackages: async () => {
     set({ loading: true, error: null })
     try {

@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { getSkillRunArtifactsDir } from '../../db/paths'
+import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 
@@ -49,8 +50,8 @@ export class ArtifactStore {
     return { mimeType: artifact.mime_type ?? 'application/octet-stream', content }
   }
 
-  exportArtifact(input: { artifactId: string; runId: string; destinationDir: string }): string {
-    const destinationDir = existingDirectory(input.destinationDir)
+  exportArtifact(input: { artifactId: string; runId: string; destinationDir?: string }): string {
+    const destinationDir = existingDirectory(input.destinationDir ?? getSkillRuntimeConfig().exportRoot)
     const artifact = skillPackageRepo.getArtifact(input.artifactId)
     if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
     requireArtifactOwnership(artifact, input.runId)

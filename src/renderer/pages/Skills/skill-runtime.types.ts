@@ -157,3 +157,17 @@ export function formatDate(value: number | null | undefined) {
 export function artifactContentUrl(artifactId: string, runId: string) {
   return API_BASE + '/skill-artifacts/' + encodeURIComponent(artifactId) + '/content?runId=' + encodeURIComponent(runId)
 }
+
+
+export type SkillRuntimeCapabilities = {
+  protocolVersion: string
+  configVersion: string
+  runtimeEnabled: boolean
+  packageExecutionEnabled: boolean
+  importEnabled: boolean
+  githubImportEnabled: boolean
+  npxImportEnabled: boolean
+  creatorEnabled: boolean
+  creatorPublishEnabled: boolean
+  limits: Record<string, number>
+}

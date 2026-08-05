@@ -1,6 +1,7 @@
 import { skillPackageRepo } from '../db/repositories/skill-package.repo'
 import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
 import { PackageInstallError, PackageInstaller, type PackageInstallSource } from '../skills/packages/package-installer'
+import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
 import { SkillRunCoordinator } from '../skills/runtime'
 import {
   SkillRunConflictError,
@@ -175,7 +176,11 @@ function rethrowMappedRuntimeError(error: unknown): never {
   if (error instanceof SkillRunNotFoundError) throw new ServiceError('NOT_FOUND', error.message)
   if (error instanceof SkillRunConflictError) throw new ServiceError('REVISION_CONFLICT', error.message)
   if (error instanceof SkillRunTransitionError) throw new ServiceError('INVALID_RUN_TRANSITION', error.message)
-  if (error instanceof PackageInstallError) throw new ServiceError('PACKAGE_INSTALL_ERROR', error.message)
+  if (error instanceof SkillRuntimeFeatureDisabledError) throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
+  if (error instanceof PackageInstallError) {
+    if (error.code === 'FEATURE_DISABLED') throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
+    throw new ServiceError('PACKAGE_INSTALL_ERROR', error.message)
+  }
   if (error instanceof ArtifactStoreError) {
     const code = error.message.startsWith('Artifact not found') ? 'NOT_FOUND' : 'ARTIFACT_ERROR'
     throw new ServiceError(code, error.message)

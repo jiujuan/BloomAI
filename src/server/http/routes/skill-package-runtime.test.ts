@@ -8,10 +8,11 @@ let fixtureDir: string
 let exportDir: string
 let originalEnv: NodeJS.ProcessEnv
 
-async function loadApi() {
+async function loadApi(env: Record<string, string> = {}) {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
-  process.env.SKILL_PACKAGE_RUNTIME_ENABLED = 'true'
+  process.env.SKILL_PACKAGE_RUNTIME_ENABLED = env.SKILL_PACKAGE_RUNTIME_ENABLED ?? 'true'
+  for (const [key, value] of Object.entries(env)) process.env[key] = value
   const client = await import('../../db/client')
   await client.runMigrations()
   const { createHonoApp } = await import('../app')
@@ -50,6 +51,15 @@ function createRunnableFixture(repo: Awaited<ReturnType<typeof loadApi>>['skillP
 }
 
 describe('Skill Package Runtime HTTP API', () => {
+  it('returns a redacted runtime capability summary', async () => {
+    const { app } = await loadApi()
+    const response = await app.request(new URL('/api/v1/skill-runtime/capabilities', 'http://localhost'))
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.data).toMatchObject({ protocolVersion: '1.1', runtimeEnabled: true })
+    expect(body.data).not.toHaveProperty('packageDataRoot')
+    expect(body.data).not.toHaveProperty('artifactRoot')
+  })
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-http-runtime-data-'))
     fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-http-runtime-fixture-'))
@@ -65,6 +75,16 @@ describe('Skill Package Runtime HTTP API', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
     fs.rmSync(fixtureDir, { recursive: true, force: true })
     fs.rmSync(exportDir, { recursive: true, force: true })
+  })
+
+  it('returns FEATURE_DISABLED when package import is disabled', async () => {
+    const { app } = await loadApi({ SKILL_PACKAGE_RUNTIME_ENABLED: 'false', SKILL_PACKAGE_IMPORT_ENABLED: 'false' })
+    const result = await requestJson(app, '/skill-packages/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }),
+    })
+    expect(result.response.status).toBe(409)
+    expect(result.body.error).toMatchObject({ code: 'FEATURE_DISABLED' })
   })
 
   it('validates JSON input and returns the uniform error envelope', async () => {
