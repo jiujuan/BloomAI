@@ -29,7 +29,7 @@
 ```txt
 bloomai/
 ├── package.json
-├── electron.vite.config.ts
+├── electron.vite.config.mts
 ├── tsconfig.json
 ├── index.html
 ├── docs/
@@ -64,7 +64,7 @@ packages/ui/src              -> 不作为主线迁移；只补充缺失文件时
 | 旧路径 | 新路径 | 动作 | 说明 |
 |---|---|---|---|
 | `apps/desktop/package.json` | `package.json` | 合并 | 合并 root、desktop、server、ui 依赖和脚本 |
-| `apps/desktop/vite.config.ts` | `electron.vite.config.ts` | 移动并改名 | 入口从 `electron/*` 改为 `src/main`、`src/preload` |
+| `apps/desktop/vite.config.ts` | `electron.vite.config.mts` | 移动并改名 | 入口从 `electron/*` 改为 `src/main`、`src/preload` |
 | `apps/desktop/tsconfig.json` | `tsconfig.json` | 合并 | 合并 renderer、main、server 类型配置 |
 | `apps/desktop/index.html` | `index.html` | 移动 | React 入口 HTML |
 | `turbo.json` | 删除或暂存 | 删除 | 单应用后不再需要 Turbo 编排 |
@@ -76,8 +76,8 @@ packages/ui/src              -> 不作为主线迁移；只补充缺失文件时
 ```json
 {
   "scripts": {
-    "dev": "vite --config electron.vite.config.ts",
-    "build": "tsc && vite build --config electron.vite.config.ts",
+    "dev": "vite --config electron.vite.config.mts",
+    "build": "tsc && vite build --config electron.vite.config.mts",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",
     "start:server": "tsx src/server/index.ts"
@@ -130,7 +130,7 @@ drizzle-kit
 workspaces
 ```
 
-### electron.vite.config.ts 必改点
+### electron.vite.config.mts 必改点
 
 旧入口：
 
@@ -620,7 +620,7 @@ packages/ui
 | 旧路径 | 新路径 |
 |---|---|
 | `apps/desktop/package.json` | `package.json` |
-| `apps/desktop/vite.config.ts` | `electron.vite.config.ts` |
+| `apps/desktop/vite.config.ts` | `electron.vite.config.mts` |
 | `apps/desktop/tsconfig.json` | `tsconfig.json` |
 | `apps/desktop/index.html` | `index.html` |
 | `package-lock.json` | `package-lock.json` |

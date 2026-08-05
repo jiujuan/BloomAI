@@ -23,7 +23,7 @@ function ensureUtf8Console() {
 ensureUtf8Console()
 
 const viteCli = path.join(path.dirname(require.resolve('vite/package.json')), 'bin', 'vite.js')
-const args = [viteCli, '--config', 'electron.vite.config.ts', ...process.argv.slice(2)]
+const args = [viteCli, '--config', 'electron.vite.config.mts', ...process.argv.slice(2)]
 const env = {
   ...process.env,
   LANG: process.env.LANG || 'C.UTF-8',

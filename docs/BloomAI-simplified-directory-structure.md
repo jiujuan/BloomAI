@@ -102,7 +102,7 @@ React 渲染进程，负责所有用户界面和前端状态。
 bloomai/
 │
 ├── package.json
-├── electron.vite.config.ts
+├── electron.vite.config.mts
 ├── tsconfig.json
 ├── index.html
 ├── README.md

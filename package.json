@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node scripts/dev-with-utf8-console.cjs",
-    "build": "tsc --noEmit && vite build --config electron.vite.config.ts",
+    "build": "tsc --noEmit && vite build --config electron.vite.config.mts",
     "test": "vitest run --pool=forks --maxWorkers=1 --minWorkers=1",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",

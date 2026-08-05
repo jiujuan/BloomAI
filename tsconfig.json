@@ -23,7 +23,7 @@
   },
   "include": [
     "src/**/*",
-    "electron.vite.config.ts"
+    "electron.vite.config.mts"
   ],
   "exclude": [
     "node_modules",

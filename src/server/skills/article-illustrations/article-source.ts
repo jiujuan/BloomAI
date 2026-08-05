@@ -1,4 +1,3 @@
-import { lookup as dnsLookup } from 'node:dns'
 import { promises as dns } from 'node:dns'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -172,6 +171,3 @@ function extractTitle(html: string): string | undefined {
 function decodeEntities(value: string): string {
   return value.replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
 }
-
-// Keep the callback API import visible to make the pinned lookup intent auditable in code review.
-void dnsLookup
