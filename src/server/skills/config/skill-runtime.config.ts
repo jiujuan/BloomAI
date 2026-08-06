@@ -28,6 +28,9 @@ export type SkillRuntimeConfig = {
   maxPackageFiles: number
   maxFileBytes: number
   maxRunDurationMs: number
+  githubRequestTimeoutMs: number
+  githubMaxArchiveBytes: number
+  githubAllowedHosts: string[]
 }
 
 export type SkillRuntimeConfigEnv = Record<string, string | undefined>
@@ -57,6 +60,9 @@ export type SkillRuntimeCapabilities = {
     maxPackageFiles: number
     maxFileBytes: number
     maxRunDurationMs: number
+    githubRequestTimeoutMs: number
+    githubMaxArchiveBytes: number
+    githubAllowedHosts: string[]
   }
 }
 
@@ -80,6 +86,7 @@ export class SkillRuntimeFeatureDisabledError extends Error {
 
 const BOOL_TRUE = new Set(['1', 'true', 'yes', 'on'])
 const BOOL_FALSE = new Set(['0', 'false', 'no', 'off'])
+const OFFICIAL_GITHUB_HOSTS = new Set(['github.com', 'api.github.com', 'codeload.github.com'])
 const HARD_LIMITS = {
   workerConcurrency: 64,
   leaseTimeoutMs: 24 * 60 * 60 * 1000,
@@ -90,6 +97,8 @@ const HARD_LIMITS = {
   maxPackageFiles: 100_000,
   maxFileBytes: 100 * 1024 * 1024,
   maxRunDurationMs: 24 * 60 * 60 * 1000,
+  githubRequestTimeoutMs: 5 * 60 * 1000,
+  githubMaxArchiveBytes: 1024 * 1024 * 1024,
 } as const
 
 function envBool(env: SkillRuntimeConfigEnv, key: string, fallback: boolean): boolean {
@@ -99,6 +108,16 @@ function envBool(env: SkillRuntimeConfigEnv, key: string, fallback: boolean): bo
   if (BOOL_TRUE.has(normalized)) return true
   if (BOOL_FALSE.has(normalized)) return false
   throw new SkillRuntimeConfigError(`${key} must be a boolean`)
+}
+
+function envList(env: SkillRuntimeConfigEnv, key: string, fallback: string[]): string[] {
+  const raw = env[key]
+  if (raw === undefined || raw.trim() === '') return [...fallback]
+  const values = raw.split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)
+  if (values.length === 0 || values.some((value) => !OFFICIAL_GITHUB_HOSTS.has(value))) {
+    throw new SkillRuntimeConfigError(`${key} must contain only official GitHub hosts`)
+  }
+  return [...new Set(values)]
 }
 
 function envInt(env: SkillRuntimeConfigEnv, key: string, fallback: number, max: number): number {
@@ -179,6 +198,15 @@ export function assertSkillRuntimeConfig(config: SkillRuntimeConfig, fsAdapter: 
   if (config.creatorPublishEnabled && !config.creatorEnabled) {
     throw new SkillRuntimeConfigError('creatorPublishEnabled requires creatorEnabled')
   }
+  if (!Number.isSafeInteger(config.githubRequestTimeoutMs) || config.githubRequestTimeoutMs < 1 || config.githubRequestTimeoutMs > HARD_LIMITS.githubRequestTimeoutMs) {
+    throw new SkillRuntimeConfigError('githubRequestTimeoutMs must be within the configured hard limit')
+  }
+  if (!Number.isSafeInteger(config.githubMaxArchiveBytes) || config.githubMaxArchiveBytes < 1 || config.githubMaxArchiveBytes > HARD_LIMITS.githubMaxArchiveBytes) {
+    throw new SkillRuntimeConfigError('githubMaxArchiveBytes must be within the configured hard limit')
+  }
+  if (!Array.isArray(config.githubAllowedHosts) || config.githubAllowedHosts.length === 0 || config.githubAllowedHosts.some((host) => !OFFICIAL_GITHUB_HOSTS.has(host))) {
+    throw new SkillRuntimeConfigError('githubAllowedHosts must contain only official GitHub hosts')
+  }
   if (config.packageExecutionEnabled && !config.runtimeEnabled) {
     throw new SkillRuntimeConfigError('packageExecutionEnabled requires runtimeEnabled')
   }
@@ -216,6 +244,9 @@ export function loadSkillRuntimeConfig(
     maxPackageFiles: envInt(env, 'SKILL_MAX_PACKAGE_FILES', 10_000, HARD_LIMITS.maxPackageFiles),
     maxFileBytes: envInt(env, 'SKILL_MAX_FILE_BYTES', 10 * 1024 * 1024, HARD_LIMITS.maxFileBytes),
     maxRunDurationMs: envInt(env, 'SKILL_MAX_RUN_DURATION_MS', 30 * 60 * 1000, HARD_LIMITS.maxRunDurationMs),
+    githubRequestTimeoutMs: envInt(env, 'SKILL_GITHUB_REQUEST_TIMEOUT_MS', 15_000, HARD_LIMITS.githubRequestTimeoutMs),
+    githubMaxArchiveBytes: envInt(env, 'SKILL_GITHUB_MAX_ARCHIVE_BYTES', 100 * 1024 * 1024, HARD_LIMITS.githubMaxArchiveBytes),
+    githubAllowedHosts: envList(env, 'SKILL_GITHUB_ALLOWED_HOSTS', ['github.com', 'api.github.com', 'codeload.github.com']),
   }
   return assertSkillRuntimeConfig(config, fsAdapter)
 }
@@ -231,7 +262,8 @@ function runtimeEnvFingerprint(): string {
     'SKILL_LEASE_TIMEOUT_MS', 'SKILL_MAX_ATTEMPTS', 'SKILL_EVENT_RETENTION_DAYS',
     'SKILL_ARTIFACT_RETENTION_DAYS', 'SKILL_PACKAGE_DATA_ROOT', 'SKILL_ARTIFACT_ROOT',
     'SKILL_EXPORT_ROOT', 'SKILL_MAX_PACKAGE_BYTES', 'SKILL_MAX_PACKAGE_FILES',
-    'SKILL_MAX_FILE_BYTES', 'SKILL_MAX_RUN_DURATION_MS', 'DATA_DIR',
+    'SKILL_MAX_FILE_BYTES', 'SKILL_MAX_RUN_DURATION_MS', 'SKILL_GITHUB_REQUEST_TIMEOUT_MS',
+    'SKILL_GITHUB_MAX_ARCHIVE_BYTES', 'SKILL_GITHUB_ALLOWED_HOSTS', 'DATA_DIR',
   ]
   return keys.map((key) => `${key}=${process.env[key] ?? ''}`).join('|')
 }
@@ -271,6 +303,9 @@ export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): S
       maxPackageFiles: config.maxPackageFiles,
       maxFileBytes: config.maxFileBytes,
       maxRunDurationMs: config.maxRunDurationMs,
+      githubRequestTimeoutMs: config.githubRequestTimeoutMs,
+      githubMaxArchiveBytes: config.githubMaxArchiveBytes,
+      githubAllowedHosts: [...config.githubAllowedHosts],
     },
   }
 }

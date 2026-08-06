@@ -222,6 +222,17 @@ describe('PackageInstaller', () => {
       kind: 'github-archive', repositoryUrl: 'https://github.com/owner/repo', ref: 'main', subdirectory: 'skills',
     } as const
     const inspected = await installer.inspect(source)
+    const repeated = await installer.inspect(source)
+    expect(repeated.sourceFingerprint).toBe(inspected.sourceFingerprint)
+    expect(repeated.resolvedCommitSha).toBe('a'.repeat(40))
+    expect(inspected.packages[0].sourceSnapshot).toMatchObject({
+      sourceUrl: source.repositoryUrl,
+      sourceRef: source.ref,
+      sourceCommit: 'a'.repeat(40),
+      resolvedCommitSha: 'a'.repeat(40),
+      archiveSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      fetchedAt: expect.any(String),
+    })
     const result = await installer.install(source, {
       reviewId: inspected.reviewId,
       sourceFingerprint: inspected.sourceFingerprint,
@@ -233,8 +244,43 @@ describe('PackageInstaller', () => {
       `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
       'https://api.github.com/repos/owner/repo/commits/main',
       `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://api.github.com/repos/owner/repo/commits/main',
+      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
     ])
     expect(result.packages[0].sourceSnapshot.sourceCommit).toBe('a'.repeat(40))
+  })
+
+  it('creates a new immutable version when a GitHub ref resolves to a new commit', async () => {
+    const firstArchivePath = path.join(fixtureDir, 'archive-a.zip')
+    const secondArchivePath = path.join(fixtureDir, 'archive-b.zip')
+    writeStoredZip(firstArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote A\n' }])
+    writeStoredZip(secondArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote B\n' }])
+    const archives = {
+      ['a'.repeat(40)]: fs.readFileSync(firstArchivePath),
+      ['b'.repeat(40)]: fs.readFileSync(secondArchivePath),
+    }
+    let currentSha = 'a'.repeat(40)
+    globalThis.fetch = vi.fn(async (url: string | URL) => {
+      const value = String(url)
+      if (value.includes('/commits/main')) return new Response(JSON.stringify({ sha: currentSha }), { status: 200 })
+      return new Response(archives[currentSha as keyof typeof archives], { status: 200 })
+    }) as typeof fetch
+
+    const { PackageInstaller, client } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'github-archive' as const, repositoryUrl: 'https://github.com/owner/repo', ref: 'main', subdirectory: 'skills' }
+    const first = await installer.inspect(source)
+    await installer.install(source, { reviewId: first.reviewId, sourceFingerprint: first.sourceFingerprint, confirm: true })
+
+    currentSha = 'b'.repeat(40)
+    const second = await installer.inspect(source)
+    await installer.install(source, { reviewId: second.reviewId, sourceFingerprint: second.sourceFingerprint, confirm: true })
+
+    const { skill_versions } = await import('../../db/schema')
+    const versions = client.getOrmDb().select().from(skill_versions).all()
+    expect(versions).toHaveLength(2)
+    expect(versions.map((version) => JSON.parse(version.source_snapshot_json).sourceCommit).sort()).toEqual(['a'.repeat(40), 'b'.repeat(40)])
+    expect(first.sourceFingerprint).not.toBe(second.sourceFingerprint)
   })
 
   it.each([

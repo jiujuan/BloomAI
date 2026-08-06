@@ -9,12 +9,26 @@ import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
 import { SkillPackageReader } from './package-reader'
 import { packageInstallReviewService } from './package-install-review.service'
+import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGitHubCommit } from './github-source'
 
 
 type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
 type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string }
 type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
 export type PackageInstallSource = LocalDirectorySource | ZipSource | GitHubArchiveSource
+
+export type PackageSourceSnapshot = {
+  sourceSha256: string
+  sourceCommit?: string
+  sourceRef?: string
+  sourceUrl?: string
+  archiveUrl?: string
+  archiveSha256?: string
+  fetchedAt?: string
+  etag?: string
+  resolvedCommitSha?: string
+  files: Array<{ path: string; sha256: string; sizeBytes: number }>
+}
 
 export type InstalledPackage = {
   packageId: string
@@ -29,7 +43,7 @@ export type InstalledPackage = {
   diagnostics: NonNullable<SkillManifest['diagnostics']>
   importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
-  sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  sourceSnapshot: PackageSourceSnapshot
 }
 export type InspectedPackage = {
   sourceType: PackageInstallSource['kind']
@@ -39,7 +53,7 @@ export type InspectedPackage = {
   diagnostics: NonNullable<SkillManifest['diagnostics']>
   importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
-  sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  sourceSnapshot: PackageSourceSnapshot
 }
 
 
@@ -62,9 +76,9 @@ export type PackageInstallResult = {
 }
 
 export class PackageInstallError extends Error {
-  readonly code: 'PACKAGE_INSTALL_ERROR' | 'FEATURE_DISABLED'
+  readonly code: string
 
-  constructor(message: string, code: 'PACKAGE_INSTALL_ERROR' | 'FEATURE_DISABLED' = 'PACKAGE_INSTALL_ERROR') {
+  constructor(message: string, code: string = 'PACKAGE_INSTALL_ERROR') {
     super(message)
     this.name = 'PackageInstallError'
     this.code = code
@@ -85,6 +99,7 @@ export class PackageInstaller {
   async inspect(source: PackageInstallSource): Promise<{
     reviewId: string
     sourceFingerprint: string
+    resolvedCommitSha?: string
     packages: InspectedPackage[]
   }> {
     assertPackageImportEnabled()
@@ -116,7 +131,12 @@ export class PackageInstaller {
         sourceFingerprint: sourceSnapshot.sourceSha256,
         inspection: { sourceType: source.kind, sourceFingerprint: sourceSnapshot.sourceSha256, packages },
       })
-      return { reviewId: review.id, sourceFingerprint: sourceSnapshot.sourceSha256, packages }
+      return {
+        reviewId: review.id,
+        sourceFingerprint: sourceSnapshot.sourceSha256,
+        ...(sourceSnapshot.resolvedCommitSha ? { resolvedCommitSha: sourceSnapshot.resolvedCommitSha } : {}),
+        packages,
+      }
     } catch (error) {
       if (error instanceof PackageInstallError) throw error
       throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
@@ -180,7 +200,7 @@ export class PackageInstaller {
     selectedRoot: string
     roots: ReturnType<typeof getPackageRoots>
     source: PackageInstallSource
-    sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string }
+    sourceSnapshot: Omit<PackageSourceSnapshot, 'files'>
   }): Promise<InstalledPackage> {
     const files = collectFiles(data.skillDirectory)
     const resolvedManifest = resolveSkillManifest(data.skillDirectory)
@@ -278,7 +298,7 @@ function getPackageLimits() {
   } satisfies PackagePathPolicy
 }
 
-async function materializeSource(source: PackageInstallSource, target: string) {
+async function materializeSource(source: PackageInstallSource, target: string): Promise<Omit<PackageSourceSnapshot, 'files'>> {
   if (source.kind === 'local-directory') {
     const directory = path.resolve(source.directory)
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
@@ -292,48 +312,35 @@ async function materializeSource(source: PackageInstallSource, target: string) {
     extractZip(archive, target)
     return { sourceSha256: hashBuffer(archive), sourceRef: zipPath }
   }
-  const { owner, repository } = parseGitHubRepository(source.repositoryUrl)
-  const commitResponse = await fetch(`https://api.github.com/repos/${owner}/${repository}/commits/${encodeURIComponent(source.ref)}`)
-  if (!commitResponse.ok) throw new PackageInstallError(`Unable to resolve GitHub ref: ${source.ref}`)
-  const commit = await commitResponse.json() as { sha?: unknown }
-  if (typeof commit.sha !== 'string' || !/^[a-f0-9]{40}$/i.test(commit.sha)) throw new PackageInstallError('GitHub did not return a valid commit SHA')
-  const archiveResponse = await fetch(`https://github.com/${owner}/${repository}/archive/${commit.sha}.zip`)
-  if (!archiveResponse.ok) throw new PackageInstallError(`Unable to download GitHub archive for ${commit.sha}`)
-  const contentLength = Number(archiveResponse.headers.get('content-length'))
-  const limits = getPackageLimits()
-  if (Number.isFinite(contentLength) && contentLength > limits.maxArchiveBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
-  const archive = await readResponseBuffer(archiveResponse, limits.maxArchiveBytes)
-  extractZip(archive, target)
-  return { sourceSha256: hashBuffer(archive), sourceCommit: commit.sha, sourceRef: source.ref }
-}
-
-async function readResponseBuffer(response: Response, maxBytes: number): Promise<Buffer> {
-  if (!response.body) return Buffer.from(await response.arrayBuffer())
-  const reader = response.body.getReader()
-  const chunks: Buffer[] = []
-  let totalBytes = 0
+  let parsedSource
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      totalBytes += value.byteLength
-      if (totalBytes > maxBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
-      chunks.push(Buffer.from(value))
+    parsedSource = parseGitHubSource(source.repositoryUrl, source.ref, source.subdirectory)
+    const config = getSkillRuntimeConfig()
+    const { commitSha } = await resolveGitHubCommit(parsedSource, {
+      timeoutMs: config.githubRequestTimeoutMs,
+      allowedHosts: config.githubAllowedHosts,
+    })
+    const downloaded = await downloadGitHubArchive(parsedSource, commitSha, {
+      timeoutMs: config.githubRequestTimeoutMs,
+      maxArchiveBytes: config.githubMaxArchiveBytes,
+      allowedHosts: config.githubAllowedHosts,
+    })
+    extractZip(downloaded.archive, target)
+    return {
+      sourceSha256: downloaded.archiveSha256,
+      sourceCommit: downloaded.resolvedCommitSha,
+      sourceRef: downloaded.sourceRef,
+      sourceUrl: downloaded.sourceUrl,
+      archiveUrl: downloaded.archiveUrl,
+      archiveSha256: downloaded.archiveSha256,
+      fetchedAt: downloaded.fetchedAt,
+      ...(downloaded.etag ? { etag: downloaded.etag } : {}),
+      resolvedCommitSha: downloaded.resolvedCommitSha,
     }
-  } finally {
-    reader.releaseLock()
+  } catch (error) {
+    if (error instanceof GitHubSourceError) throw new PackageInstallError(error.message, error.code)
+    throw error
   }
-  return Buffer.concat(chunks, totalBytes)
-}
-
-function parseGitHubRepository(repositoryUrl: string) {
-  let url: URL
-  try { url = new URL(repositoryUrl) } catch { throw new PackageInstallError('GitHub repository URL must be valid') }
-  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com') throw new PackageInstallError('Only https://github.com repository URLs are supported')
-  const segments = url.pathname.split('/').filter(Boolean)
-  const repository = segments[1]?.replace(/\.git$/, '')
-  if (segments.length !== 2 || !/^[A-Za-z0-9_.-]+$/.test(segments[0]) || !repository || !/^[A-Za-z0-9_.-]+$/.test(repository)) throw new PackageInstallError('GitHub repository URL must identify exactly one owner and repository')
-  return { owner: segments[0], repository }
 }
 
 function extractZip(archive: Buffer, target: string): void {

@@ -24,6 +24,9 @@ describe('skill runtime config', () => {
     expect(config.githubImportEnabled).toBe(false)
     expect(config.npxImportEnabled).toBe(false)
     expect(config.creatorPublishEnabled).toBe(false)
+    expect(config.githubRequestTimeoutMs).toBe(15_000)
+    expect(config.githubMaxArchiveBytes).toBe(100 * 1024 * 1024)
+    expect(config.githubAllowedHosts).toEqual(['github.com', 'api.github.com', 'codeload.github.com'])
     expect(getSkillRuntimeCapabilities(config)).not.toHaveProperty('packageDataRoot')
   })
 
@@ -36,12 +39,18 @@ describe('skill runtime config', () => {
       SKILL_NPX_IMPORT_ENABLED: 'false',
       SKILL_WORKER_CONCURRENCY: '4',
       SKILL_MAX_ATTEMPTS: '5',
+      SKILL_GITHUB_REQUEST_TIMEOUT_MS: '30000',
+      SKILL_GITHUB_MAX_ARCHIVE_BYTES: '2000000',
+      SKILL_GITHUB_ALLOWED_HOSTS: 'github.com, api.github.com, codeload.github.com',
       SKILL_PACKAGE_DATA_ROOT: root(),
       SKILL_EXPORT_ROOT: root(),
     }, fsAdapter)
     expect(config.workerConcurrency).toBe(4)
     expect(config.maxAttempts).toBe(5)
     expect(config.githubImportEnabled).toBe(true)
+    expect(config.githubRequestTimeoutMs).toBe(30_000)
+    expect(config.githubMaxArchiveBytes).toBe(2_000_000)
+    expect(config.githubAllowedHosts).toEqual(['github.com', 'api.github.com', 'codeload.github.com'])
   })
 
   it.each([
@@ -49,8 +58,14 @@ describe('skill runtime config', () => {
     ['SKILL_WORKER_CONCURRENCY', '0'],
     ['SKILL_MAX_ATTEMPTS', '-1'],
     ['SKILL_WORKER_CONCURRENCY', '1.5'],
+    ['SKILL_GITHUB_REQUEST_TIMEOUT_MS', '0'],
+    ['SKILL_GITHUB_MAX_ARCHIVE_BYTES', '0'],
   ])('rejects invalid %s=%s', (key, value) => {
     expect(() => loadSkillRuntimeConfig({ [key]: value }, fsAdapter)).toThrow(SkillRuntimeConfigError)
+  })
+
+  it('rejects non-official GitHub hosts in the allowlist', () => {
+    expect(() => loadSkillRuntimeConfig({ SKILL_GITHUB_ALLOWED_HOSTS: 'github.com,evil.example' }, fsAdapter)).toThrow(/official GitHub host/)
   })
 
   it('rejects relative paths and overlapping roots', () => {
