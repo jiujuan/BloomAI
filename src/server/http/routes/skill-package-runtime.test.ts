@@ -65,6 +65,7 @@ describe('Skill Package Runtime HTTP API', () => {
     fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'http-runtime-fixture-'))
     exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'http-runtime-export-'))
     originalEnv = { ...process.env }
+    process.env.SKILL_EXPORT_ROOT = exportDir
   })
 
   afterEach(async () => {
@@ -347,6 +348,73 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(response.body.error.code).toBe('NOT_FOUND')
   })
 
+  it('lists, previews, updates, diffs, and switches immutable package versions', async () => {
+    const { app, skillPackageRepo } = await loadApi()
+    const { pkg, version: current, installation } = createRunnableFixture(skillPackageRepo)
+    const candidate = {
+      version: '2.0.0',
+      manifest: {
+        name: 'Runnable Package',
+        description: 'updated',
+        requestedCapabilities: [{ capability: 'web.search', scope: { allowedDomains: ['example.com'] } }],
+        prompt: 'private prompt must not be returned verbatim',
+        files: [{ path: 'SKILL.md', sha256: 'new-file-sha', sizeBytes: 128 }],
+      },
+      manifestHash: 'runnable-package-v2-hash',
+      packagePath: path.join(dataDir, 'packages', 'runnable-package-v2-hash'),
+      sourceSnapshot: { sourceSha256: 'runnable-package-v2-source', files: [{ path: 'SKILL.md', sha256: 'new-file-sha' }] },
+    }
+
+    const listed = await requestJson(app, `/skill-packages/${pkg.id}/versions`)
+    expect(listed.response.status).toBe(200)
+    expect(listed.body.data).toHaveLength(1)
+    expect(listed.body.data[0]).toMatchObject({ id: current.id, packageId: pkg.id, immutableHash: expect.any(String), status: 'runnable' })
+
+    const detail = await requestJson(app, `/skill-versions/${current.id}`)
+    expect(detail.response.status).toBe(200)
+    expect(detail.body.data).toMatchObject({ id: current.id, packageId: pkg.id, manifest: { name: 'Runnable Package' } })
+    expect(detail.body.data).not.toHaveProperty('manifest_json')
+
+    const preview = await requestJson(app, `/skill-packages/${pkg.id}/update/preview`, { method: 'POST', body: JSON.stringify(candidate) })
+    expect(preview.response.status).toBe(200)
+    expect(preview.body.data).toMatchObject({ packageId: pkg.id, currentVersionId: current.id, duplicate: false, checks: { compatible: true } })
+    expect(preview.body.data.diff.capabilities.added).toEqual(['web.search'])
+    expect(preview.body.data.diff.manifestChanges.find((change: any) => change.path === 'prompt')).toMatchObject({ to: { changed: true, sha256: expect.any(String) } })
+    expect(JSON.stringify(preview.body.data.diff)).not.toContain('private prompt must not be returned verbatim')
+
+    const updated = await requestJson(app, `/skill-packages/${pkg.id}/update`, { method: 'POST', body: JSON.stringify({ ...candidate, confirm: true }) })
+    expect(updated.response.status).toBe(201)
+    expect(updated.body.data).toMatchObject({ packageId: pkg.id, duplicate: false, currentVersionId: current.id })
+    const nextVersionId = updated.body.data.version.id as string
+    expect(nextVersionId).not.toBe(current.id)
+    expect(skillPackageRepo.getInstallation(installation.id)).toMatchObject({ current_version_id: current.id, revision: 0 })
+
+    const diff = await requestJson(app, `/skill-versions/${current.id}/diff?toVersionId=${encodeURIComponent(nextVersionId)}`)
+    expect(diff.response.status).toBe(200)
+    expect(diff.body.data).toMatchObject({ fromVersionId: current.id, toVersionId: nextVersionId, sourceShaChanged: true, capabilities: { added: ['web.search'] } })
+    expect(JSON.stringify(diff.body.data)).not.toContain('private prompt must not be returned verbatim')
+
+    const switched = await requestJson(app, `/skill-installations/${installation.id}/switch-version`, {
+      method: 'POST',
+      body: JSON.stringify({ versionId: nextVersionId, expectedRevision: 0, idempotencyKey: 'switch-v2-http' }),
+    })
+    expect(switched.response.status).toBe(200)
+    expect(switched.body.data).toMatchObject({ id: installation.id, currentVersionId: nextVersionId, previousVersionId: current.id, revision: 1 })
+
+    const duplicateSwitch = await requestJson(app, `/skill-installations/${installation.id}/switch-version`, {
+      method: 'POST',
+      body: JSON.stringify({ versionId: nextVersionId, expectedRevision: 0, idempotencyKey: 'switch-v2-http' }),
+    })
+    expect(duplicateSwitch.response.status).toBe(200)
+    expect(duplicateSwitch.body.data).toMatchObject({ currentVersionId: nextVersionId, revision: 1 })
+
+    const conflict = await requestJson(app, `/skill-installations/${installation.id}/switch-version`, {
+      method: 'POST',
+      body: JSON.stringify({ versionId: current.id, expectedRevision: 0, idempotencyKey: 'stale-switch-http' }),
+    })
+    expect(conflict.response.status).toBe(409)
+    expect(conflict.body.error.code).toBe('REVISION_CONFLICT')
+  })
   it('lists, reads, and exports artifacts for a run', async () => {
     const { app, skillPackageRepo, ArtifactStore } = await loadApi()
     const { pkg } = createRunnableFixture(skillPackageRepo)
@@ -366,7 +434,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const exported = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId, destinationDir: exportDir }),
+      body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Export generated artifact for verification' }),
     })
     expect(exported.response.status).toBe(200)
     expect(exported.body.data.path).toBe(path.join(exportDir, 'summary.md'))
@@ -390,7 +458,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const otherRunExport = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir }),
+      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Verify artifact ownership enforcement' }),
     })
     expect(otherRunExport.response.status).toBe(404)
     expect(otherRunExport.body.error.code).toBe('NOT_FOUND')

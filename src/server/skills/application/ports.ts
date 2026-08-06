@@ -32,6 +32,11 @@ export type VersionSnapshot = {
   readonly packagePath: string
   readonly sourceSnapshot: JsonObject
   readonly isCompatible: boolean
+  readonly immutableHash?: string
+  readonly status?: string
+  readonly securityStatus?: string
+  readonly snapshotHash?: string
+  readonly publishedAt?: number | null
   readonly createdAt: number
 }
 
@@ -39,8 +44,15 @@ export type InstallationSnapshot = {
   readonly id: string
   readonly packageId: string
   readonly currentVersionId: string
+  readonly previousVersionId?: string | null
   readonly status: string
   readonly enabled: boolean
+  readonly revision?: number
+  readonly changedAt?: number | null
+  readonly disabledAt?: number | null
+  readonly uninstalledAt?: number | null
+  readonly deletedAt?: number | null
+  readonly rollbackReason?: string | null
   readonly installedAt: number
   readonly updatedAt: number
 }
@@ -235,9 +247,14 @@ export interface PackageSkillRepository {
     packagePath: string
     sourceSnapshot?: JsonObject
     isCompatible?: boolean
+    immutableHash?: string
+    status?: string
+    securityStatus?: string
+    snapshotHash?: string
   }): VersionSnapshot
   getVersion(id: string): VersionSnapshot | undefined
   listVersions(packageId: string): readonly VersionSnapshot[]
+  findVersionByImmutableHash?(packageId: string, immutableHash: string): VersionSnapshot | undefined
   createInstallation(data: {
     packageId: string
     currentVersionId: string
@@ -248,6 +265,7 @@ export interface PackageSkillRepository {
   setInstallationEnabled(id: string, enabled: boolean): InstallationSnapshot | undefined
   listInstallations(packageId: string): readonly InstallationSnapshot[]
   deleteInstallation(id: string): boolean
+  switchCurrentVersion?(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
   resolveRunnableVersion(referenceId: string): VersionSnapshot | undefined
   isPackageReference(referenceId: string): boolean
 }

@@ -12,6 +12,7 @@ import { PackageInstallReviewError, packageInstallReviewService } from '../skill
 import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
 import { SkillRunCoordinator } from '../skills/runtime'
 import { CapabilityGrantService, CapabilityGrantServiceError } from '../skills/application/capability-grant.service'
+import { createSkillVersionService, type SkillVersionCandidate } from '../skills/application/skill-version.service'
 import {
   SkillRunConflictError,
   SkillRunNotFoundError,
@@ -66,6 +67,12 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     clock,
     events: eventRepository,
   })
+  const skillVersionService = createSkillVersionService({
+    packages: packageRepository,
+    runs: { listRuns: (options) => runRepository.listRuns(options) },
+    grants: { listCapabilityGrants: (skillVersionId, options) => grantRepository.listCapabilityGrants(skillVersionId, options as any) },
+  })
+
   const dependencies: SkillPackageRuntimeDependencies = {
     ...overrides,
     packageRepository,
@@ -107,6 +114,30 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
 
     listPackages(page: { limit: number, offset: number }) {
       return mapRuntimeError(() => dependencies.packageRepository.listPackages(page))
+    },
+
+    listVersions(packageId: string) {
+      return mapRuntimeError(() => skillVersionService.listVersions(packageId))
+    },
+
+    getVersion(versionId: string) {
+      return mapRuntimeError(() => skillVersionService.getVersion(versionId))
+    },
+
+    diffVersions(fromVersionId: string, toVersionId: string) {
+      return mapRuntimeError(() => skillVersionService.diffVersions(fromVersionId, toVersionId))
+    },
+
+    previewVersionUpdate(packageId: string, candidate: SkillVersionCandidate) {
+      return mapRuntimeError(() => skillVersionService.previewUpdate(packageId, candidate))
+    },
+
+    updatePackageVersion(packageId: string, candidate: SkillVersionCandidate) {
+      return mapRuntimeError(() => skillVersionService.updatePackage(packageId, candidate))
+    },
+
+    switchCurrentVersion(installationId: string, versionId: string, options: { expectedRevision: number; idempotencyKey: string }) {
+      return mapRuntimeError(() => skillVersionService.switchCurrent(installationId, versionId, options))
     },
 
     getPackageDetail(id: string) {
@@ -247,10 +278,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       })
     },
 
-    exportArtifact(artifactId: string, runId: string, destinationDir: string) {
+    exportArtifact(artifactId: string, runId: string, destinationDir: string, options: { confirmed: true; actor?: string; auditReason: string }) {
       return mapRuntimeError(() => {
         dependencies.coordinator.getRun(runId)
-        return dependencies.artifactStore.exportArtifact({ artifactId, runId, destinationDir })
+        return dependencies.artifactStore.exportArtifact({ artifactId, runId, destinationDir, confirmed: options.confirmed, actor: options.actor, auditReason: options.auditReason })
       })
     },
   }

@@ -88,10 +88,16 @@ export function getExpectedSchemaContract(): SchemaContract {
           package_path: required,
           source_snapshot_json: required,
           is_compatible: required,
+          immutable_hash: required,
+          status: required,
+          security_status: required,
+          snapshot_hash: required,
+          published_at: optional,
           created_at: required,
         },
         indexes: {
           idx_skill_versions_package: { columns: ['package_id'] },
+          idx_skill_versions_immutable_hash: { columns: ['package_id', 'immutable_hash'] },
         },
       },
       skill_installations: {
@@ -103,10 +109,32 @@ export function getExpectedSchemaContract(): SchemaContract {
           enabled: required,
           installed_at: required,
           updated_at: required,
+          previous_version_id: optional,
+          revision: required,
+          changed_at: optional,
+          disabled_at: optional,
+          uninstalled_at: optional,
+          deleted_at: optional,
+          rollback_reason: optional,
         },
         indexes: {
           idx_skill_installations_package: { columns: ['package_id'] },
+          idx_skill_installations_current_version: { columns: ['current_version_id'] },
         },
+      },
+      skill_installation_commands: {
+        columns: {
+          id,
+          installation_id: required,
+          idempotency_key: required,
+          result_json: required,
+          created_at: required,
+        },
+        indexes: {
+          idx_skill_installation_commands_installation: { columns: ['installation_id', 'created_at'] },
+          idx_skill_installation_commands_idempotency: { columns: ['installation_id', 'idempotency_key'] },
+        },
+        foreignKeys: [{ from: 'installation_id', table: 'skill_installations', to: 'id' }],
       },
       skill_runs_v2: {
         columns: {

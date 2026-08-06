@@ -7,6 +7,7 @@ import {
   skill_artifacts,
   skill_capability_grants,
   skill_installations,
+  skill_installation_commands,
   skill_import_reviews,
   skill_version_snapshots,
   skill_run_commands,
@@ -94,6 +95,10 @@ export const skillPackageRepo = {
     packagePath: string
     sourceSnapshot?: Record<string, unknown>
     isCompatible?: boolean
+    immutableHash?: string
+    status?: string
+    securityStatus?: string
+    snapshotHash?: string
   }) {
     const row = {
       id: uuidv4(),
@@ -105,6 +110,11 @@ export const skillPackageRepo = {
       package_path: data.packagePath,
       source_snapshot_json: stringifyJsonObject(data.sourceSnapshot ?? {}, 'sourceSnapshot'),
       is_compatible: data.isCompatible === false ? 0 : 1,
+      immutable_hash: data.immutableHash ?? '',
+      status: data.status ?? 'runnable',
+      security_status: data.securityStatus ?? 'unreviewed',
+      snapshot_hash: data.snapshotHash ?? '',
+      published_at: null,
       created_at: Date.now(),
     }
     getOrmDb().insert(skill_versions).values(row).run()
@@ -120,6 +130,51 @@ export const skillPackageRepo = {
       .orderBy(desc(skill_versions.created_at)).all()
   },
 
+
+  findVersionByImmutableHash(packageId: string, immutableHash: string) {
+    return getOrmDb().select().from(skill_versions).where(and(
+      eq(skill_versions.package_id, packageId),
+      eq(skill_versions.immutable_hash, immutableHash),
+    )).orderBy(desc(skill_versions.created_at)).get()
+  },
+
+  switchCurrentVersion(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string }) {
+    return getOrmDb().transaction((tx) => {
+      const existing = tx.select().from(skill_installation_commands).where(and(
+        eq(skill_installation_commands.installation_id, data.installationId),
+        eq(skill_installation_commands.idempotency_key, data.idempotencyKey),
+      )).get()
+      if (existing) return JSON.parse(existing.result_json)
+
+      const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!installation || installation.revision !== data.expectedRevision) return undefined
+      const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
+      if (!target || target.package_id !== installation.package_id) return undefined
+
+      const now = Date.now()
+      const result = tx.update(skill_installations).set({
+        previous_version_id: installation.current_version_id,
+        current_version_id: data.versionId,
+        revision: installation.revision + 1,
+        changed_at: now,
+        updated_at: now,
+      }).where(and(
+        eq(skill_installations.id, data.installationId),
+        eq(skill_installations.revision, data.expectedRevision),
+      )).run()
+      if (result.changes !== 1) return undefined
+      const updated = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!updated) return undefined
+      tx.insert(skill_installation_commands).values({
+        id: uuidv4(),
+        installation_id: data.installationId,
+        idempotency_key: data.idempotencyKey,
+        result_json: JSON.stringify(updated),
+        created_at: now,
+      }).run()
+      return updated
+    })
+  },
 
   createImportReview(data: {
     source: string
@@ -217,6 +272,11 @@ export const skillPackageRepo = {
         package_path: data.version.packagePath,
         source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
         is_compatible: data.version.isCompatible === false ? 0 : 1,
+        immutable_hash: (data.version as any).immutableHash ?? '',
+        status: (data.version as any).status ?? 'runnable',
+        security_status: (data.version as any).securityStatus ?? 'unreviewed',
+        snapshot_hash: (data.version as any).snapshotHash ?? '',
+        published_at: null,
         created_at: now,
       }
       tx.insert(skill_versions).values(versionRow).run()
@@ -1008,6 +1068,10 @@ export function createSqlitePackageRepository(): PackageSkillRepository {
     listVersions(packageId) {
       return skillPackageRepo.listVersions(packageId).map(mapVersion)
     },
+    findVersionByImmutableHash(packageId, immutableHash) {
+      const row = skillPackageRepo.findVersionByImmutableHash(packageId, immutableHash)
+      return row ? mapVersion(row) : undefined
+    },
     createInstallation(data) {
       return mapInstallation(skillPackageRepo.createInstallation(data))
     },
@@ -1024,6 +1088,10 @@ export function createSqlitePackageRepository(): PackageSkillRepository {
     },
     deleteInstallation(id) {
       return skillPackageRepo.deleteInstallation(id)
+    },
+    switchCurrentVersion(data) {
+      const row = skillPackageRepo.switchCurrentVersion(data)
+      return row ? mapInstallation(row) : undefined
     },
     resolveRunnableVersion(referenceId) {
       const row = skillPackageRepo.resolveRunnableVersion(referenceId)
@@ -1225,11 +1293,42 @@ function mapPackage(row: any): PackageSnapshot {
 }
 
 function mapVersion(row: any): VersionSnapshot {
-  return { id: row.id, packageId: row.package_id, version: row.version, runtime: row.runtime, manifest: parseObject(row.manifest_json, 'manifest'), manifestHash: row.manifest_hash, packagePath: row.package_path, sourceSnapshot: parseObject(row.source_snapshot_json, 'source snapshot'), isCompatible: row.is_compatible === 1, createdAt: row.created_at }
+  return {
+    id: row.id,
+    packageId: row.package_id,
+    version: row.version,
+    runtime: row.runtime,
+    manifest: parseObject(row.manifest_json, 'manifest'),
+    manifestHash: row.manifest_hash,
+    packagePath: row.package_path,
+    sourceSnapshot: parseObject(row.source_snapshot_json, 'source snapshot'),
+    isCompatible: row.is_compatible === 1,
+    immutableHash: row.immutable_hash ?? '',
+    status: row.status ?? 'runnable',
+    securityStatus: row.security_status ?? 'unreviewed',
+    snapshotHash: row.snapshot_hash ?? '',
+    publishedAt: row.published_at ?? null,
+    createdAt: row.created_at,
+  }
 }
 
 function mapInstallation(row: any): InstallationSnapshot {
-  return { id: row.id, packageId: row.package_id, currentVersionId: row.current_version_id, status: row.status, enabled: row.enabled === 1, installedAt: row.installed_at, updatedAt: row.updated_at }
+  return {
+    id: row.id,
+    packageId: row.package_id,
+    currentVersionId: row.current_version_id,
+    previousVersionId: row.previous_version_id ?? null,
+    status: row.status,
+    enabled: row.enabled === 1,
+    revision: row.revision ?? 0,
+    changedAt: row.changed_at ?? null,
+    disabledAt: row.disabled_at ?? null,
+    uninstalledAt: row.uninstalled_at ?? null,
+    deletedAt: row.deleted_at ?? null,
+    rollbackReason: row.rollback_reason ?? null,
+    installedAt: row.installed_at,
+    updatedAt: row.updated_at,
+  }
 }
 
 function mapRun(row: any): RunSnapshot {

@@ -28,6 +28,23 @@ const packageInstallSchema = z.object({
 const importReviewDecisionSchema = z.object({ reviewer: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
 
 const installationUpdateSchema = z.object({ enabled: z.boolean() })
+const versionCandidateSchema = z.object({
+  version: z.string().trim().min(1).max(100),
+  manifest: jsonObjectSchema,
+  manifestHash: z.string().trim().min(1).max(200),
+  packagePath: z.string().trim().min(1).max(1000),
+  sourceSnapshot: jsonObjectSchema.optional(),
+  isCompatible: z.boolean().optional(),
+  status: z.string().trim().min(1).max(40).optional(),
+  securityStatus: z.string().trim().min(1).max(40).optional(),
+  snapshotHash: z.string().trim().max(200).optional(),
+}).strict()
+const versionUpdateSchema = versionCandidateSchema.extend({ confirm: z.literal(true) }).strict()
+const versionSwitchSchema = z.object({
+  versionId: idSchema,
+  expectedRevision: z.number().int().nonnegative(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+}).strict()
 const grantApproveSchema = z.object({ actor: idSchema, scope: jsonObjectSchema.optional(), expiresAt: z.number().int().positive().nullable().optional() }).strict()
 const grantRejectSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
 const grantRevokeSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
@@ -53,7 +70,7 @@ const commandSchema = z.discriminatedUnion('type', [
 ])
 const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() })
 const artifactContentQuerySchema = z.object({ runId: idSchema })
-const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1) })
+const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1), confirmed: z.literal(true), actor: idSchema.optional(), auditReason: z.string().trim().min(1).max(500) }).strict()
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
@@ -96,10 +113,40 @@ skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
   try { return c.json({ data: toPackageDetailHttpDto(skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id')))) }) } catch (error) { return errorResponse(c, error) }
 })
+skillPackageRuntimeRoutes.get('/skill-packages/:id/versions', (c) => {
+  try { return c.json({ data: skillPackageRuntimeService.listVersions(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-versions/:id', (c) => {
+  try { return c.json({ data: skillPackageRuntimeService.getVersion(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-versions/:id/diff', (c) => {
+  try {
+    const toVersionId = idSchema.parse(c.req.query('toVersionId'))
+    return c.json({ data: skillPackageRuntimeService.diffVersions(idSchema.parse(c.req.param('id')), toVersionId) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-packages/:id/update/preview', async (c) => {
+  try {
+    const candidate = await readValidated(c, versionCandidateSchema)
+    return c.json({ data: await skillPackageRuntimeService.previewVersionUpdate(idSchema.parse(c.req.param('id')), candidate) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-packages/:id/update', async (c) => {
+  try {
+    const { confirm: _confirm, ...candidate } = await readValidated(c, versionUpdateSchema)
+    return c.json({ data: await skillPackageRuntimeService.updatePackageVersion(idSchema.parse(c.req.param('id')), candidate) }, 201)
+  } catch (error) { return errorResponse(c, error) }
+})
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
   try {
     const installation = skillPackageRuntimeService.setInstallationEnabled(idSchema.parse(c.req.param('id')), (await readValidated(c, installationUpdateSchema)).enabled)
     return c.json({ data: toInstallationHttpDto(installation) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-installations/:id/switch-version', async (c) => {
+  try {
+    const input = await readValidated(c, versionSwitchSchema)
+    return c.json({ data: toInstallationHttpDto(skillPackageRuntimeService.switchCurrentVersion(idSchema.parse(c.req.param('id')), input.versionId, input)) })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
@@ -170,7 +217,7 @@ skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
 skillPackageRuntimeRoutes.post('/skill-artifacts/:id/export', async (c) => {
   try {
     const body = await readValidated(c, artifactExportSchema)
-    return c.json({ data: { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir) } })
+    return c.json({ data: { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir, body) } })
   } catch (error) { return errorResponse(c, error) }
 })
 
@@ -204,5 +251,6 @@ function pageMeta(page: { limit: number; offset: number }, total: number) { retu
 function errorResponse(c: Context, error: unknown) {
   if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)
   const response = mapErrorToHttpResponse(error)
+
   return c.json(response.body, response.status)
 }

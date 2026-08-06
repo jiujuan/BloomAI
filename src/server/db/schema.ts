@@ -182,9 +182,15 @@ export const skill_versions = sqliteTable('skill_versions', {
   package_path: text('package_path').notNull(),
   source_snapshot_json: text('source_snapshot_json').notNull().default('{}'),
   is_compatible: integer('is_compatible').notNull().default(1),
+  immutable_hash: text('immutable_hash').notNull().default(''),
+  status: text('status').notNull().default('runnable'),
+  security_status: text('security_status').notNull().default('unreviewed'),
+  snapshot_hash: text('snapshot_hash').notNull().default(''),
+  published_at: integer('published_at'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   packageIdx: index('idx_skill_versions_package').on(table.package_id),
+  immutableIdx: index('idx_skill_versions_immutable_hash').on(table.package_id, table.immutable_hash),
 }))
 
 export const skill_installations = sqliteTable('skill_installations', {
@@ -195,8 +201,28 @@ export const skill_installations = sqliteTable('skill_installations', {
   enabled: integer('enabled').notNull().default(1),
   installed_at: integer('installed_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  previous_version_id: text('previous_version_id'),
+  revision: integer('revision').notNull().default(0),
+  changed_at: integer('changed_at'),
+  disabled_at: integer('disabled_at'),
+  uninstalled_at: integer('uninstalled_at'),
+  deleted_at: integer('deleted_at'),
+  rollback_reason: text('rollback_reason'),
 }, (table) => ({
   packageIdx: index('idx_skill_installations_package').on(table.package_id),
+  currentVersionIdx: index('idx_skill_installations_current_version').on(table.current_version_id),
+}))
+
+
+export const skill_installation_commands = sqliteTable('skill_installation_commands', {
+  id: text('id').primaryKey(),
+  installation_id: text('installation_id').notNull(),
+  idempotency_key: text('idempotency_key').notNull(),
+  result_json: text('result_json').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  installationIdx: index('idx_skill_installation_commands_installation').on(table.installation_id, table.created_at),
+  idempotencyIdx: index('idx_skill_installation_commands_idempotency').on(table.installation_id, table.idempotency_key),
 }))
 
 export const skill_runs_v2 = sqliteTable('skill_runs_v2', {

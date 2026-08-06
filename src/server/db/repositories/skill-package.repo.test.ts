@@ -173,4 +173,40 @@ describe('skillPackageRepo', () => {
     })).toBeUndefined()
   })
 
+  it('stores immutable version lifecycle fields and switches installations with CAS and idempotency', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const pkg = skillPackageRepo.createPackage({ name: 'Versioned Pkg', description: '', sourceType: 'local-directory' })
+    const first = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '1.0.0',
+      manifest: { name: 'v1' },
+      manifestHash: 'manifest-v1',
+      packagePath: '/packages/v1',
+      immutableHash: 'immutable-v1',
+      status: 'runnable',
+      securityStatus: 'verified',
+      snapshotHash: 'snapshot-v1',
+    })
+    const second = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '2.0.0',
+      manifest: { name: 'v2' },
+      manifestHash: 'manifest-v2',
+      packagePath: '/packages/v2',
+      immutableHash: 'immutable-v2',
+      status: 'runnable',
+      securityStatus: 'verified',
+      snapshotHash: 'snapshot-v2',
+    })
+    const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: first.id, status: 'installed' })
+
+    expect(skillPackageRepo.findVersionByImmutableHash(pkg.id, 'immutable-v2')?.id).toBe(second.id)
+    expect(skillPackageRepo.getVersion(second.id)).toMatchObject({ immutable_hash: 'immutable-v2', status: 'runnable', security_status: 'verified', snapshot_hash: 'snapshot-v2' })
+
+    const switched = skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: second.id, expectedRevision: 0, idempotencyKey: 'switch-v2' })
+    expect(switched).toMatchObject({ current_version_id: second.id, previous_version_id: first.id, revision: 1 })
+    expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: first.id, expectedRevision: 0, idempotencyKey: 'stale' })).toBeUndefined()
+    expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: second.id, expectedRevision: 0, idempotencyKey: 'switch-v2' })).toMatchObject({ current_version_id: second.id, revision: 1 })
+  })
+
 })
