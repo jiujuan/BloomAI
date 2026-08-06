@@ -194,6 +194,11 @@ export const skillPackageRepo = {
       required_action_json: null,
       worker_id: null,
       heartbeat_at: null,
+      execution_mode: 'instruction-agent',
+      step_count: 0,
+      token_usage: 0,
+      last_heartbeat_at: null,
+      result_summary: null,
     }
     getOrmDb().insert(skill_runs_v2).values(row).run()
     return row
@@ -235,6 +240,11 @@ export const skillPackageRepo = {
       required_action_json: null,
       worker_id: null,
       heartbeat_at: null,
+      execution_mode: 'instruction-agent',
+      step_count: 0,
+      token_usage: 0,
+      last_heartbeat_at: null,
+      result_summary: null,
     }
     const queue = {
       id: uuidv4(),
@@ -298,6 +308,11 @@ export const skillPackageRepo = {
       requiredAction?: Record<string, unknown> | null
       workerId?: string | null
       heartbeatAt?: number | null
+      executionMode?: string
+      stepCount?: number
+      tokenUsage?: number
+      lastHeartbeatAt?: number | null
+      resultSummary?: string | null
     }
     event: { schemaVersion: number; producer?: string; occurredAt?: number; type: string; payload: Record<string, unknown> }
     command?: { idempotencyKey: string }
@@ -328,6 +343,11 @@ export const skillPackageRepo = {
         ...(changes.requiredAction === undefined ? {} : { required_action_json: changes.requiredAction === null ? null : stringifyJsonObject(changes.requiredAction, 'requiredAction') }),
         ...(changes.workerId === undefined ? {} : { worker_id: changes.workerId }),
         ...(changes.heartbeatAt === undefined ? {} : { heartbeat_at: changes.heartbeatAt }),
+        ...(changes.executionMode === undefined ? {} : { execution_mode: changes.executionMode }),
+        ...(changes.stepCount === undefined ? {} : { step_count: changes.stepCount }),
+        ...(changes.tokenUsage === undefined ? {} : { token_usage: changes.tokenUsage }),
+        ...(changes.lastHeartbeatAt === undefined ? {} : { last_heartbeat_at: changes.lastHeartbeatAt }),
+        ...(changes.resultSummary === undefined ? {} : { result_summary: changes.resultSummary }),
         revision: data.expectedRevision + 1,
         updated_at: now,
       }).where(and(
@@ -967,6 +987,11 @@ function mapRun(row: any): RunSnapshot {
     requiredAction: row.required_action_json === null || row.required_action_json === undefined ? null : parseObject(row.required_action_json, 'required action'),
     workerId: row.worker_id ?? null,
     heartbeatAt: row.heartbeat_at ?? null,
+    executionMode: row.execution_mode ?? 'instruction-agent',
+    stepCount: row.step_count ?? 0,
+    tokenUsage: row.token_usage ?? 0,
+    lastHeartbeatAt: row.last_heartbeat_at ?? row.heartbeat_at ?? null,
+    resultSummary: row.result_summary ?? null,
   }
 }
 

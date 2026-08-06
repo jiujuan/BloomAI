@@ -252,6 +252,11 @@ export class FakeSkillRunRepository implements SkillRunRepository {
       requiredAction: null,
       workerId: null,
       heartbeatAt: null,
+      executionMode: 'instruction-agent',
+      stepCount: 0,
+      tokenUsage: 0,
+      lastHeartbeatAt: null,
+      resultSummary: null,
     }
     this.runs.set(run.id, run)
     return clone(run)

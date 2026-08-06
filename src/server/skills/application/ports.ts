@@ -95,6 +95,11 @@ export type RunSnapshot = {
   readonly requiredAction: JsonObject | null
   readonly workerId: string | null
   readonly heartbeatAt: number | null
+  readonly executionMode: string
+  readonly stepCount: number
+  readonly tokenUsage: number
+  readonly lastHeartbeatAt: number | null
+  readonly resultSummary: string | null
 }
 
 export type RunEventSnapshot = {
@@ -125,6 +130,11 @@ export type RunChange = {
   readonly requiredAction?: JsonObject | null
   readonly workerId?: string | null
   readonly heartbeatAt?: number | null
+  readonly executionMode?: string
+  readonly stepCount?: number
+  readonly tokenUsage?: number
+  readonly lastHeartbeatAt?: number | null
+  readonly resultSummary?: string | null
 }
 
 export type RunChangeEvent = {

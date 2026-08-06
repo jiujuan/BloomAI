@@ -3,7 +3,8 @@ import { getSkillRuntimeConfig, type SkillRuntimeConfig } from '../config/skill-
 import type { SkillRuntimePorts } from '../application/ports'
 import { SkillRunCoordinator } from './skill-run-coordinator'
 import { PersistentSkillRunQueue } from './skill-run-queue'
-import { SkillRunWorker, type SkillRunExecutor } from './skill-run-worker'
+import { SkillRunWorker, type SkillRunAdapter, type SkillRunExecutor } from './skill-run-worker'
+import { InstructionAgentAdapter, type InstructionAgentExecutor } from '../adapters/instruction-agent-adapter'
 
 export type SkillRuntimeCompositionOptions = {
   readonly config?: SkillRuntimeConfig
@@ -11,6 +12,8 @@ export type SkillRuntimeCompositionOptions = {
   readonly coordinator?: SkillRunCoordinator
   readonly queue?: PersistentSkillRunQueue
   readonly executor?: SkillRunExecutor
+  readonly adapter?: SkillRunAdapter
+  readonly instructionAgentExecutor?: InstructionAgentExecutor
 }
 
 export type SkillRuntimeComposition = {
@@ -44,11 +47,23 @@ export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {})
     clock: ports.clock,
     queue: ports.queue,
   })
-  const worker = options.executor
+  const adapter = options.adapter ?? (options.instructionAgentExecutor
+    ? new InstructionAgentAdapter({
+      executor: options.instructionAgentExecutor,
+      coordinator,
+      packages: ports.packages,
+      events: ports.events,
+      maxDurationMs: config.maxRunDurationMs,
+      maxLoadedFiles: config.maxPackageFiles,
+      maxFileBytes: config.maxFileBytes,
+    })
+    : undefined)
+  const worker = options.executor || adapter
     ? new SkillRunWorker({
       queue,
       coordinator,
       executor: options.executor,
+      adapter,
       concurrency: config.workerConcurrency,
       leaseMs: config.leaseTimeoutMs,
     })

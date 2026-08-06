@@ -111,12 +111,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(33)
+    expect(migrationVersions()).toHaveLength(34)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(33)
+    expect(migrationVersions()).toHaveLength(34)
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -215,6 +215,7 @@ describe('database migrations', () => {
       '031-skill-version-drafts-and-snapshots',
       '032-skill-run-state-machine',
       '033-skill-run-event-protocol',
+      '034-skill-run-execution-metrics',
     ])
     const emptyDb = openRawDb()
     try {
@@ -763,3 +764,4 @@ describe('database migrations', () => {
     }
   })
 })
+

@@ -5,9 +5,13 @@ import { SkillRunCoordinator } from './skill-run-coordinator'
 import { PersistentSkillRunQueue } from './skill-run-queue'
 
 export type SkillRunExecutionResult = {
-  readonly status?: 'completed' | 'completed_with_errors' | 'waiting_input' | 'waiting_approval'
+  readonly status?: 'completed' | 'completed_with_errors' | 'waiting_input' | 'waiting_approval' | 'failed' | 'cancelled'
   readonly output?: JsonObject | null
   readonly waitingReason?: string | null
+}
+
+export type SkillRunAdapter = {
+  run(runId: string): Promise<SkillRun>
 }
 
 export type SkillRunExecutor = (
@@ -18,7 +22,8 @@ export type SkillRunExecutor = (
 export type SkillRunWorkerOptions = {
   readonly queue: PersistentSkillRunQueue
   readonly coordinator: SkillRunCoordinator
-  readonly executor: SkillRunExecutor
+  readonly executor?: SkillRunExecutor
+  readonly adapter?: SkillRunAdapter
   readonly workerId?: string
   readonly concurrency?: number
   readonly leaseMs?: number
@@ -45,6 +50,7 @@ export class SkillRunWorker {
     this.retryDelayMs = options.retryDelayMs ?? ((attempt) => Math.min(60_000, 100 * 2 ** Math.max(0, attempt - 1)))
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) throw new Error('concurrency must be a positive integer')
     if (!Number.isInteger(this.leaseMs) || this.leaseMs < 1) throw new Error('leaseMs must be a positive integer')
+    if (!options.executor && !options.adapter) throw new Error('executor or adapter is required')
     if (!Number.isInteger(this.pollIntervalMs) || this.pollIntervalMs < 0) throw new Error('pollIntervalMs must be a non-negative integer')
   }
 
@@ -103,7 +109,9 @@ export class SkillRunWorker {
         return true
       }
 
-      const result = await this.options.executor(run, { queueItem: item, signal: abortController.signal })
+      const result = this.options.adapter
+        ? toExecutionResult(await this.options.adapter.run(run.id))
+        : await this.options.executor!(run, { queueItem: item, signal: abortController.signal })
       const refreshed = this.options.coordinator.getRun(run.id)
       if (result?.status) {
         if (!isTerminal(refreshed.status) && refreshed.status !== 'waiting_input' && refreshed.status !== 'waiting_approval') {
@@ -172,6 +180,13 @@ export class SkillRunWorker {
     }
     this.loopPromise = undefined
   }
+}
+
+function toExecutionResult(run: SkillRun): SkillRunExecutionResult {
+  const status = ['completed', 'completed_with_errors', 'waiting_input', 'waiting_approval', 'failed', 'cancelled'].includes(run.status)
+    ? run.status as SkillRunExecutionResult['status']
+    : undefined
+  return { status, output: run.output, waitingReason: run.waitingReason }
 }
 
 function isTerminal(status: SkillRun['status']): boolean {

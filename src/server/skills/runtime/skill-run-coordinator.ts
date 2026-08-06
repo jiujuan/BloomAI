@@ -63,6 +63,11 @@ export type SkillRun = {
   requiredAction: Record<string, unknown> | null
   workerId: string | null
   heartbeatAt: number | null
+  executionMode: string
+  stepCount: number
+  tokenUsage: number
+  lastHeartbeatAt: number | null
+  resultSummary: string | null
 }
 
 export type SkillRunEvent = {
@@ -219,10 +224,10 @@ export class SkillRunCoordinator {
   }
 
   dispatchCommand(runId: string, command: SkillRunCommand): SkillRun {
+    const current = this.getRun(runId)
     const parsed = commandSchema.parse(command)
     const previous = this.runs.getCommandResult(runId, parsed.idempotencyKey)
     if (previous) return mapRun(previous)
-    const current = this.getRun(runId)
     if (parsed.type === 'confirm' || parsed.type === 'approve') {
       return this.applyCommandTransition(runId, current, parsed, 'running', {})
     }
@@ -313,6 +318,17 @@ export class SkillRunCoordinator {
     return mapRun(result.run)
   }
 
+  updateExecutionMetrics(runId: string, expectedRevision: number, usage: { stepCount: number; tokenUsage: number; lastHeartbeatAt: number }): SkillRun {
+    const result = this.runs.applyRunChange({
+      runId,
+      expectedRevision,
+      changes: { stepCount: usage.stepCount, tokenUsage: usage.tokenUsage, lastHeartbeatAt: usage.lastHeartbeatAt, heartbeatAt: usage.lastHeartbeatAt },
+      event: normalizeSkillRunEvent({ type: 'run.heartbeat', payload: { stepCount: usage.stepCount, tokenUsage: usage.tokenUsage } }),
+    })
+    if (!result) throw new SkillRunConflictError(runId)
+    return mapRun(result.run)
+  }
+
   private applyCommandChange(
     runId: string,
     current: SkillRun,
@@ -387,6 +403,11 @@ function mapRun(row: RunSnapshot): SkillRun {
     requiredAction: row.requiredAction,
     workerId: row.workerId,
     heartbeatAt: row.heartbeatAt,
+    executionMode: row.executionMode,
+    stepCount: row.stepCount,
+    tokenUsage: row.tokenUsage,
+    lastHeartbeatAt: row.lastHeartbeatAt,
+    resultSummary: row.resultSummary,
   }
 }
 

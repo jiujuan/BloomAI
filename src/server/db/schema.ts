@@ -222,6 +222,11 @@ export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
   required_action_json: text('required_action_json'),
   worker_id: text('worker_id'),
   heartbeat_at: integer('heartbeat_at'),
+  execution_mode: text('execution_mode').notNull().default('instruction-agent'),
+  step_count: integer('step_count').notNull().default(0),
+  token_usage: integer('token_usage').notNull().default(0),
+  last_heartbeat_at: integer('last_heartbeat_at'),
+  result_summary: text('result_summary'),
 }, (table) => ({
   versionIdx: index('idx_skill_runs_v2_version').on(table.skill_version_id),
   activeWorkerIdx: index('idx_skill_runs_v2_active_worker').on(table.status, table.worker_id, table.heartbeat_at),

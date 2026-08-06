@@ -1,12 +1,17 @@
 import { z } from 'zod'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { SkillPackageReader, type ReadAssetResult, type ReadTextResult } from '../packages/package-reader'
+import type { PackageSkillRepository, SkillRunEventRepository } from '../application/ports'
+import { SkillExecutionContext } from '../runtime/skill-execution-context'
 import { executeCapability, type CapabilityRequest, type CapabilityResult } from '../policy/capability-broker'
 import { SkillRunCoordinator, type SkillRun } from '../runtime/skill-run-coordinator'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 
 const DEFAULT_MAX_STEPS = 16
 const DEFAULT_MAX_TOKENS = 8_192
+const DEFAULT_MAX_DURATION_MS = 30 * 60 * 1000
+const DEFAULT_MAX_LOADED_FILES = 32
+const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 
 const manifestSchema = z.object({
   runtime: z.literal('instruction-agent'),
@@ -39,6 +44,7 @@ export type InstructionAgentExecutionContext = {
   completeStep: (title: string) => void
   consumeTokens: (count: number) => void
   isCancellationRequested: () => boolean
+  createArtifact?: (data: { kind: string; content: Buffer | string; mimeType?: string; metadata?: Record<string, unknown> }) => Promise<Record<string, unknown>>
 }
 
 export type InstructionAgentExecutor = {
@@ -64,6 +70,11 @@ export class InstructionAgentAdapter {
   private readonly executePackageCapability: (request: CapabilityRequest) => Promise<CapabilityResult>
   private readonly maxSteps: number
   private readonly maxTokens: number
+  private readonly maxDurationMs: number
+  private readonly maxLoadedFiles: number
+  private readonly maxFileBytes: number
+  private readonly packages: Pick<PackageSkillRepository, 'getVersion'> | undefined
+  private readonly events: SkillRunEventRepository | undefined
 
   constructor(options: {
     executor: InstructionAgentExecutor
@@ -71,12 +82,22 @@ export class InstructionAgentAdapter {
     executeCapability?: (request: CapabilityRequest) => Promise<CapabilityResult>
     maxSteps?: number
     maxTokens?: number
+    maxDurationMs?: number
+    maxLoadedFiles?: number
+    maxFileBytes?: number
+    packages?: Pick<PackageSkillRepository, 'getVersion'>
+    events?: SkillRunEventRepository
   }) {
     this.executor = options.executor
     this.coordinator = options.coordinator ?? new SkillRunCoordinator()
     this.executePackageCapability = options.executeCapability ?? executeCapability
     this.maxSteps = positiveInteger(options.maxSteps ?? DEFAULT_MAX_STEPS, 'maxSteps')
     this.maxTokens = positiveInteger(options.maxTokens ?? DEFAULT_MAX_TOKENS, 'maxTokens')
+    this.maxDurationMs = positiveInteger(options.maxDurationMs ?? DEFAULT_MAX_DURATION_MS, 'maxDurationMs')
+    this.maxLoadedFiles = positiveInteger(options.maxLoadedFiles ?? DEFAULT_MAX_LOADED_FILES, 'maxLoadedFiles')
+    this.maxFileBytes = positiveInteger(options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES, 'maxFileBytes')
+    this.packages = options.packages
+    this.events = options.events
   }
 
   private readonly executor: InstructionAgentExecutor
@@ -85,66 +106,48 @@ export class InstructionAgentAdapter {
     let run = this.coordinator.getRun(runId)
     try {
       if (run.cancelRequested) return this.cancel(run)
-      const version = skillPackageRepo.getVersion(run.skillVersionId)
+      const version = this.packages?.getVersion(run.skillVersionId) ?? skillPackageRepo.getVersion(run.skillVersionId)
       if (!version) throw new InstructionAgentAdapterError(`SkillVersion not found: ${run.skillVersionId}`)
-      if (version.is_compatible !== 1) throw new InstructionAgentAdapterError(`SkillVersion is incompatible: ${run.skillVersionId}`)
-      const manifest = parseManifest(version.manifest_json)
-      const reader = new SkillPackageReader(version.package_path)
+      const manifestValue = 'manifest' in version ? JSON.stringify(version.manifest) : version.manifest_json
+      const packagePath = 'packagePath' in version ? version.packagePath : version.package_path
+      const compatible = 'isCompatible' in version ? version.isCompatible : version.is_compatible === 1
+      if (!compatible) throw new InstructionAgentAdapterError(`SkillVersion is incompatible: ${run.skillVersionId}`)
+      const manifest = parseManifest(manifestValue)
+      const reader = new SkillPackageReader(packagePath, { maxFilesPerRun: this.maxLoadedFiles, maxReadBytes: this.maxFileBytes })
       const entry = reader.readEntry()
       this.recordFileLoaded(run.id, entry)
 
       run = this.startRunning(run)
       if (run.cancelRequested) return this.cancel(run)
 
-      let steps = 0
-      let tokens = 0
       const allowedCapabilities = [...new Set(manifest.requestedCapabilities.map((entry) => entry.capability))]
-      const context: InstructionAgentExecutionContext = {
+      const executionContext = new SkillExecutionContext({
         runId: run.id,
         instruction: entry.content,
         manifest,
         input: run.input,
         runContext: run.context,
-        maxSteps: this.maxSteps,
-        maxTokens: this.maxTokens,
         allowedCapabilities,
-        readText: (relativePath) => {
-          const file = reader.readText(relativePath)
-          this.recordFileLoaded(run.id, file)
-          return file
+        reader,
+        limits: {
+          maxSteps: this.maxSteps,
+          maxTokens: this.maxTokens,
+          maxDurationMs: this.maxDurationMs,
+          maxLoadedFiles: this.maxLoadedFiles,
+          maxFileBytes: this.maxFileBytes,
         },
-        readAsset: (relativePath) => {
-          const file = reader.readAsset(relativePath)
-          this.recordFileLoaded(run.id, file)
-          return file
-        },
-        executeCapability: async (capability, input) => {
-          if (!allowedCapabilities.includes(capability)) {
-            throw new InstructionAgentAdapterError(`Capability is not declared by this SkillVersion: ${capability}`)
-          }
-          return this.executePackageCapability({
-            caller: 'package-runtime',
-            capability,
-            input,
-            runId: run.id,
-            sessionId: run.sessionId ?? undefined,
-          })
-        },
-        startStep: (title) => {
-          steps += 1
-          if (steps > this.maxSteps) throw new InstructionAgentBudgetError(`Instruction Agent exceeded the ${this.maxSteps} step limit`)
-          this.recordEvent(run.id, 'step.started', { title })
-        },
-        completeStep: (title) => this.recordEvent(run.id, 'step.completed', { title }),
-        consumeTokens: (count) => {
-          tokens += positiveInteger(count, 'token count')
-          if (tokens > this.maxTokens) throw new InstructionAgentBudgetError(`Instruction Agent exceeded the ${this.maxTokens} token limit`)
-        },
+        executeCapability: (request) => this.executePackageCapability({
+          ...request,
+          sessionId: run.sessionId ?? undefined,
+        }),
         isCancellationRequested: () => this.coordinator.getRun(run.id).cancelRequested,
-      }
+        onFileLoaded: (file) => this.recordFileLoaded(run.id, file),
+        onEvent: (type, payload) => this.recordEvent(run.id, type, payload),
+        onUsage: (usage) => this.persistUsage(run.id, usage),
+      })
 
-      const result = executionResultSchema.parse(await this.executor.execute(context))
-      if (result.tokensUsed !== undefined) context.consumeTokens(result.tokensUsed)
+      const result = executionResultSchema.parse(await this.executor.execute(executionContext.toAgentContext()))
+      if (result.tokensUsed !== undefined) executionContext.consumeTokens(result.tokensUsed)
       const latest = this.coordinator.getRun(run.id)
       if (latest.cancelRequested || result.status === 'cancelled') return this.cancel(latest)
       if (result.status === 'waiting_input') {
@@ -167,7 +170,7 @@ export class InstructionAgentAdapter {
       if (latest.status === 'validating' || latest.status === 'running') {
         return this.coordinator.transition(runId, 'failed', {
           expectedRevision: latest.revision,
-          errorCode: error instanceof InstructionAgentBudgetError ? 'AGENT_BUDGET_EXCEEDED' : 'INSTRUCTION_AGENT_FAILED',
+          errorCode: isBudgetError(error) ? 'AGENT_BUDGET_EXCEEDED' : 'INSTRUCTION_AGENT_FAILED',
           errorMessage: error instanceof Error ? error.message : 'Instruction Agent execution failed',
         })
       }
@@ -194,11 +197,22 @@ export class InstructionAgentAdapter {
   }
 
   private recordEvent(runId: string, type: 'package.file_loaded' | 'step.started' | 'step.completed', payload: Record<string, unknown>): void {
-    skillPackageRepo.appendEvent({
-      runId,
-      seq: skillPackageRepo.listEvents(runId).length + 1,
-      ...normalizeSkillRunEvent({ type, payload }),
-    })
+    const event = normalizeSkillRunEvent({ type, payload })
+    if (this.events) {
+      this.events.appendEvent({ runId, seq: this.events.nextSequence(runId), ...event })
+      return
+    }
+    skillPackageRepo.appendEvent({ runId, seq: skillPackageRepo.listEvents(runId).length + 1, ...event })
+  }
+
+  private persistUsage(runId: string, usage: { stepCount: number; tokenUsage: number; lastHeartbeatAt: number }): void {
+    const run = this.coordinator.getRun(runId)
+    if (run.status !== 'running') return
+    try {
+      this.coordinator.updateExecutionMetrics(runId, run.revision, usage)
+    } catch {
+      // Usage is diagnostic; a concurrent terminal transition remains authoritative.
+    }
   }
 }
 
@@ -208,6 +222,10 @@ function parseManifest(value: string): z.infer<typeof manifestSchema> {
   } catch {
     throw new InstructionAgentAdapterError('SkillVersion manifest is invalid for the Instruction Agent runtime')
   }
+}
+
+function isBudgetError(error: unknown): boolean {
+  return error instanceof InstructionAgentBudgetError || error instanceof Error && /exceeded the .* (step|token|duration) limit|duration limit|file count limit|max file size limit/.test(error.message)
 }
 
 function positiveInteger(value: number, label: string): number {

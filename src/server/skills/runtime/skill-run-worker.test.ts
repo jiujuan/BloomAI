@@ -49,6 +49,23 @@ describe('SkillRunWorker', () => {
     expect(queue.list({ runId })).toMatchObject([{ status: 'dead', attempt: 2, lastError: 'boom' }])
   })
 
+
+  it('can execute through the run-scoped InstructionAgent adapter and converges on its persisted terminal state', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 40_000 })
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-1', input: {}, context: {} })
+    const adapter = { run: async (id: string) => {
+      expect(id).toBe(runId)
+      return coordinator.transition(id, 'completed', { expectedRevision: 2, output: { via: 'instruction-agent' } })
+    } }
+    const queue = new PersistentSkillRunQueue(ports.queue, { clock: ports.clock })
+    const worker = new SkillRunWorker({ queue, coordinator, adapter, workerId: 'adapter-worker' })
+
+    await expect(worker.runOne()).resolves.toBe(true)
+    expect(coordinator.getRun(runId)).toMatchObject({ status: 'completed', output: { via: 'instruction-agent' } })
+    expect(queue.list({ runId })).toMatchObject([{ status: 'done' }])
+  })
+
   it('does not execute cancelled or terminal runs', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 30_000 })
     const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
@@ -64,3 +81,4 @@ describe('SkillRunWorker', () => {
     expect(coordinator.getRun(runId).status).toBe('cancelled')
   })
 })
+
