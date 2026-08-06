@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { createUIMessageStreamResponse } from 'ai'
 import {
   chatService,
@@ -6,8 +7,64 @@ import {
   normalizePlanInput,
 } from '../../services/chat.service'
 import { readJson } from '../util'
+import { z } from 'zod'
+import { sessionRepo } from '../../db/repositories/session.repo'
+import { messageRepo } from '../../db/repositories/message.repo'
+import { createSqlitePackageRepository } from '../../db/repositories/skill-package.repo'
+import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
+import { createChatSkillLauncher } from '../../skills/application/chat-skill-launcher'
+import { mapErrorToHttpResponse } from '../error-mapper'
 
 export const chatRoutes = new Hono()
+
+const chatSkillRunSchema = z.object({
+  skillVersionId: z.string().trim().min(1).max(200),
+  input: z.record(z.unknown()),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  userMessage: z.object({
+    content: z.string().max(20_000),
+    parts: z.array(z.unknown()).max(100).optional(),
+  }).strict().optional(),
+}).strict()
+
+const chatSkillLauncher = createChatSkillLauncher({
+  packages: createSqlitePackageRepository(),
+  sessions: sessionRepo,
+  messages: messageRepo,
+  runtime: {
+    startRun: (input) => skillPackageRuntimeService.startRun(input),
+    findChatRunByIdempotency: (sessionId, idempotencyKey) =>
+      skillPackageRuntimeService.findChatRunByIdempotency(sessionId, idempotencyKey),
+  },
+})
+
+function chatSkillErrorResponse(c: Context, error: unknown) {
+  if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)
+  const response = mapErrorToHttpResponse(error)
+  return c.json(response.body, response.status)
+}
+
+chatRoutes.get('/sessions/:id/skills', (c) => {
+  try {
+    const sessionId = c.req.param('id')
+    if (!sessionRepo.get(sessionId)) return c.json({ error: { code: 'NOT_FOUND', message: 'Chat session not found' } }, 404)
+    return c.json({ data: chatSkillLauncher.listChatEligibleSkills() })
+  } catch (error) {
+    return chatSkillErrorResponse(c, error)
+  }
+})
+
+chatRoutes.post('/sessions/:id/skill-runs', async (c) => {
+  try {
+    const sessionId = c.req.param('id')
+    const parsed = chatSkillRunSchema.parse(await readJson<unknown>(c))
+    const result = await chatSkillLauncher.startRunFromChat({ ...parsed, sessionId })
+    return c.json({ data: result }, result.created ? 201 : 200)
+  } catch (error) {
+    return chatSkillErrorResponse(c, error)
+  }
+})
+
 
 // The route is intentionally an HTTP adapter only. Chat orchestration, persistence, plan
 // generation and attachment processing live in ChatService so the same use cases can be reused

@@ -268,6 +268,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntimeError(() => dependencies.coordinator.getRun(id))
     },
 
+    findChatRunByIdempotency(sessionId: string, idempotencyKey: string) {
+      return mapRuntimeError(() => dependencies.runRepository.findChatRunByIdempotency?.(sessionId, idempotencyKey))
+    },
+
     getRunNextAction(id: string) {
       return mapRuntimeError(() => dependencies.coordinator.getNextAction(id))
     },

@@ -654,6 +654,14 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_runs_v2).where(eq(skill_runs_v2.id, id)).get()
   },
 
+  findChatRunByIdempotency(sessionId: string, idempotencyKey: string) {
+    return getOrmDb().select().from(skill_runs_v2).where(and(
+      eq(skill_runs_v2.surface, 'chat'),
+      eq(skill_runs_v2.session_id, sessionId),
+      sql`json_extract(${skill_runs_v2.context_json}, '$.chatIdempotencyKey') = ${idempotencyKey}`,
+    )).orderBy(desc(skill_runs_v2.updated_at)).limit(1).get()
+  },
+
   setRunImageSessionId(runId: string, imageSessionId: string) {
     getOrmDb().update(skill_runs_v2).set({
       image_session_id: imageSessionId,
@@ -1314,6 +1322,10 @@ export function createSqliteRunRepository(): SkillRunRepository {
     },
     getRun(id) {
       const row = skillPackageRepo.getRun(id)
+      return row ? mapRun(row) : undefined
+    },
+    findChatRunByIdempotency(sessionId, idempotencyKey) {
+      const row = skillPackageRepo.findChatRunByIdempotency(sessionId, idempotencyKey)
       return row ? mapRun(row) : undefined
     },
     setRunImageSessionId(runId, imageSessionId) {

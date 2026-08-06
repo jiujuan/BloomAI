@@ -33,6 +33,47 @@ export type ArticleIllustrationSceneDto = { id: string; ordinal: number; title: 
 export type ArticleIllustrationJobDto = { id: string; source_type: 'text' | 'url' | 'file'; source_label: string; source_url: string | null; article_text: string; mode: 'skill' | 'fallback'; skill_version_id: string | null; run_id: string | null; image_session_id: string | null; config: Record<string, unknown>; status: string; error_message: string | null; scenes: ArticleIllustrationSceneDto[] }
 export type EligibleImageSkillDto = { packageId: string; packageName: string; skillVersionId: string; version: string; requiredCapabilities: string[]; activeImageGrant: { grantMode: string; maxCalls: number | null; allowedModels: string[] | null } | null }
 
+export type ChatSkillReferenceDto = {
+  packageId: string
+  packageName: string
+  description: string
+  skillVersionId: string
+  version: string
+  requiredCapabilities: string[]
+}
+
+export type SkillRunDto = {
+  id: string
+  skillVersionId: string
+  status: string
+  revision: number
+  input: Record<string, unknown>
+  output: Record<string, unknown> | null
+  context: Record<string, unknown>
+  surface: string | null
+  sessionId: string | null
+  imageSessionId: string | null
+  waitingReason: string | null
+  waitingSince: number | null
+  waitingExpiresAt: number | null
+  requiredAction: Record<string, unknown> | null
+  errorCode: string | null
+  errorMessage: string | null
+  resultSummary: string | null
+}
+
+export type SkillRunEventDto = {
+  id: string
+  runId: string
+  seq: number
+  schemaVersion: number
+  producer: string
+  type: string
+  payload: Record<string, unknown>
+  occurredAt: number
+  createdAt: number
+}
+
 export type SkillRuntimeCapabilitiesDto = {
   protocolVersion: string
   configVersion: string
@@ -134,6 +175,36 @@ export function imageMediaUrl(genId: string): string {
 export const platform = {
   async getSkillRuntimeCapabilities(): Promise<SkillRuntimeCapabilitiesDto> {
     const { data } = await apiFetch('/skill-runtime/capabilities')
+    return data
+  },
+  async listChatEligibleSkills(sessionId: string): Promise<ChatSkillReferenceDto[]> {
+    const { data } = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}/skills`)
+    return data
+  },
+  async startChatSkillRun(input: {
+    sessionId: string
+    skillVersionId: string
+    input: Record<string, unknown>
+    idempotencyKey: string
+    userMessage?: { content: string; parts?: unknown[] }
+  }): Promise<{ runId: string; skillVersionId: string; status: string; sessionId: string; revision: number; created: boolean }> {
+    const { data } = await apiFetch(`/chat/sessions/${encodeURIComponent(input.sessionId)}/skill-runs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        skillVersionId: input.skillVersionId,
+        input: input.input,
+        idempotencyKey: input.idempotencyKey,
+        userMessage: input.userMessage,
+      }),
+    })
+    return data
+  },
+  async getSkillRun(runId: string): Promise<SkillRunDto> {
+    const { data } = await apiFetch(`/skill-runs/${encodeURIComponent(runId)}`)
+    return data
+  },
+  async listSkillRunEvents(runId: string, afterSeq = 0): Promise<SkillRunEventDto[]> {
+    const { data } = await apiFetch(`/skill-runs/${encodeURIComponent(runId)}/events?afterSeq=${encodeURIComponent(String(afterSeq))}`)
     return data
   },
   // Sessions

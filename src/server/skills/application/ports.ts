@@ -292,6 +292,7 @@ export interface SkillRunRepository {
   setRunImageSessionId(runId: string, imageSessionId: string): RunSnapshot | undefined
   applyRunChange(data: ApplyRunChangeRequest): ApplyRunChangeResult | undefined
   getCommandResult(runId: string, idempotencyKey: string): RunSnapshot | undefined
+  findChatRunByIdempotency?(sessionId: string, idempotencyKey: string): RunSnapshot | undefined
   listRunsByStatus(status: SkillRunStatus): readonly RunSnapshot[]
   listRuns(options: { limit: number; offset: number; status?: string; skillVersionId?: string }): Page<RunSnapshot>
   /**
