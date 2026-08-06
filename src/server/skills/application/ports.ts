@@ -204,6 +204,9 @@ export type ArtifactSnapshot = {
   readonly sha256: string
   readonly metadata: JsonObject
   readonly createdAt: number
+  readonly retentionUntil?: number | null
+  readonly exportedAt?: number | null
+  readonly exportedBy?: string | null
 }
 
 export type AuditEvent = {
@@ -372,9 +375,11 @@ export interface ArtifactRepository {
     mimeType?: string | null
     sizeBytes?: number
     metadata?: JsonObject
+    retentionUntil?: number | null
   }): ArtifactSnapshot
   getArtifact(id: string): ArtifactSnapshot | undefined
   listArtifacts(runId: string): readonly ArtifactSnapshot[]
+  markArtifactExported?(data: { id: string; exportedAt: number; exportedBy?: string | null }): ArtifactSnapshot | undefined
 }
 
 export interface AuditRepository {

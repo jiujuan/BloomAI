@@ -1,15 +1,16 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { getSkillRunArtifactsDir } from '../../db/paths'
 import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import {
   createSqliteArtifactRepository,
+  createSqliteAuditRepository,
   createSqliteEventRepository,
   createSqliteRunRepository,
 } from '../../db/repositories/skill-package.repo'
-import type { ArtifactRepository, ArtifactSnapshot, Clock, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
+import type { ArtifactRepository, ArtifactSnapshot, AuditRepository, Clock, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
+import { cleanupRunArtifacts as cleanupRunDirectory, resolveArtifactRunDirectory, resolveExportDestination, SkillPathPolicyError } from '../filesystem/skill-path-policy'
 
 export class ArtifactStoreError extends Error {
   constructor(message: string) {
@@ -33,6 +34,7 @@ type ArtifactStoreDependencies = {
   readonly events: SkillRunEventRepository
   readonly artifacts: ArtifactRepository
   readonly clock: Clock
+  readonly audit?: AuditRepository
 }
 
 type ArtifactStoreRecord = ArtifactSnapshot & {
@@ -40,6 +42,9 @@ type ArtifactStoreRecord = ArtifactSnapshot & {
   readonly mime_type: string | null
   readonly size_bytes: number
   readonly created_at: number
+  readonly retention_until: number | null
+  readonly exported_at: number | null
+  readonly exported_by: string | null
 }
 
 export class ArtifactStore {
@@ -67,7 +72,7 @@ export class ArtifactStore {
     const artifact = this.dependencies.artifacts.getArtifact(input.artifactId)
     if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
     requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
-    const fullPath = resolveArtifactFile(artifact.runId, artifact.path)
+    const fullPath = resolveArtifactFile(getSkillRuntimeConfig().artifactRoot, artifact.runId, artifact.path)
     const stat = fs.lstatSync(fullPath)
     if (stat.isSymbolicLink() || !stat.isFile()) throw new ArtifactStoreError(`Artifact file must be regular: ${input.artifactId}`)
     const content = fs.readFileSync(fullPath)
@@ -75,12 +80,28 @@ export class ArtifactStore {
     return { mimeType: artifact.mimeType ?? 'application/octet-stream', content }
   }
 
-  exportArtifact(input: { artifactId: string; runId: string; destinationDir?: string }): string {
-    const destinationDir = existingDirectory(input.destinationDir ?? getSkillRuntimeConfig().exportRoot)
+  exportArtifact(input: {
+    artifactId: string
+    runId: string
+    destinationDir?: string
+    confirmed?: boolean
+    actor?: string | null
+    auditReason?: string
+  }): string {
+    if (input.confirmed !== true) throw new ArtifactStoreError('Artifact export requires explicit confirmation')
+    if (!input.auditReason?.trim()) throw new ArtifactStoreError('Artifact export requires an audit reason')
+    const config = getSkillRuntimeConfig()
+    let destinationDir: string
+    try {
+      destinationDir = resolveExportDestination(config.exportRoot, input.destinationDir)
+    } catch (error) {
+      if (error instanceof SkillPathPolicyError) throw new ArtifactStoreError(error.message)
+      throw error
+    }
     const artifact = this.dependencies.artifacts.getArtifact(input.artifactId)
     if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
     requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
-    const sourcePath = resolveArtifactFile(artifact.runId, artifact.path)
+    const sourcePath = resolveArtifactFile(config.artifactRoot, artifact.runId, artifact.path)
     const sourceStat = fs.lstatSync(sourcePath)
     if (sourceStat.isSymbolicLink() || !sourceStat.isFile()) throw new ArtifactStoreError(`Artifact file must be regular: ${input.artifactId}`)
     const targetPath = path.join(destinationDir, path.basename(artifact.path))
@@ -90,11 +111,22 @@ export class ArtifactStore {
       if (error?.code === 'EEXIST') throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
       throw new ArtifactStoreError(`Artifact export failed: ${input.artifactId}`)
     }
+    const exportedAt = this.dependencies.clock.now()
+    this.dependencies.artifacts.markArtifactExported?.({ id: artifact.id, exportedAt, exportedBy: input.actor ?? null })
+    this.dependencies.audit?.append({
+      actor: input.actor ?? null,
+      action: 'artifact.exported',
+      resourceType: 'skill_artifact',
+      resourceId: artifact.id,
+      payload: { runId: input.runId, destinationDir, auditReason: input.auditReason.trim() },
+    })
     return targetPath
   }
 
-  removeRun(_runId: string): void {
-    // Retention policy: artifact files and metadata remain available for audit and export.
+  removeRun(runId: string): boolean {
+    const artifacts = this.dependencies.artifacts.listArtifacts(runId)
+    if (!artifacts.length || artifacts.some((artifact) => artifact.retentionUntil === null || artifact.retentionUntil === undefined || artifact.retentionUntil > this.dependencies.clock.now())) return false
+    return cleanupRunDirectory(getSkillRuntimeConfig().artifactRoot, runId)
   }
 
   private writeBuffer(input: { runId: string; kind: ArtifactKind; fileName: string; content: Buffer; metadata?: Record<string, unknown> }) {
@@ -104,7 +136,9 @@ export class ArtifactStore {
       throw new ArtifactStoreError(`${input.kind} artifacts must use a ${definition.extension} file name`)
     }
     const fileName = safeFileName(input.fileName)
-    const directory = getSkillRunArtifactsDir(input.runId)
+    const config = getSkillRuntimeConfig()
+    fs.mkdirSync(config.artifactRoot, { recursive: true })
+    const directory = resolveArtifactRunDirectory(config.artifactRoot, input.runId)
     fs.mkdirSync(directory, { recursive: true })
     const target = path.join(directory, fileName)
     fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
@@ -116,6 +150,7 @@ export class ArtifactStore {
       mimeType: definition.mimeType,
       sizeBytes: input.content.length,
       metadata: input.metadata,
+      retentionUntil: this.dependencies.clock.now() + config.artifactRetentionDays * 24 * 60 * 60 * 1000,
     })
     this.dependencies.events.appendEvent({
       runId: input.runId,
@@ -158,24 +193,12 @@ function hashBuffer(value: Buffer): string {
   return crypto.createHash('sha256').update(value).digest('hex')
 }
 
-function resolveArtifactFile(runId: string, relativePath: string): string {
-  const directory = path.resolve(getSkillRunArtifactsDir(runId))
+function resolveArtifactFile(artifactRoot: string, runId: string, relativePath: string): string {
+  const directory = resolveArtifactRunDirectory(artifactRoot, runId)
   const fileName = safeFileName(relativePath)
   const fullPath = path.resolve(directory, fileName)
   if (!fullPath.startsWith(`${directory}${path.sep}`)) throw new ArtifactStoreError(`Artifact path escapes its run directory: ${relativePath}`)
   return fullPath
-}
-
-function existingDirectory(value: string): string {
-  if (!value || !path.isAbsolute(value)) throw new ArtifactStoreError(`Export destination must be an absolute directory: ${value}`)
-  let stat: fs.Stats
-  try {
-    stat = fs.lstatSync(value)
-  } catch {
-    throw new ArtifactStoreError(`Export destination does not exist: ${value}`)
-  }
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new ArtifactStoreError(`Export destination must be a regular directory: ${value}`)
-  return fs.realpathSync.native(value)
 }
 
 function createDefaultArtifactStoreDependencies(): ArtifactStoreDependencies {
@@ -185,6 +208,7 @@ function createDefaultArtifactStoreDependencies(): ArtifactStoreDependencies {
     events: createSqliteEventRepository(clock),
     artifacts: createSqliteArtifactRepository(),
     clock,
+    audit: createSqliteAuditRepository(),
   }
 }
 
@@ -195,5 +219,8 @@ function toArtifactStoreRecord(artifact: ArtifactSnapshot): ArtifactStoreRecord 
     mime_type: artifact.mimeType,
     size_bytes: artifact.sizeBytes,
     created_at: artifact.createdAt,
+    retention_until: artifact.retentionUntil ?? null,
+    exported_at: artifact.exportedAt ?? null,
+    exported_by: artifact.exportedBy ?? null,
   }
 }

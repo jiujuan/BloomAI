@@ -1,6 +1,7 @@
 import fs from 'fs'
 import { LocalFilesystem, LocalSandbox, Workspace } from '@mastra/core/workspace'
 import type { Project } from '../../../shared/schemas'
+import { assertReadableWorkspace } from '../../skills/filesystem/skill-path-policy'
 
 export const PROJECT_WORKSPACE_UNAVAILABLE = 'PROJECT_WORKSPACE_UNAVAILABLE' as const
 
@@ -72,16 +73,22 @@ export function createProjectWorkspaceFactory(
 
   return {
     async get(project: Project): Promise<ProjectWorkspace> {
-      if (!dependencies.isDirectory(project.root_path)) {
+      let rootPath: string
+      try {
+        rootPath = assertReadableWorkspace(project.root_path)
+      } catch {
+        throw new ProjectWorkspaceUnavailableError(project.id, project.root_path)
+      }
+      if (!dependencies.isDirectory(rootPath)) {
         throw new ProjectWorkspaceUnavailableError(project.id, project.root_path)
       }
 
       const cached = cache.get(project.id)
-      if (cached?.rootPath === project.root_path) return cached.workspace
+      if (cached?.rootPath === rootPath) return cached.workspace
       if (cached) await dispose(project.id)
 
-      const workspace = dependencies.createWorkspace(project.root_path)
-      cache.set(project.id, { rootPath: project.root_path, workspace })
+      const workspace = dependencies.createWorkspace(rootPath)
+      cache.set(project.id, { rootPath, workspace })
       return workspace
     },
 

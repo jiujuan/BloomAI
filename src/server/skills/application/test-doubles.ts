@@ -402,13 +402,20 @@ export class FakeArtifactRepository implements ArtifactRepository {
 
   constructor(private readonly ids: IdGenerator, private readonly clock: Clock) {}
 
-  createArtifact(data: { runId: string; kind: string; path: string; sha256: string; mimeType?: string | null; sizeBytes?: number; metadata?: JsonObject }): ArtifactSnapshot {
-    const row: ArtifactSnapshot = { id: this.ids.next(), runId: data.runId, kind: data.kind, mimeType: data.mimeType ?? null, path: data.path, sizeBytes: data.sizeBytes ?? 0, sha256: data.sha256, metadata: clone(data.metadata ?? {}), createdAt: this.clock.now() }
+  createArtifact(data: { runId: string; kind: string; path: string; sha256: string; mimeType?: string | null; sizeBytes?: number; metadata?: JsonObject; retentionUntil?: number | null }): ArtifactSnapshot {
+    const row: ArtifactSnapshot = { id: this.ids.next(), runId: data.runId, kind: data.kind, mimeType: data.mimeType ?? null, path: data.path, sizeBytes: data.sizeBytes ?? 0, sha256: data.sha256, metadata: clone(data.metadata ?? {}), createdAt: this.clock.now(), retentionUntil: data.retentionUntil ?? null, exportedAt: null, exportedBy: null }
     this.artifacts.set(row.id, row)
     return clone(row)
   }
   getArtifact(id: string): ArtifactSnapshot | undefined { const row = this.artifacts.get(id); return row ? clone(row) : undefined }
   listArtifacts(runId: string): readonly ArtifactSnapshot[] { return [...this.artifacts.values()].filter((row) => row.runId === runId).sort((a, b) => a.createdAt - b.createdAt).map(clone) }
+  markArtifactExported(data: { id: string; exportedAt: number; exportedBy?: string | null }): ArtifactSnapshot | undefined {
+    const current = this.artifacts.get(data.id)
+    if (!current) return undefined
+    const next = { ...current, exportedAt: data.exportedAt, exportedBy: data.exportedBy ?? null }
+    this.artifacts.set(data.id, next)
+    return clone(next)
+  }
 }
 
 export class FakeCapabilityGrantRepository implements CapabilityGrantRepository {

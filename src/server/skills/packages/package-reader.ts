@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { DEFAULT_PACKAGE_PATH_POLICY, normalizeSafeRelativePath, type PackagePathPolicy, assertPackageBudget } from './package-path-policy'
+import { assertReadableDirectory, SkillPathPolicyError } from '../filesystem/skill-path-policy'
 
 const DEFAULT_MAX_READ_BYTES = 1024 * 1024
 const DEFAULT_MAX_FILES_PER_RUN = 32
@@ -40,7 +41,12 @@ export class SkillPackageReader {
   private closed = false
 
   constructor(packagePath: string, options: SkillPackageReaderOptions = {}) {
-    this.root = canonicalDirectory(packagePath)
+    try {
+      this.root = assertReadableDirectory(packagePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Package directory is not readable'
+      throw new SkillPackageReadError(message, error instanceof SkillPathPolicyError && error.code === 'ROOT_NOT_FOUND' ? 'PACKAGE_READ_ERROR' : 'PATH_NOT_ALLOWED')
+    }
     this.maxReadBytes = positiveInt(options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES, 'maxReadBytes')
     this.maxFilesPerRun = positiveInt(options.maxFilesPerRun ?? DEFAULT_MAX_FILES_PER_RUN, 'maxFilesPerRun')
     this.policy = {
@@ -171,12 +177,6 @@ export class SkillPackageReader {
   private assertOpen(): void { if (this.closed) throw new SkillPackageReadError('Package reader is closed') }
 }
 
-function canonicalDirectory(directory: string): string {
-  let stat: fs.Stats
-  try { stat = fs.lstatSync(directory) } catch { throw new SkillPackageReadError(`Package directory was not found: ${directory}`, 'PATH_NOT_ALLOWED') }
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new SkillPackageReadError(`Package path must be a directory: ${directory}`, 'PATH_NOT_ALLOWED')
-  return fs.realpathSync.native(directory)
-}
 function isInsideCanonicalRoot(root: string, target: string): boolean {
   const relative = path.relative(root, target)
   return relative === '' || !!relative && !relative.startsWith('..') && !path.isAbsolute(relative)

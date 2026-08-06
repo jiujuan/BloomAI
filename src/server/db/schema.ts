@@ -274,6 +274,9 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   sha256: text('sha256').notNull(),
   metadata_json: text('metadata_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
+  retention_until: integer('retention_until'),
+  exported_at: integer('exported_at'),
+  exported_by: text('exported_by'),
 }, (table) => ({
   runIdx: index('idx_skill_artifacts_run').on(table.run_id),
 }))

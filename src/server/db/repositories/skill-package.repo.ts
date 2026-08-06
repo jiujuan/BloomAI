@@ -15,10 +15,12 @@ import {
   skill_run_queue,
   skill_runs_v2,
   skill_versions,
+  skill_audit_events,
 } from '../schema'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
+  AuditRepository,
   ArtifactSnapshot,
   CapabilityGrantRepository,
   CapabilityGrantSnapshot,
@@ -638,6 +640,7 @@ export const skillPackageRepo = {
     mimeType?: string | null
     sizeBytes?: number
     metadata?: Record<string, unknown>
+    retentionUntil?: number | null
   }) {
     if (!this.getRun(data.runId)) throw new Error(`Run not found: ${data.runId}`)
     const row = {
@@ -650,6 +653,9 @@ export const skillPackageRepo = {
       sha256: data.sha256,
       metadata_json: stringifyJsonObject(data.metadata ?? {}, 'metadata'),
       created_at: Date.now(),
+      retention_until: data.retentionUntil ?? null,
+      exported_at: null,
+      exported_by: null,
     }
     getOrmDb().insert(skill_artifacts).values(row).run()
     return row
@@ -664,6 +670,25 @@ export const skillPackageRepo = {
       .where(eq(skill_artifacts.run_id, runId))
       .orderBy(asc(skill_artifacts.created_at))
       .all()
+  },
+  markArtifactExported(data: { id: string; exportedAt: number; exportedBy?: string | null }) {
+    getOrmDb().update(skill_artifacts)
+      .set({ exported_at: data.exportedAt, exported_by: data.exportedBy ?? null })
+      .where(eq(skill_artifacts.id, data.id))
+      .run()
+    return this.getArtifact(data.id)
+  },
+
+  appendAudit(event: { actor?: string | null; action: string; resourceType: string; resourceId?: string | null; payload?: Record<string, unknown> }) {
+    getOrmDb().insert(skill_audit_events).values({
+      id: uuidv4(),
+      actor: event.actor ?? null,
+      action: event.action,
+      resource_type: event.resourceType,
+      resource_id: event.resourceId ?? null,
+      payload_json: stringifyJsonObject(event.payload ?? {}, 'audit payload'),
+      created_at: Date.now(),
+    }).run()
   },
 
   createCapabilityGrant(data: {
@@ -1174,6 +1199,18 @@ export function createSqliteArtifactRepository(): ArtifactRepository {
     listArtifacts(runId) {
       return skillPackageRepo.listArtifacts(runId).map(mapArtifact)
     },
+    markArtifactExported(data) {
+      const row = skillPackageRepo.markArtifactExported(data)
+      return row ? mapArtifact(row) : undefined
+    },
+  }
+}
+
+export function createSqliteAuditRepository(): AuditRepository {
+  return {
+    append(event) {
+      skillPackageRepo.appendAudit(event)
+    },
   }
 }
 
@@ -1267,7 +1304,7 @@ function mapGrant(row: any): CapabilityGrantSnapshot {
 }
 
 function mapArtifact(row: any): ArtifactSnapshot {
-  return { id: row.id, runId: row.run_id, kind: row.kind, mimeType: row.mime_type, path: row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at }
+  return { id: row.id, runId: row.run_id, kind: row.kind, mimeType: row.mime_type, path: row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at, retentionUntil: row.retention_until ?? null, exportedAt: row.exported_at ?? null, exportedBy: row.exported_by ?? null }
 }
 
 function mapQueue(row: any): SkillRunQueueSnapshot {

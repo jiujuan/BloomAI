@@ -182,6 +182,9 @@ export function getExpectedSchemaContract(): SchemaContract {
           sha256: required,
           metadata_json: required,
           created_at: required,
+          retention_until: optional,
+          exported_at: optional,
+          exported_by: optional,
         },
         indexes: {
           idx_skill_artifacts_run: { columns: ['run_id'] },
