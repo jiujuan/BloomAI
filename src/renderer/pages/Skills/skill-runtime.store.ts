@@ -4,6 +4,10 @@ import { devtools } from 'zustand/middleware'
 import { API_BASE } from '@shared/constants'
 import type { CapabilityGrant, InspectedPackage, PackageDetail, PackageSource, SkillArtifact, SkillPackage, SkillRun, SkillRunEvent } from './skill-runtime.types'
 
+function makeIdempotencyKey(operation: string) {
+  return operation + '-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+}
+
 async function runtimeFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(API_BASE + path, {
     headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
@@ -31,8 +35,10 @@ type RuntimeActions = {
   loadPackage: (id: string) => Promise<PackageDetail>
   inspectPackage: (source: PackageSource) => Promise<InspectedPackage[]>
   installPackage: (source: PackageSource) => Promise<void>
-  setInstallationEnabled: (id: string, enabled: boolean) => Promise<void>
-  uninstallPackage: (id: string) => Promise<void>
+  setInstallationEnabled: (id: string, enabled: boolean, expectedRevision: number) => Promise<void>
+  uninstallPackage: (id: string, expectedRevision: number) => Promise<void>
+  rollbackInstallation: (id: string, input: { versionId?: string; expectedRevision: number; reason: string }) => Promise<void>
+  deletePackage: (id: string, input: { reason: string }) => Promise<void>
   revokeCapabilityGrant: (id: string) => Promise<void>
   loadRuns: () => Promise<void>
   loadRun: (id: string) => Promise<SkillRun>
@@ -72,14 +78,37 @@ export const useSkillRuntimeStore = create<RuntimeState & RuntimeActions>()(devt
     await runtimeFetch('/skill-packages/install', { method: 'POST', body: JSON.stringify({ source }) })
     await get().loadPackages()
   },
-  setInstallationEnabled: async (id, enabled) => {
-    await runtimeFetch('/skill-installations/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ enabled }) })
+  setInstallationEnabled: async (id, enabled, expectedRevision) => {
+    await runtimeFetch('/skill-installations/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled, expectedRevision, idempotencyKey: makeIdempotencyKey(enabled ? 'enable' : 'disable') }),
+    })
     const selectedPackage = get().selectedPackage
     if (selectedPackage) await get().loadPackage(selectedPackage.package.id)
     await get().loadPackages()
   },
-  uninstallPackage: async (id) => {
-    await runtimeFetch('/skill-installations/' + encodeURIComponent(id), { method: 'DELETE' })
+  uninstallPackage: async (id, expectedRevision) => {
+    await runtimeFetch('/skill-installations/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      body: JSON.stringify({ expectedRevision, idempotencyKey: makeIdempotencyKey('uninstall') }),
+    })
+    set({ selectedPackage: null })
+    await get().loadPackages()
+  },
+  rollbackInstallation: async (id, input) => {
+    await runtimeFetch('/skill-installations/' + encodeURIComponent(id) + '/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, idempotencyKey: makeIdempotencyKey('rollback') }),
+    })
+    const selectedPackage = get().selectedPackage
+    if (selectedPackage) await get().loadPackage(selectedPackage.package.id)
+    await get().loadPackages()
+  },
+  deletePackage: async (id, input) => {
+    await runtimeFetch('/skill-packages/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      body: JSON.stringify({ ...input, confirm: true, idempotencyKey: makeIdempotencyKey('delete-package') }),
+    })
     set({ selectedPackage: null })
     await get().loadPackages()
   },

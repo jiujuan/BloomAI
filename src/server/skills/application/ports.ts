@@ -20,6 +20,8 @@ export type PackageSnapshot = {
   readonly sourceRef: string | null
   readonly createdAt: number
   readonly updatedAt: number
+  readonly deletedAt?: number | null
+  readonly deleteReason?: string | null
 }
 
 export type VersionSnapshot = {
@@ -263,8 +265,13 @@ export interface PackageSkillRepository {
   }): InstallationSnapshot
   getInstallation(id: string): InstallationSnapshot | undefined
   setInstallationEnabled(id: string, enabled: boolean): InstallationSnapshot | undefined
+  getInstallationCommandResult?(installationId: string, idempotencyKey: string): InstallationSnapshot | undefined
+  setInstallationEnabledCas?(data: { installationId: string; enabled: boolean; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
   listInstallations(packageId: string): readonly InstallationSnapshot[]
   deleteInstallation(id: string): boolean
+  uninstallInstallation?(data: { installationId: string; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
+  rollbackInstallation?(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string; reason: string }): InstallationSnapshot | undefined
+  softDeletePackage?(data: { packageId: string; idempotencyKey: string; reason: string }): PackageSnapshot | undefined
   switchCurrentVersion?(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
   resolveRunnableVersion(referenceId: string): VersionSnapshot | undefined
   isPackageReference(referenceId: string): boolean

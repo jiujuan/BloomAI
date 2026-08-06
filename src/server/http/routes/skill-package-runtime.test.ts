@@ -45,6 +45,7 @@ function createRunnableFixture(repo: Awaited<ReturnType<typeof loadApi>>['skillP
     manifest: { name: 'Runnable Package' },
     manifestHash: 'runnable-package-hash',
     packagePath: path.join(dataDir, 'packages', 'runnable-package-hash'),
+    securityStatus: 'verified',
   })
   const installation = repo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
   return { pkg, version, installation }
@@ -207,10 +208,12 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(detail.body.data.versions[0].id).toBe(version.id)
     expect(detail.body.data.installations[0].id).toBe(installation.id)
 
-    const uninstalled = await requestJson(app, '/skill-installations/' + installation.id, { method: 'DELETE' })
+    const uninstalled = await requestJson(app, '/skill-installations/' + installation.id, { method: 'DELETE', body: JSON.stringify({ expectedRevision: 0, idempotencyKey: 'uninstall-http-1' }) })
     expect(uninstalled.response.status).toBe(200)
-    expect(uninstalled.body).toEqual({ data: { uninstalled: true } })
-    expect((await requestJson(app, '/skill-installations/' + installation.id, { method: 'DELETE' })).response.status).toBe(404)
+    expect(uninstalled.body.data).toMatchObject({ uninstalled: true, installation: { status: 'uninstalled', enabled: 0 } })
+    const duplicateUninstall = await requestJson(app, '/skill-installations/' + installation.id, { method: 'DELETE', body: JSON.stringify({ expectedRevision: 0, idempotencyKey: 'uninstall-http-1' }) })
+    expect(duplicateUninstall.response.status).toBe(200)
+    expect(duplicateUninstall.body.data.installation).toMatchObject({ status: 'uninstalled', enabled: 0 })
   })
 
   it('manages installation enablement and revokes capability grants', async () => {
@@ -231,7 +234,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const disabled = await requestJson(app, '/skill-installations/' + installation.id, {
       method: 'PATCH',
-      body: JSON.stringify({ enabled: false }),
+      body: JSON.stringify({ enabled: false, expectedRevision: 0, idempotencyKey: 'disable-http-1' }),
     })
     expect(disabled.response.status).toBe(200)
     expect(disabled.body.data).toMatchObject({ id: installation.id, enabled: 0 })
@@ -415,6 +418,92 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(conflict.response.status).toBe(409)
     expect(conflict.body.error.code).toBe('REVISION_CONFLICT')
   })
+  it('disables new runs while preserving an existing run, then supports enable and rollback', async () => {
+    const { app, skillPackageRepo } = await loadApi()
+    const { pkg, version: current, installation } = createRunnableFixture(skillPackageRepo)
+    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: current.id, input: { beforeDisable: true } }) })
+    expect(started.response.status).toBe(201)
+    const runId = started.body.data.runId as string
+
+    const disabled = await requestJson(app, `/skill-installations/${installation.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled: false, expectedRevision: 0, idempotencyKey: 'lifecycle-disable-1' }),
+    })
+    expect(disabled.response.status).toBe(200)
+    expect(disabled.body.data).toMatchObject({ status: 'disabled', enabled: 0, revision: 1 })
+    expect((await requestJson(app, `/skill-runs/${runId}`)).response.status).toBe(200)
+
+    const rejectedRun = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: current.id, input: { afterDisable: true } }) })
+    expect(rejectedRun.response.status).toBe(404)
+
+    const enabled = await requestJson(app, `/skill-installations/${installation.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled: true, expectedRevision: 1, idempotencyKey: 'lifecycle-enable-1' }),
+    })
+    expect(enabled.response.status).toBe(200)
+    expect(enabled.body.data).toMatchObject({ status: 'installed', enabled: 1, revision: 2 })
+
+    const nextVersion = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '2.0.0',
+      manifest: { name: 'Runnable Package v2' },
+      manifestHash: 'runnable-package-v2-lifecycle-hash',
+      packagePath: path.join(dataDir, 'packages', 'runnable-package-v2-lifecycle-hash'),
+      securityStatus: 'verified',
+    })
+    const switched = await requestJson(app, `/skill-installations/${installation.id}/switch-version`, {
+      method: 'POST',
+      body: JSON.stringify({ versionId: nextVersion.id, expectedRevision: 2, idempotencyKey: 'lifecycle-switch-1' }),
+    })
+    expect(switched.response.status).toBe(200)
+    const rolledBack = await requestJson(app, `/skill-installations/${installation.id}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ versionId: current.id, expectedRevision: 3, idempotencyKey: 'lifecycle-rollback-1', reason: 'verified rollback after smoke failure' }),
+    })
+    expect(rolledBack.response.status).toBe(200)
+    expect(rolledBack.body.data).toMatchObject({ currentVersionId: current.id, previousVersionId: nextVersion.id, rollbackReason: 'verified rollback after smoke failure', revision: 4 })
+    expect(skillPackageRepo.getVersion(nextVersion.id)).toBeTruthy()
+  })
+
+  it('uninstalls and soft-deletes without removing package, version, run, or audit records', async () => {
+    const { app, skillPackageRepo } = await loadApi()
+    const { pkg, version, installation } = createRunnableFixture(skillPackageRepo)
+    const uninstalled = await requestJson(app, `/skill-installations/${installation.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ expectedRevision: 0, idempotencyKey: 'lifecycle-uninstall-1' }),
+    })
+    expect(uninstalled.response.status).toBe(200)
+    expect(skillPackageRepo.getInstallation(installation.id)).toMatchObject({ status: 'uninstalled', enabled: 0, current_version_id: version.id })
+
+    const deleted = await requestJson(app, `/skill-packages/${pkg.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm: true, idempotencyKey: 'lifecycle-delete-1', reason: 'retire test package' }),
+    })
+    expect(deleted.response.status).toBe(200)
+    expect(deleted.body.data).toMatchObject({ id: pkg.id, deletedAt: expect.any(Number), deleteReason: 'retire test package' })
+    expect(skillPackageRepo.getPackage(pkg.id)).toMatchObject({ deleted_at: expect.any(Number), delete_reason: 'retire test package' })
+    expect(skillPackageRepo.getVersion(version.id)).toBeTruthy()
+    expect(skillPackageRepo.getInstallation(installation.id)).toBeTruthy()
+  })
+
+  it('blocks package deletion while a Run is still active after uninstall', async () => {
+    const { app, skillPackageRepo } = await loadApi()
+    const { pkg, version, installation } = createRunnableFixture(skillPackageRepo)
+    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: version.id, input: {} }) })
+    expect(started.response.status).toBe(201)
+    const uninstalled = await requestJson(app, `/skill-installations/${installation.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ expectedRevision: 0, idempotencyKey: 'lifecycle-uninstall-running-1' }),
+    })
+    expect(uninstalled.response.status).toBe(200)
+    const deleted = await requestJson(app, `/skill-packages/${pkg.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm: true, idempotencyKey: 'lifecycle-delete-running-1', reason: 'must remain auditable' }),
+    })
+    expect(deleted.response.status).toBe(409)
+    expect(deleted.body.error.code).toBe('CONFLICT')
+  })
+
   it('lists, reads, and exports artifacts for a run', async () => {
     const { app, skillPackageRepo, ArtifactStore } = await loadApi()
     const { pkg } = createRunnableFixture(skillPackageRepo)

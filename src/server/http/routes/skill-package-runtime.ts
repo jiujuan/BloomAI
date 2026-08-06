@@ -27,7 +27,10 @@ const packageInstallSchema = z.object({
 })
 const importReviewDecisionSchema = z.object({ reviewer: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
 
-const installationUpdateSchema = z.object({ enabled: z.boolean() })
+const installationUpdateSchema = z.object({ enabled: z.boolean(), expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.string().trim().min(1).max(200) }).strict()
+const installationUninstallSchema = z.object({ expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.string().trim().min(1).max(200) }).strict()
+const installationRollbackSchema = z.object({ versionId: idSchema.optional(), expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(500) }).strict()
+const packageDeleteSchema = z.object({ confirm: z.literal(true), idempotencyKey: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(500) }).strict()
 const versionCandidateSchema = z.object({
   version: z.string().trim().min(1).max(100),
   manifest: jsonObjectSchema,
@@ -110,6 +113,12 @@ skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
     return c.json({ data: result.data, meta: pageMeta(page, result.total) })
   } catch (error) { return errorResponse(c, error) }
 })
+skillPackageRuntimeRoutes.delete('/skill-packages/:id', async (c) => {
+  try {
+    const input = await readValidated(c, packageDeleteSchema)
+    return c.json({ data: skillPackageRuntimeService.deletePackage(idSchema.parse(c.req.param('id')), input) })
+  } catch (error) { return errorResponse(c, error) }
+})
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
   try { return c.json({ data: toPackageDetailHttpDto(skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id')))) }) } catch (error) { return errorResponse(c, error) }
 })
@@ -139,7 +148,8 @@ skillPackageRuntimeRoutes.post('/skill-packages/:id/update', async (c) => {
 })
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
   try {
-    const installation = skillPackageRuntimeService.setInstallationEnabled(idSchema.parse(c.req.param('id')), (await readValidated(c, installationUpdateSchema)).enabled)
+    const input = await readValidated(c, installationUpdateSchema)
+    const installation = skillPackageRuntimeService.setInstallationEnabledWithRevision(idSchema.parse(c.req.param('id')), input.enabled, input)
     return c.json({ data: toInstallationHttpDto(installation) })
   } catch (error) { return errorResponse(c, error) }
 })
@@ -170,8 +180,17 @@ skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/revoke', async (c) 
     return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), input) })
   } catch (error) { return errorResponse(c, error) }
 })
-skillPackageRuntimeRoutes.delete('/skill-installations/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.removeInstallation(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+skillPackageRuntimeRoutes.post('/skill-installations/:id/rollback', async (c) => {
+  try {
+    const input = await readValidated(c, installationRollbackSchema)
+    return c.json({ data: toInstallationHttpDto(skillPackageRuntimeService.rollbackInstallation(idSchema.parse(c.req.param('id')), input)) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.delete('/skill-installations/:id', async (c) => {
+  try {
+    const input = await readValidated(c, installationUninstallSchema)
+    return c.json({ data: { uninstalled: true, installation: toInstallationHttpDto(skillPackageRuntimeService.uninstallInstallation(idSchema.parse(c.req.param('id')), input)) } })
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs', async (c) => {
   try { return c.json({ data: skillPackageRuntimeService.startRun(await readValidated(c, createRunSchema)) }, 201) } catch (error) { return errorResponse(c, error) }

@@ -331,6 +331,14 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_installations).where(eq(skill_installations.id, id)).get()
   },
 
+  getInstallationCommandResult(installationId: string, idempotencyKey: string) {
+    const command = getOrmDb().select().from(skill_installation_commands).where(and(
+      eq(skill_installation_commands.installation_id, installationId),
+      eq(skill_installation_commands.idempotency_key, idempotencyKey),
+    )).get()
+    return command ? JSON.parse(command.result_json) : undefined
+  },
+
   setInstallationEnabled(id: string, enabled: boolean) {
     const now = Date.now()
     const result = getOrmDb().update(skill_installations)
@@ -338,6 +346,134 @@ export const skillPackageRepo = {
       .where(eq(skill_installations.id, id))
       .run()
     return result.changes === 1 ? this.getInstallation(id) : undefined
+  },
+
+  setInstallationEnabledCas(data: { installationId: string; enabled: boolean; expectedRevision: number; idempotencyKey: string }) {
+    return getOrmDb().transaction((tx) => {
+      const existingCommand = tx.select().from(skill_installation_commands).where(and(
+        eq(skill_installation_commands.installation_id, data.installationId),
+        eq(skill_installation_commands.idempotency_key, data.idempotencyKey),
+      )).get()
+      if (existingCommand) return JSON.parse(existingCommand.result_json)
+
+      const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!installation || installation.revision !== data.expectedRevision) return undefined
+      const now = Date.now()
+      const updatedResult = tx.update(skill_installations).set({
+        enabled: data.enabled ? 1 : 0,
+        status: data.enabled ? 'installed' : 'disabled',
+        disabled_at: data.enabled ? null : now,
+        changed_at: now,
+        revision: installation.revision + 1,
+        updated_at: now,
+      }).where(and(
+        eq(skill_installations.id, data.installationId),
+        eq(skill_installations.revision, data.expectedRevision),
+      )).run()
+      if (updatedResult.changes !== 1) return undefined
+      const updated = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!updated) return undefined
+      tx.insert(skill_installation_commands).values({
+        id: uuidv4(),
+        installation_id: data.installationId,
+        idempotency_key: data.idempotencyKey,
+        result_json: JSON.stringify(updated),
+        created_at: now,
+      }).run()
+      return updated
+    })
+  },
+
+  uninstallInstallation(data: { installationId: string; expectedRevision: number; idempotencyKey: string }) {
+    return getOrmDb().transaction((tx) => {
+      const existingCommand = tx.select().from(skill_installation_commands).where(and(
+        eq(skill_installation_commands.installation_id, data.installationId),
+        eq(skill_installation_commands.idempotency_key, data.idempotencyKey),
+      )).get()
+      if (existingCommand) return JSON.parse(existingCommand.result_json)
+
+      const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!installation || installation.revision !== data.expectedRevision) return undefined
+      const now = Date.now()
+      const updatedResult = tx.update(skill_installations).set({
+        status: 'uninstalled',
+        enabled: 0,
+        uninstalled_at: now,
+        changed_at: now,
+        revision: installation.revision + 1,
+        updated_at: now,
+      }).where(and(
+        eq(skill_installations.id, data.installationId),
+        eq(skill_installations.revision, data.expectedRevision),
+      )).run()
+      if (updatedResult.changes !== 1) return undefined
+      const updated = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!updated) return undefined
+      tx.insert(skill_installation_commands).values({
+        id: uuidv4(),
+        installation_id: data.installationId,
+        idempotency_key: data.idempotencyKey,
+        result_json: JSON.stringify(updated),
+        created_at: now,
+      }).run()
+      return updated
+    })
+  },
+
+  rollbackInstallation(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string; reason: string }) {
+    return getOrmDb().transaction((tx) => {
+      const existingCommand = tx.select().from(skill_installation_commands).where(and(
+        eq(skill_installation_commands.installation_id, data.installationId),
+        eq(skill_installation_commands.idempotency_key, data.idempotencyKey),
+      )).get()
+      if (existingCommand) return JSON.parse(existingCommand.result_json)
+
+      const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
+      if (!installation || installation.revision !== data.expectedRevision || !target || target.package_id !== installation.package_id) return undefined
+      const now = Date.now()
+      const updatedResult = tx.update(skill_installations).set({
+        previous_version_id: installation.current_version_id,
+        current_version_id: data.versionId,
+        status: 'installed',
+        enabled: 1,
+        disabled_at: null,
+        rollback_reason: data.reason,
+        changed_at: now,
+        revision: installation.revision + 1,
+        updated_at: now,
+      }).where(and(
+        eq(skill_installations.id, data.installationId),
+        eq(skill_installations.revision, data.expectedRevision),
+      )).run()
+      if (updatedResult.changes !== 1) return undefined
+      const updated = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
+      if (!updated) return undefined
+      tx.insert(skill_installation_commands).values({
+        id: uuidv4(),
+        installation_id: data.installationId,
+        idempotency_key: data.idempotencyKey,
+        result_json: JSON.stringify(updated),
+        created_at: now,
+      }).run()
+      return updated
+    })
+  },
+
+  softDeletePackage(data: { packageId: string; idempotencyKey: string; reason: string }) {
+    const existing = this.getPackage(data.packageId)
+    if (!existing) return undefined
+    if (existing.deleted_at !== null && existing.deleted_at !== undefined) return existing
+    const now = Date.now()
+    const result = getOrmDb().update(skill_packages).set({
+      deleted_at: now,
+      delete_reason: data.reason,
+      updated_at: now,
+    }).where(and(
+      eq(skill_packages.id, data.packageId),
+      isNull(skill_packages.deleted_at),
+    )).run()
+    return result.changes === 1 ? this.getPackage(data.packageId) : undefined
   },
 
   listInstallations(packageId: string) {
@@ -1079,8 +1215,16 @@ export function createSqlitePackageRepository(): PackageSkillRepository {
       const row = skillPackageRepo.getInstallation(id)
       return row ? mapInstallation(row) : undefined
     },
+    getInstallationCommandResult(installationId, idempotencyKey) {
+      const row = skillPackageRepo.getInstallationCommandResult(installationId, idempotencyKey)
+      return row ? mapInstallation(row) : undefined
+    },
     setInstallationEnabled(id, enabled) {
       const row = skillPackageRepo.setInstallationEnabled(id, enabled)
+      return row ? mapInstallation(row) : undefined
+    },
+    setInstallationEnabledCas(data) {
+      const row = skillPackageRepo.setInstallationEnabledCas(data)
       return row ? mapInstallation(row) : undefined
     },
     listInstallations(packageId) {
@@ -1088,6 +1232,18 @@ export function createSqlitePackageRepository(): PackageSkillRepository {
     },
     deleteInstallation(id) {
       return skillPackageRepo.deleteInstallation(id)
+    },
+    uninstallInstallation(data) {
+      const row = skillPackageRepo.uninstallInstallation(data)
+      return row ? mapInstallation(row) : undefined
+    },
+    rollbackInstallation(data) {
+      const row = skillPackageRepo.rollbackInstallation(data)
+      return row ? mapInstallation(row) : undefined
+    },
+    softDeletePackage(data) {
+      const row = skillPackageRepo.softDeletePackage(data)
+      return row ? mapPackage(row) : undefined
     },
     switchCurrentVersion(data) {
       const row = skillPackageRepo.switchCurrentVersion(data)
@@ -1289,7 +1445,18 @@ function parseObject(value: string, fieldName: string): JsonObject {
 }
 
 function mapPackage(row: any): PackageSnapshot {
-  return { id: row.id, name: row.name, description: row.description, sourceType: row.source_type, sourceUri: row.source_uri, sourceRef: row.source_ref, createdAt: row.created_at, updatedAt: row.updated_at }
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    sourceType: row.source_type,
+    sourceUri: row.source_uri,
+    sourceRef: row.source_ref,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? null,
+    deleteReason: row.delete_reason ?? null,
+  }
 }
 
 function mapVersion(row: any): VersionSnapshot {

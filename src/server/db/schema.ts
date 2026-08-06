@@ -170,6 +170,8 @@ export const skill_packages = sqliteTable('skill_packages', {
   source_ref: text('source_ref'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  deleted_at: integer('deleted_at'),
+  delete_reason: text('delete_reason'),
 })
 
 export const skill_versions = sqliteTable('skill_versions', {

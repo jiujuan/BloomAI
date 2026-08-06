@@ -35,6 +35,8 @@ export type SkillPackage = {
   source_ref: string | null
   created_at: number
   updated_at: number
+  deleted_at: number | null
+  delete_reason: string | null
 }
 
 export type SkillVersion = {
@@ -47,6 +49,11 @@ export type SkillVersion = {
   package_path: string
   source_snapshot_json: string
   is_compatible: number
+  immutable_hash?: string
+  status?: string
+  security_status?: string
+  snapshot_hash?: string
+  published_at?: number | null
   created_at: number
 }
 
@@ -58,6 +65,13 @@ export type SkillInstallation = {
   enabled: number
   installed_at: number
   updated_at: number
+  previous_version_id?: string | null
+  revision?: number
+  changed_at?: number | null
+  disabled_at?: number | null
+  uninstalled_at?: number | null
+  deleted_at?: number | null
+  rollback_reason?: string | null
 }
 
 export type CapabilityGrant = {

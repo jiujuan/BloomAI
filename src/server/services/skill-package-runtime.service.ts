@@ -5,6 +5,7 @@ import {
   createSqlitePackageRepository,
   createSqliteQueueRepository,
   createSqliteRunRepository,
+  createSqliteAuditRepository,
 } from '../db/repositories/skill-package.repo'
 import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
 import { PackageInstallError, PackageInstaller, type PackageInstallOptions, type PackageInstallSource } from '../skills/packages/package-installer'
@@ -13,6 +14,7 @@ import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime
 import { SkillRunCoordinator } from '../skills/runtime'
 import { CapabilityGrantService, CapabilityGrantServiceError } from '../skills/application/capability-grant.service'
 import { createSkillVersionService, type SkillVersionCandidate } from '../skills/application/skill-version.service'
+import { createSkillLifecycleService } from '../skills/application/skill-lifecycle.service'
 import {
   SkillRunConflictError,
   SkillRunNotFoundError,
@@ -66,6 +68,12 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     grants: grantRepository,
     clock,
     events: eventRepository,
+  })
+  const skillLifecycleService = createSkillLifecycleService({
+    packages: packageRepository,
+    runs: runRepository,
+    audit: createSqliteAuditRepository(),
+    clock,
   })
   const skillVersionService = createSkillVersionService({
     packages: packageRepository,
@@ -177,6 +185,24 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
         if (!installation) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
         return installation
       })
+    },
+
+    setInstallationEnabledWithRevision(id: string, enabled: boolean, options: { expectedRevision: number; idempotencyKey: string }) {
+      return mapRuntimeError(() => enabled
+        ? skillLifecycleService.enableInstallation(id, options)
+        : skillLifecycleService.disableInstallation(id, options))
+    },
+
+    uninstallInstallation(id: string, options: { expectedRevision: number; idempotencyKey: string }) {
+      return mapRuntimeError(() => skillLifecycleService.uninstallInstallation(id, options))
+    },
+
+    rollbackInstallation(id: string, input: { versionId?: string; expectedRevision: number; idempotencyKey: string; reason: string }) {
+      return mapRuntimeError(() => skillLifecycleService.rollbackInstallation(id, input))
+    },
+
+    deletePackage(id: string, input: { confirm: boolean; idempotencyKey: string; reason: string }) {
+      return mapRuntimeError(() => skillLifecycleService.requestDeletePackage(id, input))
     },
 
     revokeCapabilityGrant(id: string) {

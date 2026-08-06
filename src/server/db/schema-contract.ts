@@ -75,6 +75,11 @@ export function getExpectedSchemaContract(): SchemaContract {
           source_ref: optional,
           created_at: required,
           updated_at: required,
+          deleted_at: optional,
+          delete_reason: optional,
+        },
+        indexes: {
+          idx_skill_packages_deleted_at: { columns: ['deleted_at'] },
         },
       },
       skill_versions: {
