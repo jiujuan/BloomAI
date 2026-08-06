@@ -20,6 +20,7 @@ import { deepResearchRoutes } from './routes/deep-research'
 import { schedulesRoutes } from './routes/schedules'
 import { skillCreatorRoutes } from './routes/skill-creator'
 import { skillSecurityRoutes } from './routes/skill-security'
+import { createSkillRuntimeObservabilityRoutes, type SkillRuntimeObservabilityRouteOptions } from './routes/skill-runtime-observability'
 import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checklist'
 
 /**
@@ -27,7 +28,11 @@ import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checkl
  * Chat streaming runs through Mastra (AI SDK v6); CRUD routes wrap the existing
  * SQLite repositories. Served via @hono/node-server (see ../index.ts).
  */
-export function createHonoApp(): Hono {
+export type HonoAppOptions = {
+  skillRuntimeObservability?: SkillRuntimeObservabilityRouteOptions
+}
+
+export function createHonoApp(options: HonoAppOptions = {}): Hono {
   const app = new Hono()
   const httpTracer = getTracer('bloomai.http')
   // Lazily created on first request 鈥?after initMetrics() has registered the global MeterProvider.
@@ -93,6 +98,7 @@ export function createHonoApp(): Hono {
   app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', skillCreatorRoutes)
   app.route('/api/v1', skillSecurityRoutes)
+  app.route('/api/v1', createSkillRuntimeObservabilityRoutes(options.skillRuntimeObservability))
   app.route('/api/v1', imageStudioRoutes)
   app.route('/api/v1', articleIllustrationRoutes)
   app.route('/api/v1/deep-research', deepResearchRoutes)
