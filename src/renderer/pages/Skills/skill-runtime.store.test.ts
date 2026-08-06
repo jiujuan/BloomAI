@@ -62,6 +62,16 @@ describe('Package Runtime Zustand store', () => {
     expect(useSkillRuntimeStore.getState().errorDetails).toMatchObject({ code: 'REVISION_CONFLICT', status: 409 })
   })
 
+  it('loads a draft for creator editing and refreshes server truth after a revision conflict', async () => {
+    const draft = { id: 'draft-1', content: { name: 'Draft', slug: 'draft', skillMd: '# Draft' }, revision: 4, status: 'draft' }
+    const getDraftMock = vi.spyOn(platform, 'getSkillDraft').mockResolvedValue(draft)
+    await expect(useSkillRuntimeStore.getState().loadDraft('draft-1')).resolves.toEqual(draft)
+    expect(getDraftMock).toHaveBeenCalledWith('draft-1')
+    expect(useSkillRuntimeStore.getState().drafts['draft-1']).toEqual(draft)
+    await useSkillRuntimeStore.getState().refreshAfterConflict('draft', 'draft-1')
+    expect(getDraftMock).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps package runs out of the legacy store boundary', async () => {
     vi.spyOn(platform, 'getSkillRun').mockResolvedValue({ id: 'run-1', skillVersionId: 'version-1', status: 'running', revision: 1, input: {}, output: null, context: {}, surface: 'skills', sessionId: null, imageSessionId: null, waitingReason: null, waitingSince: null, waitingExpiresAt: null, requiredAction: null, cancelRequested: false, startedAt: 1, updatedAt: 1, finishedAt: null, errorCode: null, errorMessage: null, resultSummary: null })
     const loaded = await useSkillRuntimeStore.getState().loadRun('run-1')

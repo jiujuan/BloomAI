@@ -309,10 +309,19 @@ export type DraftDto = {
   updatedAt?: number
 }
 
+export type DraftValidationIssue = {
+  path?: string
+  file?: string
+  line?: number
+  column?: number
+  message: string
+  code?: string
+}
+
 export type DraftValidation = {
   valid: boolean
-  errors: Array<{ path?: string; message: string; code?: string }>
-  warnings: Array<{ path?: string; message: string; code?: string }>
+  errors: DraftValidationIssue[]
+  warnings: DraftValidationIssue[]
 }
 
 export type DraftPreview = {

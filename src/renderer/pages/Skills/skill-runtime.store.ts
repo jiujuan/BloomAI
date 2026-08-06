@@ -148,7 +148,8 @@ type RuntimeActions = {
   rejectRun: (id: string, expectedRevision: number, reason?: string) => Promise<SkillRun>
   cancelRun: (id: string, expectedRevision: number, reason?: string) => Promise<SkillRun>
   retryRun: (id: string, expectedRevision: number) => Promise<SkillRun>
-  refreshAfterConflict: (scope?: 'package' | 'run', id?: string) => Promise<void>
+  refreshAfterConflict: (scope?: 'package' | 'run' | 'draft', id?: string) => Promise<void>
+  loadDraft: (id: string) => Promise<DraftDto>
   createDraft: (input: Parameters<typeof platform.createSkillDraft>[0]) => Promise<DraftDto>
   updateDraft: (id: string, input: Parameters<typeof platform.updateSkillDraft>[1]) => Promise<DraftDto>
   validateDraft: (id: string) => ReturnType<typeof platform.validateSkillDraft>
@@ -359,6 +360,12 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         const runId = id ?? get().selectedRun?.id
         if (runId) await get().loadRun(runId)
       }
+      if (scope === 'draft' && id) await get().loadDraft(id)
+    },
+    loadDraft: async (id) => {
+      const draft = await platform.getSkillDraft(id)
+      set((state) => ({ drafts: { ...state.drafts, [draft.id]: draft } }))
+      return draft
     },
     createDraft: async (input) => withMutation('draft:create', async () => {
       const draft = await platform.createSkillDraft(input)
