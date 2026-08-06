@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="BloomAI Skills Runtime Control Plane v1.1 admin prototype">
-  <title>Skills Runtime · BloomAI</title>
+  <meta name="description" content="BloomAI Skills Runtime Control Plane v1.1 standalone Workbench prototype">
+  <title>Skills Runtime · BloomAI Workbench</title>
   <style>
     :root {
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
       --bg-primary: #ffffff;
       --bg-secondary: #f5f5f4;
       --bg-tertiary: #eeede9;
+      --bg-elevated: #ffffff;
       --bg-info: #eff5fc;
       --bg-success: #edf7f2;
       --bg-warning: #fef5e8;
@@ -19,6 +20,7 @@
       --text-primary: #1a1a18;
       --text-secondary: #3d3d3a;
       --text-tertiary: #73726c;
+      --text-muted: #9a9891;
       --text-info: #0c447c;
       --text-success: #085041;
       --text-warning: #633806;
@@ -28,87 +30,323 @@
       --border-tertiary: #dddbd6;
       --border-info: #85b7eb;
       --border-success: #5dcaa5;
+      --border-warning: #efc77b;
       --border-danger: #f09595;
       --brand-a: #7c6ff7;
       --brand-b: #4b9bf5;
       --status-active: #2563eb;
       --status-success: #1d9e75;
+      --status-running: #2563eb;
       --status-waiting: #ef9f27;
       --status-warning: #ba7517;
       --status-danger: #e5484d;
       --status-disabled: #73726c;
       --status-info: #534ab7;
-      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .08);
-      --shadow-md: 0 12px 30px rgba(25, 24, 20, .13);
+      --shadow-sm: 0 1px 3px rgba(25, 24, 20, .08);
+      --shadow-md: 0 18px 42px rgba(25, 24, 20, .16);
       --radius-sm: 4px;
       --radius-md: 6px;
       --radius-lg: 10px;
       --radius-xl: 14px;
-      --content-max: 1600px;
+      --content-max: 1680px;
+      --sidebar-width: 256px;
+      --topbar-height: 72px;
     }
     [data-theme="dark"] {
       --bg-primary: #1a1a18;
-      --bg-secondary: #242422;
+      --bg-secondary: #232321;
       --bg-tertiary: #2e2e2b;
+      --bg-elevated: #272724;
       --bg-info: #0c1f35;
       --bg-success: #071f18;
       --bg-warning: #201200;
       --bg-danger: #1f0808;
-      --text-primary: #e8e6e0;
-      --text-secondary: #c2c0b6;
-      --text-tertiary: #888780;
+      --text-primary: #ebe9e2;
+      --text-secondary: #c9c6bc;
+      --text-tertiary: #9a9891;
+      --text-muted: #77766f;
       --text-info: #7ab8f0;
       --text-success: #5dcaa5;
       --text-warning: #dda348;
       --text-danger: #f09595;
       --border-primary: #e8e6e0;
       --border-secondary: #4a4845;
-      --border-tertiary: #35342f;
+      --border-tertiary: #3a3935;
       --border-info: #1a4a7c;
       --border-success: #0d5040;
+      --border-warning: #7b5717;
       --border-danger: #7a2020;
-      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .3);
-      --shadow-md: 0 12px 30px rgba(0, 0, 0, .35);
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .28);
+      --shadow-md: 0 18px 42px rgba(0, 0, 0, .42);
     }
     *, *::before, *::after { box-sizing: border-box; }
-    html, body { min-height: 100%; }
-    body {
-      margin: 0;
-      color: var(--text-primary);
-      background: var(--bg-secondary);
-      font-family: var(--font-sans);
-      font-size: 13px;
-      line-height: 1.45;
-      -webkit-font-smoothing: antialiased;
-    }
+    html { min-width: 320px; min-height: 100%; background: var(--bg-secondary); }
+    body { min-width: 320px; min-height: 100vh; margin: 0; overflow-x: hidden; color: var(--text-primary); background: var(--bg-secondary); font-family: var(--font-sans); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    body.is-locked { overflow: hidden; }
+    a { color: inherit; text-decoration: none; }
     button, input, select, textarea { font: inherit; }
     button { cursor: pointer; }
-    button:disabled { cursor: not-allowed; }
-    button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
-      outline: 3px solid color-mix(in srgb, var(--brand-b) 38%, transparent);
-      outline-offset: 2px;
-    }
-    .skip-link { position: fixed; left: 12px; top: 12px; z-index: 100; padding: 8px 12px; border-radius: 6px; background: var(--text-primary); color: var(--bg-primary); transform: translateY(-160%); transition: transform .2s; }
+    button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand-b) 42%, transparent); outline-offset: 2px; }
+    .skip-link { position: fixed; left: 12px; top: 12px; z-index: 120; padding: 8px 12px; border-radius: var(--radius-md); background: var(--text-primary); color: var(--bg-primary); transform: translateY(-160%); transition: transform .2s ease; }
     .skip-link:focus { transform: translateY(0); }
-    .app-shell { display: grid; min-height: 100vh; grid-template-columns: 248px minmax(0, 1fr); }
-    .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--border-tertiary); background: var(--bg-primary); }
-    .main-shell { min-width: 0; display: flex; flex-direction: column; }
-    .topbar { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 28px; border-bottom: 1px solid var(--border-tertiary); background: color-mix(in srgb, var(--bg-primary) 94%, transparent); backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 20; }
+    .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { display: flex; flex-direction: column; min-height: 100vh; border-right: 1px solid var(--border-tertiary); background: var(--bg-primary); }
+    .sidebar-head { padding: 22px 18px 16px; border-bottom: 1px solid var(--border-tertiary); }
+    .brand-line { display: flex; align-items: center; gap: 10px; }
+    .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; color: #fff; background: linear-gradient(135deg, var(--brand-a), var(--brand-b)); box-shadow: 0 5px 16px rgba(75, 155, 245, .26); }
+    .brand-mark svg { width: 19px; height: 19px; }
+    .brand-name { font-size: 14px; font-weight: 780; letter-spacing: -.01em; }
+    .brand-subtitle { margin-top: 2px; color: var(--text-tertiary); font-size: 11px; }
+    .workbench-select { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: 16px; padding: 9px 10px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); background: var(--bg-secondary); text-align: left; }
+    .workbench-select:hover { border-color: var(--border-secondary); background: var(--bg-tertiary); }
+    .workbench-select strong { display: block; color: var(--text-primary); font-size: 12px; }
+    .workbench-select small { display: block; margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
+    .sidebar-scroll { flex: 1; overflow: auto; padding: 16px 10px; }
+    .nav-section { margin-bottom: 18px; }
+    .nav-label { padding: 0 10px 7px; color: var(--text-muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .nav-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; margin: 2px 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-md); color: var(--text-secondary); background: transparent; text-align: left; transition: background .15s, color .15s, border-color .15s; }
+    .nav-item:hover { background: var(--bg-secondary); color: var(--text-primary); }
+    .nav-item.active { border-color: color-mix(in srgb, var(--brand-b) 24%, var(--border-tertiary)); color: var(--text-primary); background: color-mix(in srgb, var(--brand-b) 9%, var(--bg-primary)); font-weight: 700; }
+    .nav-item.locked { color: var(--text-muted); }
+    .nav-item.locked .nav-status { margin-left: auto; color: var(--status-disabled); }
+    .nav-icon { display: grid; flex: 0 0 18px; place-items: center; color: var(--text-tertiary); }
+    .nav-item.active .nav-icon { color: var(--brand-b); }
+    .nav-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-caption { display: block; margin-top: 1px; color: var(--text-muted); font-size: 10px; font-weight: 500; }
+    .sidebar-foot { padding: 12px 14px 16px; border-top: 1px solid var(--border-tertiary); }
+    .role-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); background: var(--bg-secondary); }
+    .role-note .icon { flex: 0 0 auto; margin-top: 1px; color: var(--brand-a); }
+    .role-note p { margin: 0; color: var(--text-tertiary); font-size: 11px; }
+    .role-note strong { display: block; margin-bottom: 2px; color: var(--text-primary); font-size: 11px; }
+    .main-shell { display: flex; min-width: 0; flex-direction: column; }
+    .topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--topbar-height); padding: 12px 28px; border-bottom: 1px solid var(--border-tertiary); background: color-mix(in srgb, var(--bg-primary) 93%, transparent); backdrop-filter: blur(15px); }
+    .topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .topbar-left { flex: 1; }
+    .mobile-menu { display: none; }
+    .breadcrumb { min-width: 0; }
+    .breadcrumb-line { display: flex; align-items: center; gap: 6px; color: var(--text-tertiary); font-size: 11px; }
+    .breadcrumb-line strong { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .context-strip { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+    .context-stat { display: inline-flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+    .context-stat strong { color: var(--text-secondary); font-weight: 700; }
+    .context-divider { width: 1px; height: 12px; background: var(--border-tertiary); }
+    .runtime-pill, .status-badge { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .runtime-pill { padding: 7px 9px; border: 1px solid var(--border-success); border-radius: 999px; color: var(--text-success); background: var(--bg-success); font-size: 11px; font-weight: 700; }
+    .runtime-pill.degraded, .status-badge.waiting { border-color: var(--border-warning); color: var(--text-warning); background: var(--bg-warning); }
+    .runtime-pill.readonly, .status-badge.disabled { border-color: var(--border-secondary); color: var(--text-tertiary); background: var(--bg-tertiary); }
+    .runtime-pill.disabled, .status-badge.failed { border-color: var(--border-danger); color: var(--text-danger); background: var(--bg-danger); }
+    .search-box { display: flex; align-items: center; gap: 7px; width: 190px; padding: 8px 10px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-tertiary); background: var(--bg-secondary); }
+    .search-box:focus-within { border-color: var(--brand-b); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-b) 13%, transparent); }
+    .search-box input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; }
+    .search-box input::placeholder { color: var(--text-muted); }
+    .key-hint { padding: 1px 4px; border: 1px solid var(--border-tertiary); border-radius: 3px; color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; }
+    .icon-btn { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-md); color: var(--text-tertiary); background: transparent; }
+    .icon-btn:hover { border-color: var(--border-tertiary); color: var(--text-primary); background: var(--bg-secondary); }
+    .role-select { min-width: 118px; padding: 8px 28px 8px 9px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); background-color: var(--bg-primary); }
     .content { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: 28px; }
-    .drawer-root, .dialog-root, .toast-root { position: fixed; inset: 0; pointer-events: none; z-index: 80; }
+    .page { animation: page-in .18s ease-out; }
+    @keyframes page-in { from { opacity: .35; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+    .eyebrow { margin-bottom: 6px; color: var(--brand-a); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 6px; font-size: clamp(23px, 3vw, 32px); line-height: 1.1; letter-spacing: -.035em; }
+    h2 { margin-bottom: 4px; font-size: 17px; letter-spacing: -.02em; }
+    h3 { margin-bottom: 3px; font-size: 13px; }
+    .page-subtitle { max-width: 760px; margin-bottom: 0; color: var(--text-tertiary); }
+    .header-actions, .button-row, .toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); background: var(--bg-primary); font-weight: 700; transition: border-color .15s, background .15s, color .15s, transform .15s; }
+    .button:hover { border-color: var(--border-secondary); background: var(--bg-secondary); }
+    .button:active { transform: translateY(1px); }
+    .button.primary { border-color: transparent; color: #fff; background: linear-gradient(135deg, var(--brand-a), var(--brand-b)); box-shadow: 0 5px 14px rgba(75, 155, 245, .18); }
+    .button.primary:hover { filter: brightness(1.05); }
+    .button.success { border-color: var(--border-success); color: var(--text-success); background: var(--bg-success); }
+    .button.warning { border-color: var(--border-warning); color: var(--text-warning); background: var(--bg-warning); }
+    .button.danger { border-color: var(--border-danger); color: var(--text-danger); background: var(--bg-danger); }
+    .button.ghost { border-color: transparent; background: transparent; }
+    .button[disabled], .button.is-disabled { opacity: .48; filter: grayscale(.35); pointer-events: none; }
+    .card { border: 1px solid var(--border-tertiary); border-radius: var(--radius-lg); background: var(--bg-primary); box-shadow: var(--shadow-sm); }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 17px 18px 12px; }
+    .card-head p { margin-bottom: 0; color: var(--text-tertiary); font-size: 11px; }
+    .card-body { padding: 0 18px 18px; }
+    .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border-tertiary); color: var(--text-tertiary); font-size: 11px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .metric { position: relative; overflow: hidden; padding: 16px; }
+    .metric::after { position: absolute; right: -25px; bottom: -35px; width: 100px; height: 100px; border-radius: 50%; background: color-mix(in srgb, var(--brand-b) 8%, transparent); content: ""; }
+    .metric-label { display: flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 11px; font-weight: 700; }
+    .metric-label .icon { color: var(--brand-b); }
+    .metric-value { margin: 10px 0 3px; font-size: 27px; font-weight: 800; letter-spacing: -.04em; }
+    .metric-note { color: var(--text-tertiary); font-size: 11px; }
+    .metric-trend { color: var(--text-success); font-weight: 700; }
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 16px; }
+    .grid-2.equal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .grid-2 > *, .grid-3 > *, .grid-4 > *, .hero > * { min-width: 0; }
+    .stack { display: grid; gap: 16px; }
+    .stack-sm { display: grid; gap: 10px; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 10px; }
+    .section-heading h2 { margin-bottom: 0; }
+    .section-heading p { margin-bottom: 0; color: var(--text-tertiary); font-size: 11px; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding: 11px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-lg); background: var(--bg-primary); }
+    .toolbar-left, .toolbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .field { display: grid; gap: 5px; min-width: 130px; }
+    .field label { color: var(--text-tertiary); font-size: 10px; font-weight: 750; }
+    .field input, .field select, .field textarea { min-height: 34px; padding: 7px 9px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-primary); background: var(--bg-primary); }
+    .field textarea { min-height: 88px; resize: vertical; }
+    .table-shell { overflow: auto; border: 1px solid var(--border-tertiary); border-radius: var(--radius-lg); background: var(--bg-primary); box-shadow: var(--shadow-sm); }
+    .data-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    .data-table th { padding: 10px 14px; border-bottom: 1px solid var(--border-tertiary); color: var(--text-muted); background: var(--bg-secondary); font-size: 10px; font-weight: 800; letter-spacing: .045em; text-align: left; text-transform: uppercase; white-space: nowrap; }
+    .data-table td { padding: 12px 14px; border-bottom: 1px solid var(--border-tertiary); vertical-align: middle; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table tbody tr:hover { background: color-mix(in srgb, var(--brand-b) 4%, var(--bg-primary)); }
+    .primary-cell { display: flex; align-items: center; gap: 9px; min-width: 190px; }
+    .object-icon { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--brand-a); background: color-mix(in srgb, var(--brand-a) 9%, var(--bg-primary)); }
+    .primary-cell strong, .primary-cell small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .primary-cell small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; }
+    .mono { font-family: var(--font-mono); font-size: 11px; }
+    .muted { color: var(--text-tertiary); }
+    .subtle { color: var(--text-muted); }
+    .nowrap { white-space: nowrap; }
+    .link { color: var(--brand-b); font-weight: 700; }
+    .link:hover { text-decoration: underline; }
+    .status-badge { padding: 4px 7px; border: 1px solid var(--border-tertiary); border-radius: 999px; color: var(--text-secondary); background: var(--bg-secondary); font-size: 10px; font-weight: 750; }
+    .status-badge.success { border-color: var(--border-success); color: var(--text-success); background: var(--bg-success); }
+    .status-badge.running { border-color: var(--border-info); color: var(--text-info); background: var(--bg-info); }
+    .status-badge.warning { border-color: var(--border-warning); color: var(--text-warning); background: var(--bg-warning); }
+    .status-badge.danger { border-color: var(--border-danger); color: var(--text-danger); background: var(--bg-danger); }
+    .status-badge.info { border-color: color-mix(in srgb, var(--brand-a) 42%, var(--border-tertiary)); color: var(--status-info); background: color-mix(in srgb, var(--brand-a) 9%, var(--bg-primary)); }
+    .status-badge .icon { flex: 0 0 auto; }
+    .badge-row, .chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-tertiary); border-radius: 999px; color: var(--text-secondary); background: var(--bg-secondary); font-size: 10px; }
+    .chip.capability { border-color: color-mix(in srgb, var(--brand-a) 32%, var(--border-tertiary)); color: var(--status-info); background: color-mix(in srgb, var(--brand-a) 8%, var(--bg-primary)); }
+    .banner { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-lg); background: var(--bg-primary); }
+    .banner .icon { flex: 0 0 auto; margin-top: 1px; }
+    .banner strong { display: block; margin-bottom: 2px; }
+    .banner p { margin-bottom: 0; color: var(--text-tertiary); font-size: 11px; }
+    .banner.info { border-color: var(--border-info); background: var(--bg-info); }
+    .banner.info .icon { color: var(--status-info); }
+    .banner.warning { border-color: var(--border-warning); background: var(--bg-warning); }
+    .banner.warning .icon { color: var(--status-warning); }
+    .banner.danger { border-color: var(--border-danger); background: var(--bg-danger); }
+    .banner.danger .icon { color: var(--status-danger); }
+    .banner.success { border-color: var(--border-success); background: var(--bg-success); }
+    .banner.success .icon { color: var(--status-success); }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(250px, .8fr); gap: 16px; padding: 20px; border: 1px solid color-mix(in srgb, var(--brand-b) 28%, var(--border-tertiary)); border-radius: var(--radius-xl); background: linear-gradient(135deg, color-mix(in srgb, var(--brand-a) 9%, var(--bg-primary)), color-mix(in srgb, var(--brand-b) 7%, var(--bg-primary))); box-shadow: var(--shadow-sm); }
+    .hero h2 { font-size: 21px; }
+    .hero p { max-width: 720px; color: var(--text-tertiary); }
+    .hero-aside { display: grid; align-content: center; gap: 8px; padding: 14px; border: 1px solid color-mix(in srgb, var(--brand-b) 24%, var(--border-tertiary)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--bg-primary) 72%, transparent); }
+    .hero-aside-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-tertiary); font-size: 11px; }
+    .hero-aside-row strong { color: var(--text-primary); }
+    .sparkline { width: 100%; height: 36px; }
+    .sparkline path { fill: none; stroke: var(--brand-b); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
+    .sparkline .area { fill: color-mix(in srgb, var(--brand-b) 12%, transparent); stroke: none; }
+    .state-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .state-card { min-height: 76px; padding: 10px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); background: var(--bg-primary); }
+    .state-card strong { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; font-size: 11px; }
+    .state-card p { margin-bottom: 0; color: var(--text-tertiary); font-size: 10px; }
+    .state-card.loading strong { color: var(--status-info); }
+    .state-card.empty strong { color: var(--text-tertiary); }
+    .state-card.waiting strong { color: var(--status-waiting); }
+    .state-card.failed strong { color: var(--status-danger); }
+    .state-card.readonly strong { color: var(--text-tertiary); }
+    .state-card.disabled strong { color: var(--status-warning); }
+    .state-card.denied strong { color: var(--status-danger); }
+    .state-card.progress strong { color: var(--status-running); }
+    .progress { height: 7px; overflow: hidden; border-radius: 999px; background: var(--bg-tertiary); }
+    .progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand-a), var(--brand-b)); }
+    .progress-row { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--text-tertiary); font-size: 10px; }
+    .list { display: grid; gap: 0; }
+    .list-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-tertiary); }
+    .list-item:first-child { padding-top: 0; }
+    .list-item:last-child { padding-bottom: 0; border-bottom: 0; }
+    .list-main { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
+    .list-main strong, .list-main small { display: block; }
+    .list-main small { margin-top: 2px; color: var(--text-tertiary); font-size: 10px; }
+    .timeline { position: relative; display: grid; gap: 0; padding-left: 22px; }
+    .timeline::before { position: absolute; top: 7px; bottom: 7px; left: 6px; width: 1px; background: var(--border-tertiary); content: ""; }
+    .timeline-item { position: relative; padding: 0 0 15px; }
+    .timeline-item:last-child { padding-bottom: 0; }
+    .timeline-dot { position: absolute; left: -22px; top: 3px; display: grid; width: 14px; height: 14px; place-items: center; border: 3px solid var(--bg-primary); border-radius: 50%; background: var(--status-info); box-shadow: 0 0 0 1px var(--border-tertiary); }
+    .timeline-item.success .timeline-dot { background: var(--status-success); }
+    .timeline-item.warning .timeline-dot { background: var(--status-waiting); }
+    .timeline-item.danger .timeline-dot { background: var(--status-danger); }
+    .timeline-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .timeline-top strong { font-size: 12px; }
+    .timeline-top time { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+    .timeline-item p { margin: 3px 0 0; color: var(--text-tertiary); font-size: 11px; }
+    .stepper { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+    .step { position: relative; padding-top: 25px; color: var(--text-muted); font-size: 10px; }
+    .step::before { position: absolute; top: 7px; left: 0; right: 0; height: 2px; background: var(--border-tertiary); content: ""; }
+    .step:first-child::before { left: 50%; }
+    .step:last-child::before { right: 50%; }
+    .step::after { position: absolute; top: 1px; left: calc(50% - 7px); width: 14px; height: 14px; border: 3px solid var(--bg-primary); border-radius: 50%; background: var(--border-secondary); box-shadow: 0 0 0 1px var(--border-tertiary); content: ""; }
+    .step.done, .step.current { color: var(--text-secondary); font-weight: 700; }
+    .step.done::before, .step.current::before { background: var(--status-success); }
+    .step.done::after { background: var(--status-success); }
+    .step.current::after { background: var(--status-running); }
+    .kv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+    .kv { min-width: 0; }
+    .kv dt { margin-bottom: 3px; color: var(--text-muted); font-size: 10px; }
+    .kv dd { margin: 0; color: var(--text-secondary); font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+    .empty-state { display: grid; place-items: center; min-height: 210px; padding: 28px; border: 1px dashed var(--border-secondary); border-radius: var(--radius-lg); color: var(--text-tertiary); background: color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary)); text-align: center; }
+    .empty-state .empty-icon { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 10px; border-radius: 50%; color: var(--brand-a); background: color-mix(in srgb, var(--brand-a) 10%, var(--bg-primary)); }
+    .empty-state h3 { color: var(--text-secondary); }
+    .empty-state p { max-width: 420px; margin-bottom: 14px; font-size: 11px; }
+    .read-only { position: relative; }
+    .read-only::after { position: absolute; top: 10px; right: 12px; color: var(--text-muted); content: "只读"; font-size: 10px; font-weight: 800; }
+    .code-block { overflow: auto; padding: 13px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); background: var(--bg-secondary); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; white-space: pre; }
+    .object-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 11px; }
+    .object-chain .chain-item { color: var(--brand-b); font-weight: 700; }
+    .object-chain .icon { color: var(--text-muted); }
+    .drawer-root, .dialog-root, .toast-root { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
     .drawer-root > *, .dialog-root > *, .toast-root > * { pointer-events: auto; }
-    .no-js { padding: 24px; max-width: 680px; margin: 40px auto; color: var(--text-danger); background: var(--bg-danger); border: 1px solid var(--border-danger); border-radius: var(--radius-lg); }
-    @media (max-width: 1024px) { .app-shell { grid-template-columns: 220px minmax(0, 1fr); } .content { padding: 22px; } .topbar { padding-inline: 22px; } }
-    @media (max-width: 768px) { .app-shell { grid-template-columns: 74px minmax(0, 1fr); } .content { padding: 18px; } .topbar { padding-inline: 16px; } }
-    @media (max-width: 520px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 64px; border-top: 1px solid var(--border-tertiary); border-right: 0; } .topbar { position: static; align-items: flex-start; } .content { padding: 14px; } }
+    .drawer-backdrop, .dialog-backdrop { position: absolute; inset: 0; background: rgba(20, 20, 18, .42); }
+    .drawer-backdrop { animation: fade-in .15s ease-out; }
+    .drawer-panel { position: absolute; top: 0; right: 0; display: flex; width: min(580px, 100%); height: 100%; flex-direction: column; border-left: 1px solid var(--border-tertiary); background: var(--bg-primary); box-shadow: var(--shadow-md); animation: drawer-in .2s ease-out; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes drawer-in { from { opacity: .5; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
+    .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 20px 15px; border-bottom: 1px solid var(--border-tertiary); }
+    .drawer-head h2 { margin-bottom: 3px; }
+    .drawer-head p { margin-bottom: 0; color: var(--text-tertiary); font-size: 11px; }
+    .drawer-body { overflow: auto; flex: 1; padding: 18px 20px; }
+    .drawer-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--border-tertiary); }
+    .dialog-root { display: grid; place-items: center; padding: 18px; }
+    .dialog-backdrop { animation: fade-in .12s ease-out; }
+    .dialog-card { position: relative; z-index: 1; width: min(500px, 100%); max-height: min(690px, calc(100vh - 36px)); overflow: auto; border: 1px solid var(--border-tertiary); border-radius: var(--radius-xl); background: var(--bg-primary); box-shadow: var(--shadow-md); animation: dialog-in .18s ease-out; }
+    @keyframes dialog-in { from { opacity: .5; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    .dialog-head, .dialog-body, .dialog-foot { padding-inline: 20px; }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-top: 18px; }
+    .dialog-head h2 { margin-bottom: 0; }
+    .dialog-body { padding-top: 12px; padding-bottom: 16px; }
+    .dialog-body p { color: var(--text-tertiary); font-size: 12px; }
+    .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 13px; padding-bottom: 15px; border-top: 1px solid var(--border-tertiary); }
+    .toast-stack { position: absolute; right: 18px; bottom: 18px; display: grid; gap: 8px; width: min(360px, calc(100% - 36px)); }
+    .toast { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid var(--border-tertiary); border-radius: var(--radius-lg); background: var(--bg-primary); box-shadow: var(--shadow-md); animation: toast-in .18s ease-out; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    .toast.success .icon { color: var(--status-success); }
+    .toast.warning .icon { color: var(--status-warning); }
+    .toast.danger .icon { color: var(--status-danger); }
+    .toast.info .icon { color: var(--status-info); }
+    .toast strong { display: block; margin-bottom: 2px; font-size: 11px; }
+    .toast p { margin-bottom: 0; color: var(--text-tertiary); font-size: 10px; }
+    .toast-close { margin-left: auto; color: var(--text-muted); }
+    .toast-close:hover { color: var(--text-primary); }
+    .no-js { max-width: 720px; margin: 60px auto; padding: 22px; border: 1px solid var(--border-warning); border-radius: var(--radius-lg); color: var(--text-warning); background: var(--bg-warning); }
+    .hidden { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (min-width: 1440px) { .content { padding: 34px 40px 46px; } }
+    @media (max-width: 1100px) { :root { --sidebar-width: 224px; } .topbar { padding-inline: 20px; } .content { padding: 22px; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .search-box { width: 150px; } }
+    @media (max-width: 820px) { .app-shell { grid-template-columns: 76px minmax(0, 1fr); } .sidebar-head { padding: 16px 10px; } .brand-line { justify-content: center; } .brand-copy, .workbench-select .workbench-copy, .sidebar-foot, .nav-label, .nav-text, .nav-caption { display: none; } .workbench-select { justify-content: center; padding: 9px 0; } .sidebar-scroll { padding-inline: 8px; } .nav-item { justify-content: center; padding-inline: 0; } .nav-icon { flex-basis: auto; } .nav-item .nav-status { display: none; } .topbar { gap: 10px; } .context-strip { display: none; } .search-box { width: 38px; padding-inline: 9px; } .search-box input, .key-hint { display: none; } .grid-2, .grid-2.equal, .hero { grid-template-columns: 1fr; } .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .page-header { flex-direction: column; } .header-actions { width: 100%; } }
+    @media (max-width: 560px) { .app-shell { grid-template-columns: 1fr; padding-bottom: 64px; } .sidebar { position: fixed; right: 0; bottom: 0; z-index: 50; display: block; width: 100%; min-height: 64px; height: 64px; border-top: 1px solid var(--border-tertiary); border-right: 0; } .sidebar-head { display: none; } .sidebar-scroll { display: flex; overflow-x: auto; height: 64px; padding: 7px 8px; } .nav-section { display: flex; flex: 0 0 auto; gap: 5px; margin: 0; } .nav-label { display: none; } .nav-item { width: 48px; min-height: 48px; border-radius: var(--radius-md); } .sidebar-foot { display: none; } .main-shell { min-height: calc(100vh - 64px); } .topbar { position: static; align-items: flex-start; min-height: 64px; padding: 11px 14px; } .topbar-left { min-width: 0; } .mobile-menu { display: inline-grid; } .runtime-pill span:not(.icon) { display: none; } .role-select { min-width: 36px; width: 36px; padding-inline: 7px; color: transparent; } .role-select option { color: var(--text-primary); } .content { padding: 15px 14px 24px; } .metrics, .grid-3, .grid-4, .state-grid { grid-template-columns: 1fr 1fr; } .kv-grid { grid-template-columns: 1fr; } .toolbar { align-items: stretch; flex-direction: column; } .toolbar-left, .toolbar-right { width: 100%; } .field { flex: 1; min-width: 0; } .toolbar .button { flex: 1; } .section-heading { align-items: flex-start; flex-direction: column; } h1 { font-size: 23px; } .drawer-panel { width: 100%; } }
+    @media (max-width: 380px) { .metrics, .grid-3, .grid-4, .state-grid { grid-template-columns: 1fr; } .topbar-right .icon-btn:not(.mobile-menu) { display: none; } .header-actions .button { flex: 1; } .hero { padding: 15px; } .card-head, .card-body { padding-inline: 14px; } .data-table th, .data-table td { padding-inline: 10px; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
   </style>
 </head>
 <body>
   <a class="skip-link" href="#main-content">跳转到主要内容</a>
   <div class="app-shell">
-    <aside id="sidebar" class="sidebar" aria-label="Skills Runtime navigation">
-      <div style="padding:20px">Skills Runtime</div>
-    </aside>
+    <aside id="sidebar" class="sidebar" aria-label="Skills Runtime navigation"></aside>
     <div class="main-shell">
       <header id="topbar" class="topbar" aria-label="Runtime context"></header>
       <main id="main-content" class="content" tabindex="-1">
@@ -120,5 +358,625 @@
   <div id="dialog-root" class="dialog-root" aria-live="assertive"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
   <noscript><div class="no-js">此原型需要启用 JavaScript 以展示导航、抽屉、弹窗和角色切换。</div></noscript>
+  <script>
+  (function () {
+    "use strict";
+
+    const roles = ['user', 'admin', 'ops'];
+    const roleLabels = { user: '普通用户', admin: '管理员', ops: '运维人员' };
+    const roleDescriptions = {
+      user: '查看可用 Skills、自己的 Run 和 Artifact，并维护自己的 Draft。',
+      admin: '管理 Package、Version、Installation、Policy、审批和发布。',
+      ops: '负责 Runtime、Worker、Queue、诊断、迁移、备份和 Rollback。'
+    };
+    const roleIcons = { user: 'user', admin: 'shield-check', ops: 'wrench' };
+    const pageMeta = {
+      overview: { title: 'Runtime Overview', cn: 'Runtime 总览', icon: 'activity', section: 'Control Plane' },
+      packages: { title: 'Package Catalog', cn: 'Skill Package 目录', icon: 'package', section: 'Explore' },
+      packageDetail: { title: 'Package Detail', cn: 'Package 详情', icon: 'box', section: 'Explore' },
+      runs: { title: 'Run Explorer', cn: 'Run 查询', icon: 'list', section: 'Explore' },
+      runDetail: { title: 'Run Detail', cn: 'Run 详情', icon: 'play', section: 'Explore' },
+      approvals: { title: 'Approval Queue', cn: 'Capability 审批', icon: 'clock', section: 'Governance' },
+      capabilities: { title: 'Capability Policies', cn: '能力策略', icon: 'shield', section: 'Governance' },
+      artifacts: { title: 'Artifact Center', cn: 'Artifact 中心', icon: 'file', section: 'Data & Creation' },
+      creator: { title: 'Creator / Draft Studio', cn: 'Creator 草稿工作台', icon: 'pen', section: 'Data & Creation' },
+      legacy: { title: 'Legacy Skills', cn: 'Legacy 兼容管理', icon: 'archive', section: 'Data & Creation' },
+      diagnostics: { title: 'Runtime Diagnostics', cn: 'Runtime 诊断', icon: 'cpu', section: 'Operations' },
+      operations: { title: 'Release & Migration', cn: '发布与迁移', icon: 'rocket', section: 'Operations' },
+      audit: { title: 'Audit & Evidence', cn: '审计与验收证据', icon: 'scroll', section: 'Operations' }
+    };
+    const navSections = [
+      { label: 'Control Plane', items: ['overview'] },
+      { label: 'Explore', items: ['packages', 'packageDetail', 'runs', 'runDetail'] },
+      { label: 'Governance', items: ['approvals', 'capabilities'] },
+      { label: 'Data & Creation', items: ['artifacts', 'creator', 'legacy'] },
+      { label: 'Operations', items: ['diagnostics', 'operations', 'audit'] }
+    ];
+    const rolePageAccess = {
+      user: ['overview', 'packages', 'packageDetail', 'runs', 'runDetail', 'approvals', 'artifacts', 'creator'],
+      admin: Object.keys(pageMeta),
+      ops: Object.keys(pageMeta)
+    };
+    const runtimeStates = {
+      healthy: { label: 'Healthy', cn: '运行健康', icon: 'check-circle', className: 'healthy', description: 'Package execution、Queue 和 Capability Broker 均可用。' },
+      degraded: { label: 'Degraded', cn: '降级运行', icon: 'alert-triangle', className: 'degraded', description: '存在可恢复异常；新 Run 仍受 Feature Gate 控制。' },
+      readonly: { label: 'Read-only', cn: '只读模式', icon: 'lock', className: 'readonly', description: '保留查询、导出、事件和 Artifact 访问，修改操作已禁用。' },
+      disabled: { label: 'Execution disabled', cn: '执行已禁用', icon: 'x-circle', className: 'disabled', description: '执行入口已关闭；可继续查看历史 Run 和审计证据。' }
+    };
+    const stateSamples = [
+      ['loading', 'Loading', '数据加载中，保留骨架和上下文。', 'loader'],
+      ['empty', 'Empty', '当前筛选没有可显示对象。', 'inbox'],
+      ['waiting', 'Waiting', '等待 Approval、Worker lease 或持久化长任务。', 'clock'],
+      ['failed', 'Failed', '可重试错误，保留 requestId 和错误分类。', 'x-circle'],
+      ['readonly', 'Read-only', '可查询和导出，写操作显示为禁用。', 'lock'],
+      ['disabled', 'Feature disabled', '服务端 Feature Gate 未开放此能力。', 'flag'],
+      ['denied', 'Permission denied', '当前角色和数据范围不允许此动作。', 'shield-off'],
+      ['progress', 'Long-running', '任务进度持久化，不依赖页面存活。', 'loader']
+    ];
+    const packages = [
+      { id: 'pkg-vision-extract', name: 'vision.extract', title: 'Vision Extract', owner: 'BloomAI Labs', version: '2.4.1', hash: 'sha256:5b0d…92c1', install: 'enabled', channel: 'stable', runs: 1842, caps: ['image.read', 'artifact.write'], updated: '2026-08-06 08:42' },
+      { id: 'pkg-data-notebook', name: 'data.notebook', title: 'Data Notebook', owner: 'Data Platform', version: '1.9.0', hash: 'sha256:8b3c…a71f', install: 'enabled', channel: 'stable', runs: 968, caps: ['file.read', 'artifact.write'], updated: '2026-08-05 18:12' },
+      { id: 'pkg-repo-review', name: 'repo.review', title: 'Repository Review', owner: 'Engineering', version: '0.8.4', hash: 'sha256:2e10…f409', install: 'approval', channel: 'canary', runs: 243, caps: ['repo.read', 'network.egress'], updated: '2026-08-05 11:31' },
+      { id: 'pkg-release-notes', name: 'release.notes', title: 'Release Notes', owner: 'Developer Experience', version: '3.1.2', hash: 'sha256:6f11…0ac9', install: 'disabled', channel: 'stable', runs: 0, caps: ['repo.read', 'artifact.write'], updated: '2026-08-03 09:20' },
+      { id: 'pkg-legacy-csv', name: 'legacy.csv-import', title: 'Legacy CSV Import', owner: 'Migration Team', version: 'legacy-adapter', hash: 'sha256:legacy…4d11', install: 'legacy', channel: 'compat', runs: 56, caps: ['file.read'], updated: '2026-07-30 14:08' }
+    ];
+    const versions = [
+      { version: '2.4.1', hash: 'sha256:5b0d…92c1', channel: 'stable', signature: 'verified', published: '2026-08-05 17:20', installs: 3 },
+      { version: '2.4.0', hash: 'sha256:1cc6…d08b', channel: 'stable', signature: 'verified', published: '2026-07-23 09:15', installs: 7 },
+      { version: '2.5.0-rc.1', hash: 'sha256:9aab…41e3', channel: 'canary', signature: 'verified', published: '2026-08-06 07:02', installs: 1 }
+    ];
+    const runs = [
+      { id: 'run_01JZ9R2MK7', skill: 'vision.extract', version: '2.4.1', hash: 'sha256:5b0d…92c1', status: 'succeeded', trigger: 'manual', duration: '02m 18s', owner: 'you', updated: '2026-08-06 09:42', artifacts: 3, requestId: 'req_8ea1' },
+      { id: 'run_01JZ9QTY91', skill: 'repo.review', version: '0.8.4', hash: 'sha256:2e10…f409', status: 'waiting', trigger: 'schedule', duration: '—', owner: 'li.ming', updated: '2026-08-06 09:37', artifacts: 0, requestId: 'req_8e8c' },
+      { id: 'run_01JZ9Q55F0', skill: 'data.notebook', version: '1.9.0', hash: 'sha256:8b3c…a71f', status: 'running', trigger: 'manual', duration: '08m 02s', owner: 'you', updated: '2026-08-06 09:31', artifacts: 1, requestId: 'req_8e62' },
+      { id: 'run_01JZ9P9H3E', skill: 'release.notes', version: '3.1.2', hash: 'sha256:6f11…0ac9', status: 'failed', trigger: 'webhook', duration: '00m 44s', owner: 'zhang.wei', updated: '2026-08-06 09:12', artifacts: 0, requestId: 'req_8df0' },
+      { id: 'run_01JZ9NQ0T8', skill: 'vision.extract', version: '2.4.0', hash: 'sha256:1cc6…d08b', status: 'canceled', trigger: 'manual', duration: '01m 04s', owner: 'you', updated: '2026-08-06 08:45', artifacts: 1, requestId: 'req_8d12' }
+    ];
+    const approvals = [
+      { id: 'capreq_8ea1', run: 'run_01JZ9QTY91', skill: 'repo.review', actor: 'li.ming', capability: 'network.egress', scope: 'api.github.com/org/bloomai/*', risk: 'high', status: 'pending', age: '18m', reason: '读取 PR diff 并生成审查摘要' },
+      { id: 'capreq_8e62', run: 'run_01JZ9Q55F0', skill: 'data.notebook', actor: 'you', capability: 'file.read', scope: '/workbench/reports/q3/*', risk: 'medium', status: 'pending', age: '25m', reason: '加载当前 Workbench 的季度数据' },
+      { id: 'capreq_8d12', run: 'run_01JZ9NQ0T8', skill: 'vision.extract', actor: 'you', capability: 'image.read', scope: 'artifact://upload/7c2b', risk: 'low', status: 'approved', age: '2h', reason: '读取用户上传图片' },
+      { id: 'capreq_8c71', run: 'run_01JZ9P9H3E', skill: 'release.notes', actor: 'zhang.wei', capability: 'repo.read', scope: 'repo://bloomai/bloomai', risk: 'medium', status: 'rejected', age: '3h', reason: '读取发布 commit' }
+    ];
+    const artifacts = [
+      { id: 'art_01JZ9R2M', name: 'invoice-fields.json', run: 'run_01JZ9R2MK7', skill: 'vision.extract', type: 'application/json', size: '184 KB', retention: '29d', status: 'available', storage: 's3://bloomai-artifacts/prod/…' },
+      { id: 'art_01JZ9R2N', name: 'extraction-preview.png', run: 'run_01JZ9R2MK7', skill: 'vision.extract', type: 'image/png', size: '1.8 MB', retention: '29d', status: 'available', storage: 's3://bloomai-artifacts/prod/…' },
+      { id: 'art_01JZ9Q55', name: 'notebook-output.html', run: 'run_01JZ9Q55F0', skill: 'data.notebook', type: 'text/html', size: '2.4 MB', retention: '6d', status: 'available', storage: 's3://bloomai-artifacts/prod/…' },
+      { id: 'art_orphan_04', name: 'orphaned-upload.bin', run: '—', skill: 'unknown', type: 'application/octet-stream', size: '32 MB', retention: 'orphan', status: 'orphan', storage: 's3://bloomai-artifacts/quarantine/…' }
+    ];
+    const policies = [
+      { capability: 'file.read', default: 'request', scope: '/workbench/*', ttl: '30m', packages: 12, status: 'active', owner: '管理员' },
+      { capability: 'artifact.write', default: 'allow', scope: 'run://current', ttl: '24h', packages: 21, status: 'active', owner: '管理员' },
+      { capability: 'network.egress', default: 'deny', scope: 'api.github.com/*', ttl: '15m', packages: 3, status: 'guarded', owner: '管理员' },
+      { capability: 'process.spawn', default: 'deny', scope: 'none', ttl: '—', packages: 0, status: 'disabled', owner: '运维人员' }
+    ];
+    const drafts = [
+      { id: 'draft_018', name: 'quarterly.insight', author: 'you', status: 'editing', version: '0.1.0', validation: '2 warnings', updated: '12m ago' },
+      { id: 'draft_017', name: 'support.reply', author: 'li.ming', status: 'review', version: '0.4.0', validation: 'passed', updated: '1h ago' },
+      { id: 'draft_011', name: 'legacy.csv-import', author: 'migration-team', status: 'published', version: '1.0.0', validation: 'passed', updated: '2d ago' }
+    ];
+    const legacySkills = [
+      { name: 'legacy.csv-import', source: 'skills/legacy/csv_import.py', adapter: 'sandbox adapter', status: 'compatible', risk: 'medium', lastRun: '2026-08-05', recommendation: '保留兼容层，新增 manifest' },
+      { name: 'legacy.doc-summary', source: 'plugins/doc_summary.js', adapter: 'process bridge', status: 'needs-review', risk: 'high', lastRun: '2026-07-28', recommendation: '先禁用 process.spawn，再评估迁移' },
+      { name: 'legacy.mail-merge', source: 'skills/mail_merge', adapter: 'none', status: 'blocked', risk: 'high', lastRun: '2026-07-11', recommendation: '不允许安装，等待 owner 迁移' }
+    ];
+    const workers = [
+      { id: 'worker-az1-01', zone: 'cn-east-1a', status: 'online', leases: 6, heartbeat: '8s ago', version: 'runtime 1.1.0' },
+      { id: 'worker-az1-02', zone: 'cn-east-1a', status: 'online', leases: 4, heartbeat: '11s ago', version: 'runtime 1.1.0' },
+      { id: 'worker-az2-01', zone: 'cn-east-1b', status: 'draining', leases: 1, heartbeat: '21s ago', version: 'runtime 1.0.9' },
+      { id: 'worker-az2-02', zone: 'cn-east-1b', status: 'offline', leases: 0, heartbeat: '9m ago', version: 'runtime 1.0.9' }
+    ];
+    const migrations = [
+      { id: '001', name: 'create_skill_packages', status: 'applied', checksum: 'sha256:7b0a…', applied: '2026-07-28 10:02', duration: '420ms' },
+      { id: '017', name: 'add_run_content_hash', status: 'applied', checksum: 'sha256:1c8f…', applied: '2026-07-30 15:19', duration: '1.8s' },
+      { id: '042', name: 'add_artifact_retention_state', status: 'applied', checksum: 'sha256:9aa1…', applied: '2026-08-04 09:11', duration: '3.2s' },
+      { id: '043', name: 'add_capability_request_index', status: 'pending', checksum: 'sha256:2e10…', applied: '—', duration: 'dry-run 1.4s' }
+    ];
+    const auditEvents = [
+      { id: 'evt_9a10', time: '2026-08-06 09:42:18', type: 'run', actor: 'you', object: 'run_01JZ9R2MK7', requestId: 'req_8ea1', result: 'succeeded', note: 'Run completed with immutable version binding' },
+      { id: 'evt_9a0f', time: '2026-08-06 09:40:02', type: 'approve', actor: 'admin:chen', object: 'capreq_8d12', requestId: 'req_8d12', result: 'approved', note: 'image.read scope constrained to artifact' },
+      { id: 'evt_9a0e', time: '2026-08-06 09:32:17', type: 'feature flag', actor: 'ops:wang', object: 'package.execution', requestId: 'req_8e62', result: 'enabled', note: 'allowlist unchanged' },
+      { id: 'evt_9a0d', time: '2026-08-06 09:19:11', type: 'migration', actor: 'ops:wang', object: 'migration:043', requestId: 'req_8df0', result: 'dry-run', note: 'forward-fix only; no down migration' },
+      { id: 'evt_9a0c', time: '2026-08-06 08:58:45', type: 'artifact export', actor: 'you', object: 'art_01JZ9R2M', requestId: 'req_8d12', result: 'succeeded', note: 'content redaction policy applied' }
+    ];
+    const events = [
+      { seq: 1, type: 'run.created', time: '09:39:02', tone: 'info', text: '创建 Run，绑定 Skill Version 2.4.1 和 content hash。' },
+      { seq: 2, type: 'capability.requested', time: '09:39:04', tone: 'warning', text: 'Capability Broker 收到 image.read 请求。' },
+      { seq: 3, type: 'capability.granted', time: '09:39:07', tone: 'success', text: 'Grant 已批准，scope=artifact://upload/7c2b，TTL=30m。' },
+      { seq: 4, type: 'worker.leased', time: '09:39:11', tone: 'info', text: 'worker-az1-01 获取 lease，开始执行。' },
+      { seq: 5, type: 'artifact.created', time: '09:41:20', tone: 'success', text: '创建 3 个 Artifact，Retention policy=30d。' },
+      { seq: 6, type: 'run.succeeded', time: '09:41:20', tone: 'success', text: 'Run 成功完成，历史事件已持久化。' }
+    ];
+    const app = { role: 'admin', page: 'overview', theme: 'light', runtime: 'healthy', newRunsPaused: false, drawer: null, dialog: null, search: '', selectedWorkbench: 'production' };
+
+    const iconPaths = {
+      activity: '<path d="M3 12h3l2-7 4 14 2-7h7"/>',
+      archive: '<path d="M3 7h18"/><path d="M5 7v12h14V7"/><path d="M4 3h16v4H4z"/><path d="M9 11h6"/>',
+      arrowRight: '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
+      box: '<path d="m21 8-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+      check: '<path d="m5 12 4 4L19 6"/>',
+      checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/>',
+      chevronDown: '<path d="m6 9 6 6 6-6"/>',
+      chevronRight: '<path d="m9 18 6-6-6-6"/>',
+      circle: '<circle cx="12" cy="12" r="8"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      close: '<path d="m6 6 12 12M18 6 6 18"/>',
+      copy: '<rect x="8" y="8" width="10" height="10" rx="1"/><path d="M6 16H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+      cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>',
+      database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/>',
+      download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+      external: '<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/>',
+      eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/>',
+      file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+      filter: '<path d="M4 5h16l-6 7v5l-4 2v-7z"/>',
+      flag: '<path d="M5 21V4"/><path d="M5 4c5-3 9 3 14 0v9c-5 3-9-3-14 0"/>',
+      gitBranch: '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h5a5 5 0 0 1 5 5v5"/><path d="M6 8v8a4 4 0 0 0 4 4h6"/>',
+      hardDrive: '<line x1="3" y1="8" x2="21" y2="8"/><path d="m4 8 2-5h12l2 5v10H4z"/><path d="M8 14h.01M12 14h.01"/>',
+      inbox: '<path d="M4 4h16l2 10v6H2v-6z"/><path d="M2 14h5l2 3h6l2-3h5"/>',
+      info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
+      key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 5l3 3M14 7l3 3"/>',
+      link: '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1"/>',
+      loader: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+      lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+      menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+      moon: '<path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/>',
+      more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+      package: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
+      pause: '<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>',
+      pen: '<path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10z"/><path d="m13.5 7.5 3 3"/>',
+      play: '<circle cx="12" cy="12" r="9"/><path d="m10 8 5 4-5 4z"/>',
+      plus: '<path d="M12 5v14M5 12h14"/>',
+      refresh: '<path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 4v7h-7"/>',
+      rocket: '<path d="M14 4c3-1 5-1 6-1 0 1 0 3-1 6l-6 6-4-4z"/><path d="m8 12-4 1 3 3M14 16l-1 4-3-3"/><circle cx="16" cy="7" r="1"/><path d="M5 19c1.5.2 2.8-.2 4-1.2"/>',
+      rotate: '<path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 4v7h-7"/><path d="M12 8v4l2 2"/>',
+      search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+      server: '<rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/>',
+      settings: '<path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/>',
+      shield: '<path d="M12 3 20 6v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/>',
+      shieldCheck: '<path d="M12 3 20 6v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="m8 12 2.5 2.5L16 9"/>',
+      shieldOff: '<path d="m4 4 16 16"/><path d="M12 3 20 6v5c0 1.3-.2 2.4-.6 3.4M8.7 18.3A18 18 0 0 1 4 11V6l3.1-1.2"/><path d="M12 21c1.4-.6 2.7-1.3 3.8-2.1"/>',
+      sparkles: '<path d="m12 3-1.2 4.8L6 9l4.8 1.2L12 15l1.2-4.8L18 9l-4.8-1.2zM19 15l-.6 2.4L16 18l2.4.6L19 21l.6-2.4L22 18l-2.4-.6z"/>',
+      spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+      scroll: '<path d="M7 4h11a2 2 0 0 1 2 2v13H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z"/><path d="M7 4v12a3 3 0 0 0 3 3M9 8h7M9 12h7"/>',
+      terminal: '<path d="m4 5 6 7-6 7M12 19h8"/>',
+      upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
+      user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+      users: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 6"/>',
+      wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>',
+      xCircle: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
+      alertTriangle: '<path d="m12 3 10 18H2z"/><path d="M12 9v4M12 17h.01"/>',
+      checkSquare: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/>',
+      databaseBackup: '<path d="M4 5c0-1.1 3.6-2 8-2s8 .9 8 2-3.6 2-8 2-8-.9-8-2Z"/><path d="M4 5v7c0 1.1 3.6 2 8 2 1.8 0 3.4-.2 4.7-.5"/><path d="M20 12v-7"/><path d="M17 17h6M20 14v6"/><path d="M4 12v7c0 1.1 3.6 2 8 2 1.6 0 3-.2 4.2-.4"/>',
+      square: '<rect x="4" y="4" width="16" height="16" rx="2"/>',
+      externalLink: '<path d="M14 3h7v7M10 14 21 3M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/>'
+    };
+    function icon(name, size) {
+      var content = iconPaths[name] || iconPaths.circle;
+      return '<svg class="icon" width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + content + '</svg>';
+    }
+    function esc(value) {
+      return String(value === undefined || value === null ? '' : value).replace(/[&<>"']/g, function (char) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+      });
+    }
+    function join(items) { return items.filter(Boolean).join(''); }
+    function titleFor(page) { return pageMeta[page] ? pageMeta[page].title : 'Skills Runtime'; }
+    function cnFor(page) { return pageMeta[page] ? pageMeta[page].cn : ''; }
+    function canView(page) { return rolePageAccess[app.role].indexOf(page) !== -1; }
+    function roleLabel() { return roleLabels[app.role]; }
+    function runtime() { return runtimeStates[app.runtime]; }
+    function stateBadge(status, text) {
+      var map = {
+        succeeded: ['success', 'check-circle', 'Succeeded'], success: ['success', 'check-circle', 'Success'],
+        running: ['running', 'loader', 'Running'], waiting: ['waiting', 'clock', 'Waiting'], pending: ['waiting', 'clock', 'Pending'],
+        failed: ['failed', 'x-circle', 'Failed'], rejected: ['failed', 'x-circle', 'Rejected'], canceled: ['disabled', 'pause', 'Canceled'],
+        approved: ['success', 'shield-check', 'Approved'], active: ['success', 'check-circle', 'Active'], enabled: ['success', 'check-circle', 'Enabled'],
+        disabled: ['disabled', 'lock', 'Disabled'], orphan: ['failed', 'alert-triangle', 'Orphan'], legacy: ['waiting', 'archive', 'Legacy'],
+        approval: ['waiting', 'clock', 'Approval'], verified: ['success', 'shield-check', 'Verified'], review: ['waiting', 'eye', 'Review'],
+        editing: ['info', 'pen', 'Editing'], published: ['success', 'rocket', 'Published'], compatible: ['success', 'check-circle', 'Compatible'],
+        'needs-review': ['waiting', 'alert-triangle', 'Needs review'], blocked: ['failed', 'lock', 'Blocked'], online: ['success', 'check-circle', 'Online'],
+        draining: ['waiting', 'pause', 'Draining'], offline: ['failed', 'x-circle', 'Offline'], applied: ['success', 'check-circle', 'Applied']
+      };
+      var item = map[status] || ['info', 'info', text || status];
+      return '<span class="status-badge ' + item[0] + '">' + icon(item[1], 13) + '<span>' + esc(text || item[2]) + '</span></span>';
+    }
+    function button(label, action, cls, iconName, attrs) {
+      return '<button type="button" class="button ' + (cls || '') + '" data-action="' + esc(action || '') + '"' + (attrs || '') + '>' + (iconName ? icon(iconName, 14) : '') + '<span>' + esc(label) + '</span></button>';
+    }
+    function iconButton(label, action, iconName, attrs) {
+      return '<button type="button" class="icon-btn" aria-label="' + esc(label) + '" title="' + esc(label) + '" data-action="' + esc(action || '') + '"' + (attrs || '') + '>' + icon(iconName || 'more', 16) + '</button>';
+    }
+    function objectIcon(name, iconName) { return '<span class="object-icon" aria-hidden="true">' + icon(iconName || 'box', 16) + '</span>'; }
+    function primaryCell(name, subtitle, iconName) { return '<div class="primary-cell">' + objectIcon(name, iconName) + '<div><strong>' + esc(name) + '</strong><small>' + esc(subtitle) + '</small></div></div>'; }
+    function stateCard(key, title, description, iconName) { return '<div class="state-card ' + key + '"><strong>' + icon(iconName, 14) + esc(title) + '</strong><p>' + esc(description) + '</p></div>'; }
+    function card(title, subtitle, body, foot) { return '<section class="card"><div class="card-head"><div><h2>' + title + '</h2>' + (subtitle ? '<p>' + subtitle + '</p>' : '') + '</div></div><div class="card-body">' + body + '</div>' + (foot ? '<div class="card-foot">' + foot + '</div>' : '') + '</section>'; }
+    function pageHeader(eyebrow, title, subtitle, actions) { return '<div class="page-header"><div><div class="eyebrow">' + esc(eyebrow) + '</div><h1>' + esc(title) + '</h1><p class="page-subtitle">' + esc(subtitle) + '</p></div><div class="header-actions">' + (actions || '') + '</div></div>'; }
+    function sectionHeading(title, subtitle, actions) { return '<div class="section-heading"><div><h2>' + esc(title) + '</h2>' + (subtitle ? '<p>' + esc(subtitle) + '</p>' : '') + '</div><div class="header-actions">' + (actions || '') + '</div></div>'; }
+    function metric(label, value, note, iconName, trend) { return '<section class="card metric"><div class="metric-label">' + icon(iconName, 15) + '<span>' + esc(label) + '</span></div><div class="metric-value">' + esc(value) + '</div><div class="metric-note">' + (trend ? '<span class="metric-trend">' + esc(trend) + '</span> · ' : '') + esc(note) + '</div></section>'; }
+    function scopeNotice() { return '<div class="banner info">' + icon('shield', 17) + '<div><strong>' + esc(roleLabel()) + '数据范围</strong><p>' + esc(roleDescriptions[app.role]) + ' 服务端会话负责最终授权，原型中的角色切换仅用于演示。</p></div></div>'; }
+    function permissionNotice(label) { return '<div class="banner danger">' + icon('shieldOff', 17) + '<div><strong>Permission denied · ' + esc(label || '当前操作') + '</strong><p>此操作需要更高权限或不在当前 Workbench 数据范围内；服务端会拒绝未授权请求。</p></div></div>'; }
+    function readOnlyNotice() { return '<div class="banner warning">' + icon('lock', 17) + '<div><strong>Read-only mode</strong><p>保留查询、导出、事件和 Artifact 访问；新执行、修改策略、迁移和 Rollback 已禁用。</p></div></div>'; }
+    function featureDisabledNotice(feature) { return '<div class="banner warning">' + icon('flag', 17) + '<div><strong>Feature disabled · ' + esc(feature) + '</strong><p>该能力由服务端 Feature Gate 控制，当前 Runtime 或 Workbench 尚未开放。</p></div></div>'; }
+    function runtimeNotice() {
+      if (app.runtime === 'healthy') return '';
+      var r = runtime();
+      var tone = app.runtime === 'disabled' ? 'danger' : 'warning';
+      var heading = app.runtime === 'readonly' ? 'Read-only mode · ' + r.label + ' · ' + r.cn : r.label + ' · ' + r.cn;
+      return '<div class="banner ' + tone + '">' + icon(r.icon, 17) + '<div><strong>' + esc(heading) + '</strong><p>' + esc(r.description) + '</p></div></div>';
+    }
+
+    function renderSidebar() {
+      var html = '<div class="sidebar-head"><div class="brand-line"><span class="brand-mark">' + icon('sparkles', 19) + '</span><div class="brand-copy"><div class="brand-name">BloomAI Skills</div><div class="brand-subtitle">Runtime Control Plane v1.1</div></div></div><button class="workbench-select" type="button" data-action="cycle-workbench" aria-label="切换 Workbench"><span class="workbench-copy"><strong>Workbench</strong><small>' + esc(app.selectedWorkbench) + ' · production</small></span>' + icon('chevronDown', 15) + '</button></div><div class="sidebar-scroll">';
+      navSections.forEach(function (section) {
+        html += '<nav class="nav-section" aria-label="' + esc(section.label) + '"><div class="nav-label">' + esc(section.label) + '</div>';
+        section.items.forEach(function (page) {
+          var meta = pageMeta[page];
+          var locked = !canView(page);
+          html += '<button type="button" class="nav-item ' + (app.page === page ? 'active ' : '') + (locked ? 'locked' : '') + '" data-nav="' + page + '" aria-current="' + (app.page === page ? 'page' : 'false') + '" aria-label="' + esc(meta.title + ' · ' + meta.cn) + '" title="' + esc(locked ? '当前角色无权访问：' + meta.title : meta.title) + '">' + '<span class="nav-icon">' + icon(meta.icon, 16) + '</span><span class="nav-text">' + esc(meta.title) + '<span class="nav-caption">' + esc(meta.cn) + '</span></span>' + (locked ? '<span class="nav-status">' + icon('lock', 12) + '</span>' : '') + '</button>';
+        });
+        html += '</nav>';
+      });
+      html += '</div><div class="sidebar-foot"><div class="role-note">' + icon(roleIcons[app.role], 16) + '<p><strong>' + esc(roleLabel()) + '</strong>' + esc(roleDescriptions[app.role]) + '</p></div></div>';
+      document.getElementById('sidebar').innerHTML = html;
+    }
+
+    function renderTopbar() {
+      var r = runtime();
+      var pauseLabel = app.newRunsPaused ? '恢复新 Run' : '暂停新 Run';
+      var pauseIcon = app.newRunsPaused ? 'play' : 'pause';
+      var pauseClass = app.newRunsPaused ? 'success' : 'warning';
+      var pauseDisabled = app.role === 'user' || app.runtime === 'readonly' || app.runtime === 'disabled';
+      var html = '<div class="topbar-left"><button type="button" class="icon-btn mobile-menu" aria-label="打开导航" data-action="mobile-nav">' + icon('menu', 17) + '</button><div class="breadcrumb"><div class="breadcrumb-line"><span>Skills Runtime</span>' + icon('chevronRight', 11) + '<strong>' + esc(titleFor(app.page)) + '</strong></div><div class="context-strip"><span class="context-stat">' + icon('database', 12) + 'schema <strong>v1.1.043</strong></span><span class="context-divider"></span><span class="context-stat">' + icon('server', 12) + 'Workers <strong>3/4</strong></span><span class="context-divider"></span><span class="context-stat">' + icon('activity', 12) + 'Queue <strong>12</strong></span><span class="context-divider"></span><span class="context-stat">' + icon('clock', 12) + 'Approvals <strong>2</strong></span></div></div></div><div class="topbar-right"><span class="runtime-pill ' + r.className + '" title="' + esc(r.description) + '">' + icon(r.icon, 14) + '<span>' + esc(r.label) + '</span></span><label class="search-box" aria-label="全局搜索">' + icon('search', 14) + '<input id="global-search" type="search" placeholder="搜索 Run / Package" value="' + esc(app.search) + '"><span class="key-hint">/</span></label><button type="button" class="icon-btn" aria-label="切换主题" title="切换 Light / Dark Mode" data-action="toggle-theme">' + icon(app.theme === 'dark' ? 'sun' : 'moon', 16) + '</button><select id="role-select" class="role-select" aria-label="切换角色">' + roles.map(function (role) { return '<option value="' + role + '"' + (role === app.role ? ' selected' : '') + '>' + esc(roleLabels[role]) + '</option>'; }).join('') + '</select>' + button(pauseLabel, 'pause-new-run', pauseClass, pauseIcon, (pauseDisabled ? ' disabled aria-disabled="true" title="当前角色或 Runtime 不允许"' : '')) + '</div>';
+      document.getElementById('topbar').innerHTML = html;
+    }
+
+    function renderOverview() {
+      var actions = button('导入 Package', 'open-import', 'primary', 'upload') + button('新建 Draft', 'nav-creator', '', 'pen');
+      var html = pageHeader('Skills Runtime Control Plane', 'Runtime Overview', '以 Workbench 为上下文查看运行健康、队列积压、审批等待和近期异常。', actions);
+      html += runtimeNotice() + scopeNotice();
+      html += '<div class="hero"><div><div class="eyebrow">Current Workbench</div><h2>production / Skills Runtime v1.1</h2><p>所有 Run 均绑定 immutable Skill Version 和 content hash。manifest 中 requested capability 不是权限授予，执行前统一经过 Capability Broker。</p><div class="button-row">' + button('查看 Run Explorer', 'nav-runs', 'primary', 'list') + button('检查 Runtime 诊断', 'nav-diagnostics', '', 'cpu') + '</div></div><div class="hero-aside"><div class="hero-aside-row"><span>Runtime 状态</span>' + stateBadge(app.runtime === 'healthy' ? 'active' : app.runtime, runtime().label) + '</div><div class="hero-aside-row"><span>Active Workers</span><strong>3 / 4 online</strong></div><div class="hero-aside-row"><span>Queue lag p95</span><strong>18s</strong></div><svg class="sparkline" viewBox="0 0 220 36" role="img" aria-label="Queue lag 最近趋势"><path class="area" d="M0 32 L0 23 L26 25 L52 17 L78 21 L104 14 L130 19 L156 10 L182 13 L220 6 L220 32 Z"></path><path d="M0 23 L26 25 L52 17 L78 21 L104 14 L130 19 L156 10 L182 13 L220 6"></path></svg></div></div>';
+      html += '<div class="metrics">' + metric('Active Runs', '12', '过去 15 分钟 +3', 'play', '+20%') + metric('Queue Depth', '12', 'p95 lag 18s', 'inbox', '−8%') + metric('Pending Approvals', '2', '最高风险 1 条', 'clock', '需处理') + metric('Artifact Storage', '68.4 GB', 'Retention 合规 99.2%', 'hardDrive', '+1.4 GB') + '</div>';
+      html += sectionHeading('Runtime state matrix', '每个页面都保留 Loading、Empty、Waiting、Failed、只读和权限边界示例。');
+      html += '<div class="state-grid">' + stateSamples.map(function (item) { return stateCard(item[0], item[1], item[2], item[3]); }).join('') + '</div>';
+      html += '<div class="grid-2"><div>' + sectionHeading('Recent Runs', '最近 24 小时 · 服务端分页示例', button('查看全部', 'nav-runs', 'ghost', 'arrowRight')) + '<div class="table-shell"><table class="data-table"><thead><tr><th>Run</th><th>Status</th><th>Version</th><th>Updated</th><th></th></tr></thead><tbody>' + runs.slice(0, 4).map(function (run) { return '<tr><td>' + primaryCell(run.skill, run.id, 'play') + '</td><td>' + stateBadge(run.status) + '</td><td class="mono">v' + esc(run.version) + '<br><span class="subtle">' + esc(run.hash) + '</span></td><td class="muted nowrap">' + esc(run.updated) + '</td><td>' + iconButton('打开 Run 详情', 'open-run-' + run.id, 'chevronRight') + '</td></tr>'; }).join('') + '</tbody></table></div></div><div>' + sectionHeading('Exceptions & entry points', '异常卡片带预过滤上下文。') + '<div class="stack-sm">' + '<button type="button" class="card quick-action" data-action="nav-runs-filtered"><div class="card-body"><div class="list-main">' + icon('alertTriangle', 16) + '<div><strong>1 lease expired</strong><small>进入 Run Explorer · filter=lease_expired</small></div></div></div></button>' + '<button type="button" class="card quick-action" data-action="nav-approvals"><div class="card-body"><div class="list-main">' + icon('clock', 16) + '<div><strong>2 approvals waiting</strong><small>最高风险 network.egress</small></div></div></div></button>' + '<button type="button" class="card quick-action" data-action="nav-artifacts"><div class="card-body"><div class="list-main">' + icon('alertTriangle', 16) + '<div><strong>1 orphan artifact</strong><small>仅允许 Dry-run，不直接删除</small></div></div></div></button>' + '</div></div></div>';
+      html += sectionHeading('Runtime controls', '示例控制由服务端 Feature Gate 和角色权限最终裁决。');
+      html += '<div class="grid-3"><div class="card"><div class="card-head"><div><h2>状态演示</h2><p>切换 banner、按钮和顶部 Runtime pill</p></div></div><div class="card-body"><div class="chip-row">' + Object.keys(runtimeStates).map(function (key) { return '<button type="button" class="chip" data-set-runtime="' + key + '">' + icon(runtimeStates[key].icon, 12) + esc(runtimeStates[key].label) + '</button>'; }).join('') + '</div></div></div><div class="card"><div class="card-head"><div><h2>持久化长任务</h2><p>Migration 043 dry-run · 页面关闭后仍可恢复</p></div>' + stateBadge('running', 'Running') + '</div><div class="card-body"><div class="progress-row"><span>Migration 043 / inspect</span><strong>68%</strong></div><div class="progress"><span style="width:68%"></span></div></div></div><div class="card"><div class="card-head"><div><h2>Feature Gate</h2><p>Package execution 当前 allowlist</p></div>' + stateBadge('active', 'Enabled') + '</div><div class="card-body"><div class="chip-row"><span class="chip">Import</span><span class="chip">Creator</span><span class="chip">Artifact export</span></div></div></div></div>';
+      return html;
+    }
+
+    function renderPackages() {
+      var html = pageHeader('Catalog', 'Package Catalog', '管理 Skill Package、immutable Version 和当前 Workbench 的 Installation 状态。', button('导入 Package', 'open-import', 'primary', 'upload'));
+      html += runtimeNotice() + '<div class="toolbar"><div class="toolbar-left"><label class="search-box" style="width:230px" aria-label="筛选 Package">' + icon('search', 14) + '<input id="package-search" type="search" placeholder="按 name / owner 搜索"></label><div class="field"><label for="package-status">状态</label><select id="package-status"><option>全部</option><option>Enabled</option><option>Approval</option><option>Disabled</option><option>Legacy</option></select></div><div class="field"><label for="package-channel">Channel</label><select id="package-channel"><option>全部</option><option>stable</option><option>canary</option><option>compat</option></select></div></div><div class="toolbar-right">' + button('导出目录', 'export-packages', '', 'download') + '</div></div>';
+      html += '<div class="metrics">' + metric('Packages', '24', 'production Workbench', 'package', '+2 this week') + metric('Enabled Installations', '18', '3 个版本待升级', 'check-circle', '75%') + metric('Unsigned Rejects', '1', '最近 7 日', 'shieldOff', '需关注') + metric('Legacy Adapters', '3', '1 个 blocked', 'archive', '迁移中') + '</div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Package</th><th>Current Version</th><th>Installation</th><th>Capabilities</th><th>Runs</th><th>Updated</th><th>Actions</th></tr></thead><tbody>' + packages.map(function (pkg) { return '<tr><td>' + primaryCell(pkg.name, pkg.title + ' · ' + pkg.owner, 'package') + '</td><td><a href="#" class="link mono" data-open-package="' + pkg.id + '">v' + esc(pkg.version) + '</a><br><span class="subtle mono">' + esc(pkg.hash) + '</span></td><td>' + stateBadge(pkg.install) + '</td><td><div class="chip-row">' + pkg.caps.map(function (cap) { return '<span class="chip capability">' + esc(cap) + '</span>'; }).join('') + '</div></td><td class="mono">' + esc(pkg.runs.toLocaleString()) + '</td><td class="muted nowrap">' + esc(pkg.updated) + '</td><td><div class="button-row">' + iconButton('查看 Package 详情', 'open-package-' + pkg.id, 'eye') + iconButton('更多操作', 'open-package-menu-' + pkg.id, 'more') + '</div></td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Import contract', '导入只展示服务端返回的校验结果。') + '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>Manifest</dt><dd>SKILL.md + schema v1.1</dd></dl><dl class="kv"><dt>Signature</dt><dd>required · verified before install</dd></dl><dl class="kv"><dt>Content hash</dt><dd class="mono">immutable / sha256</dd></dl><dl class="kv"><dt>Requested capability</dt><dd>request only · not a grant</dd></dl></div></div></div></div><div>' + sectionHeading('Feature example', '未开放能力不静默消失。') + featureDisabledNotice('GitHub import') + '</div></div>';
+      return html;
+    }
+
+    function renderPackageDetail() {
+      var pkg = packages[0];
+      var html = pageHeader('Package · ' + pkg.name, 'Package Detail', '查看 Package、Version、Installation 与关联 Run；对象链路始终保留 content hash。', button('回到 Package Catalog', 'nav-packages', '', 'arrowRight'));
+      html += '<div class="object-chain">' + '<button type="button" class="chain-item" data-nav="packages">Package Catalog</button>' + icon('chevronRight', 12) + '<span class="chain-item">' + esc(pkg.name) + '</span>' + icon('chevronRight', 12) + '<span>Version v' + esc(pkg.version) + '</span>' + '</div><div style="height:14px"></div>';
+      html += '<div class="hero"><div><div class="eyebrow">Skill Package</div><h2>' + esc(pkg.title) + ' <span class="subtle">/' + esc(pkg.name) + '</span></h2><p>由 ' + esc(pkg.owner) + ' 维护。当前安装绑定 <span class="mono">v' + esc(pkg.version) + '</span>，immutable content hash 为 <span class="mono">' + esc(pkg.hash) + '</span>。</p><div class="badge-row">' + stateBadge('active', 'Installation enabled') + stateBadge('verified', 'Signature verified') + '<span class="chip">channel: ' + esc(pkg.channel) + '</span></div></div><div class="hero-aside"><div class="hero-aside-row"><span>Package ID</span><strong class="mono">' + esc(pkg.id) + '</strong></div><div class="hero-aside-row"><span>Latest Version</span><strong>v' + esc(pkg.version) + '</strong></div><div class="hero-aside-row"><span>Runs (30d)</span><strong>' + esc(pkg.runs.toLocaleString()) + '</strong></div><div class="hero-aside-row"><span>Owner</span><strong>' + esc(pkg.owner) + '</strong></div></div></div>';
+      html += '<div class="grid-2"><div>' + sectionHeading('Version history', '历史版本不可变，卸载不会破坏已有 Run。') + '<div class="table-shell"><table class="data-table"><thead><tr><th>Version</th><th>Channel</th><th>Hash</th><th>Signature</th><th>Installations</th><th></th></tr></thead><tbody>' + versions.map(function (version) { return '<tr><td><strong>v' + esc(version.version) + '</strong><br><span class="subtle">' + esc(version.published) + '</span></td><td><span class="chip">' + esc(version.channel) + '</span></td><td class="mono">' + esc(version.hash) + '</td><td>' + stateBadge(version.signature) + '</td><td class="mono">' + esc(version.installs) + '</td><td>' + iconButton('打开 Version 详情', 'open-version-' + version.version, 'eye') + '</td></tr>'; }).join('') + '</tbody></table></div></div><div class="stack"><div>' + sectionHeading('Current Installation', 'production Workbench') + '<div class="card"><div class="card-body"><dl class="kv-grid"><dl class="kv"><dt>Installation ID</dt><dd class="mono">inst_prod_07</dd></dl><dl class="kv"><dt>State</dt><dd>' + stateBadge('active', 'Enabled') + '</dd></dl><dl class="kv"><dt>Worker pool</dt><dd>default · 3 workers</dd></dl><dl class="kv"><dt>Feature gate</dt><dd>package.execution</dd></dl></dl></div><div class="card-foot">' + button('打开关联 Run', 'nav-runs', 'ghost', 'play') + button('查看安装事件', 'open-install-events', 'ghost', 'scroll') + '</div></div></div><div>' + sectionHeading('Capability contract') + '<div class="card"><div class="card-body"><div class="chip-row">' + pkg.caps.map(function (cap) { return '<span class="chip capability">' + icon('key', 12) + esc(cap) + '</span>'; }).join('') + '</div><p class="muted" style="margin:12px 0 0;font-size:11px">manifest requested capability 仅表示请求，实际 Grant 和 scope 由 Capability Broker 决定。</p></div></div></div></div></div>';
+      return html;
+    }
+
+    function renderRuns() {
+      var html = pageHeader('Execution', 'Run Explorer', app.role === 'user' ? '查看当前 Workbench 中属于自己的 Run、状态、Event 摘要和 Artifact。' : '按 Workbench、Package、Skill Version、状态和 owner 查询可追踪的 Run。', button('刷新查询', 'refresh-page', '', 'refresh'));
+      html += runtimeNotice() + scopeNotice();
+      html += '<div class="toolbar"><div class="toolbar-left"><label class="search-box" style="width:220px" aria-label="搜索 Run">' + icon('search', 14) + '<input id="run-search" type="search" placeholder="runId / skill name"></label><div class="field"><label for="run-status">Status</label><select id="run-status"><option>全部状态</option><option>Succeeded</option><option>Running</option><option>Waiting</option><option>Failed</option><option>Canceled</option></select></div><div class="field"><label for="run-owner">Owner</label><select id="run-owner"><option>当前范围</option><option>you</option><option>li.ming</option><option>zhang.wei</option></select></div><button type="button" class="button ghost" data-action="show-filter-state">' + icon('filter', 14) + '<span>高级筛选</span></button></div><div class="toolbar-right">' + button('导出 CSV', 'export-runs', '', 'download') + '</div></div>';
+      html += '<div class="metrics">' + metric('Total Results', '5', 'server pagination · 1 page', 'list', '100%') + metric('Succeeded', '1', '最近 24 小时', 'check-circle', '稳定') + metric('Waiting', '1', 'approval / lease', 'clock', '需关注') + metric('Retryable Errors', '1', '保留 requestId', 'rotate', '可重试') + '</div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Run</th><th>Status</th><th>Skill Version</th><th>Trigger / Owner</th><th>Duration</th><th>Artifacts</th><th>Updated</th><th></th></tr></thead><tbody>' + runs.map(function (run) { return '<tr><td>' + primaryCell(run.id, run.skill + ' · ' + run.requestId, 'play') + '</td><td>' + stateBadge(run.status) + '</td><td class="mono">v' + esc(run.version) + '<br><span class="subtle">' + esc(run.hash) + '</span></td><td><span class="chip">' + esc(run.trigger) + '</span><br><span class="muted">' + esc(run.owner) + '</span></td><td class="mono">' + esc(run.duration) + '</td><td class="mono">' + esc(run.artifacts) + '</td><td class="muted nowrap">' + esc(run.updated) + '</td><td><div class="button-row">' + iconButton('打开 Run 详情', 'open-run-' + run.id, 'eye') + (run.status === 'running' || run.status === 'waiting' ? iconButton('取消 Run', 'confirm-cancel-' + run.id, 'pause') : '') + (run.status === 'failed' ? iconButton('重试 Run', 'confirm-retry-' + run.id, 'rotate') : '') + '</div></td></tr>'; }).join('') + '</tbody></table></div>';
+      html += sectionHeading('State examples', '列表支持 empty、failed 和 retryable error 的一致反馈。');
+      html += '<div class="grid-3"><div class="card"><div class="card-body"><div class="empty-state" style="min-height:145px"><div class="empty-icon">' + icon('inbox', 20) + '</div><h3>Empty result</h3><p>调整 Workbench、时间范围或 owner 筛选。</p></div></div></div><div class="card"><div class="card-body">' + '<div class="banner danger" style="margin:0">' + icon('x-circle', 17) + '<div><strong>API error · RUN_QUERY_TIMEOUT</strong><p>requestId=req_8e62 · 可安全重试查询。</p></div></div></div></div><div class="card"><div class="card-body">' + '<div class="banner warning" style="margin:0">' + icon('clock', 17) + '<div><strong>Waiting state</strong><p>Run 不依赖 HTTP 请求存活，等待会持久化。</p></div></div></div></div></div>';
+      return html;
+    }
+
+    function renderRunDetail() {
+      var run = runs[0];
+      var html = pageHeader('Run · ' + run.id, 'Run Detail', '查看状态机、持久化 Event、Capability Grant 和 Artifact；历史执行绑定 immutable Skill Version。', button('回到 Run Explorer', 'nav-runs', '', 'arrowRight'));
+      html += '<div class="object-chain"><button type="button" class="chain-item" data-nav="packages">Package: ' + esc(run.skill) + '</button>' + icon('chevronRight', 12) + '<button type="button" class="chain-item" data-nav="packageDetail">Version v' + esc(run.version) + '</button>' + icon('chevronRight', 12) + '<span class="chain-item">' + esc(run.id) + '</span></div><div style="height:14px"></div>';
+      html += runtimeNotice() + '<div class="hero"><div><div class="eyebrow">Execution object</div><h2>' + esc(run.id) + ' ' + stateBadge(run.status) + '</h2><p>创建于 ' + esc(run.updated) + ' · requestId=<span class="mono">' + esc(run.requestId) + '</span>。Run 读取的是版本快照，不随 Package 最新版本改变。</p><div class="button-row">' + (run.status === 'running' || run.status === 'waiting' ? button('取消 Run', 'confirm-cancel-' + run.id, 'danger', 'pause') : '') + (run.status === 'failed' ? button('重试 Run', 'confirm-retry-' + run.id, 'warning', 'rotate') : '') + button('复制 Run ID', 'copy-run-id', '', 'copy') + '</div></div><div class="hero-aside"><div class="hero-aside-row"><span>Skill Version</span><strong>v' + esc(run.version) + '</strong></div><div class="hero-aside-row"><span>Content hash</span><strong class="mono">' + esc(run.hash) + '</strong></div><div class="hero-aside-row"><span>Owner</span><strong>' + esc(run.owner) + '</strong></div><div class="hero-aside-row"><span>Duration</span><strong>' + esc(run.duration) + '</strong></div></div></div>';
+      html += '<div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Run state machine</h2><p>服务端状态可在页面刷新后通过 Event history + afterSeq 恢复。</p></div>' + stateBadge(run.status) + '</div><div class="card-body"><div class="stepper"><div class="step done">Created</div><div class="step done">Queued</div><div class="step done">Leased</div><div class="step done">Executing</div><div class="step current">Succeeded</div></div></div></div>';
+      html += '<div class="grid-2"><div>' + sectionHeading('Persisted Event timeline', 'afterSeq=0 · 6 events') + '<div class="card"><div class="card-body"><div class="timeline">' + events.map(function (event) { return '<div class="timeline-item ' + event.tone + '"><span class="timeline-dot"></span><div class="timeline-top"><strong>' + esc(event.type) + '</strong><time>' + esc(event.time) + ' · seq ' + esc(event.seq) + '</time></div><p>' + esc(event.text) + '</p></div>'; }).join('') + '</div></div></div><div class="stack"><div>' + sectionHeading('Capability Grants', 'Broker decision and scope') + '<div class="card"><div class="card-body"><div class="list"><div class="list-item"><div class="list-main">' + objectIcon('image.read', 'key') + '<div><strong>image.read</strong><small>scope=artifact://upload/7c2b · TTL=30m</small></div></div>' + stateBadge('approved', 'Granted') + '</div><div class="list-item"><div class="list-main">' + objectIcon('artifact.write', 'file') + '<div><strong>artifact.write</strong><small>scope=run://current · TTL=24h</small></div></div>' + stateBadge('approved', 'Granted') + '</div></div></div><div class="card-foot">' + button('查看 Approval', 'open-approval-capreq_8d12', 'ghost', 'shield') + '</div></div></div><div>' + sectionHeading('Artifacts', '3 objects · retention 30d') + '<div class="card"><div class="card-body"><div class="list">' + artifacts.slice(0, 3).map(function (artifact) { return '<div class="list-item"><div class="list-main">' + objectIcon(artifact.name, 'file') + '<div><strong>' + esc(artifact.name) + '</strong><small>' + esc(artifact.size) + ' · ' + esc(artifact.type) + '</small></div></div>' + iconButton('打开 Artifact 详情', 'open-artifact-' + artifact.id, 'eye') + '</div>'; }).join('') + '</div></div><div class="card-foot">' + button('打开 Artifact Center', 'nav-artifacts', 'ghost', 'arrowRight') + '</div></div></div></div></div>';
+      return html;
+    }
+
+    function renderApprovals() {
+      var html = pageHeader('Governance', 'Approval Queue', app.role === 'user' ? '提交和跟踪自己的 Capability Request；审批决定由管理员和服务端策略完成。' : '处理 Capability Broker 的请求、风险、Scope 和 TTL；每次决定都写入 Audit。', app.role === 'user' ? button('提交 Capability 请求', 'open-capability-request', 'primary', 'plus') : button('刷新队列', 'refresh-page', '', 'refresh'));
+      html += runtimeNotice() + (app.role === 'user' ? scopeNotice() : '') + '<div class="metrics">' + metric('Pending', '2', '跨 Run 持久化等待', 'clock', '1 high risk') + metric('Approved today', '18', 'scope constrained', 'shieldCheck', '+12%') + metric('Rejected today', '3', '保留原因和 actor', 'xCircle', '−2') + metric('Median wait', '6m', '目标 < 10m', 'activity', '达标') + '</div>';
+      html += '<div class="toolbar"><div class="toolbar-left"><div class="field"><label for="approval-status">Status</label><select id="approval-status"><option>Pending</option><option>Approved</option><option>Rejected</option><option>全部</option></select></div><div class="field"><label for="approval-risk">Risk</label><select id="approval-risk"><option>全部风险</option><option>High</option><option>Medium</option><option>Low</option></select></div><label class="search-box" style="width:230px" aria-label="搜索 Capability request">' + icon('search', 14) + '<input type="search" placeholder="capreq / run / capability"></label></div><div class="toolbar-right">' + button('导出队列', 'export-approvals', '', 'download') + '</div></div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Request</th><th>Capability / Scope</th><th>Actor / Run</th><th>Risk</th><th>Status</th><th>Age</th><th>Actions</th></tr></thead><tbody>' + approvals.map(function (approval) { var riskClass = approval.risk === 'high' ? 'danger' : approval.risk === 'medium' ? 'warning' : 'success'; return '<tr><td>' + primaryCell(approval.id, approval.reason, 'key') + '</td><td><strong>' + esc(approval.capability) + '</strong><br><span class="mono muted">' + esc(approval.scope) + '</span></td><td><span>' + esc(approval.actor) + '</span><br><span class="mono muted">' + esc(approval.run) + '</span></td><td><span class="status-badge ' + riskClass + '">' + icon(approval.risk === 'high' ? 'alertTriangle' : 'shield', 13) + esc(approval.risk.toUpperCase()) + '</span></td><td>' + stateBadge(approval.status) + '</td><td class="muted nowrap">' + esc(approval.age) + '</td><td><div class="button-row">' + iconButton('查看审批详情', 'open-approval-' + approval.id, 'eye') + (approval.status === 'pending' && app.role === 'admin' ? iconButton('批准', 'confirm-approve-' + approval.id, 'check') + iconButton('拒绝', 'confirm-reject-' + approval.id, 'close') : '') + '</div></td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Waiting semantics') + '<div class="card"><div class="card-body"><div class="banner warning" style="margin:0">' + icon('clock', 17) + '<div><strong>Approval wait is durable</strong><p>浏览器关闭、Worker 重启或 HTTP 超时不会丢失 request；收敛后回到原 Run。</p></div></div></div></div></div><div>' + sectionHeading('Permission boundary') + (app.role === 'admin' ? '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>Decision owner</dt><dd>管理员</dd></dl><dl class="kv"><dt>Audit write</dt><dd>required</dd></dl><dl class="kv"><dt>Scope</dt><dd>server-returned</dd></dl><dl class="kv"><dt>Default</dt><dd>deny</dd></dl></div></div></div>' : permissionNotice('批准 / 拒绝 Capability Request')) + '</div></div>';
+      return html;
+    }
+
+    function renderCapabilities() {
+      var html = pageHeader('Governance', 'Capability Policies', '以服务端返回的 Policy、Scope、TTL 和 Feature Gate 管理 Capability Broker；requested capability 不等于 grant。', app.role === 'admin' ? button('新增 Policy', 'open-policy-editor', 'primary', 'plus') : button('查看 Broker 状态', 'open-broker-status', '', 'shield'));
+      html += runtimeNotice() + (app.role === 'admin' ? '' : permissionNotice('修改 Capability Policy'));
+      html += '<div class="grid-3"><div class="card"><div class="card-head"><div><h2>Default deny</h2><p>未匹配策略的请求</p></div>' + stateBadge('active', 'Enforced') + '</div><div class="card-body"><div class="metric-value">100%</div><div class="metric-note">由 Capability Broker 统一决策</div></div></div><div class="card"><div class="card-head"><div><h2>Active Grants</h2><p>当前 Workbench</p></div>' + stateBadge('approved', 'Broker') + '</div><div class="card-body"><div class="metric-value">42</div><div class="metric-note">平均 TTL 24m · scope constrained</div></div></div><div class="card"><div class="card-head"><div><h2>Denied requests</h2><p>过去 24 小时</p></div>' + stateBadge('failed', 'Audit') + '</div><div class="card-body"><div class="metric-value">7</div><div class="metric-note">可从 Audit 追踪 requestId</div></div></div></div>';
+      html += sectionHeading('Policy registry', '策略结果由服务端计算，前端不自行推导安全结论。');
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Capability</th><th>Default</th><th>Scope</th><th>TTL</th><th>Packages</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>' + policies.map(function (policy) { return '<tr><td>' + primaryCell(policy.capability, 'Capability Broker policy', 'key') + '</td><td>' + stateBadge(policy.default === 'deny' ? 'disabled' : policy.default === 'allow' ? 'active' : 'waiting', policy.default) + '</td><td class="mono">' + esc(policy.scope) + '</td><td class="mono">' + esc(policy.ttl) + '</td><td class="mono">' + esc(policy.packages) + '</td><td>' + esc(policy.owner) + '</td><td>' + (policy.status === 'disabled' ? stateBadge('disabled', 'Disabled') : stateBadge('active', policy.status === 'guarded' ? 'Guarded' : 'Active')) + '</td><td>' + iconButton('查看策略详情', 'open-policy-' + policy.capability, 'eye') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Broker decision trace', '示例：network.egress 请求') + '<div class="card"><div class="card-body"><div class="timeline"><div class="timeline-item success"><span class="timeline-dot"></span><div class="timeline-top"><strong>requested</strong><time>09:37:02</time></div><p>manifest requested network.egress，尚未授予。</p></div><div class="timeline-item warning"><span class="timeline-dot"></span><div class="timeline-top"><strong>policy matched</strong><time>09:37:02</time></div><p>default=deny；scope 需要人工审核。</p></div><div class="timeline-item danger"><span class="timeline-dot"></span><div class="timeline-top"><strong>waiting approval</strong><time>09:37:03</time></div><p>生成 Capability Grant request，TTL 尚未开始计时。</p></div></div></div></div></div><div>' + sectionHeading('Policy invariants') + '<div class="card"><div class="card-body"><div class="chip-row"><span class="chip capability">scope required</span><span class="chip capability">TTL required</span><span class="chip capability">audit required</span><span class="chip capability">revoke supported</span></div><p class="muted" style="margin:13px 0 0;font-size:11px">撤销只影响未来或当前 Grant 的服务端状态，不删除历史 Run / Event / Artifact。</p></div></div></div></div>';
+      return html;
+    }
+
+    function renderArtifacts() {
+      var html = pageHeader('Data', 'Artifact Center', '按 Run 追踪 Artifact、Retention、Storage 和 orphan 状态；删除前必须经过 Dry-run 和审计。', button('导出清单', 'export-artifacts', '', 'download'));
+      html += runtimeNotice() + scopeNotice();
+      html += '<div class="metrics">' + metric('Artifacts', '3,842', '当前 Workbench', 'file', '+114 today') + metric('Stored Bytes', '68.4 GB', 'S3 compatible storage', 'hardDrive', '+1.4 GB') + metric('Retention compliance', '99.2%', '目标 ≥ 99%', 'checkCircle', '达标') + metric('Orphan candidates', '1', '仅可 Dry-run', 'alertTriangle', '需处理') + '</div>';
+      html += '<div class="toolbar"><div class="toolbar-left"><label class="search-box" style="width:230px" aria-label="搜索 Artifact">' + icon('search', 14) + '<input type="search" placeholder="artifact name / runId"></label><div class="field"><label for="artifact-status">Status</label><select id="artifact-status"><option>全部</option><option>Available</option><option>Orphan</option><option>Expired</option></select></div><div class="field"><label for="artifact-retention">Retention</label><select id="artifact-retention"><option>全部</option><option>30d</option><option>7d</option><option>orphan</option></select></div></div><div class="toolbar-right">' + button('Orphan Cleanup Dry-run', 'confirm-cleanup', 'warning', 'refresh') + '</div></div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Artifact</th><th>Run / Skill</th><th>Type</th><th>Size</th><th>Retention</th><th>Storage</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + artifacts.map(function (artifact) { return '<tr><td>' + primaryCell(artifact.name, artifact.id, 'file') + '</td><td><a href="#" class="link mono" data-open-run="' + artifact.run + '">' + esc(artifact.run) + '</a><br><span class="muted">' + esc(artifact.skill) + '</span></td><td class="mono">' + esc(artifact.type) + '</td><td class="mono">' + esc(artifact.size) + '</td><td class="mono">' + esc(artifact.retention) + '</td><td class="mono muted">' + esc(artifact.storage) + '</td><td>' + stateBadge(artifact.status) + '</td><td><div class="button-row">' + iconButton('打开 Artifact 详情', 'open-artifact-' + artifact.id, 'eye') + (artifact.status === 'available' ? iconButton('导出 Artifact', 'export-artifact-' + artifact.id, 'download') : '') + '</div></td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Retention policy') + '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>Default</dt><dd>30 days</dd></dl><dl class="kv"><dt>Run binding</dt><dd>immutable</dd></dl><dl class="kv"><dt>Delete mode</dt><dd>forward task only</dd></dl><dl class="kv"><dt>Audit</dt><dd>export / cleanup required</dd></dl></div></div></div></div><div>' + sectionHeading('Orphan handling') + '<div class="card"><div class="card-body"><div class="banner warning" style="margin:0">' + icon('alertTriangle', 17) + '<div><strong>orphaned-upload.bin · 32 MB</strong><p>未找到有效 Run 关联；Dry-run 只生成候选和影响范围，不直接删除历史记录。</p></div></div></div><div class="card-foot">' + button('查看 Dry-run 证据', 'open-orphan-evidence', 'ghost', 'scroll') + '</div></div></div></div>';
+      return html;
+    }
+
+    function renderCreator() {
+      var html = pageHeader('Creation', 'Creator / Draft Studio', app.role === 'user' ? '创建、保存和验证自己的 Skill Draft；发布前仍需管理员审查和服务端校验。' : '查看 Draft、manifest、能力请求、验证结果和发布证据；管理员可审查并发布。', app.role === 'ops' ? button('查看 Creator Feature Gate', 'open-feature-creator', '', 'flag') : button('新建 Draft', 'new-draft', 'primary', 'plus'));
+      html += runtimeNotice() + (app.role === 'ops' ? permissionNotice('编辑或发布 Creator Draft') : '');
+      html += '<div class="grid-2"><div><div class="card"><div class="card-head"><div><h2>Drafts</h2><p>草稿归属由服务端会话决定</p></div><span class="chip">' + esc(drafts.length) + ' total</span></div><div class="card-body"><div class="list">' + drafts.map(function (draft) { return '<div class="list-item"><div class="list-main">' + objectIcon(draft.name, 'pen') + '<div><strong>' + esc(draft.name) + '</strong><small>v' + esc(draft.version) + ' · ' + esc(draft.author) + ' · ' + esc(draft.updated) + '</small></div></div><div class="button-row">' + stateBadge(draft.status) + iconButton('打开 Draft', 'open-draft-' + draft.id, 'eye') + '</div></div>'; }).join('') + '</div></div></div>' + sectionHeading('Draft state matrix') + '<div class="grid-3"><div class="card"><div class="card-body"><div class="state-card loading"><strong>' + icon('loader', 14) + 'Validating</strong><p>manifest schema / content hash</p></div></div></div><div class="card"><div class="card-body"><div class="state-card failed"><strong>' + icon('x-circle', 14) + 'Validation error</strong><p>capability scope 缺失，可修复</p></div></div></div><div class="card"><div class="card-body"><div class="state-card denied"><strong>' + icon('shieldOff', 14) + 'Publish denied</strong><p>当前角色不能发布 Draft</p></div></div></div></div></div><div class="stack"><div class="card"><div class="card-head"><div><h2>Draft editor · quarterly.insight</h2><p>schema v1.1 · autosave disabled in prototype</p></div>' + stateBadge('editing', 'Editing') + '</div><div class="card-body"><div class="field"><label for="draft-name">Skill name</label><input id="draft-name" value="quarterly.insight"></div><div class="field" style="margin-top:10px"><label for="draft-summary">Summary</label><textarea id="draft-summary">Summarize quarterly metrics and produce an evidence-ready report.</textarea></div><div class="field" style="margin-top:10px"><label>Requested capabilities</label><div class="chip-row"><span class="chip capability">file.read</span><span class="chip capability">artifact.write</span><button type="button" class="chip" data-action="open-capability-request">' + icon('plus', 12) + 'request</button></div></div></div><div class="card-foot">' + (app.role === 'ops' ? button('保存 Draft', 'save-draft', 'is-disabled', 'check', ' disabled') : button('保存 Draft', 'save-draft', 'primary', 'check')) + (app.role === 'admin' ? button('审查并发布', 'confirm-publish', 'success', 'rocket') : button('提交审查', 'submit-draft-review', '', 'shieldCheck')) + '</div></div><div class="card"><div class="card-head"><div><h2>Manifest preview</h2><p>仅展示脱敏后的本地 demo payload</p></div>' + stateBadge('verified', 'Schema v1.1') + '</div><div class="card-body"><div class="code-block">name: quarterly.insight\nversion: 0.1.0\ncontentHash: sha256:draft…91a2\nrequestedCapabilities:\n  - file.read\n  - artifact.write\nexecution:\n  broker: required\n  artifactRetention: 30d</div></div></div></div></div>';
+      return html;
+    }
+
+    function renderLegacy() {
+      var html = pageHeader('Compatibility', 'Legacy Skills', '保留兼容层和迁移评估，不强制把 Legacy Skill 改写为 SKILL.md；所有风险和 Adapter 状态可追踪。', app.role === 'admin' ? button('新建迁移评估', 'open-legacy-assessment', '', 'gitBranch') : button('导出评估', 'export-legacy', '', 'download'));
+      html += runtimeNotice() + (app.role === 'user' ? permissionNotice('管理 Legacy Adapter') : '');
+      html += '<div class="banner info">' + icon('archive', 17) + '<div><strong>Compatibility boundary</strong><p>Legacy Skill 不自动获得新 Capability；Adapter 必须经过安全评估、Feature Gate 和 Audit。</p></div></div>';
+      html += '<div class="metrics">' + metric('Legacy inventory', '3', '当前 Workbench', 'archive', '全量登记') + metric('Compatible', '1', '可继续运行', 'checkCircle', '低摩擦') + metric('Needs review', '1', 'process bridge', 'alertTriangle', '高风险') + metric('Blocked', '1', '禁止安装/执行', 'lock', '需 owner') + '</div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Legacy Skill</th><th>Source</th><th>Adapter</th><th>Risk</th><th>Last Run</th><th>Recommendation</th><th>Status</th><th></th></tr></thead><tbody>' + legacySkills.map(function (skill) { var risk = skill.risk === 'high' ? 'danger' : 'warning'; return '<tr><td>' + primaryCell(skill.name, 'legacy object', 'archive') + '</td><td class="mono muted">' + esc(skill.source) + '</td><td>' + esc(skill.adapter) + '</td><td><span class="status-badge ' + risk + '">' + icon(skill.risk === 'high' ? 'alertTriangle' : 'shield', 13) + esc(skill.risk.toUpperCase()) + '</span></td><td class="muted nowrap">' + esc(skill.lastRun) + '</td><td class="muted">' + esc(skill.recommendation) + '</td><td>' + stateBadge(skill.status) + '</td><td>' + iconButton('查看 Legacy 详情', 'open-legacy-' + skill.name, 'eye') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Migration checklist') + '<div class="card"><div class="card-body"><div class="list"><div class="list-item"><div class="list-main">' + icon('checkSquare', 16) + '<div><strong>记录 source 和 owner</strong><small>保留原始路径、入口和版本。</small></div></div>' + stateBadge('approved', 'Done') + '</div><div class="list-item"><div class="list-main">' + icon('checkSquare', 16) + '<div><strong>收敛 Capability</strong><small>禁止隐式 process / network 权限。</small></div></div>' + stateBadge('waiting', 'Review') + '</div><div class="list-item"><div class="list-main">' + icon('checkSquare', 16) + '<div><strong>Shadow / Dry-run</strong><small>比较输出，生成发布证据。</small></div></div>' + stateBadge('disabled', 'Not started') + '</div></div></div></div></div><div>' + sectionHeading('Permission example') + (app.role === 'user' ? permissionNotice('启用 / 禁用 Legacy Adapter') : '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>Legacy flag</dt><dd>server-controlled</dd></dl><dl class="kv"><dt>Runtime mode</dt><dd>adapter sandbox</dd></dl><dl class="kv"><dt>Rollback</dt><dd>application only</dd></dl><dl class="kv"><dt>History</dt><dd>preserved</dd></dl></div></div></div>') + '</div></div>';
+      return html;
+    }
+
+    function renderDiagnostics() {
+      var html = pageHeader('Operations', 'Runtime Diagnostics', '查看 Health、Readiness、Worker、Queue、DB、Metrics 和脱敏诊断包；不展示 token、cookie 或原始用户内容。', button('生成诊断包', 'generate-diagnostic-bundle', 'primary', 'download'));
+      html += runtimeNotice() + (app.role === 'ops' ? '' : permissionNotice('修改 Worker、Queue 或 Runtime Feature Flag'));
+      html += '<div class="metrics">' + metric('Health checks', '18/19', '1 degraded · 0 critical', 'activity', '99.4%') + metric('Workers', '3 / 4', '1 draining · 1 offline', 'server', '需恢复') + metric('Queue depth', '12', 'oldest wait 6m', 'inbox', 'p95 18s') + metric('DB / WAL', 'Healthy', 'size 42.8 GB · WAL 1.2 GB', 'database', '正常') + '</div>';
+      html += '<div class="grid-2"><div class="stack"><div>' + sectionHeading('Health & readiness', '服务端诊断摘要') + '<div class="card"><div class="card-body"><div class="list"><div class="list-item"><div class="list-main">' + icon('checkCircle', 16) + '<div><strong>runtime-readiness</strong><small>package execution dependencies available</small></div></div>' + stateBadge('success', 'Healthy') + '</div><div class="list-item"><div class="list-main">' + icon('checkCircle', 16) + '<div><strong>capability-broker</strong><small>decision latency p95=42ms</small></div></div>' + stateBadge('success', 'Healthy') + '</div><div class="list-item"><div class="list-main">' + icon('alertTriangle', 16) + '<div><strong>worker-az2-02</strong><small>last heartbeat 9m ago</small></div></div>' + stateBadge('failed', 'Offline') + '</div><div class="list-item"><div class="list-main">' + icon('database', 16) + '<div><strong>schema checksum</strong><small>v1.1.043 · sha256:2e10…</small></div></div>' + stateBadge('success', 'Matched') + '</div></div></div></div></div><div>' + sectionHeading('Metrics sample', '可通过 Metrics API 分页或时间范围查询') + '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>queue_lag_p95</dt><dd>18s</dd></dl><dl class="kv"><dt>lease_expired_total</dt><dd>1 / 24h</dd></dl><dl class="kv"><dt>run_retry_total</dt><dd>12 / 24h</dd></dl><dl class="kv"><dt>capability_error_rate</dt><dd>0.4%</dd></dl><dl class="kv"><dt>artifact_bytes</dt><dd>68.4 GB</dd></dl><dl class="kv"><dt>import_reject_reasons</dt><dd>unsigned: 1</dd></dl></div></div></div></div></div><div class="stack"><div>' + sectionHeading('Worker pool', 'lease 和 heartbeat 状态') + '<div class="card"><div class="card-body"><div class="list">' + workers.map(function (worker) { return '<div class="list-item"><div class="list-main">' + objectIcon(worker.id, 'server') + '<div><strong>' + esc(worker.id) + '</strong><small>' + esc(worker.zone) + ' · ' + esc(worker.version) + ' · heartbeat ' + esc(worker.heartbeat) + '</small></div></div><div><div>' + stateBadge(worker.status) + '</div><small class="muted">' + esc(worker.leases) + ' leases</small></div></div>'; }).join('') + '</div></div><div class="card-foot">' + button('Drain Worker', 'confirm-drain-worker', 'warning', 'pause') + button('刷新心跳', 'refresh-diagnostics', 'ghost', 'refresh') + '</div></div></div><div>' + sectionHeading('Feature flags', '服务端能力摘要') + '<div class="card"><div class="card-body"><div class="chip-row"><span class="chip">Package execution · on</span><span class="chip">Creator publish · on</span><span class="chip">GitHub import · off</span><span class="chip">Legacy · guarded</span><span class="chip">Read-only · off</span></div></div></div></div></div></div>';
+      return html;
+    }
+
+    function renderOperations() {
+      var html = pageHeader('Operations', 'Release & Migration', '以阶段 Gate 管理发布、数据库迁移、备份恢复演练和应用 Rollback；数据库只允许 forward-fix。', button('生成发布证据', 'generate-release-evidence', '', 'scroll'));
+      html += runtimeNotice() + (app.role === 'ops' ? '' : permissionNotice('执行 Migration、Release 或 Rollback'));
+      html += '<div class="card"><div class="card-head"><div><h2>Release stage</h2><p>当前阶段卡包含 Entry criteria、SLO、Error budget、Rollback trigger、Owner 和 Exit evidence。</p></div>' + stateBadge('running', 'Worker shadow / dry-run') + '</div><div class="card-body"><div class="stepper"><div class="step done">Schema-only</div><div class="step done">Inspect-only</div><div class="step done">Install disabled</div><div class="step current">Worker shadow / dry-run</div><div class="step">Package Run allowlist</div></div><div class="grid-3" style="margin-top:20px"><div><div class="muted" style="font-size:10px">Owner</div><strong>ops:wang</strong></div><div><div class="muted" style="font-size:10px">SLO</div><strong>queue lag p95 &lt; 30s</strong></div><div><div class="muted" style="font-size:10px">Rollback trigger</div><strong>error rate &gt; 2%</strong></div></div></div></div>';
+      html += '<div class="grid-2"><div>' + sectionHeading('Migration history', '001–043 · forward-fix only') + '<div class="table-shell"><table class="data-table"><thead><tr><th>ID</th><th>Migration</th><th>Status</th><th>Checksum</th><th>Applied</th><th>Duration</th><th></th></tr></thead><tbody>' + migrations.map(function (migration) { return '<tr><td class="mono">' + esc(migration.id) + '</td><td><strong>' + esc(migration.name) + '</strong><br><span class="subtle">schema v1.1</span></td><td>' + stateBadge(migration.status) + '</td><td class="mono">' + esc(migration.checksum) + '</td><td class="muted nowrap">' + esc(migration.applied) + '</td><td class="mono">' + esc(migration.duration) + '</td><td>' + iconButton('查看 Migration 详情', 'open-migration-' + migration.id, 'eye') + '</td></tr>'; }).join('') + '</tbody></table></div><div class="button-row" style="margin-top:10px">' + button('Migration 043 Dry-run', 'confirm-migration-dry-run', 'warning', 'refresh') + button('查看 Schema snapshot', 'open-schema-snapshot', '', 'database') + '</div></div><div class="stack"><div>' + sectionHeading('Backup / restore rehearsal') + '<div class="card"><div class="card-body"><div class="progress-row"><span>last rehearsal · backup_20260806_0812</span><strong>Passed</strong></div><div class="progress"><span style="width:100%;background:var(--status-success)"></span></div><div class="kv-grid" style="margin-top:13px"><dl class="kv"><dt>RPO</dt><dd>15m</dd></dl><dl class="kv"><dt>RTO</dt><dd>42m</dd></dl><dl class="kv"><dt>Verified</dt><dd>2026-08-06 08:12</dd></dl><dl class="kv"><dt>Evidence</dt><dd class="mono">ev_7b12</dd></dl></div></div><div class="card-foot">' + button('重新演练', 'confirm-backup-rehearsal', 'ghost', 'databaseBackup') + button('查看证据', 'open-backup-evidence', 'ghost', 'scroll') + '</div></div></div><div>' + sectionHeading('Rollback guardrail') + '<div class="card"><div class="card-body"><div class="banner danger" style="margin:0">' + icon('alertTriangle', 17) + '<div><strong>Rollback ≠ database down migration</strong><p>仅允许回滚应用版本、关闭 Package execution、Drain Worker 或进入只读；历史 Run / Event / Artifact 必须保留。</p></div></div><div class="kv-grid" style="margin-top:14px"><dl class="kv"><dt>Required</dt><dd>incident ID · owner · reason</dd></dl><dl class="kv"><dt>Database</dt><dd>forward-fix only</dd></dl></div></div><div class="card-foot">' + button('发起 Rollback', 'confirm-rollback', 'danger', 'rotate') + '</div></div></div></div></div>';
+      return html;
+    }
+
+    function renderAudit() {
+      var html = pageHeader('Evidence', 'Audit & Evidence', '按 actor、requestId、runId、Workbench、对象类型和时间查看脱敏事件，并生成发布验收证据。', button('生成验收证据', 'generate-audit-evidence', 'primary', 'scroll'));
+      html += runtimeNotice() + '<div class="toolbar"><div class="toolbar-left"><label class="search-box" style="width:230px" aria-label="搜索 Audit">' + icon('search', 14) + '<input type="search" placeholder="actor / requestId / runId"></label><div class="field"><label for="audit-type">Object type</label><select id="audit-type"><option>全部</option><option>run</option><option>approve</option><option>migration</option><option>release</option><option>rollback</option><option>artifact export</option></select></div><div class="field"><label for="audit-time">Time range</label><select id="audit-time"><option>最近 24 小时</option><option>最近 7 天</option><option>自定义</option></select></div></div><div class="toolbar-right">' + button('导出 JSON', 'export-audit-json', '', 'download') + button('导出 CSV', 'export-audit-csv', '', 'download') + '</div></div>';
+      html += '<div class="metrics">' + metric('Events today', '1,284', '脱敏后可查询', 'scroll', '+8%') + metric('Release evidence', '6', '本周生成', 'checkSquare', '全部可追踪') + metric('Security decisions', '42', 'grant / revoke / deny', 'shield', '100% audited') + metric('Export jobs', '2', '1 running · 1 done', 'download', '可下载') + '</div>';
+      html += '<div class="table-shell"><table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Object</th><th>Request ID</th><th>Result</th><th>Note</th><th></th></tr></thead><tbody>' + auditEvents.map(function (event) { return '<tr><td class="mono muted nowrap">' + esc(event.time) + '</td><td>' + stateBadge('info', event.type) + '</td><td>' + esc(event.actor) + '</td><td class="mono">' + esc(event.object) + '</td><td class="mono muted">' + esc(event.requestId) + '</td><td>' + stateBadge(event.result, event.result) + '</td><td class="muted">' + esc(event.note) + '</td><td>' + iconButton('查看脱敏事件', 'open-audit-' + event.id, 'eye') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      html += '<div class="grid-2 equal"><div>' + sectionHeading('Release evidence bundle', '将 Gate、Migration、Health、Audit 和 Runbook 关联为一个证据包。') + '<div class="card"><div class="card-body"><div class="kv-grid"><dl class="kv"><dt>Evidence ID</dt><dd class="mono">ev_release_20260806_01</dd></dl><dl class="kv"><dt>Checklist</dt><dd>18 / 18 passed</dd></dl><dl class="kv"><dt>Runbook</dt><dd class="mono">RB-SKILLS-001</dd></dl><dl class="kv"><dt>Redactions</dt><dd>tokens / cookies / raw content</dd></dl></div></div><div class="card-foot">' + button('下载 Evidence JSON', 'download-evidence', 'ghost', 'download') + button('关联 Runbook', 'open-runbook', 'ghost', 'external') + '</div></div></div><div>' + sectionHeading('Audit guarantees') + '<div class="card"><div class="card-body"><div class="list"><div class="list-item"><div class="list-main">' + icon('checkCircle', 16) + '<div><strong>不可变 requestId</strong><small>跨 API、Event、Approval 和操作回溯。</small></div></div>' + stateBadge('success', 'On') + '</div><div class="list-item"><div class="list-main">' + icon('checkCircle', 16) + '<div><strong>历史保留</strong><small>Run / Event / Artifact 不因应用回滚被删除。</small></div></div>' + stateBadge('success', 'On') + '</div><div class="list-item"><div class="list-main">' + icon('lock', 16) + '<div><strong>数据脱敏</strong><small>诊断包和导出不含 token、cookie、raw content。</small></div></div>' + stateBadge('success', 'On') + '</div></div></div></div></div>';
+      return html;
+    }
+
+    function renderPage() {
+      var renderer = {
+        overview: renderOverview,
+        packages: renderPackages,
+        packageDetail: renderPackageDetail,
+        runs: renderRuns,
+        runDetail: renderRunDetail,
+        approvals: renderApprovals,
+        capabilities: renderCapabilities,
+        artifacts: renderArtifacts,
+        creator: renderCreator,
+        legacy: renderLegacy,
+        diagnostics: renderDiagnostics,
+        operations: renderOperations,
+        audit: renderAudit
+      }[app.page] || renderOverview;
+      document.getElementById('main-content').innerHTML = '<div class="page" data-page="' + esc(app.page) + '">' + renderer() + '</div>';
+      renderSidebar();
+      renderTopbar();
+      document.getElementById('main-content').focus({ preventScroll: true });
+    }
+
+    function findById(collection, id) { return collection.find(function (item) { return item.id === id || item.name === id || item.run === id || item.capability === id; }); }
+    function drawerShell(title, subtitle, body, foot) {
+      return '<div class="drawer-backdrop" data-drawer-close="true"></div><section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><div class="drawer-head"><div><h2 id="drawer-title">' + title + '</h2><p>' + (subtitle || '') + '</p></div>' + iconButton('关闭详情', 'close-drawer', 'close') + '</div><div class="drawer-body">' + body + '</div><div class="drawer-foot">' + (foot || button('关闭', 'close-drawer', 'ghost', 'close')) + '</div></section>';
+    }
+    function renderDrawer(kind, id) {
+      var body = '', foot = '';
+      if (kind === 'package') {
+        var pkg = findById(packages, id) || packages[0];
+        body = '<div class="stack"><div class="banner info">' + icon('package', 17) + '<div><strong>Skill Package 是独立一等对象</strong><p>Package、Version、Installation 和 Run 分开存储，历史 Run 不随最新发布改变。</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Package ID</dt><dd class="mono">' + esc(pkg.id) + '</dd></dl><dl class="kv"><dt>Owner</dt><dd>' + esc(pkg.owner) + '</dd></dl><dl class="kv"><dt>Current Version</dt><dd>v' + esc(pkg.version) + '</dd></dl><dl class="kv"><dt>Content hash</dt><dd class="mono">' + esc(pkg.hash) + '</dd></dl><dl class="kv"><dt>Installation</dt><dd>' + stateBadge(pkg.install) + '</dd></dl><dl class="kv"><dt>Channel</dt><dd>' + esc(pkg.channel) + '</dd></dl></dl><div><h3>Capabilities requested</h3><div class="chip-row">' + pkg.caps.map(function (cap) { return '<span class="chip capability">' + icon('key', 12) + esc(cap) + '</span>'; }).join('') + '</div><p class="muted" style="margin:10px 0 0;font-size:11px">实际 Grant、scope、TTL 需要 Capability Broker 决策。</p></div><div><h3>Version history</h3><div class="list">' + versions.map(function (version) { return '<div class="list-item"><div><strong>v' + esc(version.version) + '</strong><small class="muted">' + esc(version.hash) + ' · ' + esc(version.channel) + '</small></div>' + stateBadge(version.signature) + '</div>'; }).join('') + '</div></div></div>';
+        foot = button('打开 Package 页面', 'nav-packageDetail', 'ghost', 'arrowRight') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'run') {
+        var run = findById(runs, id) || runs[0];
+        body = '<div class="stack"><div class="banner success">' + icon('checkCircle', 17) + '<div><strong>Immutable execution binding</strong><p>v' + esc(run.version) + ' · ' + esc(run.hash) + ' · requestId=' + esc(run.requestId) + '</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Run ID</dt><dd class="mono">' + esc(run.id) + '</dd></dl><dl class="kv"><dt>Status</dt><dd>' + stateBadge(run.status) + '</dd></dl><dl class="kv"><dt>Trigger</dt><dd>' + esc(run.trigger) + '</dd></dl><dl class="kv"><dt>Owner</dt><dd>' + esc(run.owner) + '</dd></dl><dl class="kv"><dt>Duration</dt><dd>' + esc(run.duration) + '</dd></dl><dl class="kv"><dt>Artifacts</dt><dd>' + esc(run.artifacts) + '</dd></dl></dl><div><h3>Event summary</h3><div class="timeline">' + events.slice(0, 4).map(function (event) { return '<div class="timeline-item ' + event.tone + '"><span class="timeline-dot"></span><div class="timeline-top"><strong>' + esc(event.type) + '</strong><time>' + esc(event.time) + '</time></div><p>' + esc(event.text) + '</p></div>'; }).join('') + '</div></div></div>';
+        foot = button('打开 Run 页面', 'nav-runDetail', 'ghost', 'arrowRight') + (run.status === 'failed' ? button('重试', 'confirm-retry-' + run.id, 'warning', 'rotate') : '') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'approval') {
+        var approval = findById(approvals, id) || approvals[0];
+        body = '<div class="stack"><div class="banner ' + (approval.risk === 'high' ? 'danger' : 'warning') + '">' + icon(approval.risk === 'high' ? 'alertTriangle' : 'clock', 17) + '<div><strong>' + esc(approval.risk.toUpperCase()) + ' risk · ' + esc(approval.capability) + '</strong><p>' + esc(approval.reason) + '</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Request ID</dt><dd class="mono">' + esc(approval.id) + '</dd></dl><dl class="kv"><dt>Run</dt><dd class="mono">' + esc(approval.run) + '</dd></dl><dl class="kv"><dt>Actor</dt><dd>' + esc(approval.actor) + '</dd></dl><dl class="kv"><dt>Status</dt><dd>' + stateBadge(approval.status) + '</dd></dl><dl class="kv"><dt>Capability</dt><dd>' + esc(approval.capability) + '</dd></dl><dl class="kv"><dt>Scope</dt><dd class="mono">' + esc(approval.scope) + '</dd></dl></dl><div><h3>Decision contract</h3><div class="code-block">default: deny\nscope: server-returned\nTTL: starts after grant\nAudit: required\nrevoke: supported</div></div></div>';
+        foot = (approval.status === 'pending' && app.role === 'admin' ? button('批准', 'confirm-approve-' + approval.id, 'success', 'check') + button('拒绝', 'confirm-reject-' + approval.id, 'danger', 'close') : '') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'artifact') {
+        var artifact = findById(artifacts, id) || artifacts[0];
+        body = '<div class="stack"><div class="banner info">' + icon('file', 17) + '<div><strong>Artifact 与 Run 关联</strong><p>Artifact export 会写入 Audit；Retention 和 orphan 状态由服务端管理。</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Artifact ID</dt><dd class="mono">' + esc(artifact.id) + '</dd></dl><dl class="kv"><dt>Name</dt><dd>' + esc(artifact.name) + '</dd></dl><dl class="kv"><dt>Run</dt><dd class="mono">' + esc(artifact.run) + '</dd></dl><dl class="kv"><dt>Skill</dt><dd>' + esc(artifact.skill) + '</dd></dl><dl class="kv"><dt>Size / Type</dt><dd>' + esc(artifact.size) + ' · ' + esc(artifact.type) + '</dd></dl><dl class="kv"><dt>Retention</dt><dd>' + esc(artifact.retention) + '</dd></dl><dl class="kv"><dt>Storage</dt><dd class="mono">' + esc(artifact.storage) + '</dd></dl><dl class="kv"><dt>Status</dt><dd>' + stateBadge(artifact.status) + '</dd></dl></dl><div><h3>Export safeguards</h3><div class="chip-row"><span class="chip">redacted payload</span><span class="chip">requestId required</span><span class="chip">audit event</span></div></div></div>';
+        foot = (artifact.status === 'available' ? button('导出 Artifact', 'export-artifact-' + artifact.id, 'primary', 'download') : '') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'migration') {
+        var migration = findById(migrations, id) || migrations[migrations.length - 1];
+        body = '<div class="stack"><div class="banner warning">' + icon('database', 17) + '<div><strong>Forward-fix only</strong><p>Migration 只向前演进，不执行 down migration；应用 Rollback 和数据库迁移是两个独立动作。</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Migration</dt><dd>' + esc(migration.id) + ' · ' + esc(migration.name) + '</dd></dl><dl class="kv"><dt>Status</dt><dd>' + stateBadge(migration.status) + '</dd></dl><dl class="kv"><dt>Checksum</dt><dd class="mono">' + esc(migration.checksum) + '</dd></dl><dl class="kv"><dt>Duration</dt><dd class="mono">' + esc(migration.duration) + '</dd></dl></dl><div><h3>Dry-run evidence</h3><div class="progress-row"><span>inspect / plan / validate</span><strong>68%</strong></div><div class="progress"><span style="width:68%"></span></div><p class="muted" style="margin:9px 0 0;font-size:11px">阻塞条件：backup rehearsal 必须在 apply 前通过。</p></div></div>';
+        foot = button('执行 Dry-run', 'confirm-migration-dry-run', 'warning', 'refresh') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'policy') {
+        var policy = findById(policies, id) || policies[0];
+        body = '<div class="stack"><div class="banner info">' + icon('shieldCheck', 17) + '<div><strong>Server-enforced policy</strong><p>前端只展示已脱敏的策略结果，不信任客户端提交的 ownerId 或 scope。</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Capability</dt><dd>' + esc(policy.capability) + '</dd></dl><dl class="kv"><dt>Default</dt><dd>' + esc(policy.default) + '</dd></dl><dl class="kv"><dt>Scope</dt><dd class="mono">' + esc(policy.scope) + '</dd></dl><dl class="kv"><dt>TTL</dt><dd>' + esc(policy.ttl) + '</dd></dl><dl class="kv"><dt>Package count</dt><dd>' + esc(policy.packages) + '</dd></dl><dl class="kv"><dt>Owner</dt><dd>' + esc(policy.owner) + '</dd></dl></dl><div class="code-block">decision: ' + (policy.default === 'deny' ? 'approval_required' : 'allow_if_scope_matches') + '\naudit: true\nrevoke: true</div></div>';
+        foot = (app.role === 'admin' ? button('编辑 Policy', 'open-policy-editor', 'primary', 'settings') : '') + button('关闭', 'close-drawer', '', 'close');
+      } else if (kind === 'audit') {
+        var event = findById(auditEvents, id) || auditEvents[0];
+        body = '<div class="stack"><div class="banner success">' + icon('scroll', 17) + '<div><strong>脱敏 Audit event</strong><p>事件可关联 Runbook、Release evidence 和 requestId。</p></div></div><dl class="kv-grid"><dl class="kv"><dt>Event ID</dt><dd class="mono">' + esc(event.id) + '</dd></dl><dl class="kv"><dt>Time</dt><dd>' + esc(event.time) + '</dd></dl><dl class="kv"><dt>Type</dt><dd>' + esc(event.type) + '</dd></dl><dl class="kv"><dt>Actor</dt><dd>' + esc(event.actor) + '</dd></dl><dl class="kv"><dt>Object</dt><dd class="mono">' + esc(event.object) + '</dd></dl><dl class="kv"><dt>Request ID</dt><dd class="mono">' + esc(event.requestId) + '</dd></dl></dl><div><h3>Redacted payload</h3><div class="code-block">result: ' + esc(event.result) + '\nnote: ' + esc(event.note) + '\nrawContent: [redacted]\ntoken: [redacted]\ncookie: [redacted]</div></div></div>';
+        foot = button('关闭', 'close-drawer', '', 'close');
+      } else {
+        body = '<div class="empty-state"><div class="empty-icon">' + icon('info', 20) + '</div><h3>Details available</h3><p>该对象的关联数据由服务端 API 返回；原型展示抽屉和状态边界。</p></div>';
+      }
+      document.getElementById('drawer-root').innerHTML = drawerShell(esc(kind === 'package' ? 'Package preview' : kind === 'run' ? 'Run preview' : kind === 'approval' ? 'Approval request' : kind === 'artifact' ? 'Artifact preview' : kind === 'migration' ? 'Migration detail' : kind === 'policy' ? 'Policy detail' : kind === 'audit' ? 'Audit event' : 'Object detail'), esc(id || ''), body, foot);
+      app.drawer = { kind: kind, id: id };
+      document.body.classList.add('is-locked');
+      var close = document.querySelector('#drawer-root .drawer-panel .icon-btn');
+      if (close) close.focus();
+    }
+    function openDrawer(kind, id) { renderDrawer(kind, id); }
+    function closeDrawer() { document.getElementById('drawer-root').innerHTML = ''; app.drawer = null; if (!app.dialog) document.body.classList.remove('is-locked'); }
+
+    function dialogCopy(action) {
+      var parts = action.split('-');
+      if (action.indexOf('approve-') === 0) return { title: '批准 Capability Request', tone: 'success', icon: 'shieldCheck', body: '批准后将创建带 scope 和 TTL 的 Capability Grant，并写入 Audit。请确认审批理由和影响范围。', confirm: '批准并记录' };
+      if (action.indexOf('reject-') === 0) return { title: '拒绝 Capability Request', tone: 'danger', icon: 'close', body: '拒绝会使原 Run 保持 waiting 或进入可重试错误状态；历史请求不会删除。', confirm: '拒绝并记录' };
+      if (action.indexOf('cancel-') === 0) return { title: '取消 Run', tone: 'warning', icon: 'pause', body: '取消将向服务端提交持久化状态转换；已写入的 Event 和 Artifact 不会被删除。', confirm: '确认取消' };
+      if (action.indexOf('retry-') === 0) return { title: '重试 Run', tone: 'warning', icon: 'rotate', body: '重试会创建新的执行尝试并保留原 Run、requestId 和失败原因。请确认当前 Runtime 允许执行。', confirm: '确认重试' };
+      if (action === 'pause-new-run') return { title: app.newRunsPaused ? '恢复新 Run' : '暂停新 Run', tone: 'warning', icon: app.newRunsPaused ? 'play' : 'pause', body: app.newRunsPaused ? '恢复后，新的 Run 将重新进入服务端 Queue；已有 Run 不受影响。' : '暂停后，新的 Run 将被 Feature Gate 拦截；已有 Run、历史查询和 Artifact 访问不受影响。', confirm: app.newRunsPaused ? '恢复执行入口' : '暂停执行入口' };
+      if (action === 'confirm-cleanup') return { title: 'Orphan Cleanup Dry-run', tone: 'warning', icon: 'refresh', body: 'Dry-run 只计算 orphan 候选、存储影响和可回收范围，不直接删除 Artifact，也不删除历史 Audit。', confirm: '开始 Dry-run' };
+      if (action === 'confirm-rollback') return { title: '发起应用 Rollback', tone: 'danger', icon: 'rotate', body: 'Rollback 仅回滚应用版本、关闭 Package execution 或 Drain Worker。数据库 Migration 不回滚；历史 Run、Event、Artifact 必须保留。请填写 incident ID、owner 和原因。', confirm: '确认 Rollback' };
+      if (action === 'confirm-migration-dry-run') return { title: '执行 Migration Dry-run', tone: 'warning', icon: 'database', body: '将执行 inspect / plan / validate 和 backup prerequisite 检查，不写入数据库。结果会持久化并生成 requestId。', confirm: '开始 Migration Dry-run' };
+      if (action === 'confirm-backup-rehearsal') return { title: 'Backup / Restore Rehearsal', tone: 'info', icon: 'databaseBackup', body: '将在隔离环境验证 RPO、RTO、schema snapshot 和 restore evidence，不影响 production Run。', confirm: '开始演练' };
+      if (action === 'confirm-drain-worker') return { title: 'Drain Worker', tone: 'warning', icon: 'pause', body: 'Worker 将停止接收新 lease，并等待当前任务安全收敛；失败时保留 lease expired 事件。', confirm: '确认 Drain' };
+      if (action === 'confirm-publish') return { title: '发布 Creator Draft', tone: 'success', icon: 'rocket', body: '发布会创建 immutable Skill Version，重新计算 content hash，并将 Package 交给 Installation / Feature Gate。', confirm: '确认发布' };
+      return { title: '确认操作', tone: 'info', icon: 'info', body: '此操作会写入服务端状态和 Audit，请确认继续。', confirm: '继续' };
+    }
+    function openConfirm(action) {
+      var copy = dialogCopy(action);
+      var needsFields = action === 'confirm-rollback';
+      var fields = needsFields ? '<div class="grid-2 equal"><div class="field"><label for="incident-id">Incident ID</label><input id="incident-id" placeholder="INC-2026-" required></div><div class="field"><label for="rollback-owner">Owner</label><input id="rollback-owner" value="ops:wang" required></div></div><div class="field" style="margin-top:10px"><label for="rollback-reason">Reason</label><textarea id="rollback-reason" placeholder="记录触发条件和影响范围" required></textarea></div>' : '';
+      document.getElementById('dialog-root').innerHTML = '<div class="dialog-backdrop" data-dialog-close="true"></div><section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">' + esc(copy.title) + '</h2>' + iconButton('关闭弹窗', 'close-dialog', 'close') + '</div><div class="dialog-body"><div class="banner ' + copy.tone + '">' + icon(copy.icon, 17) + '<div><strong>' + esc(copy.title) + '</strong><p>' + esc(copy.body) + '</p></div></div>' + fields + '</div><div class="dialog-foot"><button type="button" class="button ghost" data-action="close-dialog">取消</button><button type="button" class="button ' + (copy.tone === 'danger' ? 'danger' : copy.tone === 'success' ? 'success' : 'primary') + '" data-confirm-action="' + esc(action) + '">' + icon(copy.icon, 14) + '<span>' + esc(copy.confirm) + '</span></button></div></section>';
+      app.dialog = action;
+      document.body.classList.add('is-locked');
+      var close = document.querySelector('#dialog-root .dialog-card .icon-btn');
+      if (close) close.focus();
+    }
+    function closeDialog() { document.getElementById('dialog-root').innerHTML = ''; app.dialog = null; if (!app.drawer) document.body.classList.remove('is-locked'); }
+    function toast(title, message, tone) {
+      var root = document.getElementById('toast-root');
+      if (!root.querySelector('.toast-stack')) root.innerHTML = '<div class="toast-stack"></div>';
+      var node = document.createElement('div');
+      node.className = 'toast ' + (tone || 'info');
+      node.innerHTML = icon(tone === 'success' ? 'checkCircle' : tone === 'danger' ? 'xCircle' : tone === 'warning' ? 'alertTriangle' : 'info', 16) + '<div><strong>' + esc(title) + '</strong><p>' + esc(message) + '</p></div><button type="button" class="icon-btn toast-close" aria-label="关闭提示" data-action="close-toast">' + icon('close', 14) + '</button>';
+      root.querySelector('.toast-stack').appendChild(node);
+      window.setTimeout(function () { if (node.parentNode) node.remove(); }, 4600);
+    }
+
+    function openInfoDialog(title, text, tone, iconName) {
+      document.getElementById('dialog-root').innerHTML = '<div class="dialog-backdrop" data-dialog-close="true"></div><section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title">' + esc(title) + '</h2>' + iconButton('关闭弹窗', 'close-dialog', 'close') + '</div><div class="dialog-body"><div class="banner ' + (tone || 'info') + '">' + icon(iconName || 'info', 17) + '<div><strong>' + esc(title) + '</strong><p>' + esc(text) + '</p></div></div></div><div class="dialog-foot"><button type="button" class="button primary" data-action="close-dialog">完成</button></div></section>';
+      app.dialog = 'info';
+      document.body.classList.add('is-locked');
+      var close = document.querySelector('#dialog-root .dialog-card .icon-btn');
+      if (close) close.focus();
+    }
+    function showLongTask(title, text) {
+      toast(title, text + ' · 页面关闭后仍可通过状态恢复。', 'info');
+      window.setTimeout(function () { toast(title + ' 已完成', 'requestId=req_demo_' + Date.now().toString(36) + ' · 证据已写入 Audit。', 'success'); }, 900);
+    }
+    function goPage(page) {
+      if (!pageMeta[page]) return;
+      if (!canView(page)) {
+        toast('Permission denied', roleLabel() + ' 无权访问 ' + titleFor(page) + '；页面数据范围由服务端会话控制。', 'danger');
+        return;
+      }
+      app.page = page;
+      closeDrawer();
+      closeDialog();
+      renderPage();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    function refreshPage(message) { renderPage(); toast('已刷新', message || '已重新读取服务端状态摘要。', 'success'); }
+    function performConfirm(action) {
+      var i, item, id;
+      if (action.indexOf('approve-') === 0) {
+        id = action.slice('approve-'.length); item = findById(approvals, id); if (item) item.status = 'approved'; closeDialog(); renderPage(); toast('Approval 已批准', id + ' 已创建 Capability Grant 并写入 Audit。', 'success'); return;
+      }
+      if (action.indexOf('reject-') === 0) {
+        id = action.slice('reject-'.length); item = findById(approvals, id); if (item) item.status = 'rejected'; closeDialog(); renderPage(); toast('Approval 已拒绝', id + ' 保留拒绝原因，原 Run 可按策略重试。', 'warning'); return;
+      }
+      if (action.indexOf('cancel-') === 0) {
+        id = action.slice('cancel-'.length); item = findById(runs, id); if (item) item.status = 'canceled'; closeDialog(); renderPage(); toast('Run 已取消', id + ' 的状态转换和 Event 已持久化。', 'success'); return;
+      }
+      if (action.indexOf('retry-') === 0) {
+        id = action.slice('retry-'.length); item = findById(runs, id); if (item) { item.status = 'running'; item.duration = '—'; } closeDialog(); renderPage(); toast('Retry 已提交', id + ' 创建新的执行尝试，保留原失败证据。', 'info'); return;
+      }
+      if (action === 'pause-new-run') {
+        app.newRunsPaused = !app.newRunsPaused; closeDialog(); renderPage(); toast(app.newRunsPaused ? '新 Run 已暂停' : '新 Run 已恢复', app.newRunsPaused ? '新的执行入口由 Feature Gate 拦截，历史查询仍可用。' : '新的执行入口已重新开放。', app.newRunsPaused ? 'warning' : 'success'); return;
+      }
+      if (action === 'confirm-cleanup') { closeDialog(); showLongTask('Orphan Cleanup Dry-run 已开始', '正在扫描未关联 Run 的 Artifact 候选'); return; }
+      if (action === 'confirm-rollback') { closeDialog(); app.runtime = 'readonly'; app.newRunsPaused = true; renderPage(); toast('应用 Rollback 已进入只读保护', '没有执行数据库 down migration；历史 Run / Event / Artifact 保留。', 'warning'); return; }
+      if (action === 'confirm-migration-dry-run') { closeDialog(); showLongTask('Migration 043 Dry-run 已开始', 'inspect / plan / validate 正在执行'); return; }
+      if (action === 'confirm-backup-rehearsal') { closeDialog(); showLongTask('Backup / Restore 演练已开始', '隔离环境正在验证 RPO、RTO 和 schema snapshot'); return; }
+      if (action === 'confirm-drain-worker') { closeDialog(); workers[2].status = 'draining'; renderPage(); toast('Worker 已进入 draining', '停止接收新 lease，等待当前任务安全收敛。', 'warning'); return; }
+      if (action === 'confirm-publish') { closeDialog(); drafts[0].status = 'published'; drafts[0].validation = 'passed'; renderPage(); toast('Draft 已发布', '已创建 immutable Skill Version，发布证据已关联。', 'success'); return; }
+      closeDialog(); toast('操作已提交', '服务端将返回 requestId 和最终对象状态。', 'info');
+    }
+    function handleAction(action) {
+      if (!action) return;
+      if (action.indexOf('nav-') === 0) { goPage(action.slice(4)); return; }
+      if (action.indexOf('open-package-') === 0 && action.indexOf('open-package-menu-') !== 0) { openDrawer('package', action.slice('open-package-'.length)); return; }
+      if (action.indexOf('open-run-') === 0) { openDrawer('run', action.slice('open-run-'.length)); return; }
+      if (action.indexOf('open-approval-') === 0) { openDrawer('approval', action.slice('open-approval-'.length)); return; }
+      if (action.indexOf('open-artifact-') === 0) { openDrawer('artifact', action.slice('open-artifact-'.length)); return; }
+      if (action.indexOf('open-migration-') === 0) { openDrawer('migration', action.slice('open-migration-'.length)); return; }
+      if (action.indexOf('open-policy-') === 0) { openDrawer('policy', action.slice('open-policy-'.length)); return; }
+      if (action.indexOf('open-audit-') === 0) { openDrawer('audit', action.slice('open-audit-'.length)); return; }
+      if (action.indexOf('confirm-') === 0) { openConfirm(action); return; }
+      if (action === 'close-drawer') { closeDrawer(); return; }
+      if (action === 'close-dialog') { closeDialog(); return; }
+      if (action === 'close-toast') { var t = document.querySelector('#toast-root .toast:last-child'); if (t) t.remove(); return; }
+      if (action === 'toggle-theme') { app.theme = app.theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', app.theme); renderTopbar(); toast('主题已切换', app.theme === 'dark' ? 'Dark Mode' : 'Light Mode', 'info'); return; }
+      if (action === 'cycle-workbench') { app.selectedWorkbench = app.selectedWorkbench === 'production' ? 'staging' : 'production'; renderSidebar(); renderTopbar(); toast('Workbench 已切换', app.selectedWorkbench + ' · 服务端数据范围已刷新。', 'info'); return; }
+      if (action === 'pause-new-run') { if (app.role === 'user' || app.runtime === 'readonly' || app.runtime === 'disabled') { toast('操作不可用', '当前角色或 Runtime 不允许暂停新 Run。', 'warning'); return; } openConfirm(action); return; }
+      if (action === 'refresh-page' || action === 'refresh-diagnostics') { refreshPage(action === 'refresh-diagnostics' ? 'Health、Worker 和 Queue 摘要已刷新。' : '列表和指标已刷新。'); return; }
+      if (action === 'mobile-nav') { var sidebar = document.getElementById('sidebar'); sidebar.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); toast('导航已定位', '在窄屏下可横向滚动底部导航。', 'info'); return; }
+      if (action === 'set-runtime') return;
+      if (action === 'open-import') { openInfoDialog('导入 Package', '导入流程需要 manifest schema、签名、content hash 和服务端安全校验；GitHub import 当前为 Feature disabled。', 'info', 'upload'); return; }
+      if (action === 'new-draft') { toast('Draft editor 已准备', '已打开 quarterly.insight 示例；保存和发布仍受角色与服务端策略约束。', 'success'); return; }
+      if (action === 'save-draft') { toast('Draft 已保存', '草稿状态保持 editing，保存对象为当前用户范围。', 'success'); return; }
+      if (action === 'submit-draft-review') { showLongTask('Draft review 已提交', '正在执行 manifest validate 和 capability review'); return; }
+      if (action === 'open-capability-request') { openInfoDialog('提交 Capability Request', '填写 capability、最小 scope、使用理由和预期 TTL；请求提交后进入 Approval Queue，默认不会直接授予。', 'warning', 'key'); return; }
+      if (action === 'open-policy-editor') { openInfoDialog('Policy editor', '管理员可以修改 default、scope、TTL 和 package allowlist；每次修改都生成 Audit event，服务端重新计算最终策略。', 'info', 'settings'); return; }
+      if (action === 'open-broker-status') { openInfoDialog('Capability Broker', 'Broker healthy · decision latency p95=42ms · default deny enforced · 42 active grants。', 'success', 'shieldCheck'); return; }
+      if (action === 'open-feature-creator') { openInfoDialog('Creator Feature Gate', 'Creator publish 对当前运维角色是只读查看；需要管理员发布，服务端负责最终鉴权。', 'warning', 'flag'); return; }
+      if (action === 'open-legacy-assessment') { showLongTask('Legacy 迁移评估已开始', '正在扫描 adapter、requested capability 和历史 Run'); return; }
+      if (action === 'generate-diagnostic-bundle') { showLongTask('诊断包生成中', '只包含脱敏 correlation、错误分类、指标和 schema 信息'); return; }
+      if (action === 'generate-release-evidence' || action === 'generate-audit-evidence') { showLongTask('验收证据生成中', '正在关联 Gate、Migration、Health、Audit 和 Runbook'); return; }
+      if (action.indexOf('export-') === 0 || action.indexOf('download-') === 0) { showLongTask('导出任务已提交', '正在生成脱敏文件并写入 Audit'); return; }
+      if (action === 'open-install-events' || action === 'open-orphan-evidence' || action === 'open-schema-snapshot' || action === 'open-backup-evidence' || action === 'open-runbook' || action === 'download-evidence') { openInfoDialog('关联证据', '该入口会打开服务端返回的脱敏 Event、Schema snapshot、Backup rehearsal 或 Runbook 证据。', 'info', 'scroll'); return; }
+      if (action === 'show-filter-state') { toast('高级筛选已展开', '可组合 Workbench、版本、状态、owner、requestId 和时间范围。', 'info'); return; }
+      if (action === 'copy-run-id') { var runId = 'run_01JZ9R2MK7'; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(runId).catch(function () {}); toast('Run ID 已复制', runId, 'success'); return; }
+      if (action.indexOf('open-package-menu-') === 0) { openInfoDialog('Package actions', '可进入 Version、Installation、Policy、Run 和 Audit 关联对象。', 'info', 'more'); return; }
+      if (action.indexOf('open-version-') === 0 || action.indexOf('open-draft-') === 0 || action.indexOf('open-legacy-') === 0 || action.indexOf('open-policy-') === 0) { openInfoDialog('对象详情', '该对象详情使用同一套抽屉和权限边界；原型保留关联对象链路。', 'info', 'eye'); return; }
+      if (action === 'confirm-cancel' || action === 'confirm-retry') { openConfirm(action); return; }
+      toast('已触发操作', action, 'info');
+    }
+
+    document.addEventListener('click', function (event) {
+      var nav = event.target.closest('[data-nav]');
+      if (nav) { event.preventDefault(); goPage(nav.getAttribute('data-nav')); return; }
+      var openPackage = event.target.closest('[data-open-package]');
+      if (openPackage) { event.preventDefault(); openDrawer('package', openPackage.getAttribute('data-open-package')); return; }
+      var openRun = event.target.closest('[data-open-run]');
+      if (openRun) { event.preventDefault(); openDrawer('run', openRun.getAttribute('data-open-run')); return; }
+      if (event.target.closest('[data-drawer-close]')) { closeDrawer(); return; }
+      if (event.target.closest('[data-dialog-close]')) { closeDialog(); return; }
+      var confirmButton = event.target.closest('[data-confirm-action]');
+      if (confirmButton) { performConfirm(confirmButton.getAttribute('data-confirm-action')); return; }
+      var actionNode = event.target.closest('[data-action]');
+      if (actionNode) { handleAction(actionNode.getAttribute('data-action')); return; }
+      var runtimeNode = event.target.closest('[data-set-runtime]');
+      if (runtimeNode) { app.runtime = runtimeNode.getAttribute('data-set-runtime'); renderPage(); toast('Runtime 状态已切换', runtime().label + ' · ' + runtime().cn, app.runtime === 'healthy' ? 'success' : 'warning'); return; }
+    });
+    document.addEventListener('change', function (event) {
+      if (event.target.id === 'role-select') { app.role = event.target.value; if (!canView(app.page)) app.page = 'overview'; renderPage(); toast('角色已切换', roleLabel() + ' · ' + roleDescriptions[app.role], 'info'); }
+    });
+    document.addEventListener('input', function (event) {
+      if (event.target.id === 'global-search') app.search = event.target.value;
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { if (app.dialog) closeDialog(); else if (app.drawer) closeDrawer(); }
+      if (event.key === '/' && document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') { event.preventDefault(); var search = document.getElementById('global-search'); if (search) search.focus(); }
+    });
+    document.documentElement.setAttribute('data-theme', app.theme);
+    renderPage();
+  })();
+  </script>
 </body>
 </html>
