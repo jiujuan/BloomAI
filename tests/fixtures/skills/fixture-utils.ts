@@ -39,7 +39,7 @@ export function copySkillFixture(name: string, destination: string): string {
 }
 
 export function createTestPackage(name: string, parent = os.tmpdir()): string {
-  const destination = fs.mkdtempSync(path.join(parent, `bloomai-${name}-`))
+  const destination = fs.mkdtempSync(path.join(parent, `skills-runtime-${name}-`))
   return copySkillFixture(name, destination)
 }
 
@@ -54,23 +54,28 @@ export function createTestRun(
   }).runId
 }
 
-export function createTestClock(initial = Date.now()): { clock: { now: () => number }; advanceClock: (milliseconds: number) => number } {
-  let now = initial
-  return {
-    clock: { now: () => now },
-    advanceClock: (milliseconds: number) => {
-      if (!Number.isFinite(milliseconds)) throw new Error('Clock advance must be finite')
-      now += milliseconds
-      return now
-    },
-  }
+export type TestClock = {
+  now: () => number
+  setNow: (value: number) => void
 }
 
-export function advanceClock(clock: { now: () => number }, milliseconds: number): number {
-  const mutable = clock as { setNow?: (value: number) => void }
-  if (!mutable.setNow) throw new Error('Clock is not mutable; use createTestClock()')
+export function createTestClock(initial = Date.now()): { clock: TestClock; advanceClock: (milliseconds: number) => number } {
+  if (!Number.isFinite(initial)) throw new Error('Clock initial value must be finite')
+  let now = initial
+  const clock: TestClock = {
+    now: () => now,
+    setNow: (value) => {
+      if (!Number.isFinite(value)) throw new Error('Clock value must be finite')
+      now = value
+    },
+  }
+  return { clock, advanceClock: (milliseconds) => advanceClock(clock, milliseconds) }
+}
+
+export function advanceClock(clock: Pick<TestClock, 'now' | 'setNow'>, milliseconds: number): number {
+  if (!Number.isFinite(milliseconds)) throw new Error('Clock advance must be finite')
   const next = clock.now() + milliseconds
-  mutable.setNow(next)
+  clock.setNow(next)
   return next
 }
 
@@ -84,7 +89,7 @@ export function fakeGitHubArchive(entries: Array<{ name: string; content: string
   const fetchImpl = async (input: string | URL): Promise<Response> => {
     const url = String(input)
     if (url.includes('/commits/')) return new Response(JSON.stringify({ sha: 'a'.repeat(40) }), { status: 200, headers: { 'content-type': 'application/json' } })
-    if (url.includes('/zipball/')) return new Response(archive, { status: 200, headers: { 'content-length': String(archive.length) } })
+    if (url.includes('/zipball/')) return new Response(Uint8Array.from(archive), { status: 200, headers: { 'content-length': String(archive.length) } })
     return new Response('not found', { status: 404 })
   }
   return { archive, fetchImpl }

@@ -130,8 +130,10 @@ describe('skill runtime offline integration vertical slice', () => {
 
     const completed = await waitFor(
       () => skillPackageRepo.getRun(runId),
-      (run) => Boolean(run && ['completed', 'failed'].includes(run.status)),
+      (run): run is NonNullable<typeof run> => Boolean(run && ['completed', 'failed'].includes(run.status)),
     )
+    expect(completed).toBeDefined()
+    if (!completed) throw new Error('Run disappeared after reaching a terminal state')
     expect(completed.status).toBe('completed')
 
     const artifacts = await requestJson(app, `/skill-runs/${runId}/artifacts`)

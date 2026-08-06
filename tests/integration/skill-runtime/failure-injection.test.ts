@@ -7,6 +7,17 @@ import { copySkillFixture } from '../../fixtures/skills/fixture-utils'
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
 
+async function waitFor<T>(read: () => T, predicate: (value: T) => boolean, timeoutMs = 5_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  let value = read()
+  while (!predicate(value) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    value = read()
+  }
+  if (!predicate(value)) throw new Error(`Timed out waiting for state: ${JSON.stringify(value)}`)
+  return value
+}
+
 async function loadPorts() {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
@@ -27,7 +38,7 @@ async function loadPorts() {
 
 describe('skill runtime failure injection', () => {
   beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-skill-failure-data-'))
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-runtime-failure-data-'))
     originalEnv = { ...process.env }
   })
 
@@ -69,15 +80,22 @@ describe('skill runtime failure injection', () => {
     const runtime = createSkillRuntime({ executor: async () => { throw new Error('deterministic failure') } })
     const { runId } = runtime.coordinator.startRun({ skillVersionId: version.id, input: {}, context: {} })
     runtime.start()
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await waitFor(
+      () => runtime.coordinator.getRun(runId),
+      (run) => run.status === 'failed',
+    )
+    await waitFor(
+      () => repo.skillPackageRepo.listRunQueue(),
+      (items) => items.some((item: any) => item.status === 'dead'),
+    )
     await runtime.stop({ drain: true, timeoutMs: 1_000 })
     expect(runtime.coordinator.getRun(runId).status).toBe('failed')
-    expect(repo.skillPackageRepo.listRunQueue({ limit: 10, offset: 0 }).some((item: any) => item.status === 'dead')).toBe(true)
+    expect(repo.skillPackageRepo.listRunQueue().some((item: any) => item.status === 'dead')).toBe(true)
     client.closeDb()
   })
 
   it('keeps fixture inputs offline and does not execute package scripts', () => {
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-skill-failure-fixture-'))
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-runtime-failure-fixture-'))
     copySkillFixture('failing-runtime-skill', fixture)
     expect(fs.existsSync(path.join(fixture, 'SKILL.md'))).toBe(true)
     expect(fs.existsSync(path.join(fixture, 'scripts', 'must-not-run.js'))).toBe(true)

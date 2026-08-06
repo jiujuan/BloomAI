@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/server/**/*.ts",
+    "tests/fixtures/skills/**/*.ts",
+    "tests/integration/skill-runtime/**/*.ts",
+    "tests/security/**/*.ts",
+    "tests/e2e/skills/**/*.ts",
+    "tests/migration/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-electron",
+    "src/renderer/**",
+    "src/main/**",
+    "src/preload/**"
+  ]
+}
