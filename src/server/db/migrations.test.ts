@@ -91,6 +91,34 @@ function foreignKeyActions(tableName: string) {
 }
 
 describe('database migrations', () => {
+  it('reports applied, pending, and current migration versions without executing migrations', async () => {
+    const { getMigrationStatus, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = [
+        { version: '001-alpha', sql: 'CREATE TABLE migration_alpha (id TEXT PRIMARY KEY);' },
+        { version: '002-beta', sql: 'CREATE TABLE migration_beta (id TEXT PRIMARY KEY);' },
+      ]
+
+      expect(getMigrationStatus(db, migrations)).toEqual({
+        current: null,
+        applied: [],
+        pending: ['001-alpha', '002-beta'],
+      })
+
+      runSqlMigrations(db, migrations.slice(0, 1))
+
+      expect(getMigrationStatus(db, migrations)).toEqual({
+        current: '001-alpha',
+        applied: ['001-alpha'],
+        pending: ['002-beta'],
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-db-migrations-'))
     originalEnv = { ...process.env }

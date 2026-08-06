@@ -2,7 +2,7 @@ import { execSync } from 'child_process'
 import { serve } from '@hono/node-server'
 import { loadDotEnv } from './config/load-env'
 import { createHonoApp } from './http/app'
-import { runMigrations } from './db/client'
+import { getSkillRuntimeMigrationStatus, runMigrations } from './db/client'
 import { createSkillRuntime } from './skills/runtime'
 import { getDeepResearchModule } from './deepresearch'
 import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
@@ -33,8 +33,9 @@ let skillRuntime: ReturnType<typeof createSkillRuntime> | undefined
 
 runMigrations()
   .then(async () => {
-    skillRuntime = createSkillRuntime({ config: skillRuntimeConfig })
-    const interrupted = skillRuntime.markInterruptedRuns({ staleAfterMs: skillRuntimeConfig.leaseTimeoutMs })
+    const runtime = createSkillRuntime({ config: skillRuntimeConfig })
+    skillRuntime = runtime
+    const interrupted = runtime.markInterruptedRuns({ staleAfterMs: skillRuntimeConfig.leaseTimeoutMs })
     if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
     const recovered = await getDeepResearchModule().recoverInterruptedRuns()
     if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })
@@ -42,9 +43,14 @@ runMigrations()
     // Start Mastra workers before serving requests. This restores persisted task
     // schedules after app restart and lets newly created schedules dispatch runs.
     await mastra.startWorkers()
-    const workerStart = skillRuntime.start()
+    const workerStart = runtime.start()
     if (!workerStart.started) serverLogger.info('Skill Runtime worker not started', { reason: workerStart.reason })
-    const app = createHonoApp()
+    const app = createHonoApp({
+      skillRuntimeObservability: {
+        health: () => runtime.getRuntimeHealth(getSkillRuntimeMigrationStatus()),
+        diagnostics: () => runtime.getRuntimeDiagnostics({ migrations: getSkillRuntimeMigrationStatus() }),
+      },
+    })
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)
     })

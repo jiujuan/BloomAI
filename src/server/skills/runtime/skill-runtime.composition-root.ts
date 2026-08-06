@@ -6,6 +6,8 @@ import { PersistentSkillRunQueue } from './skill-run-queue'
 import { SkillRunWorker, type SkillRunAdapter, type SkillRunExecutor } from './skill-run-worker'
 import { InstructionAgentAdapter, type InstructionAgentExecutor } from '../adapters/instruction-agent-adapter'
 import { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
+import { SECURITY_POLICY_VERSION } from '../security/skill-security-checklist'
+import { getRuntimeDiagnostics as buildRuntimeDiagnostics, getRuntimeHealth as buildRuntimeHealth, type RuntimeDiagnosticsSnapshot, type RuntimeHealth, type RuntimeMigrationStatus } from '../observability/skill-runtime.diagnostics'
 
 export type SkillRuntimeCompositionOptions = {
   readonly config?: SkillRuntimeConfig
@@ -28,6 +30,8 @@ export type SkillRuntimeComposition = {
   start(): { started: boolean; reason?: string }
   stop(options?: { drain?: boolean; timeoutMs?: number }): Promise<void>
   markInterruptedRuns(options?: { now?: number; staleAfterMs?: number }): number
+  getRuntimeHealth(migrations?: RuntimeMigrationStatus): RuntimeHealth
+  getRuntimeDiagnostics(options?: { migrations?: RuntimeMigrationStatus; now?: () => number }): RuntimeDiagnosticsSnapshot
 }
 
 /**
@@ -96,6 +100,43 @@ export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {})
     },
     markInterruptedRuns(options) {
       return coordinator.markInterruptedRuns(options)
+    },
+    getRuntimeHealth(migrations = { current: null, applied: [], pending: [] }) {
+      return buildRuntimeHealth({
+        config: {
+          protocolVersion: config.protocolVersion,
+          configVersion: config.configVersion,
+          runtimeEnabled: config.runtimeEnabled,
+          packageExecutionEnabled: config.packageExecutionEnabled,
+          policyVersion: SECURITY_POLICY_VERSION,
+        },
+        migrations,
+        worker: worker?.getStatusSnapshot(),
+      })
+    },
+    getRuntimeDiagnostics(diagnosticsOptions = {}) {
+      const failures = ports.runs.listRuns({ limit: 50, offset: 0, status: 'failed' }).data
+      return buildRuntimeDiagnostics({
+        now: diagnosticsOptions.now,
+        config: {
+          protocolVersion: config.protocolVersion,
+          configVersion: config.configVersion,
+          runtimeEnabled: config.runtimeEnabled,
+          packageExecutionEnabled: config.packageExecutionEnabled,
+          policyVersion: SECURITY_POLICY_VERSION,
+        },
+        queue: queue.list(),
+        worker: worker?.getStatusSnapshot(),
+        migrations: diagnosticsOptions.migrations,
+        metrics,
+        recentFailures: failures.map((run) => ({
+          runId: run.id,
+          status: run.status,
+          errorCode: run.errorCode,
+          errorMessage: run.errorMessage,
+          updatedAt: run.updatedAt,
+        })),
+      })
     },
   }
 }

@@ -7,6 +7,25 @@ import { PersistentSkillRunQueue } from './skill-run-queue'
 import { SkillRunWorker } from './skill-run-worker'
 
 describe('SkillRunWorker', () => {
+  it('exposes a safe operational status snapshot for diagnostics', async () => {
+    const ports = createFakeSkillRuntimePorts()
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+    const queue = new PersistentSkillRunQueue(ports.queue, { clock: ports.clock })
+    const worker = new SkillRunWorker({
+      queue,
+      coordinator,
+      workerId: 'worker-status',
+      concurrency: 2,
+      executor: async () => ({ status: 'completed' }),
+    })
+
+    expect(worker.getStatusSnapshot()).toMatchObject({ status: 'stopped', workerId: 'worker-status', activeRuns: 0, concurrency: 2 })
+    worker.start()
+    expect(worker.getStatusSnapshot()).toMatchObject({ status: 'running', workerId: 'worker-status', activeRuns: 0, concurrency: 2 })
+    await worker.stop({ drain: false, timeoutMs: 100 })
+    expect(worker.getStatusSnapshot()).toMatchObject({ status: 'stopped', workerId: 'worker-status', activeRuns: 0, concurrency: 2 })
+  })
+
   it('consumes a durable queue item and completes the run through the coordinator', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 10_000 })
     const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })

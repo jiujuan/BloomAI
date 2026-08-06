@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { createRequire } from 'node:module'
-import { runSqlMigrations } from './migrations'
+import { getMigrationStatus, runSqlMigrations, type SqlMigration } from './migrations'
 import { assertSchemaContract } from './schema-contract'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
@@ -59,6 +59,12 @@ export async function initDb() {
   syncExports()
 
   return state.db
+}
+
+export function getSkillRuntimeMigrationStatus(migrations?: SqlMigration[]) {
+  const database = getState().dbInstance
+  if (!database) throw new Error('Database has not been initialized. Call initDb() first.')
+  return getMigrationStatus(database, migrations)
 }
 
 export function closeDb() {

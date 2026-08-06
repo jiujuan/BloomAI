@@ -7,7 +7,7 @@ export interface SqlMigration {
   sql: string
 }
 
-type RawSqliteDb = {
+export type RawSqliteDb = {
   exec(sql: string): void
   prepare(sql: string): {
     all(): unknown[]
@@ -45,6 +45,21 @@ export function getAppliedMigrationVersions(db: RawSqliteDb): string[] {
     );
   `)
   return db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row: any) => String(row.version))
+}
+
+export function getMigrationStatus(db: RawSqliteDb, migrations = loadSqlMigrations()): { current: string | null; applied: string[]; pending: string[] } {
+  const recorded = getAppliedMigrationVersions(db)
+  const recordedSet = new Set(recorded)
+  const orderedVersions = migrations.map((migration) => migration.version)
+  const knownApplied = orderedVersions.filter((version) => recordedSet.has(version))
+  const unknownApplied = recorded.filter((version) => !orderedVersions.includes(version))
+  const applied = [...knownApplied, ...unknownApplied]
+  const pending = orderedVersions.filter((version) => !recordedSet.has(version))
+  return {
+    current: applied.length > 0 ? applied[applied.length - 1] : null,
+    applied,
+    pending,
+  }
 }
 
 export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations()): void {

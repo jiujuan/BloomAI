@@ -44,6 +44,30 @@ describe('createSkillRuntime', () => {
     expect(metrics.snapshot().points.some((point) => point.kind === 'queue')).toBe(true)
   })
 
+  it('builds diagnostics from the composed runtime instead of empty defaults', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 10_000 })
+    const metrics = new SkillRuntimeMetrics({ now: ports.clock.now })
+    const runtime = createSkillRuntime({
+      config: config({ SKILL_PACKAGE_EXECUTION_ENABLED: 'true', SKILL_MAX_ATTEMPTS: '1' }),
+      ports,
+      metrics,
+      executor: async () => { throw new Error('secret token=should-not-leak') },
+    })
+    const { runId } = runtime.coordinator.startRun({ skillVersionId: 'version-diagnostics', input: {}, context: {} })
+
+    await runtime.worker?.runOne()
+    await runtime.stop({ drain: false })
+    const diagnostics = runtime.getRuntimeDiagnostics({
+      migrations: { current: '043-skill-security-audit-fields', applied: ['043-skill-security-audit-fields'], pending: [] },
+    })
+
+    expect(diagnostics.queue).toMatchObject({ depth: 1, dead: 1 })
+    expect(diagnostics.worker).toMatchObject({ status: 'stopped' })
+    expect(diagnostics.migration).toMatchObject({ current: '043-skill-security-audit-fields', pending: [] })
+    expect(diagnostics.recentFailures).toEqual(expect.arrayContaining([expect.objectContaining({ runId })]))
+    expect(JSON.stringify(diagnostics)).not.toContain('should-not-leak')
+  })
+
   it('assembles coordinator, queue, and worker with one injected port set', async () => {
     const ports = createFakeSkillRuntimePorts()
     const runtime = createSkillRuntime({

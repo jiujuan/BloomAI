@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { JsonObject, SkillRunQueueSnapshot } from '../application/ports'
+import type { RuntimeWorkerStatus } from '../observability/skill-runtime.diagnostics'
 import type { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
 import { withSkillCorrelation } from '../observability/skill-runtime.logger'
 import type { SkillRun } from './skill-run-coordinator'
@@ -42,11 +43,15 @@ export class SkillRunWorker {
   private readonly retryDelayMs: (attempt: number) => number
   private readonly metrics?: SkillRuntimeMetrics
   private readonly active = new Set<Promise<boolean>>()
+  private activeRunCount = 0
   private running = false
   private drainRequested = false
   private loopPromise: Promise<void> | undefined
   private shutdownRequested = false
   private readonly controllers = new Set<AbortController>()
+  private operationalStatus: RuntimeWorkerStatus['status'] = 'stopped'
+  private lastError: string | null = null
+  private heartbeatAt: number | null = null
 
   constructor(private readonly options: SkillRunWorkerOptions) {
     this.workerId = options.workerId ?? `skill-worker-${randomUUID()}`
@@ -61,25 +66,50 @@ export class SkillRunWorker {
     if (!Number.isInteger(this.pollIntervalMs) || this.pollIntervalMs < 0) throw new Error('pollIntervalMs must be a non-negative integer')
   }
 
+  getStatusSnapshot(): RuntimeWorkerStatus {
+    return {
+      status: this.operationalStatus,
+      workerId: this.workerId,
+      lastError: this.lastError,
+      heartbeatAt: this.heartbeatAt,
+      activeRuns: this.activeRunCount,
+      concurrency: this.concurrency,
+    }
+  }
+
   start(): void {
     if (this.running) return
+    this.operationalStatus = 'starting'
+    this.lastError = null
     this.running = true
     this.shutdownRequested = false
     this.drainRequested = false
+    this.heartbeatAt = Date.now()
+    this.operationalStatus = 'running'
     this.loopPromise = this.pump()
   }
 
   async stop(options: { drain: boolean; timeoutMs: number }): Promise<void> {
     this.running = false
+    this.operationalStatus = this.loopPromise ? 'stopping' : 'stopped'
     this.drainRequested = options.drain
     this.shutdownRequested = !options.drain
     if (!options.drain) for (const controller of this.controllers) controller.abort()
     const loop = this.loopPromise
     if (!loop) return
-    await Promise.race([
-      loop,
-      new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, options.timeoutMs))),
-    ])
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        loop,
+        new Promise<void>((resolve) => {
+          timeoutHandle = setTimeout(resolve, Math.max(0, options.timeoutMs))
+          timeoutHandle.unref?.()
+        }),
+      ])
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+    }
+    if (this.activeRunCount === 0 && this.operationalStatus !== 'crashed') this.operationalStatus = 'stopped'
   }
 
   async drain(timeoutMs = 30_000): Promise<void> {
@@ -90,6 +120,7 @@ export class SkillRunWorker {
     const item = this.options.queue.claimNext(this.workerId, this.leaseMs)
     if (!item) return false
 
+    this.activeRunCount += 1
     return withSkillCorrelation({ runId: item.runId, workerId: this.workerId }, async () => {
       const startedAt = Date.now()
       const abortController = new AbortController()
@@ -97,6 +128,7 @@ export class SkillRunWorker {
       let leaseLost = false
       let run: SkillRun | undefined
       const heartbeatTimer = setInterval(() => {
+        this.heartbeatAt = Date.now()
         const lease = this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
         if (!lease) {
           leaseLost = true
@@ -174,6 +206,7 @@ export class SkillRunWorker {
         abortController.abort()
         clearInterval(heartbeatTimer)
         this.controllers.delete(abortController)
+        this.activeRunCount = Math.max(0, this.activeRunCount - 1)
       }
     })
   }
@@ -241,23 +274,35 @@ export class SkillRunWorker {
   }
 
   private async pump(): Promise<void> {
-    while (this.running || (this.drainRequested && this.active.size > 0)) {
-      while (this.running && this.active.size < this.concurrency) {
-        const task = this.runOne()
-        this.active.add(task)
-        void task.then(
-          () => this.active.delete(task),
-          () => this.active.delete(task),
-        )
-      }
+    try {
+      while (this.running || (this.drainRequested && this.active.size > 0)) {
+        let pollNeeded = false
+        while (this.running && this.active.size < this.concurrency && !pollNeeded) {
+          const task = this.runOne()
+          this.active.add(task)
+          void task.then(
+            (hasWork) => {
+              this.active.delete(task)
+              if (!hasWork) pollNeeded = true
+            },
+            () => this.active.delete(task),
+          )
+        }
 
-      if (this.active.size > 0) {
-        await Promise.race(this.active)
-      } else if (this.running) {
-        await sleep(this.pollIntervalMs)
+        if (this.active.size > 0) {
+          await Promise.race(this.active)
+        }
+        if (pollNeeded && this.running) await sleep(this.pollIntervalMs)
       }
+    } catch (error) {
+      this.operationalStatus = 'crashed'
+      this.lastError = error instanceof Error ? error.message : String(error)
+      this.running = false
+      this.drainRequested = false
+    } finally {
+      this.loopPromise = undefined
+      if (this.operationalStatus === 'stopping' && this.activeRunCount === 0) this.operationalStatus = 'stopped'
     }
-    this.loopPromise = undefined
   }
 }
 
