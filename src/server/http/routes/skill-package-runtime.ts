@@ -18,6 +18,14 @@ const packageSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('github-archive'), repositoryUrl: z.string().url(), ref: z.string().min(1), subdirectory: z.string().min(1).optional() }),
 ])
 const packageMutationSchema = z.object({ source: packageSourceSchema })
+const packageInstallSchema = z.object({
+  source: packageSourceSchema,
+  reviewId: idSchema,
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+  confirm: z.literal(true),
+})
+const importReviewDecisionSchema = z.object({ reviewer: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
+
 const installationUpdateSchema = z.object({ enabled: z.boolean() })
 const grantApproveSchema = z.object({ actor: idSchema, scope: jsonObjectSchema.optional(), expiresAt: z.number().int().positive().nullable().optional() }).strict()
 const grantRejectSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
@@ -57,7 +65,25 @@ skillPackageRuntimeRoutes.post('/skill-packages/inspect', async (c) => {
   try { return c.json({ data: await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source) }) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-packages/install', async (c) => {
-  try { return c.json({ data: await skillPackageRuntimeService.installPackage((await readValidated(c, packageMutationSchema)).source) }, 201) } catch (error) { return errorResponse(c, error) }
+  try {
+    const input = await readValidated(c, packageInstallSchema)
+    return c.json({ data: await skillPackageRuntimeService.installPackage(input.source, input) }, 201)
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-import-reviews/:id', (c) => {
+  try { return c.json({ data: skillPackageRuntimeService.getImportReview(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/approve', async (c) => {
+  try {
+    const input = await readValidated(c, importReviewDecisionSchema)
+    return c.json({ data: skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), input.reviewer) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/reject', async (c) => {
+  try {
+    const input = await readValidated(c, importReviewDecisionSchema)
+    return c.json({ data: skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), input.reviewer, input.reason) })
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   try {

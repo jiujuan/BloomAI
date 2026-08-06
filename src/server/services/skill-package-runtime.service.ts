@@ -7,7 +7,8 @@ import {
   createSqliteRunRepository,
 } from '../db/repositories/skill-package.repo'
 import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
-import { PackageInstallError, PackageInstaller, type PackageInstallSource } from '../skills/packages/package-installer'
+import { PackageInstallError, PackageInstaller, type PackageInstallOptions, type PackageInstallSource } from '../skills/packages/package-installer'
+import { PackageInstallReviewError, packageInstallReviewService } from '../skills/packages/package-install-review.service'
 import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
 import { SkillRunCoordinator } from '../skills/runtime'
 import { CapabilityGrantService, CapabilityGrantServiceError } from '../skills/application/capability-grant.service'
@@ -88,8 +89,20 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntimeError(() => dependencies.createInstaller().inspect(source))
     },
 
-    async installPackage(source: PackageInstallSource) {
-      return mapRuntimeError(() => dependencies.createInstaller().install(source))
+    async installPackage(source: PackageInstallSource, options: PackageInstallOptions) {
+      return mapRuntimeError(() => dependencies.createInstaller().install(source, options))
+    },
+
+    getImportReview(id: string) {
+      return mapRuntimeError(() => packageInstallReviewService.get(id))
+    },
+
+    approveImportReview(id: string, reviewer: string) {
+      return mapRuntimeError(() => packageInstallReviewService.approve(id, reviewer))
+    },
+
+    rejectImportReview(id: string, reviewer: string, reason?: string) {
+      return mapRuntimeError(() => packageInstallReviewService.reject(id, reviewer, reason))
     },
 
     listPackages(page: { limit: number, offset: number }) {
@@ -283,6 +296,10 @@ function rethrowMappedRuntimeError(error: unknown): never {
                 : error.code === 'SCOPE_EXCEEDED' ? 'FORBIDDEN'
                   : 'CAPABILITY_GRANT_ERROR'
     throw new ServiceError(code, error.message, normalizeServiceErrorDetails(error.details))
+  }
+  if (error instanceof PackageInstallReviewError) {
+    const code = error.code === 'REVIEW_NOT_FOUND' ? 'NOT_FOUND' : 'PACKAGE_INSTALL_ERROR'
+    throw new ServiceError(code, error.message, { reviewCode: error.code })
   }
   if (error instanceof PackageInstallError) {
     if (error.code === 'FEATURE_DISABLED') throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })

@@ -8,6 +8,7 @@ import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skil
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
 import { SkillPackageReader } from './package-reader'
+import { packageInstallReviewService } from './package-install-review.service'
 
 
 type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
@@ -42,7 +43,23 @@ export type InspectedPackage = {
 }
 
 
-export type PackageInstallResult = { status: 'awaiting_permission_review'; packages: InstalledPackage[] }
+export type PackageInstallOptions = {
+  reviewId: string
+  sourceFingerprint: string
+  confirm: boolean
+}
+
+export type PackageInstallFailure = {
+  relativeSkillPath: string
+  code: string
+  message: string
+}
+
+export type PackageInstallResult = {
+  status: 'awaiting_permission_review' | 'partial_failure'
+  packages: InstalledPackage[]
+  partialFailures?: PackageInstallFailure[]
+}
 
 export class PackageInstallError extends Error {
   readonly code: 'PACKAGE_INSTALL_ERROR' | 'FEATURE_DISABLED'
@@ -65,7 +82,11 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
-  async inspect(source: PackageInstallSource): Promise<{ packages: InspectedPackage[] }> {
+  async inspect(source: PackageInstallSource): Promise<{
+    reviewId: string
+    sourceFingerprint: string
+    packages: InspectedPackage[]
+  }> {
     assertPackageImportEnabled()
     const roots = getPackageRoots()
     fs.mkdirSync(roots.staging, { recursive: true })
@@ -76,21 +97,26 @@ export class PackageInstaller {
       const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
       const skills = discoverSkillDirectories(selectedRoot)
       if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
-      return {
-        packages: skills.map((skillDirectory) => {
-          const files = collectFiles(skillDirectory)
-          return {
-            sourceType: source.kind,
-            relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
-            manifestHash: resolveSkillManifest(skillDirectory).canonicalHash ?? hashJson(files),
-            sourceFingerprint: hashJson(files),
-            diagnostics: resolveSkillManifest(skillDirectory).diagnostics ?? [],
-            importReviewRequired: Boolean(resolveSkillManifest(skillDirectory).requestedCapabilities.length || resolveSkillManifest(skillDirectory).unsupported.length),
-            manifest: { ...resolveSkillManifest(skillDirectory), files },
-            sourceSnapshot: { ...sourceSnapshot, files },
-          }
-        }),
-      }
+      const packages = skills.map((skillDirectory) => {
+        const files = collectFiles(skillDirectory)
+        const resolvedManifest = resolveSkillManifest(skillDirectory)
+        return {
+          sourceType: source.kind,
+          relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
+          manifestHash: resolvedManifest.canonicalHash ?? hashJson(files),
+          sourceFingerprint: hashJson(files),
+          diagnostics: resolvedManifest.diagnostics ?? [],
+          importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
+          manifest: { ...resolvedManifest, files },
+          sourceSnapshot: { ...sourceSnapshot, files },
+        }
+      })
+      const review = packageInstallReviewService.create({
+        source,
+        sourceFingerprint: sourceSnapshot.sourceSha256,
+        inspection: { sourceType: source.kind, sourceFingerprint: sourceSnapshot.sourceSha256, packages },
+      })
+      return { reviewId: review.id, sourceFingerprint: sourceSnapshot.sourceSha256, packages }
     } catch (error) {
       if (error instanceof PackageInstallError) throw error
       throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
@@ -99,9 +125,10 @@ export class PackageInstaller {
     }
   }
 
-  async install(source: PackageInstallSource): Promise<PackageInstallResult> {
+  async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
     assertPackageImportEnabled()
     if (source.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
+    if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
 
     const roots = getPackageRoots()
     fs.mkdirSync(roots.staging, { recursive: true })
@@ -110,14 +137,36 @@ export class PackageInstaller {
     try {
       const sourceRoot = path.join(stage, 'source')
       const sourceSnapshot = await materializeSource(source, sourceRoot)
+      if (sourceSnapshot.sourceSha256 !== options.sourceFingerprint) {
+        throw new PackageInstallError('Package source fingerprint changed since inspection')
+      }
+      const review = packageInstallReviewService.assertInstallable(options.reviewId, options.sourceFingerprint, options.confirm)
+      if (review.status === 'installed' && review.decision?.result) {
+        return review.decision.result as unknown as PackageInstallResult
+      }
+
       const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
       const skills = discoverSkillDirectories(selectedRoot)
       if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
       const packages: InstalledPackage[] = []
+      const partialFailures: PackageInstallFailure[] = []
       for (const skillDirectory of skills) {
-        packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source, sourceSnapshot }))
+        const relativeSkillPath = normalizeRelative(path.relative(selectedRoot, skillDirectory))
+        try {
+          packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source, sourceSnapshot }))
+        } catch (error) {
+          partialFailures.push({
+            relativeSkillPath,
+            code: error instanceof PackageInstallError ? error.code : 'PACKAGE_INSTALL_ERROR',
+            message: error instanceof Error ? error.message : 'Package installation failed',
+          })
+        }
       }
-      return { status: 'awaiting_permission_review', packages }
+      const result: PackageInstallResult = partialFailures.length > 0
+        ? { status: 'partial_failure', packages, partialFailures }
+        : { status: 'awaiting_permission_review', packages }
+      packageInstallReviewService.markInstalled(options.reviewId, result as unknown as Record<string, unknown>)
+      return result
     } catch (error) {
       if (error instanceof PackageInstallError) throw error
       throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
@@ -138,39 +187,68 @@ export class PackageInstaller {
     const manifestHash = resolvedManifest.canonicalHash ?? hashJson(files)
     const sourceFingerprint = hashJson(files)
     const finalPath = path.join(data.roots.packages, sourceFingerprint)
+    let createdPackagePath = false
     if (!fs.existsSync(finalPath)) {
       const materializingRoot = fs.mkdtempSync(path.join(data.roots.staging, `package-${manifestHash}-`))
       const materializingPath = path.join(materializingRoot, 'package')
       try {
         copySafeDirectory(data.skillDirectory, materializingPath)
         fs.renameSync(materializingPath, finalPath)
+        createdPackagePath = true
       } catch (error) {
         if (!fs.existsSync(finalPath)) throw error
       } finally {
         fs.rmSync(materializingRoot, { recursive: true, force: true })
       }
     }
+
     const relativeSkillPath = normalizeRelative(path.relative(data.selectedRoot, data.skillDirectory))
-    const sourceSnapshot = { ...data.sourceSnapshot, files }
+    const sourceSnapshot = { ...data.sourceSnapshot, files, snapshotHash: sourceFingerprint }
     const manifest = { ...resolvedManifest, files }
-    await runMigrations()
-    const packageRecord = skillPackageRepo.createPackage({
-      name: path.basename(data.skillDirectory), description: '', sourceType: data.source.kind,
-      sourceUri: sourceUriFor(data.source), sourceRef: data.sourceSnapshot.sourceCommit ?? data.sourceSnapshot.sourceRef ?? null,
-    })
-    const versionRecord = skillPackageRepo.createVersion({
-      packageId: packageRecord.id, version: manifestHash.slice(0, 12), manifest, manifestHash,
-      packagePath: finalPath, sourceSnapshot,
-    })
-    const installationRecord = skillPackageRepo.createInstallation({
-      packageId: packageRecord.id, currentVersionId: versionRecord.id, status: 'awaiting_permission_review', enabled: false,
-    })
-    return {
-      packageId: packageRecord.id, versionId: versionRecord.id, installationId: installationRecord.id,
-      status: 'awaiting_permission_review', sourceType: data.source.kind, relativeSkillPath, packagePath: finalPath,
-      manifestHash, manifest, sourceSnapshot,
-      sourceFingerprint, diagnostics: resolvedManifest.diagnostics ?? [],
-      importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
+    const snapshotFiles = Object.fromEntries(files.map((file) => [file.path, { sha256: file.sha256, sizeBytes: file.sizeBytes }]))
+    try {
+      const records = skillPackageRepo.createPackageVersionInstallationTransaction({
+        package: {
+          name: typeof manifest.name === 'string' ? manifest.name : path.basename(data.skillDirectory),
+          description: typeof manifest.description === 'string' ? manifest.description : '',
+          sourceType: data.source.kind,
+          sourceUri: sourceUriFor(data.source),
+          sourceRef: data.sourceSnapshot.sourceCommit ?? data.sourceSnapshot.sourceRef ?? null,
+        },
+        version: {
+          version: typeof manifest.version === 'string' ? manifest.version : `0.0.0+${manifestHash.slice(0, 12)}`,
+          manifest,
+          manifestHash,
+          packagePath: finalPath,
+          sourceSnapshot,
+        },
+        snapshot: {
+          filesManifest: snapshotFiles,
+          totalBytes: files.reduce((total, file) => total + file.sizeBytes, 0),
+          fileCount: files.length,
+          snapshotRoot: finalPath,
+          snapshotHash: sourceFingerprint,
+        },
+        installation: { status: 'awaiting_permission_review', enabled: false },
+      })
+      return {
+        packageId: records.package.id,
+        versionId: records.version.id,
+        installationId: records.installation.id,
+        status: 'awaiting_permission_review',
+        sourceType: data.source.kind,
+        relativeSkillPath,
+        packagePath: finalPath,
+        manifestHash,
+        manifest,
+        sourceSnapshot,
+        sourceFingerprint,
+        diagnostics: resolvedManifest.diagnostics ?? [],
+        importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
+      }
+    } catch (error) {
+      if (createdPackagePath) fs.rmSync(finalPath, { recursive: true, force: true })
+      throw error
     }
   }
 }

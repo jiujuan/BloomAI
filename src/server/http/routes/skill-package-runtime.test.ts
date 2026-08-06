@@ -61,9 +61,9 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(body.data).not.toHaveProperty('artifactRoot')
   })
   beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-http-runtime-data-'))
-    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-http-runtime-fixture-'))
-    exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-http-runtime-export-'))
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'http-runtime-data-'))
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'http-runtime-fixture-'))
+    exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'http-runtime-export-'))
     originalEnv = { ...process.env }
   })
 
@@ -107,13 +107,77 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const inspected = await requestJson(app, '/skill-packages/inspect', { method: 'POST', body: JSON.stringify(payload) })
     expect(inspected.response.status).toBe(200)
+    expect(inspected.body.data.reviewId).toEqual(expect.any(String))
+    expect(inspected.body.data.sourceFingerprint).toMatch(/^[a-f0-9]{64}$/)
     expect(inspected.body.data.packages).toHaveLength(1)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
 
-    const installed = await requestJson(app, '/skill-packages/install', { method: 'POST', body: JSON.stringify(payload) })
+    const review = await requestJson(app, `/skill-import-reviews/${inspected.body.data.reviewId}`)
+    expect(review.response.status).toBe(200)
+    expect(review.body.data).toMatchObject({
+      id: inspected.body.data.reviewId,
+      sourceSha: inspected.body.data.sourceFingerprint,
+      status: 'pending',
+    })
+
+    const installed = await requestJson(app, '/skill-packages/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        reviewId: inspected.body.data.reviewId,
+        sourceFingerprint: inspected.body.data.sourceFingerprint,
+        confirm: true,
+      }),
+    })
     expect(installed.response.status).toBe(201)
     expect(installed.body.data.status).toBe('awaiting_permission_review')
     expect(installed.body.data.packages).toHaveLength(1)
+  })
+
+  it('supports approving and rejecting import reviews through the HTTP contract', async () => {
+    writeFixture('approved/SKILL.md', '# Approved\n')
+    const { app } = await loadApi()
+
+    const inspected = await requestJson(app, '/skill-packages/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }),
+    })
+    const reviewId = inspected.body.data.reviewId
+
+    const approved = await requestJson(app, `/skill-import-reviews/${reviewId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ reviewer: 'operator-1' }),
+    })
+    expect(approved.response.status).toBe(200)
+    expect(approved.body.data).toMatchObject({ id: reviewId, status: 'approved', reviewer: 'operator-1' })
+
+    const missing = await requestJson(app, '/skill-import-reviews/missing')
+    expect(missing.response.status).toBe(404)
+    expect(missing.body.error.code).toBe('NOT_FOUND')
+
+    writeFixture('rejected/SKILL.md', '# Rejected\n')
+    const rejectedInspection = await requestJson(app, '/skill-packages/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }),
+    })
+    const rejected = await requestJson(app, `/skill-import-reviews/${rejectedInspection.body.data.reviewId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reviewer: 'operator-2', reason: 'Policy review failed' }),
+    })
+    expect(rejected.response.status).toBe(200)
+    expect(rejected.body.data).toMatchObject({ status: 'rejected', reviewer: 'operator-2' })
+
+    const rejectedInstall = await requestJson(app, '/skill-packages/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: { kind: 'local-directory', directory: fixtureDir },
+        reviewId: rejectedInspection.body.data.reviewId,
+        sourceFingerprint: rejectedInspection.body.data.sourceFingerprint,
+        confirm: true,
+      }),
+    })
+    expect(rejectedInstall.response.status).toBe(400)
+    expect(rejectedInstall.body.error.code).toBe('PACKAGE_INSTALL_ERROR')
   })
 
   it('paginates, fetches, and uninstalls persisted package records', async () => {

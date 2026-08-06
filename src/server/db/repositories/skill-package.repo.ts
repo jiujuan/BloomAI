@@ -7,6 +7,8 @@ import {
   skill_artifacts,
   skill_capability_grants,
   skill_installations,
+  skill_import_reviews,
+  skill_version_snapshots,
   skill_run_commands,
   skill_packages,
   skill_run_events,
@@ -116,6 +118,132 @@ export const skillPackageRepo = {
       .orderBy(desc(skill_versions.created_at)).all()
   },
 
+
+  createImportReview(data: {
+    source: string
+    sourceSha: string
+    sourceRef?: string | null
+    inspection: Record<string, unknown>
+    status?: string
+  }) {
+    const now = Date.now()
+    const existing = getOrmDb().select().from(skill_import_reviews).where(and(
+      eq(skill_import_reviews.source, data.source),
+      eq(skill_import_reviews.source_sha, data.sourceSha),
+      data.sourceRef === null || data.sourceRef === undefined
+        ? isNull(skill_import_reviews.source_ref)
+        : eq(skill_import_reviews.source_ref, data.sourceRef),
+    )).get()
+    if (existing) return existing
+    const row = {
+      id: uuidv4(),
+      source: data.source,
+      source_sha: data.sourceSha,
+      source_ref: data.sourceRef ?? null,
+      inspection_json: stringifyJsonObject(data.inspection, 'inspection'),
+      status: data.status ?? 'pending',
+      reviewer: null,
+      decision: null,
+      created_at: now,
+      updated_at: now,
+    }
+    getOrmDb().insert(skill_import_reviews).values(row).run()
+    return row
+  },
+
+  getImportReview(id: string) {
+    return getOrmDb().select().from(skill_import_reviews).where(eq(skill_import_reviews.id, id)).get()
+  },
+
+  updateImportReview(id: string, data: { status?: string; reviewer?: string | null; decision?: string | null }) {
+    const patch = {
+      ...(data.status === undefined ? {} : { status: data.status }),
+      ...(data.reviewer === undefined ? {} : { reviewer: data.reviewer }),
+      ...(data.decision === undefined ? {} : { decision: data.decision }),
+      updated_at: Date.now(),
+    }
+    const result = getOrmDb().update(skill_import_reviews).set(patch).where(eq(skill_import_reviews.id, id)).run()
+    return result.changes === 1 ? this.getImportReview(id) : undefined
+  },
+
+  createPackageVersionInstallationTransaction(data: {
+    package: {
+      name: string
+      description: string
+      sourceType: string
+      sourceUri?: string | null
+      sourceRef?: string | null
+    }
+    version: {
+      version: string
+      manifest: Record<string, unknown>
+      manifestHash: string
+      packagePath: string
+      sourceSnapshot: Record<string, unknown>
+      isCompatible?: boolean
+    }
+    snapshot: {
+      filesManifest: Record<string, unknown>
+      totalBytes: number
+      fileCount: number
+      snapshotRoot: string
+      snapshotHash: string
+    }
+    installation: { status: string; enabled?: boolean }
+  }) {
+    return getOrmDb().transaction((tx) => {
+      const now = Date.now()
+      const packageRow = {
+        id: uuidv4(),
+        name: data.package.name,
+        description: data.package.description,
+        source_type: data.package.sourceType,
+        source_uri: data.package.sourceUri ?? null,
+        source_ref: data.package.sourceRef ?? null,
+        created_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_packages).values(packageRow).run()
+
+      const versionRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        version: data.version.version,
+        runtime: 'instruction-agent',
+        manifest_json: stringifyJsonObject(data.version.manifest, 'manifest'),
+        manifest_hash: data.version.manifestHash,
+        package_path: data.version.packagePath,
+        source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
+        is_compatible: data.version.isCompatible === false ? 0 : 1,
+        created_at: now,
+      }
+      tx.insert(skill_versions).values(versionRow).run()
+
+      const snapshotRow = {
+        id: uuidv4(),
+        version_id: versionRow.id,
+        files_manifest_json: stringifyJsonObject(data.snapshot.filesManifest, 'filesManifest'),
+        total_bytes: data.snapshot.totalBytes,
+        file_count: data.snapshot.fileCount,
+        snapshot_root: data.snapshot.snapshotRoot,
+        snapshot_hash: data.snapshot.snapshotHash,
+        created_at: now,
+      }
+      tx.insert(skill_version_snapshots).values(snapshotRow).run()
+
+      const installationRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        current_version_id: versionRow.id,
+        status: data.installation.status,
+        enabled: data.installation.enabled === false ? 0 : 1,
+        installed_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_installations).values(installationRow).run()
+      return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow }
+    })
+  },
 
   createInstallation(data: {
     packageId: string
