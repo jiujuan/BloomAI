@@ -374,4 +374,89 @@ describe('PackageInstaller', () => {
     })
   })
 
+
+  it('records bounded reject reasons for manifest, fingerprint, source, and archive failures', async () => {
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const installer = new PackageInstaller({ metrics })
+
+    writeFile('invalid/SKILL.md', '---\nname: [broken\n---\n# Invalid\n')
+    await expect(installer.inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+
+    fs.rmSync(path.join(fixtureDir, 'invalid'), { recursive: true, force: true })
+    const fingerprintZip = path.join(fixtureDir, 'fingerprint.zip')
+    writeStoredZip(fingerprintZip, [{ name: 'valid/SKILL.md', content: '# Valid\n' }])
+    const inspected = await installer.inspect({ kind: 'zip', zipPath: fingerprintZip })
+    writeStoredZip(fingerprintZip, [{ name: 'valid/SKILL.md', content: '# Changed\n' }])
+    await expect(installer.install({ kind: 'zip', zipPath: fingerprintZip }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })).rejects.toThrow(/fingerprint changed/i)
+
+    const sourceNotAllowed = { kind: 'github-archive' as const, repositoryUrl: 'http://github.com/acme/skills', ref: 'main' }
+    await expect(installer.inspect(sourceNotAllowed)).rejects.toMatchObject({ code: 'SOURCE_HOST_NOT_ALLOWED' })
+
+    const corruptZip = path.join(fixtureDir, 'corrupt.zip')
+    fs.writeFileSync(corruptZip, Buffer.from('not a zip archive'))
+    await expect(installer.inspect({ kind: 'zip', zipPath: corruptZip })).rejects.toBeInstanceOf(PackageInstallError)
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters.importRejects).toMatchObject({
+      invalid_manifest: 1,
+      fingerprint_changed: 1,
+      source_not_allowed: 1,
+      archive_corrupt: 1,
+    })
+    expect(JSON.stringify(snapshot.points)).not.toContain(fixtureDir)
+  })
+
+  it('records bounded security and size-limit rejects without path labels', async () => {
+    const zipPath = path.join(fixtureDir, 'unsafe.zip')
+    writeStoredZip(zipPath, [{ name: '../outside/SKILL.md', content: '# unsafe\n' }])
+    const oversizedZipPath = path.join(fixtureDir, 'oversized.zip')
+    writeStoredZip(oversizedZipPath, [{
+      name: 'skill/SKILL.md',
+      content: '# oversized\n',
+      uncompressedSize: 10 * 1024 * 1024 + 1,
+    }])
+
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const installer = new PackageInstaller({ metrics })
+
+    await expect(installer.inspect({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    await expect(installer.inspect({ kind: 'zip', zipPath: oversizedZipPath })).rejects.toThrow(/maximum size/i)
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters.importRejects).toMatchObject({ security_policy: 1, size_limit: 1 })
+    expect(snapshot.points.every((point) => point.kind === 'import' && Object.keys(point.attributes).every((key) => key === 'reason'))).toBe(true)
+  })
+
+  it('records unknown rejects for partial installation failures', async () => {
+    writeFile('first/SKILL.md', '# First\n')
+    writeFile('second/SKILL.md', '# Second\n')
+    const { PackageInstaller, skillPackageRepo } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const transaction = vi.spyOn(skillPackageRepo, 'createPackageVersionInstallationTransaction')
+      .mockImplementationOnce(() => { throw new Error('simulated database transaction failure') })
+    const installer = new PackageInstaller({ metrics })
+
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+    const result = await installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.status).toBe('partial_failure')
+    expect(result.partialFailures).toHaveLength(1)
+    expect(metrics.snapshot().counters.importRejects).toMatchObject({ unknown: 1 })
+    expect(transaction).toHaveBeenCalled()
+    transaction.mockRestore()
+  })
+
 })

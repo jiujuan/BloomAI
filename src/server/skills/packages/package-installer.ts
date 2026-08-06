@@ -5,6 +5,8 @@ import { inflateRawSync } from 'zlib'
 import { runMigrations } from '../../db/client'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skill-runtime.config'
+import { getSkillCorrelation, withSkillCorrelation } from '../observability/skill-runtime.logger'
+import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observability/skill-runtime.metrics'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
 import { SkillPackageReader } from './package-reader'
@@ -91,6 +93,10 @@ export class PackageInstallError extends Error {
   }
 }
 
+export type PackageInstallerDependencies = {
+  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+}
+
 type ZipEntry = {
   name: string
   flags: number
@@ -102,18 +108,27 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
+  private readonly metrics: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+
+  constructor(dependencies: PackageInstallerDependencies = {}) {
+    this.metrics = dependencies.metrics ?? SkillRuntimeMetrics.global()
+  }
+
   async inspect(source: PackageInstallSource): Promise<{
     reviewId: string
     sourceFingerprint: string
     resolvedCommitSha?: string
     packages: InspectedPackage[]
   }> {
-    assertPackageImportEnabled()
-    const securedSource = validatePackageInstallSource(source)
-    const roots = getPackageRoots()
-    fs.mkdirSync(roots.staging, { recursive: true })
-    const stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
-    try {
+    const correlation = getSkillCorrelation()
+    return withSkillCorrelation(correlation, async () => {
+      let stage: string | undefined
+      try {
+        assertPackageImportEnabled()
+        const securedSource = validatePackageInstallSource(source)
+        const roots = getPackageRoots()
+        fs.mkdirSync(roots.staging, { recursive: true })
+        stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
       const sourceRoot = path.join(stage, 'source')
       const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
       const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
@@ -148,25 +163,30 @@ export class PackageInstaller {
         ...(sourceSnapshot.resolvedCommitSha ? { resolvedCommitSha: sourceSnapshot.resolvedCommitSha } : {}),
         packages,
       }
-    } catch (error) {
-      if (error instanceof PackageInstallError) throw error
-      throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
-    } finally {
-      fs.rmSync(stage, { recursive: true, force: true })
-    }
+      } catch (error) {
+        this.recordImportReject(error, correlation)
+        if (error instanceof PackageInstallError) throw error
+        throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
+      } finally {
+        if (stage) fs.rmSync(stage, { recursive: true, force: true })
+      }
+    })
   }
 
   async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
-    assertPackageImportEnabled()
-    const securedSource = validatePackageInstallSource(source)
-    if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
-    if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
+    const correlation = getSkillCorrelation()
+    return withSkillCorrelation(correlation, async () => {
+      let stage: string | undefined
+      try {
+        assertPackageImportEnabled()
+        const securedSource = validatePackageInstallSource(source)
+        if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
+        if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
 
-    const roots = getPackageRoots()
-    fs.mkdirSync(roots.staging, { recursive: true })
-    fs.mkdirSync(roots.packages, { recursive: true })
-    const stage = fs.mkdtempSync(path.join(roots.staging, 'install-'))
-    try {
+        const roots = getPackageRoots()
+        fs.mkdirSync(roots.staging, { recursive: true })
+        fs.mkdirSync(roots.packages, { recursive: true })
+        stage = fs.mkdtempSync(path.join(roots.staging, 'install-'))
       const sourceRoot = path.join(stage, 'source')
       const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
       if (sourceSnapshot.sourceSha256 !== options.sourceFingerprint) {
@@ -187,6 +207,7 @@ export class PackageInstaller {
         try {
           packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source: securedSource, sourceSnapshot }))
         } catch (error) {
+          this.recordImportReject(error)
           partialFailures.push({
             relativeSkillPath,
             code: error instanceof PackageInstallError ? error.code : 'PACKAGE_INSTALL_ERROR',
@@ -199,12 +220,14 @@ export class PackageInstaller {
         : { status: 'awaiting_permission_review', packages }
       packageInstallReviewService.markInstalled(options.reviewId, result as unknown as Record<string, unknown>)
       return result
-    } catch (error) {
-      if (error instanceof PackageInstallError) throw error
-      throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
-    } finally {
-      fs.rmSync(stage, { recursive: true, force: true })
-    }
+      } catch (error) {
+        this.recordImportReject(error, correlation)
+        if (error instanceof PackageInstallError) throw error
+        throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
+      } finally {
+        if (stage) fs.rmSync(stage, { recursive: true, force: true })
+      }
+    })
   }
 
   private async persistSkill(data: {
@@ -288,6 +311,49 @@ export class PackageInstaller {
       throw error
     }
   }
+
+  private recordImportReject(error: unknown, correlation: SkillRuntimeCorrelation = getSkillCorrelation()): void {
+    try {
+      this.metrics.recordImportReject(classifyImportRejectReason(error), {
+        ...correlation,
+        ...getSkillCorrelation(),
+      })
+    } catch {
+      // Import telemetry must never change package validation or installation behavior.
+    }
+  }
+}
+
+type ImportRejectReason =
+  | 'unsupported_capability'
+  | 'invalid_manifest'
+  | 'security_policy'
+  | 'size_limit'
+  | 'file_limit'
+  | 'archive_corrupt'
+  | 'source_not_allowed'
+  | 'unsupported_runtime'
+  | 'review_required'
+  | 'fingerprint_changed'
+  | 'unknown'
+
+function classifyImportRejectReason(error: unknown): ImportRejectReason {
+  const candidate = error as { code?: unknown; message?: unknown }
+  const code = typeof candidate.code === 'string' ? candidate.code.toUpperCase() : ''
+  const message = typeof candidate.message === 'string' ? candidate.message : ''
+  const normalizedMessage = message.toLowerCase()
+
+  if (code === 'REVIEW_FINGERPRINT_MISMATCH' || normalizedMessage.includes('fingerprint changed')) return 'fingerprint_changed'
+  if (code === 'REVIEW_NOT_APPROVED' || code === 'REVIEW_REJECTED' || code === 'REVIEW_NOT_FOUND' || normalizedMessage.includes('requires explicit confirmation')) return 'review_required'
+  if (code === 'SOURCE_HOST_NOT_ALLOWED' || code === 'INVALID_SOURCE_URL' || code === 'INVALID_SOURCE_REF' || normalizedMessage.includes('source host') || normalizedMessage.includes('official github')) return 'source_not_allowed'
+  if (code === 'PACKAGE_FILE_BYTES_LIMIT' || code === 'PACKAGE_ARCHIVE_BYTES_LIMIT' || normalizedMessage.includes('maximum size') || normalizedMessage.includes('size limit') || normalizedMessage.includes('bytes exceed')) return 'size_limit'
+  if (code === 'PACKAGE_FILE_COUNT_LIMIT' || normalizedMessage.includes('too many files') || normalizedMessage.includes('file count') || normalizedMessage.includes('file limit')) return 'file_limit'
+  if (code === 'MANIFEST_INVALID' || normalizedMessage.includes('manifest') || normalizedMessage.includes('frontmatter') || normalizedMessage.includes('skill.md was not found')) return 'invalid_manifest'
+  if (code === 'UNSUPPORTED_RUNTIME' || normalizedMessage.includes('unsupported runtime')) return 'unsupported_runtime'
+  if (code === 'CAPABILITY_DENIED' || normalizedMessage.includes('capability is not allowed')) return 'unsupported_capability'
+  if (code === 'FEATURE_DISABLED' || code === 'INVALID_PATH' || code === 'SECURITY_POLICY_VIOLATION' || normalizedMessage.includes('symbolic link') || normalizedMessage.includes('unsafe archive') || normalizedMessage.includes('path escapes') || normalizedMessage.includes('path is not allowed') || normalizedMessage.includes('non-regular') || normalizedMessage.includes('security policy') || normalizedMessage.includes('traversal')) return 'security_policy'
+  if (normalizedMessage.includes('zip') || normalizedMessage.includes('archive') || normalizedMessage.includes('central directory') || normalizedMessage.includes('local file header')) return 'archive_corrupt'
+  return 'unknown'
 }
 
 function validatePackageInstallSource(source: PackageInstallSource): PackageInstallSource {
