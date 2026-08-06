@@ -7,7 +7,7 @@ import {
   createSqliteRunRepository,
   createSqliteAuditRepository,
 } from '../db/repositories/skill-package.repo'
-import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
+import { ArtifactStore, ArtifactStoreError, type ArtifactListOptions } from '../skills/artifacts'
 import { PackageInstallError, PackageInstaller, type PackageInstallOptions, type PackageInstallSource } from '../skills/packages/package-installer'
 import { PackageInstallReviewError, packageInstallReviewService } from '../skills/packages/package-install-review.service'
 import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
@@ -290,9 +290,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       })
     },
 
-    listRunArtifacts(runId: string) {
+    listRunArtifacts(runId: string, options?: ArtifactListOptions) {
       return mapRuntimeError(() => {
         dependencies.coordinator.getRun(runId)
+        if (options) return dependencies.artifactStore.listArtifacts({ runId, ...options })
         return dependencies.repo?.listArtifacts ? dependencies.repo.listArtifacts(runId) : dependencies.artifactRepository.listArtifacts(runId)
       })
     },

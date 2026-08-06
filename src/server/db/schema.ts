@@ -296,8 +296,10 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   kind: text('kind').notNull(),
+  artifact_kind: text('artifact_kind').notNull().default('unknown'),
   mime_type: text('mime_type'),
   path: text('path').notNull(),
+  relative_path: text('relative_path').notNull().default(''),
   size_bytes: integer('size_bytes').notNull().default(0),
   sha256: text('sha256').notNull(),
   metadata_json: text('metadata_json').notNull().default('{}'),
@@ -307,6 +309,8 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   exported_by: text('exported_by'),
 }, (table) => ({
   runIdx: index('idx_skill_artifacts_run').on(table.run_id),
+  runCreatedIdx: index('idx_skill_artifacts_run_created').on(table.run_id, table.created_at),
+  retentionIdx: index('idx_skill_artifacts_retention').on(table.retention_until, table.exported_at),
 }))
 
 export const skill_capability_grants = sqliteTable('skill_capability_grants', {

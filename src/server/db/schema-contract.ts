@@ -209,8 +209,10 @@ export function getExpectedSchemaContract(): SchemaContract {
           id,
           run_id: required,
           kind: required,
+          artifact_kind: required,
           mime_type: optional,
           path: required,
+          relative_path: required,
           size_bytes: required,
           sha256: required,
           metadata_json: required,
@@ -221,6 +223,8 @@ export function getExpectedSchemaContract(): SchemaContract {
         },
         indexes: {
           idx_skill_artifacts_run: { columns: ['run_id'] },
+          idx_skill_artifacts_run_created: { columns: ['run_id', 'created_at'] },
+          idx_skill_artifacts_retention: { columns: ['retention_until', 'exported_at'] },
         },
       },
       skill_capability_grants: {

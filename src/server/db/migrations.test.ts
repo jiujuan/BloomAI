@@ -111,12 +111,73 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(40)
+    expect(migrationVersions()).toHaveLength(41)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(40)
+    expect(migrationVersions()).toHaveLength(41)
+  })
+
+  it('adds artifact policy columns and backfills legacy artifact rows incrementally', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const artifactMigration = migrations.find((migration) => migration.version === '041-skill-artifact-policy')
+      expect(artifactMigration).toBeDefined()
+      db.exec(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, persona_id TEXT, model TEXT NOT NULL,
+          status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE messages (
+          id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+          tool_calls TEXT, parts TEXT, tokens INTEGER, created_at INTEGER NOT NULL
+        );
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER NOT NULL,
+          scope TEXT NOT NULL, granted_at INTEGER NOT NULL
+        );
+      `)
+      runSqlMigrations(db, migrations.filter((migration) => migration.version !== '041-skill-artifact-policy'))
+      db.exec(`
+        INSERT INTO skill_packages (id, name, source_type, created_at, updated_at)
+        VALUES ('package-artifact-policy', 'Artifact Policy', 'local', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-artifact-policy', 'package-artifact-policy', '1.0.0', '{}', 'hash', '/pkg', 1);
+        INSERT INTO skill_runs_v2 (
+          id, skill_version_id, status, input_json, context_json, updated_at, revision
+        ) VALUES ('run-artifact-policy', 'version-artifact-policy', 'created', '{}', '{}', 1, 0);
+        INSERT INTO skill_artifacts (
+          id, run_id, kind, mime_type, path, size_bytes, sha256, metadata_json, created_at
+        ) VALUES ('artifact-legacy', 'run-artifact-policy', 'markdown', 'text/markdown', 'summary.md', 2, 'hash', '{}', 2);
+      `)
+
+      runSqlMigrations(db, [artifactMigration!])
+      runSqlMigrations(db, [artifactMigration!])
+
+      expect(db.prepare("SELECT name FROM pragma_table_info('skill_artifacts') WHERE name IN ('artifact_kind', 'relative_path') ORDER BY name").all()).toEqual([
+        { name: 'artifact_kind' },
+        { name: 'relative_path' },
+      ])
+      expect(db.prepare("SELECT artifact_kind, relative_path FROM skill_artifacts WHERE id = 'artifact-legacy'").get()).toEqual({
+        artifact_kind: 'markdown',
+        relative_path: 'summary.md',
+      })
+      expect(indexNames('skill_artifacts')).toEqual(expect.arrayContaining([
+        'idx_skill_artifacts_run_created',
+        'idx_skill_artifacts_retention',
+      ]))
+      expect(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '041-skill-artifact-policy'").get()).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -222,6 +283,7 @@ describe('database migrations', () => {
       '038-skill-artifact-retention-export',
       '039-skill-version-lifecycle',
       '040-skill-lifecycle-delete',
+      '041-skill-artifact-policy',
     ])
     const emptyDb = openRawDb()
     try {

@@ -885,8 +885,10 @@ export const skillPackageRepo = {
       id: uuidv4(),
       run_id: data.runId,
       kind: data.kind,
+      artifact_kind: data.kind,
       mime_type: data.mimeType ?? null,
       path: data.path,
+      relative_path: data.path,
       size_bytes: data.sizeBytes ?? 0,
       sha256: data.sha256,
       metadata_json: stringifyJsonObject(data.metadata ?? {}, 'metadata'),
@@ -1612,7 +1614,7 @@ function mapGrant(row: any): CapabilityGrantSnapshot {
 }
 
 function mapArtifact(row: any): ArtifactSnapshot {
-  return { id: row.id, runId: row.run_id, kind: row.kind, mimeType: row.mime_type, path: row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at, retentionUntil: row.retention_until ?? null, exportedAt: row.exported_at ?? null, exportedBy: row.exported_by ?? null }
+  return { id: row.id, runId: row.run_id, kind: row.artifact_kind ?? row.kind, mimeType: row.mime_type, path: row.relative_path ?? row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at, retentionUntil: row.retention_until ?? null, exportedAt: row.exported_at ?? null, exportedBy: row.exported_by ?? null }
 }
 
 function mapQueue(row: any): SkillRunQueueSnapshot {

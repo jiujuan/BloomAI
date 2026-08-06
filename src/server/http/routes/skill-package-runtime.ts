@@ -73,6 +73,7 @@ const commandSchema = z.discriminatedUnion('type', [
 ])
 const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() })
 const artifactContentQuerySchema = z.object({ runId: idSchema })
+const artifactListQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), offset: z.coerce.number().int().min(0).optional(), sort: z.enum(['createdAt', 'size', 'kind']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict()
 const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1), confirmed: z.literal(true), actor: idSchema.optional(), auditReason: z.string().trim().min(1).max(500) }).strict()
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
@@ -225,7 +226,14 @@ skillPackageRuntimeRoutes.post('/skill-runs/:id/cancel', async (c) => {
   try { return c.json({ data: skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), await readValidated(c, cancelSchema)) }) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/artifacts', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.listRunArtifacts(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try {
+    const runId = idSchema.parse(c.req.param('id'))
+    const rawQuery = c.req.query()
+    if (Object.keys(rawQuery).length === 0) return c.json({ data: skillPackageRuntimeService.listRunArtifacts(runId) })
+    const query = artifactListQuerySchema.parse(rawQuery)
+    const page = skillPackageRuntimeService.listRunArtifacts(runId, query)
+    return c.json({ data: page.data, meta: { total: page.total, limit: page.limit, offset: page.offset, nextOffset: page.nextOffset } })
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
   try {
