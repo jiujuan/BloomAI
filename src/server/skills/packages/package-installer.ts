@@ -22,6 +22,9 @@ export type InstalledPackage = {
   relativeSkillPath: string
   packagePath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: NonNullable<SkillManifest['diagnostics']>
+  importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
   sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
 }
@@ -29,6 +32,9 @@ export type InspectedPackage = {
   sourceType: PackageInstallSource['kind']
   relativeSkillPath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: NonNullable<SkillManifest['diagnostics']>
+  importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
   sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
 }
@@ -74,7 +80,10 @@ export class PackageInstaller {
           return {
             sourceType: source.kind,
             relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
-            manifestHash: hashJson(files),
+            manifestHash: resolveSkillManifest(skillDirectory).canonicalHash ?? hashJson(files),
+            sourceFingerprint: hashJson(files),
+            diagnostics: resolveSkillManifest(skillDirectory).diagnostics ?? [],
+            importReviewRequired: Boolean(resolveSkillManifest(skillDirectory).requestedCapabilities.length || resolveSkillManifest(skillDirectory).unsupported.length),
             manifest: { ...resolveSkillManifest(skillDirectory), files },
             sourceSnapshot: { ...sourceSnapshot, files },
           }
@@ -124,8 +133,9 @@ export class PackageInstaller {
   }): Promise<InstalledPackage> {
     const files = collectFiles(data.skillDirectory)
     const resolvedManifest = resolveSkillManifest(data.skillDirectory)
-    const manifestHash = hashJson(files)
-    const finalPath = path.join(data.roots.packages, manifestHash)
+    const manifestHash = resolvedManifest.canonicalHash ?? hashJson(files)
+    const sourceFingerprint = hashJson(files)
+    const finalPath = path.join(data.roots.packages, sourceFingerprint)
     if (!fs.existsSync(finalPath)) {
       const materializingRoot = fs.mkdtempSync(path.join(data.roots.staging, `package-${manifestHash}-`))
       const materializingPath = path.join(materializingRoot, 'package')
@@ -157,6 +167,8 @@ export class PackageInstaller {
       packageId: packageRecord.id, versionId: versionRecord.id, installationId: installationRecord.id,
       status: 'awaiting_permission_review', sourceType: data.source.kind, relativeSkillPath, packagePath: finalPath,
       manifestHash, manifest, sourceSnapshot,
+      sourceFingerprint, diagnostics: resolvedManifest.diagnostics ?? [],
+      importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
     }
   }
 }
