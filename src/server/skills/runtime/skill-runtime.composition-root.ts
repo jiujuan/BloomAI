@@ -5,6 +5,7 @@ import { SkillRunCoordinator } from './skill-run-coordinator'
 import { PersistentSkillRunQueue } from './skill-run-queue'
 import { SkillRunWorker, type SkillRunAdapter, type SkillRunExecutor } from './skill-run-worker'
 import { InstructionAgentAdapter, type InstructionAgentExecutor } from '../adapters/instruction-agent-adapter'
+import { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
 
 export type SkillRuntimeCompositionOptions = {
   readonly config?: SkillRuntimeConfig
@@ -14,6 +15,7 @@ export type SkillRuntimeCompositionOptions = {
   readonly executor?: SkillRunExecutor
   readonly adapter?: SkillRunAdapter
   readonly instructionAgentExecutor?: InstructionAgentExecutor
+  readonly metrics?: SkillRuntimeMetrics
 }
 
 export type SkillRuntimeComposition = {
@@ -22,6 +24,7 @@ export type SkillRuntimeComposition = {
   readonly coordinator: SkillRunCoordinator
   readonly queue: PersistentSkillRunQueue
   readonly worker?: SkillRunWorker
+  readonly metrics: SkillRuntimeMetrics
   start(): { started: boolean; reason?: string }
   stop(options?: { drain?: boolean; timeoutMs?: number }): Promise<void>
   markInterruptedRuns(options?: { now?: number; staleAfterMs?: number }): number
@@ -37,15 +40,18 @@ export type SkillRuntimeComposition = {
 export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {}): SkillRuntimeComposition {
   const config = options.config ?? getSkillRuntimeConfig()
   const ports = options.ports ?? createSqliteSkillRuntimePorts()
+  const metrics = options.metrics ?? SkillRuntimeMetrics.global()
   const queue = options.queue ?? new PersistentSkillRunQueue(ports.queue, {
     clock: ports.clock,
     maxAttempts: config.maxAttempts,
+    metrics,
   })
   const coordinator = options.coordinator ?? new SkillRunCoordinator({
     runs: ports.runs,
     events: ports.events,
     clock: ports.clock,
     queue: ports.queue,
+    metrics,
   })
   const adapter = options.adapter ?? (options.instructionAgentExecutor
     ? new InstructionAgentAdapter({
@@ -66,6 +72,7 @@ export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {})
       adapter,
       concurrency: config.workerConcurrency,
       leaseMs: config.leaseTimeoutMs,
+      metrics,
     })
     : undefined
 
@@ -75,6 +82,7 @@ export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {})
     coordinator,
     queue,
     worker,
+    metrics,
     start() {
       if (!config.runtimeEnabled) return { started: false, reason: 'runtimeEnabled' }
       if (!config.packageExecutionEnabled) return { started: false, reason: 'packageExecutionEnabled' }
