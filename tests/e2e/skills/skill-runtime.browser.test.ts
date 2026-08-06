@@ -288,4 +288,3 @@ describe('Skills Runtime browser acceptance (offline harness)', () => {
     }
   }, 120_000)
 })
-
