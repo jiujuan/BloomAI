@@ -24,7 +24,7 @@ export type SkillRuntimeComposition = {
   readonly worker?: SkillRunWorker
   start(): { started: boolean; reason?: string }
   stop(options?: { drain?: boolean; timeoutMs?: number }): Promise<void>
-  markInterruptedRuns(): number
+  markInterruptedRuns(options?: { now?: number; staleAfterMs?: number }): number
 }
 
 /**
@@ -86,8 +86,8 @@ export function createSkillRuntime(options: SkillRuntimeCompositionOptions = {})
       if (!worker) return
       await worker.stop({ drain: stopOptions.drain ?? false, timeoutMs: stopOptions.timeoutMs ?? 30_000 })
     },
-    markInterruptedRuns() {
-      return coordinator.markInterruptedRuns()
+    markInterruptedRuns(options) {
+      return coordinator.markInterruptedRuns(options)
     },
   }
 }

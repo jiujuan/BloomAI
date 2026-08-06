@@ -41,6 +41,8 @@ export class SkillRunWorker {
   private running = false
   private drainRequested = false
   private loopPromise: Promise<void> | undefined
+  private shutdownRequested = false
+  private readonly controllers = new Set<AbortController>()
 
   constructor(private readonly options: SkillRunWorkerOptions) {
     this.workerId = options.workerId ?? `skill-worker-${randomUUID()}`
@@ -57,6 +59,7 @@ export class SkillRunWorker {
   start(): void {
     if (this.running) return
     this.running = true
+    this.shutdownRequested = false
     this.drainRequested = false
     this.loopPromise = this.pump()
   }
@@ -64,6 +67,8 @@ export class SkillRunWorker {
   async stop(options: { drain: boolean; timeoutMs: number }): Promise<void> {
     this.running = false
     this.drainRequested = options.drain
+    this.shutdownRequested = !options.drain
+    if (!options.drain) for (const controller of this.controllers) controller.abort()
     const loop = this.loopPromise
     if (!loop) return
     await Promise.race([
@@ -81,8 +86,19 @@ export class SkillRunWorker {
     if (!item) return false
 
     const abortController = new AbortController()
+    this.controllers.add(abortController)
+    let leaseLost = false
     const heartbeatTimer = setInterval(() => {
-      this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
+      const lease = this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
+      if (!lease) {
+        leaseLost = true
+        abortController.abort()
+        return
+      }
+      try {
+        const current = this.options.coordinator.getRun(item.runId)
+        if (current.cancelRequested) abortController.abort()
+      } catch { /* run may have been concurrently finalized */ }
     }, Math.max(50, Math.floor(this.leaseMs / 3)))
 
     try {
@@ -125,6 +141,7 @@ export class SkillRunWorker {
         throw new Error('Skill executor returned without transitioning the run')
       }
 
+      if (leaseLost) throw new Error(`Queue lease lost before ack: ${item.id}`)
       if (!this.options.queue.ack(item.id, this.workerId)) throw new Error(`Queue lease lost before ack: ${item.id}`)
       return true
     } catch (error) {
@@ -133,11 +150,28 @@ export class SkillRunWorker {
     } finally {
       abortController.abort()
       clearInterval(heartbeatTimer)
+      this.controllers.delete(abortController)
     }
   }
 
   private async handleFailure(item: SkillRunQueueSnapshot, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error)
+    if (this.shutdownRequested) {
+      try {
+        const run = this.options.coordinator.getRun(item.runId)
+        if (!isTerminal(run.status)) {
+          this.options.coordinator.transition(run.id, 'interrupted', {
+            expectedRevision: run.revision,
+            errorCode: 'WORKER_SHUTDOWN',
+            errorMessage: 'Worker stopped before the run reached a terminal state',
+            reason: 'process_interrupted',
+            cancelReason: 'worker_shutdown',
+          })
+        }
+      } catch { /* a concurrent command owns the run */ }
+      this.options.queue.retry(item.id, this.workerId, 'worker_shutdown', 0)
+      return
+    }
     const next = this.options.queue.retry(
       item.id,
       this.workerId,

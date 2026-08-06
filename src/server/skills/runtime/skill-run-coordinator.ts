@@ -54,6 +54,9 @@ export type SkillRun = {
   waitingReason: string | null
   cancelRequested: boolean
   cancelRequestedAt: number | null
+  interruptedAt: number | null
+  cancelReason: string | null
+  lastCheckpoint: Record<string, unknown> | null
   startedAt: number | null
   updatedAt: number
   finishedAt: number | null
@@ -185,6 +188,8 @@ export class SkillRunCoordinator {
     errorMessage?: string | null
     currentStep?: string | null
     requiredAction?: JsonObject | null
+    cancelReason?: string | null
+    lastCheckpoint?: JsonObject | null
   }): SkillRun {
     const current = this.getRun(runId)
     if (!canTransition(current.status, targetStatus)) {
@@ -216,6 +221,9 @@ export class SkillRunCoordinator {
         errorMessage: data.errorMessage ?? null,
         startedAt: targetStatus === 'running' && current.startedAt === null ? now : undefined,
         finishedAt: isTerminalStatus(targetStatus) ? now : null,
+        interruptedAt: targetStatus === 'interrupted' ? now : null,
+        cancelReason: data.cancelReason ?? (targetStatus === 'cancelled' ? 'user_cancelled' : undefined),
+        lastCheckpoint: data.lastCheckpoint,
       },
       event,
     })
@@ -258,10 +266,35 @@ export class SkillRunCoordinator {
       }, 'input.summarized')
     }
     if (isTerminalStatus(current.status)) return current
+    if (isWaitingStatus(current.status)) {
+      return this.applyCommandTransition(runId, current, parsed as Extract<SkillRunCommand, { type: 'cancel' }>, 'cancelled', {
+        errorCode: 'RUN_CANCELLED',
+        errorMessage: 'Run cancelled by user',
+      })
+    }
     return this.applyCommandChange(runId, current, parsed, {
       cancelRequested: true,
       cancelRequestedAt: this.clock.now(),
+      cancelReason: 'user_cancelled',
     }, 'run.cancel_requested')
+  }
+
+  requestCancel(runId: string, data: { expectedRevision: number; idempotencyKey: string; reason?: string }): SkillRun {
+    const current = this.getRun(runId)
+    if (isTerminalStatus(current.status)) return current
+    const command: SkillRunCommand = { type: 'cancel', idempotencyKey: data.idempotencyKey, expectedRevision: data.expectedRevision }
+    const existing = this.runs.getCommandResult(runId, data.idempotencyKey)
+    if (existing) return mapRun(existing)
+    if (isWaitingStatus(current.status)) {
+      return this.transition(runId, 'cancelled', {
+        expectedRevision: data.expectedRevision,
+        reason: 'cancel_requested',
+        errorCode: 'RUN_CANCELLED',
+        errorMessage: data.reason ?? 'Run cancelled by user',
+        cancelReason: data.reason ?? 'user_cancelled',
+      })
+    }
+    return this.dispatchCommand(runId, command)
   }
 
   resumeRun(runId: string, data: { expectedRevision: number; targetStatus?: SkillRunStatus }): SkillRun {
@@ -271,12 +304,26 @@ export class SkillRunCoordinator {
     return this.transition(runId, targetStatus, { expectedRevision: data.expectedRevision, reason: 'recovered' })
   }
 
-  markInterruptedRuns(): number {
+  markInterruptedRuns(options: { now?: number; staleAfterMs?: number } = {}): number {
     let count = 0
+    const now = options.now ?? this.clock.now()
+    const staleAfterMs = options.staleAfterMs ?? 0
     for (const status of ['validating', 'running'] as const) {
       for (const run of this.runs.listRunsByStatus(status)) {
-        this.transition(run.id, 'interrupted', { expectedRevision: run.revision, errorCode: 'PROCESS_INTERRUPTED', reason: 'process_interrupted' })
-        count += 1
+        const heartbeat = run.lastHeartbeatAt ?? run.heartbeatAt ?? run.updatedAt
+        if (now - heartbeat < staleAfterMs) continue
+        try {
+          this.transition(run.id, 'interrupted', {
+            expectedRevision: run.revision,
+            errorCode: 'PROCESS_INTERRUPTED',
+            errorMessage: 'Run interrupted while the worker was unavailable',
+            reason: 'process_interrupted',
+            cancelReason: 'process_crash',
+          })
+          count += 1
+        } catch (error) {
+          if (!(error instanceof SkillRunConflictError)) throw error
+        }
       }
     }
     return count
@@ -285,7 +332,7 @@ export class SkillRunCoordinator {
   private applyCommandTransition(
     runId: string,
     current: SkillRun,
-    command: Extract<SkillRunCommand, { type: 'confirm' | 'approve' | 'reject' | 'resume' | 'retry' }>,
+    command: Extract<SkillRunCommand, { type: 'confirm' | 'approve' | 'reject' | 'resume' | 'retry' | 'cancel' }>,
     targetStatus: SkillRunStatus,
     changes: Record<string, unknown>,
   ): SkillRun {
@@ -299,11 +346,12 @@ export class SkillRunCoordinator {
         requiredAction: null,
         startedAt: targetStatus === 'running' && current.startedAt === null ? this.clock.now() : undefined,
         finishedAt: isTerminalStatus(targetStatus) ? this.clock.now() : null,
-        errorCode: targetStatus === 'failed' ? (changes.errorCode as string ?? 'RUN_FAILED') : null,
-        errorMessage: targetStatus === 'failed' ? (changes.errorMessage as string ?? null) : null,
+        errorCode: targetStatus === 'failed' ? (changes.errorCode as string ?? 'RUN_FAILED') : targetStatus === 'cancelled' ? (changes.errorCode as string ?? 'RUN_CANCELLED') : null,
+        errorMessage: targetStatus === 'failed' || targetStatus === 'cancelled' ? (changes.errorMessage as string ?? null) : null,
+        cancelReason: targetStatus === 'cancelled' ? 'user_cancelled' : undefined,
       },
       event: normalizeSkillRunEvent({
-        type: targetStatus === 'failed' ? 'run.failed' : 'run.status_changed',
+        type: targetStatus === 'failed' ? 'run.failed' : targetStatus === 'cancelled' ? 'run.cancelled' : 'run.status_changed',
         payload: {
           from: current.status,
           to: targetStatus,
@@ -333,7 +381,7 @@ export class SkillRunCoordinator {
     runId: string,
     current: SkillRun,
     command: Extract<SkillRunCommand, { type: 'modify' | 'cancel' }>,
-    changes: { input?: Record<string, unknown>; waitingReason?: string | null; requiredAction?: JsonObject | null; cancelRequested?: boolean; cancelRequestedAt?: number },
+    changes: { input?: Record<string, unknown>; waitingReason?: string | null; requiredAction?: JsonObject | null; cancelRequested?: boolean; cancelRequestedAt?: number; cancelReason?: string | null; lastCheckpoint?: JsonObject | null },
     eventType: string,
   ): SkillRun {
     const result = this.runs.applyRunChange({
@@ -372,6 +420,8 @@ function transitionEvent(
   if (to === 'completed_with_errors') return { schemaVersion: 1, type: 'run.completed_with_errors', payload: base }
   if (to === 'waiting_approval') return { schemaVersion: 1, type: 'approval.required', payload: { ...base, reason: data.waitingReason ?? 'Approval required', capabilities: data.approvalCapabilities ?? [] } }
   if (to === 'failed') return { schemaVersion: 1, type: 'run.failed', payload: { ...base, code: data.errorCode ?? 'RUN_FAILED', message: data.errorMessage ?? 'Skill run failed' } }
+  if (to === 'cancelled') return { schemaVersion: 1, type: 'run.cancelled', payload: base }
+  if (to === 'interrupted') return { schemaVersion: 1, type: 'run.interrupted', payload: base }
   return { schemaVersion: 1, type: 'run.status_changed', payload: base }
 }
 
@@ -394,6 +444,9 @@ function mapRun(row: RunSnapshot): SkillRun {
     waitingReason: row.waitingReason,
     cancelRequested: row.cancelRequested,
     cancelRequestedAt: row.cancelRequestedAt,
+    interruptedAt: row.interruptedAt,
+    cancelReason: row.cancelReason,
+    lastCheckpoint: row.lastCheckpoint,
     startedAt: row.startedAt,
     updatedAt: row.updatedAt,
     finishedAt: row.finishedAt,

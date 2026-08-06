@@ -136,6 +136,7 @@ export function getExpectedSchemaContract(): SchemaContract {
         indexes: {
           idx_skill_runs_v2_version: { columns: ['skill_version_id'] },
           idx_skill_runs_v2_active_worker: { columns: ['status', 'worker_id', 'heartbeat_at'] },
+          idx_skill_runs_v2_recovery: { columns: ['status', 'interrupted_at', 'cancel_requested'] },
         },
       },
       skill_run_events: {

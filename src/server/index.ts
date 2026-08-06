@@ -34,7 +34,7 @@ let skillRuntime: ReturnType<typeof createSkillRuntime> | undefined
 runMigrations()
   .then(async () => {
     skillRuntime = createSkillRuntime({ config: skillRuntimeConfig })
-    const interrupted = skillRuntime.markInterruptedRuns()
+    const interrupted = skillRuntime.markInterruptedRuns({ staleAfterMs: skillRuntimeConfig.leaseTimeoutMs })
     if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
     const recovered = await getDeepResearchModule().recoverInterruptedRuns()
     if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })

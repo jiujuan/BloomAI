@@ -179,8 +179,8 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntimeError(() => dependencies.coordinator.dispatchCommand(id, command))
     },
 
-    cancelRun(id: string, command: { idempotencyKey: string, expectedRevision: number }) {
-      return mapRuntimeError(() => dependencies.coordinator.dispatchCommand(id, { type: 'cancel', ...command }))
+    cancelRun(id: string, command: { idempotencyKey: string, expectedRevision: number, reason?: string }) {
+      return mapRuntimeError(() => dependencies.coordinator.requestCancel(id, command))
     },
 
     listRunArtifacts(runId: string) {

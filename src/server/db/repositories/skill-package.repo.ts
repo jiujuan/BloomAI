@@ -300,6 +300,9 @@ export const skillPackageRepo = {
       waitingReason?: string | null
       cancelRequested?: boolean
       cancelRequestedAt?: number | null
+      interruptedAt?: number | null
+      cancelReason?: string | null
+      lastCheckpoint?: Record<string, unknown> | null
       startedAt?: number | null
       finishedAt?: number | null
       errorCode?: string | null
@@ -335,6 +338,9 @@ export const skillPackageRepo = {
         ...(changes.waitingReason === undefined ? {} : { waiting_reason: changes.waitingReason }),
         ...(changes.cancelRequested === undefined ? {} : { cancel_requested: changes.cancelRequested ? 1 : 0 }),
         ...(changes.cancelRequestedAt === undefined ? {} : { cancel_requested_at: changes.cancelRequestedAt }),
+        ...(changes.interruptedAt === undefined ? {} : { interrupted_at: changes.interruptedAt }),
+        ...(changes.cancelReason === undefined ? {} : { cancel_reason: changes.cancelReason }),
+        ...(changes.lastCheckpoint === undefined ? {} : { last_checkpoint_json: changes.lastCheckpoint === null ? null : stringifyJsonObject(changes.lastCheckpoint, 'lastCheckpoint') }),
         ...(changes.startedAt === undefined ? {} : { started_at: changes.startedAt }),
         ...(changes.finishedAt === undefined ? {} : { finished_at: changes.finishedAt }),
         ...(changes.errorCode === undefined ? {} : { error_code: changes.errorCode }),
@@ -978,6 +984,9 @@ function mapRun(row: any): RunSnapshot {
     waitingReason: row.waiting_reason,
     cancelRequested: row.cancel_requested === 1,
     cancelRequestedAt: row.cancel_requested_at ?? null,
+    interruptedAt: row.interrupted_at ?? null,
+    cancelReason: row.cancel_reason ?? null,
+    lastCheckpoint: row.last_checkpoint_json === null || row.last_checkpoint_json === undefined ? null : parseObject(row.last_checkpoint_json, 'last checkpoint'),
     startedAt: row.started_at,
     updatedAt: row.updated_at,
     finishedAt: row.finished_at,

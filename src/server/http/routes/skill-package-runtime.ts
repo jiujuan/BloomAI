@@ -34,7 +34,7 @@ const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('modify'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), patchInput: jsonObjectSchema }),
   z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
 ])
-const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() })
+const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() })
 const artifactContentQuerySchema = z.object({ runId: idSchema })
 const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1) })
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])

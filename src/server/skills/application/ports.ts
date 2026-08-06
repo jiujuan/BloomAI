@@ -86,6 +86,9 @@ export type RunSnapshot = {
   readonly waitingReason: string | null
   readonly cancelRequested: boolean
   readonly cancelRequestedAt: number | null
+  readonly interruptedAt: number | null
+  readonly cancelReason: string | null
+  readonly lastCheckpoint: JsonObject | null
   readonly startedAt: number | null
   readonly updatedAt: number
   readonly finishedAt: number | null
@@ -122,6 +125,9 @@ export type RunChange = {
   readonly waitingReason?: string | null
   readonly cancelRequested?: boolean
   readonly cancelRequestedAt?: number | null
+  readonly interruptedAt?: number | null
+  readonly cancelReason?: string | null
+  readonly lastCheckpoint?: JsonObject | null
   readonly startedAt?: number | null
   readonly finishedAt?: number | null
   readonly errorCode?: string | null
