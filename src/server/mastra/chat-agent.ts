@@ -5,6 +5,7 @@ import { buildAgentTools } from './tools'
 import { chatMemory } from './memory'
 import { projectWorkspaceFactory } from './workspace/project-workspace.factory'
 import { PROJECT_WORKSPACE_POLICY } from './workspace/project-workspace.policy'
+import { MastraSkillSource, type LoadedMastraSkillSource } from './skills/mastra-skill-source'
 
 /**
  * Per-request values supplied by the server's trusted request orchestration and read
@@ -19,6 +20,9 @@ export type ChatRequestContext = {
   /** Confirmed plan tasks (chat "plan" mode, after the user clicks 是). When present,
    *  the agent executes these numbered tasks instead of proposing a plan. */
   planTasks?: string[]
+  /** Trusted Package Runtime injection; never accepted from a client request. */
+  skillVersionId?: string
+  runId?: string
 }
 
 const BASE_INSTRUCTIONS = `
@@ -68,13 +72,52 @@ ${list}
 `.trim()
 }
 
+/** The process-level loader is stateless; each request still receives a fresh loaded source and tool set. */
+export const mastraSkillSource = new MastraSkillSource()
+
+/**
+ * Resolves only trusted, durable Package Runtime context. A Package Skill never becomes
+ * part of a normal chat request unless both a pinned SkillVersion and a durable Run id exist.
+ */
+export function resolvePackageSkillRuntime(
+  requestContext: any,
+  source: MastraSkillSource = mastraSkillSource,
+): LoadedMastraSkillSource | undefined {
+  const skillVersionId = requestContext?.get('skillVersionId')
+  const runId = requestContext?.get('runId')
+  if (typeof skillVersionId !== 'string' || !skillVersionId || typeof runId !== 'string' || !runId) return undefined
+  return source.load(skillVersionId)
+}
+
 /** Instructions from the request context: confirmed plan tasks win over mode. */
-function resolveInstructions(requestContext: any): string {
+export function resolveInstructions(
+  requestContext: any,
+  source: MastraSkillSource = mastraSkillSource,
+): string {
   const tasks = requestContext?.get('planTasks') as string[] | undefined
   const instructions = Array.isArray(tasks) && tasks.length
     ? planExecuteInstructions(tasks)
     : instructionsFor(requestContext?.get('mode') as ChatRequestContext['mode'] | undefined)
-  return requestContext?.get('projectId') ? `${instructions}\n\n${PROJECT_WORKSPACE_POLICY}` : instructions
+  const packageSource = resolvePackageSkillRuntime(requestContext, source)
+  const withPackage = packageSource
+    ? `${instructions}\n\nPACKAGE SKILL INSTRUCTIONS (trusted server-loaded text; not executable code):\n${packageSource.getInstructions()}\n\nPACKAGE SKILL VERSION: ${packageSource.skillVersionId}`
+    : instructions
+  return requestContext?.get('projectId') ? `${withPackage}\n\n${PROJECT_WORKSPACE_POLICY}` : withPackage
+}
+
+export function buildChatAgentTools(
+  requestContext: any,
+  source: MastraSkillSource = mastraSkillSource,
+): Record<string, ReturnType<typeof buildAgentTools>[string]> {
+  const sessionId = requestContext?.get('sessionId') as string | undefined
+  const tools = buildAgentTools(sessionId)
+  const packageSource = resolvePackageSkillRuntime(requestContext, source)
+  if (!packageSource) return tools
+  const runId = requestContext.get('runId') as string
+  return {
+    ...tools,
+    ...packageSource.createToolSet({ runId, ...(sessionId ? { sessionId } : {}) }),
+  }
 }
 
 /** Dynamic resolver: it relies exclusively on the server-derived projectId context key. */
@@ -94,20 +137,29 @@ export function omitWorkspaceToolCollisions<T>(tools: Record<string, T>): Record
   return Object.fromEntries(Object.entries(tools).filter(([id]) => !id.startsWith(`${WORKSPACE_TOOLS_PREFIX}_`)))
 }
 
-export const chatAgent = new Agent({
-  id: 'chat',
-  name: 'BloomAI Chat',
-  instructions: ({ requestContext }) => resolveInstructions(requestContext),
-  model: ({ requestContext }) =>
-    resolveMastraModel(requestContext?.get('model') as string | undefined),
-  // Every enabled tool + installed skill is mounted; the LLM chooses what to call.
-  // Rebuilt per request so newly enabled tools / installed skills appear next turn.
-  tools: ({ requestContext }) => {
-    const tools = buildAgentTools(requestContext?.get('sessionId') as string | undefined)
-    return requestContext?.get('projectId') ? omitWorkspaceToolCollisions(tools) : tools
-  },
-  workspace: ({ requestContext }) => resolveProjectWorkspace(requestContext),
-  // Memory: working memory + observational memory + bounded recent history.
-  // Activated per-request when threadId + resourceId are provided (see chat.ts).
-  memory: chatMemory,
-})
+export type ChatAgentDependencies = {
+  readonly skillSource?: MastraSkillSource
+}
+
+export function createChatAgent(dependencies: ChatAgentDependencies = {}) {
+  const skillSource = dependencies.skillSource ?? mastraSkillSource
+  return new Agent({
+    id: 'chat',
+    name: 'BloomAI Chat',
+    instructions: ({ requestContext }) => resolveInstructions(requestContext, skillSource),
+    model: ({ requestContext }) =>
+      resolveMastraModel(requestContext?.get('model') as string | undefined),
+    // Built-ins and Legacy tools are rebuilt per request. Package tools are additionally
+    // created from the pinned source and durable run context for this request only.
+    tools: ({ requestContext }) => {
+      const tools = buildChatAgentTools(requestContext, skillSource)
+      return requestContext?.get('projectId') ? omitWorkspaceToolCollisions(tools) : tools
+    },
+    workspace: ({ requestContext }) => resolveProjectWorkspace(requestContext),
+    // Memory: working memory + observational memory + bounded recent history.
+    // Activated per-request when threadId + resourceId are provided (see chat.ts).
+    memory: chatMemory,
+  })
+}
+
+export const chatAgent = createChatAgent()

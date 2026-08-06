@@ -12,10 +12,11 @@ async function createFixture(manifest: Record<string, unknown> = {}) {
   process.env.DATA_DIR = dataDir
   const client = await import('../../db/client')
   await client.runMigrations()
-  const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
+  const { createSqlitePackageRepository } = await import('../../db/repositories/skill-package.repo')
+  const packages = createSqlitePackageRepository()
   const { SkillRunCoordinator } = await import('../runtime/skill-run-coordinator')
-  const version = skillPackageRepo.createVersion({
-    packageId: skillPackageRepo.createPackage({ name: 'Adapter fixture', description: '', sourceType: 'local-directory' }).id,
+  const version = packages.createVersion({
+    packageId: packages.createPackage({ name: 'Adapter fixture', description: '', sourceType: 'local-directory' }).id,
     version: '1.0.0',
     manifest: { name: 'Adapter fixture', runtime: 'instruction-agent', requestedCapabilities: [{ capability: 'web.search', scope: {} }], ...manifest },
     manifestHash: 'adapter-fixture', packagePath,
@@ -27,7 +28,7 @@ async function createFixture(manifest: Record<string, unknown> = {}) {
     context: { surface: 'image-studio' },
     sessionId: 'session-1',
   })
-  return { SkillRunCoordinator, coordinator, runId, skillPackageRepo, version }
+  return { SkillRunCoordinator, coordinator, runId, packages, version }
 }
 
 describe('InstructionAgentAdapter', () => {
@@ -270,5 +271,52 @@ describe('InstructionAgentAdapter', () => {
 
     expect(await duringAdapter.run(duringRunId)).toMatchObject({ status: 'cancelled' })
     expect(coordinator.getRun(duringRunId)).toMatchObject({ status: 'cancelled', output: null })
+  })
+
+  it('loads the pinned SkillVersion through MastraSkillSource for the run', async () => {
+    const { runId, coordinator, version } = await createFixture()
+    const { InstructionAgentAdapter } = await import('./instruction-agent-adapter')
+    const { MastraSkillSource } = await import('../../mastra/skills/mastra-skill-source')
+    const actualSource = new MastraSkillSource({ packages: { getVersion: () => version } })
+    const source = { load: vi.fn((skillVersionId: string) => actualSource.load(skillVersionId)) }
+    const execute = vi.fn(async (context) => {
+      expect(context.instruction).toContain('Article Illustrator')
+      return { status: 'completed' as const, output: { ok: true } }
+    })
+    const adapter = new InstructionAgentAdapter({
+      executor: { execute },
+      coordinator,
+      packages: { getVersion: () => version },
+      source: source as any,
+    })
+
+    await adapter.run(runId)
+
+    expect(source.load).toHaveBeenCalledWith(version.id)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('maps Mastra source failures to stable Skill Run error codes', async () => {
+    const { runId, coordinator } = await createFixture()
+    const { InstructionAgentAdapter } = await import('./instruction-agent-adapter')
+    const { MastraSkillSourceError } = await import('../../mastra/skills/mastra-skill-source')
+    const adapter = new InstructionAgentAdapter({
+      executor: { execute: vi.fn() },
+      coordinator,
+      source: {
+        load: vi.fn(() => {
+          throw new MastraSkillSourceError('SOURCE_INVALID', 'SKILL.md is missing')
+        }),
+      },
+    })
+
+    const result = await adapter.run(runId)
+
+    expect(result).toMatchObject({ status: 'failed', errorCode: 'SKILL_SOURCE_INVALID' })
+    expect(coordinator.getRun(runId)).toMatchObject({
+      status: 'failed',
+      errorCode: 'SKILL_SOURCE_INVALID',
+      errorMessage: 'SKILL.md is missing',
+    })
   })
 })

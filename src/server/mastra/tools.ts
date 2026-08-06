@@ -30,7 +30,7 @@ export const toSkillToolId = toLegacySkillToolId
  * authorization, approval and timeout policy at call time.
  */
 export function buildAgentTools(sessionId?: string): Record<string, MastraTool> {
-  return { ...buildBuiltinTools(sessionId), ...buildSkillTools(sessionId) }
+  return { ...buildBuiltinTools(sessionId), ...buildLegacySkillTools(sessionId) }
 }
 
 // Curated built-in tool sets per specialist agent (P6d). `null` = all enabled tools.
@@ -90,7 +90,7 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
   return tools
 }
 
-export function buildSkillTools(sessionId?: string): Record<string, MastraTool> {
+export function buildLegacySkillTools(sessionId?: string): Record<string, MastraTool> {
   const tools: Record<string, MastraTool> = {}
   // Package Skills intentionally do not enter this synchronous Mastra Tool surface.
   for (const skill of skillRepo.listInstalled()) {
@@ -110,3 +110,6 @@ export function buildSkillTools(sessionId?: string): Record<string, MastraTool> 
   }
   return tools
 }
+
+/** Backward-compatible name for the Legacy Skill-only synchronous surface. */
+export const buildSkillTools = buildLegacySkillTools

@@ -1,11 +1,12 @@
 import { z } from 'zod'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { SkillPackageReader, type ReadAssetResult, type ReadTextResult } from '../packages/package-reader'
+import { type ReadAssetResult, type ReadTextResult } from '../packages/package-reader'
 import type { PackageSkillRepository, SkillRunEventRepository } from '../application/ports'
 import { SkillExecutionContext } from '../runtime/skill-execution-context'
 import { CapabilityApprovalRequiredError, CapabilityDeniedError, CapabilityNotSupportedError, executeCapability, type CapabilityRequest, type CapabilityResult } from '../policy/capability-broker'
 import { SkillRunCoordinator, type SkillRun } from '../runtime/skill-run-coordinator'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
+import { MastraSkillSource, MastraSkillSourceError } from '../../mastra/skills/mastra-skill-source'
 
 const DEFAULT_MAX_STEPS = 16
 const DEFAULT_MAX_TOKENS = 8_192
@@ -73,7 +74,7 @@ export class InstructionAgentAdapter {
   private readonly maxDurationMs: number
   private readonly maxLoadedFiles: number
   private readonly maxFileBytes: number
-  private readonly packages: Pick<PackageSkillRepository, 'getVersion'> | undefined
+  private readonly source: Pick<MastraSkillSource, 'load'>
   private readonly events: SkillRunEventRepository | undefined
 
   constructor(options: {
@@ -86,6 +87,7 @@ export class InstructionAgentAdapter {
     maxLoadedFiles?: number
     maxFileBytes?: number
     packages?: Pick<PackageSkillRepository, 'getVersion'>
+    source?: Pick<MastraSkillSource, 'load'>
     events?: SkillRunEventRepository
   }) {
     this.executor = options.executor
@@ -96,7 +98,7 @@ export class InstructionAgentAdapter {
     this.maxDurationMs = positiveInteger(options.maxDurationMs ?? DEFAULT_MAX_DURATION_MS, 'maxDurationMs')
     this.maxLoadedFiles = positiveInteger(options.maxLoadedFiles ?? DEFAULT_MAX_LOADED_FILES, 'maxLoadedFiles')
     this.maxFileBytes = positiveInteger(options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES, 'maxFileBytes')
-    this.packages = options.packages
+    this.source = options.source ?? new MastraSkillSource(options.packages ? { packages: options.packages } : {})
     this.events = options.events
   }
 
@@ -106,15 +108,10 @@ export class InstructionAgentAdapter {
     let run = this.coordinator.getRun(runId)
     try {
       if (run.cancelRequested) return this.cancel(run)
-      const version = this.packages?.getVersion(run.skillVersionId) ?? skillPackageRepo.getVersion(run.skillVersionId)
-      if (!version) throw new InstructionAgentAdapterError(`SkillVersion not found: ${run.skillVersionId}`)
-      const manifestValue = 'manifest' in version ? JSON.stringify(version.manifest) : version.manifest_json
-      const packagePath = 'packagePath' in version ? version.packagePath : version.package_path
-      const compatible = 'isCompatible' in version ? version.isCompatible : version.is_compatible === 1
-      if (!compatible) throw new InstructionAgentAdapterError(`SkillVersion is incompatible: ${run.skillVersionId}`)
-      const manifest = parseManifest(manifestValue)
-      const reader = new SkillPackageReader(packagePath, { maxFilesPerRun: this.maxLoadedFiles, maxReadBytes: this.maxFileBytes })
-      const entry = reader.readEntry()
+      const loadedSource = this.source.load(run.skillVersionId)
+      const manifest = parseManifest(JSON.stringify(loadedSource.manifest))
+      const reader = loadedSource.reader
+      const entry = reader.readText(loadedSource.entryPath, this.maxFileBytes)
       this.recordFileLoaded(run.id, entry)
 
       run = this.startRunning(run)
@@ -180,7 +177,7 @@ export class InstructionAgentAdapter {
       if (latest.status === 'validating' || latest.status === 'running') {
         return this.coordinator.transition(runId, 'failed', {
           expectedRevision: latest.revision,
-          errorCode: isBudgetError(error) ? 'AGENT_BUDGET_EXCEEDED' : 'INSTRUCTION_AGENT_FAILED',
+          errorCode: instructionAgentErrorCode(error),
           errorMessage: error instanceof Error ? error.message : 'Instruction Agent execution failed',
         })
       }
@@ -232,6 +229,16 @@ function parseManifest(value: string): z.infer<typeof manifestSchema> {
   } catch {
     throw new InstructionAgentAdapterError('SkillVersion manifest is invalid for the Instruction Agent runtime')
   }
+}
+
+
+function instructionAgentErrorCode(error: unknown): string {
+  if (error instanceof MastraSkillSourceError) {
+    if (error.code === 'SOURCE_NOT_FOUND') return 'SKILL_SOURCE_NOT_FOUND'
+    if (error.code === 'SOURCE_INCOMPATIBLE') return 'SKILL_SOURCE_INCOMPATIBLE'
+    return 'SKILL_SOURCE_INVALID'
+  }
+  return isBudgetError(error) ? 'AGENT_BUDGET_EXCEEDED' : 'INSTRUCTION_AGENT_FAILED'
 }
 
 function isBudgetError(error: unknown): boolean {

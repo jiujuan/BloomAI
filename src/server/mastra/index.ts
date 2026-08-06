@@ -4,7 +4,8 @@ import { Observability } from '@mastra/observability'
 import { OtelBridge } from '@mastra/otel-bridge'
 import { serverLogger } from '../logger/logger'
 import { readConfigValue } from '../config/config'
-import { chatAgent } from './chat-agent'
+import { chatAgent, createChatAgent } from './chat-agent'
+import { MastraSkillSource } from './skills/mastra-skill-source'
 import { planAgent } from './plan-agent'
 import { writerAgent, coderAgent } from './agents/team'
 import { createScheduleHooks } from './schedules/hooks'
@@ -39,22 +40,35 @@ export const scheduleRuntimeStorage = new LibSQLStore({
   url: process.env.VITEST ? ':memory:' : resolveScheduleRuntimeUrl(),
 })
 
-export const mastra = new Mastra({
-  storage: scheduleRuntimeStorage,
-  logger: serverLogger,
-  observability,
-  schedules: createScheduleHooks({
-    // Task run history is owned by the application database, not Mastra runtime storage.
-    taskRunWriter: createScheduledTaskRunWriter(),
-  }),
-  agents: {
-    chat: chatAgent,
-    'plan-planner': planAgent,
-    writer: writerAgent,
-    coder: coderAgent,
-    'scheduled-task': scheduledTaskAgent,
-  },
-})
+export type MastraRuntimeDependencies = {
+  /** Inject a request/runtime source in tests or an alternate composition root. */
+  readonly skillSource?: MastraSkillSource
+  /** Preserve the ability to supply a fully constructed Chat Agent. */
+  readonly chatAgent?: typeof chatAgent
+}
+
+export function createMastraRuntime(dependencies: MastraRuntimeDependencies = {}) {
+  const resolvedChatAgent = dependencies.chatAgent
+    ?? (dependencies.skillSource ? createChatAgent({ skillSource: dependencies.skillSource }) : chatAgent)
+  return new Mastra({
+    storage: scheduleRuntimeStorage,
+    logger: serverLogger,
+    observability,
+    schedules: createScheduleHooks({
+      // Task run history is owned by the application database, not Mastra runtime storage.
+      taskRunWriter: createScheduledTaskRunWriter(),
+    }),
+    agents: {
+      chat: resolvedChatAgent,
+      'plan-planner': planAgent,
+      writer: writerAgent,
+      coder: coderAgent,
+      'scheduled-task': scheduledTaskAgent,
+    },
+  })
+}
+
+export const mastra = createMastraRuntime()
 
 export type MastraRuntimeShutdownDependencies = {
   mastra: Pick<typeof mastra, 'shutdown'>
