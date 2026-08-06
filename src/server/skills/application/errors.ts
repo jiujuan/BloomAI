@@ -8,6 +8,7 @@ export type SkillDomainErrorCode =
   | 'IDEMPOTENCY_CONFLICT'
   | 'VALIDATION_ERROR'
   | 'FEATURE_DISABLED'
+  | 'WAITING_ACTION_EXPIRED'
 
 export class SkillDomainError extends Error {
   constructor(

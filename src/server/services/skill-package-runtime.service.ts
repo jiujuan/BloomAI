@@ -15,6 +15,7 @@ import {
   SkillRunConflictError,
   SkillRunNotFoundError,
   SkillRunTransitionError,
+  SkillRunWaitingActionExpiredError,
 } from '../skills/runtime/skill-run-coordinator'
 import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunQueueRepository, SkillRunRepository } from '../skills/application/ports'
 import { ServiceError } from './errors'
@@ -197,6 +198,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntimeError(() => dependencies.coordinator.getRun(id))
     },
 
+    getRunNextAction(id: string) {
+      return mapRuntimeError(() => dependencies.coordinator.getNextAction(id))
+    },
+
     listRunEvents(id: string, afterSeq: number) {
       return mapRuntimeError(() => {
         dependencies.coordinator.getRun(id)
@@ -266,6 +271,7 @@ function rethrowMappedRuntimeError(error: unknown): never {
   if (error instanceof SkillRunNotFoundError) throw new ServiceError('NOT_FOUND', error.message)
   if (error instanceof SkillRunConflictError) throw new ServiceError('REVISION_CONFLICT', error.message)
   if (error instanceof SkillRunTransitionError) throw new ServiceError('INVALID_RUN_TRANSITION', error.message)
+  if (error instanceof SkillRunWaitingActionExpiredError) throw new ServiceError('WAITING_ACTION_EXPIRED', error.message)
   if (error instanceof SkillRuntimeFeatureDisabledError) throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
   if (error instanceof CapabilityGrantServiceError) {
     const code = error.code === 'NOT_FOUND' ? 'NOT_FOUND'

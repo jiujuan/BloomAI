@@ -3,7 +3,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { SkillPackageReader, type ReadAssetResult, type ReadTextResult } from '../packages/package-reader'
 import type { PackageSkillRepository, SkillRunEventRepository } from '../application/ports'
 import { SkillExecutionContext } from '../runtime/skill-execution-context'
-import { executeCapability, type CapabilityRequest, type CapabilityResult } from '../policy/capability-broker'
+import { CapabilityApprovalRequiredError, CapabilityDeniedError, CapabilityNotSupportedError, executeCapability, type CapabilityRequest, type CapabilityResult } from '../policy/capability-broker'
 import { SkillRunCoordinator, type SkillRun } from '../runtime/skill-run-coordinator'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 
@@ -167,6 +167,16 @@ export class InstructionAgentAdapter {
     } catch (error) {
       const latest = this.coordinator.getRun(runId)
       if (latest.cancelRequested) return this.cancel(latest)
+      const capabilityMapping = mapCapabilityErrorToRunAction(error)
+      if (capabilityMapping && (latest.status === 'validating' || latest.status === 'running')) {
+        return this.coordinator.transition(runId, capabilityMapping.targetStatus, {
+          expectedRevision: latest.revision,
+          waitingReason: capabilityMapping.waitingReason,
+          requiredAction: capabilityMapping.requiredAction,
+          errorCode: capabilityMapping.errorCode,
+          errorMessage: capabilityMapping.errorMessage,
+        })
+      }
       if (latest.status === 'validating' || latest.status === 'running') {
         return this.coordinator.transition(runId, 'failed', {
           expectedRevision: latest.revision,
@@ -226,6 +236,45 @@ function parseManifest(value: string): z.infer<typeof manifestSchema> {
 
 function isBudgetError(error: unknown): boolean {
   return error instanceof InstructionAgentBudgetError || error instanceof Error && /exceeded the .* (step|token|duration) limit|duration limit|file count limit|max file size limit/.test(error.message)
+}
+
+function mapCapabilityErrorToRunAction(error: unknown): {
+  targetStatus: 'waiting_approval' | 'failed'
+  waitingReason?: string
+  requiredAction?: Record<string, unknown> | null
+  errorCode?: string
+  errorMessage?: string
+} | undefined {
+  if (error instanceof CapabilityApprovalRequiredError) {
+    const details = error.details
+    return {
+      targetStatus: 'waiting_approval',
+      waitingReason: error.message,
+      requiredAction: {
+        type: 'approval',
+        ...(details?.capability ? { capability: details.capability } : {}),
+        ...(details?.grantId ? { grantId: details.grantId } : {}),
+        prompt: { kind: 'confirm', label: error.message },
+        ...(details?.requestedScope ? { requestedScope: details.requestedScope } : {}),
+        ...(details?.expiresAt !== undefined ? { expiresAt: details.expiresAt } : {}),
+      },
+    }
+  }
+  if (error instanceof CapabilityDeniedError) {
+    return {
+      targetStatus: 'failed',
+      errorCode: error.details?.reasonCode === 'CAPABILITY_BUDGET_EXHAUSTED' ? 'CAPABILITY_BUDGET_EXHAUSTED' : 'CAPABILITY_DENIED',
+      errorMessage: error.message,
+    }
+  }
+  if (error instanceof CapabilityNotSupportedError) {
+    return {
+      targetStatus: 'failed',
+      errorCode: 'CAPABILITY_NOT_SUPPORTED',
+      errorMessage: error.message,
+    }
+  }
+  return undefined
 }
 
 function positiveInteger(value: number, label: string): number {

@@ -34,6 +34,7 @@ const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reject'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(500).optional() }),
   z.object({ type: z.literal('resume'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative() }),
   z.object({ type: z.literal('retry'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('submit_input'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative(), input: z.record(z.unknown()) }),
   z.object({ type: z.literal('modify'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative(), patchInput: z.record(z.unknown()) }),
   z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1), expectedRevision: z.number().int().nonnegative() }),
 ])
@@ -52,6 +53,8 @@ export type SkillRun = {
   sessionId: string | null
   imageSessionId: string | null
   waitingReason: string | null
+  waitingSince: number | null
+  waitingExpiresAt: number | null
   cancelRequested: boolean
   cancelRequestedAt: number | null
   interruptedAt: number | null
@@ -103,6 +106,13 @@ export class SkillRunTransitionError extends SkillDomainError {
   constructor(from: SkillRunStatus, to: SkillRunStatus) {
     super('INVALID_TRANSITION', `Invalid skill run transition: ${from} -> ${to}`)
     this.name = 'SkillRunTransitionError'
+  }
+}
+
+export class SkillRunWaitingActionExpiredError extends SkillDomainError {
+  constructor(runId: string) {
+    super('WAITING_ACTION_EXPIRED', `Waiting action expired: ${runId}`)
+    this.name = 'SkillRunWaitingActionExpiredError'
   }
 }
 
@@ -199,7 +209,9 @@ export class SkillRunCoordinator {
     const waitingReason = isWaitingStatus(targetStatus) ? data.waitingReason ?? null : null
     const requiredAction = data.requiredAction === undefined
       ? defaultRequiredAction(targetStatus, waitingReason, data.approvalCapabilities)
-      : data.requiredAction
+      : sanitizeRequiredAction(data.requiredAction)
+    const waitingSince = isWaitingStatus(targetStatus) ? now : null
+    const waitingExpiresAt = isWaitingStatus(targetStatus) ? actionExpiresAt(requiredAction) : null
     const event = transitionEvent(current.status, targetStatus, {
       waitingReason,
       approvalCapabilities: data.approvalCapabilities,
@@ -214,6 +226,8 @@ export class SkillRunCoordinator {
       changes: {
         status: targetStatus,
         waitingReason,
+        waitingSince,
+        waitingExpiresAt,
         requiredAction,
         currentStep: data.currentStep === undefined ? current.currentStep : data.currentStep,
         output: data.output,
@@ -236,14 +250,24 @@ export class SkillRunCoordinator {
     const parsed = commandSchema.parse(command)
     const previous = this.runs.getCommandResult(runId, parsed.idempotencyKey)
     if (previous) return mapRun(previous)
+
+    if (isWaitingStatus(current.status) && parsed.type !== 'cancel' && isWaitingActionExpired(current, this.clock.now())) {
+      this.transition(runId, 'failed', {
+        expectedRevision: current.revision,
+        reason: 'system',
+        errorCode: 'WAITING_ACTION_EXPIRED',
+        errorMessage: 'Waiting action expired',
+      })
+      throw new SkillRunWaitingActionExpiredError(runId)
+    }
+
     if (parsed.type === 'confirm' || parsed.type === 'approve') {
+      if (current.status !== 'waiting_approval') throw new SkillRunTransitionError(current.status, 'running')
       return this.applyCommandTransition(runId, current, parsed, 'running', {})
     }
     if (parsed.type === 'reject') {
       if (current.status !== 'waiting_approval') throw new SkillRunTransitionError(current.status, 'failed')
       return this.applyCommandTransition(runId, current, parsed, 'failed', {
-        waitingReason: null,
-        requiredAction: null,
         errorCode: 'CAPABILITY_REJECTED',
         errorMessage: parsed.reason ?? 'Capability approval rejected',
       })
@@ -256,18 +280,26 @@ export class SkillRunCoordinator {
       if (current.status !== 'interrupted') throw new SkillRunTransitionError(current.status, 'validating')
       return this.applyCommandTransition(runId, current, parsed, 'validating', {})
     }
+    if (parsed.type === 'submit_input') {
+      if (current.status !== 'waiting_input') throw new SkillRunTransitionError(current.status, 'running')
+      return this.applyCommandTransition(runId, current, parsed, 'running', {
+        input: { ...current.input, ...parsed.input },
+      })
+    }
     if (parsed.type === 'modify') {
       if (current.status !== 'waiting_input') throw new SkillRunTransitionError(current.status, 'waiting_input')
       const input = { ...current.input, ...parsed.patchInput }
       return this.applyCommandChange(runId, current, parsed, {
         input,
         waitingReason: current.waitingReason,
+        waitingSince: current.waitingSince,
+        waitingExpiresAt: current.waitingExpiresAt,
         requiredAction: current.requiredAction,
       }, 'input.summarized')
     }
     if (isTerminalStatus(current.status)) return current
     if (isWaitingStatus(current.status)) {
-      return this.applyCommandTransition(runId, current, parsed as Extract<SkillRunCommand, { type: 'cancel' }>, 'cancelled', {
+      return this.applyCommandTransition(runId, current, parsed, 'cancelled', {
         errorCode: 'RUN_CANCELLED',
         errorMessage: 'Run cancelled by user',
       })
@@ -277,6 +309,16 @@ export class SkillRunCoordinator {
       cancelRequestedAt: this.clock.now(),
       cancelReason: 'user_cancelled',
     }, 'run.cancel_requested')
+  }
+
+  getNextAction(runId: string): { runId: string; status: SkillRunStatus; action: Record<string, unknown> | null; expiresAt: number | null } {
+    const run = this.getRun(runId)
+    return {
+      runId: run.id,
+      status: run.status,
+      action: run.requiredAction,
+      expiresAt: run.waitingExpiresAt,
+    }
   }
 
   requestCancel(runId: string, data: { expectedRevision: number; idempotencyKey: string; reason?: string }): SkillRun {
@@ -332,7 +374,7 @@ export class SkillRunCoordinator {
   private applyCommandTransition(
     runId: string,
     current: SkillRun,
-    command: Extract<SkillRunCommand, { type: 'confirm' | 'approve' | 'reject' | 'resume' | 'retry' | 'cancel' }>,
+    command: Extract<SkillRunCommand, { type: 'confirm' | 'approve' | 'reject' | 'resume' | 'retry' | 'submit_input' | 'cancel' }>,
     targetStatus: SkillRunStatus,
     changes: Record<string, unknown>,
   ): SkillRun {
@@ -342,7 +384,10 @@ export class SkillRunCoordinator {
       expectedRevision: command.expectedRevision,
       changes: {
         status: targetStatus,
+        input: changes.input as Record<string, unknown> | undefined,
         waitingReason: null,
+        waitingSince: null,
+        waitingExpiresAt: null,
         requiredAction: null,
         startedAt: targetStatus === 'running' && current.startedAt === null ? this.clock.now() : undefined,
         finishedAt: isTerminalStatus(targetStatus) ? this.clock.now() : null,
@@ -363,7 +408,17 @@ export class SkillRunCoordinator {
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
-    return mapRun(result.run)
+    const next = mapRun(result.run)
+    if (!result.duplicate && isWaitingStatus(current.status) && (targetStatus === 'running' || targetStatus === 'validating')) {
+      this.enqueueIfInactive(runId)
+    }
+    return next
+  }
+
+  private enqueueIfInactive(runId: string): void {
+    if (!this.queue) return
+    const active = this.queue.list({ runId }).some((item) => ['queued', 'leased', 'retry_wait'].includes(item.status))
+    if (!active) this.queue.enqueue({ runId, availableAt: this.clock.now() })
   }
 
   updateExecutionMetrics(runId: string, expectedRevision: number, usage: { stepCount: number; tokenUsage: number; lastHeartbeatAt: number }): SkillRun {
@@ -381,7 +436,7 @@ export class SkillRunCoordinator {
     runId: string,
     current: SkillRun,
     command: Extract<SkillRunCommand, { type: 'modify' | 'cancel' }>,
-    changes: { input?: Record<string, unknown>; waitingReason?: string | null; requiredAction?: JsonObject | null; cancelRequested?: boolean; cancelRequestedAt?: number; cancelReason?: string | null; lastCheckpoint?: JsonObject | null },
+    changes: { input?: Record<string, unknown>; waitingReason?: string | null; waitingSince?: number | null; waitingExpiresAt?: number | null; requiredAction?: JsonObject | null; cancelRequested?: boolean; cancelRequestedAt?: number; cancelReason?: string | null; lastCheckpoint?: JsonObject | null },
     eventType: string,
   ): SkillRun {
     const result = this.runs.applyRunChange({
@@ -407,6 +462,25 @@ function defaultRequiredAction(status: SkillRunStatus, waitingReason: string | n
   if (status === 'waiting_input') return { type: 'input', reason: waitingReason ?? 'Input required' }
   if (status === 'waiting_approval') return { type: 'approval', reason: waitingReason ?? 'Approval required', capabilities: capabilities ?? [] }
   return null
+}
+
+const REQUIRED_ACTION_KEYS = new Set(['type', 'capability', 'capabilities', 'grantId', 'prompt', 'promptSchema', 'expiresAt', 'reason'])
+
+function sanitizeRequiredAction(action: JsonObject | null): JsonObject | null {
+  if (!action) return null
+  const safe: JsonObject = {}
+  for (const key of REQUIRED_ACTION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(action, key)) safe[key] = action[key]
+  }
+  return Object.keys(safe).length > 0 ? safe : null
+}
+
+function actionExpiresAt(action: JsonObject | null): number | null {
+  return typeof action?.expiresAt === 'number' && Number.isFinite(action.expiresAt) ? action.expiresAt : null
+}
+
+function isWaitingActionExpired(run: SkillRun, now: number): boolean {
+  return run.waitingExpiresAt !== null && run.waitingExpiresAt <= now
 }
 
 function transitionEvent(
@@ -442,6 +516,8 @@ function mapRun(row: RunSnapshot): SkillRun {
     sessionId: row.sessionId,
     imageSessionId: row.imageSessionId,
     waitingReason: row.waitingReason,
+    waitingSince: row.waitingSince,
+    waitingExpiresAt: row.waitingExpiresAt,
     cancelRequested: row.cancelRequested,
     cancelRequestedAt: row.cancelRequestedAt,
     interruptedAt: row.interruptedAt,

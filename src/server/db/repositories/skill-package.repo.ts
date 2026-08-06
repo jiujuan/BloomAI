@@ -183,6 +183,8 @@ export const skillPackageRepo = {
       session_id: data.sessionId ?? null,
       image_session_id: data.imageSessionId ?? null,
       waiting_reason: null,
+      waiting_since: null,
+      waiting_expires_at: null,
       cancel_requested: 0,
       cancel_requested_at: null,
       started_at: data.status === 'running' ? now : null,
@@ -229,6 +231,8 @@ export const skillPackageRepo = {
       session_id: data.sessionId ?? null,
       image_session_id: data.imageSessionId ?? null,
       waiting_reason: null,
+      waiting_since: null,
+      waiting_expires_at: null,
       cancel_requested: 0,
       cancel_requested_at: null,
       started_at: data.status === 'running' ? now : null,
@@ -298,6 +302,8 @@ export const skillPackageRepo = {
       input?: Record<string, unknown>
       output?: Record<string, unknown> | null
       waitingReason?: string | null
+      waitingSince?: number | null
+      waitingExpiresAt?: number | null
       cancelRequested?: boolean
       cancelRequestedAt?: number | null
       interruptedAt?: number | null
@@ -336,6 +342,8 @@ export const skillPackageRepo = {
         ...(changes.input === undefined ? {} : { input_json: stringifyJsonObject(changes.input, 'input') }),
         ...(changes.output === undefined ? {} : { output_json: changes.output === null ? null : stringifyJsonObject(changes.output, 'output') }),
         ...(changes.waitingReason === undefined ? {} : { waiting_reason: changes.waitingReason }),
+        ...(changes.waitingSince === undefined ? {} : { waiting_since: changes.waitingSince }),
+        ...(changes.waitingExpiresAt === undefined ? {} : { waiting_expires_at: changes.waitingExpiresAt }),
         ...(changes.cancelRequested === undefined ? {} : { cancel_requested: changes.cancelRequested ? 1 : 0 }),
         ...(changes.cancelRequestedAt === undefined ? {} : { cancel_requested_at: changes.cancelRequestedAt }),
         ...(changes.interruptedAt === undefined ? {} : { interrupted_at: changes.interruptedAt }),
@@ -900,6 +908,8 @@ export function createSqliteRunRepository(): SkillRunRepository {
           ...(data.changes.input === undefined ? {} : { input: data.changes.input }),
           ...(data.changes.output === undefined ? {} : { output: data.changes.output }),
           ...(data.changes.waitingReason === undefined ? {} : { waitingReason: data.changes.waitingReason }),
+          ...(data.changes.waitingSince === undefined ? {} : { waitingSince: data.changes.waitingSince }),
+          ...(data.changes.waitingExpiresAt === undefined ? {} : { waitingExpiresAt: data.changes.waitingExpiresAt }),
           ...(data.changes.cancelRequested === undefined ? {} : { cancelRequested: data.changes.cancelRequested }),
           ...(data.changes.cancelRequestedAt === undefined ? {} : { cancelRequestedAt: data.changes.cancelRequestedAt }),
           ...(data.changes.startedAt === undefined ? {} : { startedAt: data.changes.startedAt }),
@@ -1070,6 +1080,8 @@ function mapRun(row: any): RunSnapshot {
     sessionId: row.session_id,
     imageSessionId: row.image_session_id,
     waitingReason: row.waiting_reason,
+    waitingSince: row.waiting_since ?? null,
+    waitingExpiresAt: row.waiting_expires_at ?? null,
     cancelRequested: row.cancel_requested === 1,
     cancelRequestedAt: row.cancel_requested_at ?? null,
     interruptedAt: row.interrupted_at ?? null,

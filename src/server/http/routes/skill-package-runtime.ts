@@ -34,6 +34,11 @@ const createRunSchema = z.object({
 }).refine((body) => Boolean(body.skillId || body.skillVersionId), { message: 'skillId or skillVersionId is required' })
 const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('confirm'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('approve'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('reject'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(500).optional() }),
+  z.object({ type: z.literal('resume'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('retry'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('submit_input'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), input: jsonObjectSchema }),
   z.object({ type: z.literal('modify'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), patchInput: jsonObjectSchema }),
   z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
 ])
@@ -103,6 +108,9 @@ skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
     const result = skillPackageRuntimeService.listRuns(page)
     return c.json({ data: result.data, meta: pageMeta(page, result.total) })
   } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-runs/:id/next-action', (c) => {
+  try { return c.json({ data: skillPackageRuntimeService.getRunNextAction(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id', (c) => {
   try { return c.json({ data: skillPackageRuntimeService.getRun(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }

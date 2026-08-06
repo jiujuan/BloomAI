@@ -121,6 +121,8 @@ export function getExpectedSchemaContract(): SchemaContract {
           session_id: optional,
           image_session_id: optional,
           waiting_reason: optional,
+          waiting_since: optional,
+          waiting_expires_at: optional,
           cancel_requested: required,
           cancel_requested_at: optional,
           started_at: optional,
@@ -137,6 +139,7 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_runs_v2_version: { columns: ['skill_version_id'] },
           idx_skill_runs_v2_active_worker: { columns: ['status', 'worker_id', 'heartbeat_at'] },
           idx_skill_runs_v2_recovery: { columns: ['status', 'interrupted_at', 'cancel_requested'] },
+          idx_skill_runs_v2_waiting_actions: { columns: ['status', 'waiting_expires_at'] },
         },
       },
       skill_run_events: {

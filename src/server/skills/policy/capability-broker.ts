@@ -101,10 +101,19 @@ export type CapabilityBrokerDependencies = {
   readonly artifacts?: Pick<ArtifactRepository, 'listArtifacts'>
 }
 
+export type CapabilityErrorDetails = {
+  capability?: string
+  grantId?: string
+  requestedScope?: Record<string, unknown>
+  expiresAt?: number | null
+  reasonCode?: string
+}
+
 export class CapabilityError extends Error {
   constructor(
     readonly code: 'CAPABILITY_DENIED' | 'CAPABILITY_APPROVAL_REQUIRED' | 'CAPABILITY_DISABLED' | 'CAPABILITY_NOT_SUPPORTED',
     message: string,
+    readonly details?: CapabilityErrorDetails,
   ) {
     super(message)
     this.name = this.constructor.name
@@ -112,26 +121,26 @@ export class CapabilityError extends Error {
 }
 
 export class CapabilityDeniedError extends CapabilityError {
-  constructor(message: string) {
-    super('CAPABILITY_DENIED', message)
+  constructor(message: string, details?: CapabilityErrorDetails) {
+    super('CAPABILITY_DENIED', message, details)
   }
 }
 
 export class CapabilityApprovalRequiredError extends CapabilityError {
-  constructor(message: string) {
-    super('CAPABILITY_APPROVAL_REQUIRED', message)
+  constructor(message: string, details?: CapabilityErrorDetails) {
+    super('CAPABILITY_APPROVAL_REQUIRED', message, details)
   }
 }
 
 export class CapabilityDisabledError extends CapabilityError {
-  constructor(message: string) {
-    super('CAPABILITY_DISABLED', message)
+  constructor(message: string, details?: CapabilityErrorDetails) {
+    super('CAPABILITY_DISABLED', message, details)
   }
 }
 
 export class CapabilityNotSupportedError extends CapabilityError {
-  constructor(message: string) {
-    super('CAPABILITY_NOT_SUPPORTED', message)
+  constructor(message: string, details?: CapabilityErrorDetails) {
+    super('CAPABILITY_NOT_SUPPORTED', message, details)
   }
 }
 
@@ -173,7 +182,12 @@ export class CapabilityBroker {
         sessionId: parsed.sessionId,
       })) {
         if (grant.maxCalls !== null && grant.callsUsed >= grant.maxCalls) {
-          throw new CapabilityDeniedError(`Capability budget exhausted (${grant.maxCalls} calls): ${parsed.capability}`)
+          throw new CapabilityDeniedError(`Capability budget exhausted (${grant.maxCalls} calls): ${parsed.capability}`, {
+            capability: parsed.capability,
+            grantId: grant.id,
+            expiresAt: grant.expiresAt,
+            reasonCode: 'CAPABILITY_BUDGET_EXHAUSTED',
+          })
         }
         throw new CapabilityApprovalRequiredError(`Capability approval has already been used or is no longer active: ${parsed.capability}`)
       }
@@ -325,8 +339,31 @@ export class CapabilityBroker {
           && (candidate.sessionId === null || request.sessionId !== undefined && candidate.sessionId === request.sessionId)
           && candidate.maxCalls !== null
           && candidate.callsUsed >= candidate.maxCalls)
-      if (exhausted) throw new CapabilityDeniedError(`Capability budget exhausted (${exhausted.maxCalls} calls): ${request.capability}`)
-      throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`)
+      if (exhausted) {
+        throw new CapabilityDeniedError(`Capability budget exhausted (${exhausted.maxCalls} calls): ${request.capability}`, {
+          capability: request.capability,
+          grantId: exhausted.id,
+          expiresAt: exhausted.expiresAt,
+          reasonCode: 'CAPABILITY_BUDGET_EXHAUSTED',
+        })
+      }
+      const pending = this.dependencies.grants.listCapabilityGrants(run.skillVersionId)
+        .filter((candidate) => candidate.capability === capability.data
+          && candidate.status === 'pending'
+          && (candidate.runId === null || candidate.runId === request.runId)
+          && (candidate.sessionId === null || candidate.sessionId === request.sessionId))
+        .at(-1)
+      if (pending) {
+        throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`, {
+          capability: request.capability,
+          grantId: pending.id,
+          requestedScope: pending.requestedScope,
+          expiresAt: pending.expiresAt,
+        })
+      }
+      throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`, {
+        capability: request.capability,
+      })
     }
 
     const parsedScope = capabilityScopeSchema.safeParse(grant.scope)
@@ -337,7 +374,9 @@ export class CapabilityBroker {
   private enforcePackageScope(request: CapabilityRequest, scope: CapabilityScope): void {
     const capability = skillCapabilitySchema.parse(request.capability) as SkillCapability
     const allowed = isScopeAllowed({ capability, input: request.input, scope })
-    if (!allowed.allowed) throw new CapabilityDeniedError(allowed.reason)
+    if (!allowed.allowed) throw new CapabilityDeniedError(allowed.reason, {
+      capability: request.capability,
+    })
   }
 
   private async executePackageImageCapability(request: CapabilityRequest, toolId: string): Promise<CapabilityResult> {

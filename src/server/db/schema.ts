@@ -211,6 +211,8 @@ export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
   session_id: text('session_id'),
   image_session_id: text('image_session_id'),
   waiting_reason: text('waiting_reason'),
+  waiting_since: integer('waiting_since'),
+  waiting_expires_at: integer('waiting_expires_at'),
   cancel_requested: integer('cancel_requested').notNull().default(0),
   cancel_requested_at: integer('cancel_requested_at'),
   interrupted_at: integer('interrupted_at'),
@@ -234,6 +236,7 @@ export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
   versionIdx: index('idx_skill_runs_v2_version').on(table.skill_version_id),
   activeWorkerIdx: index('idx_skill_runs_v2_active_worker').on(table.status, table.worker_id, table.heartbeat_at),
   recoveryIdx: index('idx_skill_runs_v2_recovery').on(table.status, table.interrupted_at, table.cancel_requested),
+  waitingActionsIdx: index('idx_skill_runs_v2_waiting_actions').on(table.status, table.waiting_expires_at),
 }))
 
 export const skill_run_events = sqliteTable('skill_run_events', {

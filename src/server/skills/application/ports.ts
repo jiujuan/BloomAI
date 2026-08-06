@@ -84,6 +84,8 @@ export type RunSnapshot = {
   readonly sessionId: string | null
   readonly imageSessionId: string | null
   readonly waitingReason: string | null
+  readonly waitingSince: number | null
+  readonly waitingExpiresAt: number | null
   readonly cancelRequested: boolean
   readonly cancelRequestedAt: number | null
   readonly interruptedAt: number | null
@@ -123,6 +125,8 @@ export type RunChange = {
   readonly input?: JsonObject
   readonly output?: JsonObject | null
   readonly waitingReason?: string | null
+  readonly waitingSince?: number | null
+  readonly waitingExpiresAt?: number | null
   readonly cancelRequested?: boolean
   readonly cancelRequestedAt?: number | null
   readonly interruptedAt?: number | null
