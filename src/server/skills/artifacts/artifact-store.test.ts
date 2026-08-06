@@ -187,6 +187,43 @@ describe('ArtifactStore', () => {
     expect(() => store.writeText({ runId: '../escape', kind: 'markdown', fileName: 'summary.md', content: '# Result' })).toThrow(ArtifactStoreError)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'runs', 'missing-run'))).toBe(false)
   })
+  it('emits best-effort artifact create/export metrics with run and artifact correlation only', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 10 })
+    const version = ports.packages.createVersion({ packageId: 'pkg-1', version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: '/pkg' })
+    const run = ports.runs.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
+    const recordArtifact = vi.fn()
+    const metrics = { recordArtifact }
+    const { ArtifactStore } = await import('./artifact-store')
+    const store = new ArtifactStore({ ...ports, metrics })
+    const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'observed.md', content: '# observed' })
+
+    expect(recordArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      bytes: artifact.size_bytes,
+      operation: 'create',
+      outcome: 'success',
+      correlation: expect.objectContaining({ runId: run.id, artifactId: artifact.id }),
+    }))
+    expect(JSON.stringify(recordArtifact.mock.calls)).not.toContain(dataDir)
+    expect(JSON.stringify(recordArtifact.mock.calls)).not.toContain('# observed')
+
+    const exportRoot = (await import('../config/skill-runtime.config')).getSkillRuntimeConfig().exportRoot
+    const destinationDir = path.join(exportRoot, 'observability')
+    fs.mkdirSync(destinationDir, { recursive: true })
+    store.exportArtifact({ artifactId: artifact.id, runId: run.id, destinationDir, confirmed: true, actor: 'tester', auditReason: 'observability test' })
+    expect(recordArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      bytes: artifact.size_bytes,
+      operation: 'export',
+      outcome: 'success',
+      correlation: expect.objectContaining({ runId: run.id, artifactId: artifact.id }),
+    }))
+
+    expect(() => store.exportArtifact({ artifactId: artifact.id, runId: run.id, destinationDir, confirmed: true, actor: 'tester', auditReason: 'duplicate observability test' })).toThrow()
+    expect(recordArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'export',
+      outcome: 'error',
+      correlation: expect.objectContaining({ runId: run.id, artifactId: artifact.id }),
+    }))
+  })
   it('accepts injected runtime ports without requiring a database repository', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 10 })
     const version = ports.packages.createVersion({ packageId: 'pkg-1', version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: '/pkg' })

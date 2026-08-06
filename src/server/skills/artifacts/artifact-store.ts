@@ -20,6 +20,8 @@ import {
 } from './artifact-policy'
 import { ArtifactPolicyError } from './artifact-policy'
 import { assertArtifactOwnership, sanitizeMarkdownHtml } from '../security/skill-security-checklist'
+import { getSkillCorrelation } from '../observability/skill-runtime.logger'
+import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observability/skill-runtime.metrics'
 
 export class ArtifactStoreError extends Error {
   constructor(message: string) {
@@ -67,6 +69,7 @@ type ArtifactStoreDependencies = {
   readonly artifacts: ArtifactRepository
   readonly clock: Clock
   readonly audit?: AuditRepository
+  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordArtifact'>
 }
 
 export class ArtifactStore {
@@ -126,45 +129,52 @@ export class ArtifactStore {
     actor?: string | null
     auditReason?: string
   }): string {
-    if (input.confirmed !== true) throw new ArtifactStoreError('Artifact export requires explicit confirmation')
-    if (!input.auditReason?.trim()) throw new ArtifactStoreError('Artifact export requires an audit reason')
-    const config = getSkillRuntimeConfig()
-    let destinationDir: string
+    let artifact: ArtifactSnapshot | undefined
     try {
-      destinationDir = resolveExportDestination(config.exportRoot, input.destinationDir)
+      if (input.confirmed !== true) throw new ArtifactStoreError('Artifact export requires explicit confirmation')
+      if (!input.auditReason?.trim()) throw new ArtifactStoreError('Artifact export requires an audit reason')
+      const config = getSkillRuntimeConfig()
+      let destinationDir: string
+      try {
+        destinationDir = resolveExportDestination(config.exportRoot, input.destinationDir)
+      } catch (error) {
+        if (error instanceof SkillPathPolicyError) throw new ArtifactStoreError(error.message)
+        throw error
+      }
+      artifact = this.dependencies.artifacts.getArtifact(input.artifactId) ?? undefined
+      if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
+      requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
+      const content = readArtifactBytes(config.artifactRoot, artifact)
+      const targetPath = path.join(destinationDir, path.basename(artifact.path))
+      if (fs.existsSync(targetPath)) throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
+
+      const temporaryPath = path.join(destinationDir, `.${path.basename(artifact.path)}.${crypto.randomUUID()}.tmp`)
+      try {
+        fs.writeFileSync(temporaryPath, content, { mode: 0o600, flag: 'wx' })
+        if (fs.existsSync(targetPath)) throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
+        fs.renameSync(temporaryPath, targetPath)
+      } catch (error: any) {
+        try { if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true }) } catch { /* best effort cleanup */ }
+        if (error instanceof ArtifactStoreError) throw error
+        if (error?.code === 'EEXIST') throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
+        throw new ArtifactStoreError(`Artifact export failed: ${input.artifactId}`)
+      }
+
+      const exportedAt = this.dependencies.clock.now()
+      this.dependencies.artifacts.markArtifactExported?.({ id: artifact.id, exportedAt, exportedBy: input.actor ?? null })
+      this.dependencies.audit?.append({
+        actor: input.actor ?? null,
+        action: 'artifact.exported',
+        resourceType: 'skill_artifact',
+        resourceId: artifact.id,
+        payload: { runId: input.runId, destinationDir, auditReason: input.auditReason.trim() },
+      })
+      this.recordArtifactMetric({ operation: 'export', outcome: 'success', bytes: artifact.sizeBytes, correlation: this.correlation(input.runId, artifact.id) })
+      return targetPath
     } catch (error) {
-      if (error instanceof SkillPathPolicyError) throw new ArtifactStoreError(error.message)
+      this.recordArtifactMetric({ operation: 'export', outcome: 'error', bytes: artifact?.sizeBytes, correlation: this.correlation(input.runId, artifact?.id) })
       throw error
     }
-    const artifact = this.dependencies.artifacts.getArtifact(input.artifactId)
-    if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
-    requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
-    const content = readArtifactBytes(config.artifactRoot, artifact)
-    const targetPath = path.join(destinationDir, path.basename(artifact.path))
-    if (fs.existsSync(targetPath)) throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
-
-    const temporaryPath = path.join(destinationDir, `.${path.basename(artifact.path)}.${crypto.randomUUID()}.tmp`)
-    try {
-      fs.writeFileSync(temporaryPath, content, { mode: 0o600, flag: 'wx' })
-      if (fs.existsSync(targetPath)) throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
-      fs.renameSync(temporaryPath, targetPath)
-    } catch (error: any) {
-      try { if (fs.existsSync(temporaryPath)) fs.rmSync(temporaryPath, { force: true }) } catch { /* best effort cleanup */ }
-      if (error instanceof ArtifactStoreError) throw error
-      if (error?.code === 'EEXIST') throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
-      throw new ArtifactStoreError(`Artifact export failed: ${input.artifactId}`)
-    }
-
-    const exportedAt = this.dependencies.clock.now()
-    this.dependencies.artifacts.markArtifactExported?.({ id: artifact.id, exportedAt, exportedBy: input.actor ?? null })
-    this.dependencies.audit?.append({
-      actor: input.actor ?? null,
-      action: 'artifact.exported',
-      resourceType: 'skill_artifact',
-      resourceId: artifact.id,
-      payload: { runId: input.runId, destinationDir, auditReason: input.auditReason.trim() },
-    })
-    return targetPath
   }
 
   removeRun(runId: string): boolean {
@@ -174,48 +184,75 @@ export class ArtifactStore {
   }
 
   private writeBuffer(input: { runId: string; kind: ArtifactKind; fileName: string; content: Buffer; metadata?: Record<string, unknown> }) {
-    requireExistingRunId(input.runId, this.dependencies.runs)
-    const config = getSkillRuntimeConfig()
-    let validated: ReturnType<typeof validateArtifactInput>
+    let artifact: ArtifactSnapshot | undefined
     try {
-      validated = validateArtifactInput({
-        ...input,
-        maxContentBytes: config.maxFileBytes,
+      requireExistingRunId(input.runId, this.dependencies.runs)
+      const config = getSkillRuntimeConfig()
+      let validated: ReturnType<typeof validateArtifactInput>
+      try {
+        validated = validateArtifactInput({
+          ...input,
+          maxContentBytes: config.maxFileBytes,
+        })
+      } catch (error) {
+        if (error instanceof ArtifactPolicyError) throw new ArtifactStoreError(error.message)
+        throw error
+      }
+      fs.mkdirSync(config.artifactRoot, { recursive: true })
+      const directory = resolveArtifactRunDirectory(config.artifactRoot, input.runId)
+      fs.mkdirSync(directory, { recursive: true })
+      const target = path.join(directory, validated.fileName)
+      fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
+      artifact = this.dependencies.artifacts.createArtifact({
+        runId: input.runId,
+        kind: input.kind,
+        path: validated.fileName,
+        sha256: hashBuffer(input.content),
+        mimeType: validated.mimeType,
+        sizeBytes: input.content.length,
+        metadata: validated.metadata,
+        retentionUntil: this.dependencies.clock.now() + config.artifactRetentionDays * 24 * 60 * 60 * 1000,
       })
+      this.dependencies.events.appendEvent({
+        runId: input.runId,
+        seq: this.dependencies.events.nextSequence(input.runId),
+        ...normalizeSkillRunEvent({
+          type: 'artifact.created',
+          payload: {
+            artifactId: artifact.id,
+            kind: artifact.kind,
+            path: artifact.path,
+            sha256: artifact.sha256,
+            sizeBytes: artifact.sizeBytes,
+          },
+        }),
+      })
+      this.recordArtifactMetric({ operation: 'create', outcome: 'success', bytes: artifact.sizeBytes, correlation: this.correlation(input.runId, artifact.id) })
+      return toArtifactStoreRecord(artifact)
     } catch (error) {
-      if (error instanceof ArtifactPolicyError) throw new ArtifactStoreError(error.message)
+      this.recordArtifactMetric({ operation: 'create', outcome: 'error', bytes: artifact?.sizeBytes ?? input.content.length, correlation: this.correlation(input.runId, artifact?.id) })
       throw error
     }
-    fs.mkdirSync(config.artifactRoot, { recursive: true })
-    const directory = resolveArtifactRunDirectory(config.artifactRoot, input.runId)
-    fs.mkdirSync(directory, { recursive: true })
-    const target = path.join(directory, validated.fileName)
-    fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
-    const artifact = this.dependencies.artifacts.createArtifact({
-      runId: input.runId,
-      kind: input.kind,
-      path: validated.fileName,
-      sha256: hashBuffer(input.content),
-      mimeType: validated.mimeType,
-      sizeBytes: input.content.length,
-      metadata: validated.metadata,
-      retentionUntil: this.dependencies.clock.now() + config.artifactRetentionDays * 24 * 60 * 60 * 1000,
-    })
-    this.dependencies.events.appendEvent({
-      runId: input.runId,
-      seq: this.dependencies.events.nextSequence(input.runId),
-      ...normalizeSkillRunEvent({
-        type: 'artifact.created',
-        payload: {
-          artifactId: artifact.id,
-          kind: artifact.kind,
-          path: artifact.path,
-          sha256: artifact.sha256,
-          sizeBytes: artifact.sizeBytes,
-        },
-      }),
-    })
-    return toArtifactStoreRecord(artifact)
+  }
+
+  private correlation(runId?: string, artifactId?: string): SkillRuntimeCorrelation {
+    const correlation = getSkillCorrelation()
+    const safeId = (value: string | undefined): string | undefined => value && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined
+    const safeRunId = safeId(runId)
+    const safeArtifactId = safeId(artifactId)
+    return {
+      ...correlation,
+      ...(safeRunId ? { runId: safeRunId } : {}),
+      ...(safeArtifactId ? { artifactId: safeArtifactId } : {}),
+    }
+  }
+
+  private recordArtifactMetric(input: { bytes?: number; operation: 'create' | 'export'; outcome: 'success' | 'error'; correlation: SkillRuntimeCorrelation }): void {
+    try {
+      (this.dependencies.metrics ?? SkillRuntimeMetrics.global()).recordArtifact(input)
+    } catch {
+      // Metrics are best effort and must never change artifact behavior.
+    }
   }
 }
 
@@ -306,6 +343,7 @@ function createDefaultArtifactStoreDependencies(): ArtifactStoreDependencies {
     artifacts: createSqliteArtifactRepository(),
     clock,
     audit: createSqliteAuditRepository(),
+    metrics: SkillRuntimeMetrics.global(),
   }
 }
 

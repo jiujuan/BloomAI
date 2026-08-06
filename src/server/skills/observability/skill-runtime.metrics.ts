@@ -31,6 +31,7 @@ export type SkillRuntimeMetricCounters = {
   runDurationMs: number
   capabilityCalls: number
   capabilityLatencyMs: number
+  artifactOperations: Record<string, number>
   importRejects: Record<string, number>
   runsByStatus: Record<string, number>
   capabilityErrors: Record<string, number>
@@ -60,6 +61,13 @@ export type RecordRunMetricInput = {
   approvalWaitMs?: number
   artifactBytes?: number
   importRejectReason?: string
+  correlation?: SkillRuntimeCorrelation
+}
+
+export type RecordArtifactMetricInput = {
+  bytes?: number
+  operation?: 'create' | 'export'
+  outcome?: 'success' | 'error'
   correlation?: SkillRuntimeCorrelation
 }
 
@@ -140,6 +148,7 @@ function cloneCounters(counters: SkillRuntimeMetricCounters): SkillRuntimeMetric
     runDurationMs: counters.runDurationMs,
     capabilityCalls: counters.capabilityCalls,
     capabilityLatencyMs: counters.capabilityLatencyMs,
+    artifactOperations: { ...counters.artifactOperations },
     importRejects: { ...counters.importRejects },
     runsByStatus: { ...counters.runsByStatus },
     capabilityErrors: { ...counters.capabilityErrors },
@@ -152,6 +161,7 @@ type MetricEvent = {
     importRejectReason?: string
     runStatus?: string
     capabilityError?: string
+    artifactOperation?: string
   }
 }
 
@@ -274,12 +284,23 @@ export class SkillRuntimeMetrics {
     })
   }
 
-  recordArtifact(bytes: number, correlation?: SkillRuntimeCorrelation): void {
+  recordArtifact(bytes: number, correlation?: SkillRuntimeCorrelation): void
+  recordArtifact(input: RecordArtifactMetricInput): void
+  recordArtifact(inputOrBytes: number | RecordArtifactMetricInput, _correlation?: SkillRuntimeCorrelation): void {
     const timestamp = safeTimestamp(this.now())
-    const value = finiteNonNegative(bytes)
+    const input = typeof inputOrBytes === 'number'
+      ? { bytes: inputOrBytes, operation: 'create' as const, outcome: 'success' as const }
+      : inputOrBytes
+    const operation = input.operation === 'export' ? 'export' : 'create'
+    const outcome = input.outcome === 'error' ? 'error' : 'success'
+    const value = outcome === 'success' ? finiteNonNegative(input.bytes) : 0
+    const artifactOperation = `${operation}_${outcome}`
     this.push({
-      point: { timestamp, kind: 'artifact', value, attributes: {} },
-      counters: { artifactBytes: value },
+      point: { timestamp, kind: 'artifact', value, attributes: { operation, outcome } },
+      counters: {
+        artifactBytes: value,
+        artifactOperation,
+      },
     })
   }
 
@@ -310,6 +331,7 @@ export class SkillRuntimeMetrics {
       if (delta.importRejectReason) counters.importRejects[delta.importRejectReason] = (counters.importRejects[delta.importRejectReason] ?? 0) + 1
       if (delta.runStatus) counters.runsByStatus[delta.runStatus] = (counters.runsByStatus[delta.runStatus] ?? 0) + 1
       if (delta.capabilityError) counters.capabilityErrors[delta.capabilityError] = (counters.capabilityErrors[delta.capabilityError] ?? 0) + 1
+      if (delta.artifactOperation) counters.artifactOperations[delta.artifactOperation] = (counters.artifactOperations[delta.artifactOperation] ?? 0) + 1
     }
     return {
       generatedAt: safeTimestamp(this.now()),
@@ -344,6 +366,7 @@ function emptyCounters(): SkillRuntimeMetricCounters {
     runDurationMs: 0,
     capabilityCalls: 0,
     capabilityLatencyMs: 0,
+    artifactOperations: {},
     importRejects: {},
     runsByStatus: {},
     capabilityErrors: {},
