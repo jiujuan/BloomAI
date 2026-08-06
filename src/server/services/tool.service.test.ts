@@ -45,6 +45,11 @@ describe('toolService', () => {
       toolId: 'search',
       output: { ok: true },
       toolRunId: 'run-1',
+      status: 'completed' as const,
+      artifactIds: [],
+      usage: { calls: 1 },
+      errorCode: null,
+      retryable: false,
     }))
     const service = createToolService({
       repo: {} as any,

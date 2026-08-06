@@ -12,7 +12,10 @@ describe('SkillExecutionContext', () => {
     fs.writeFileSync(path.join(root, 'references', 'guide.md'), 'guide')
     const onEvent = vi.fn()
     const onUsage = vi.fn()
-    const executeCapability = vi.fn(async (request) => ({ capability: request.capability, toolId: 'tool-1', toolRunId: 'tool-run-1', output: { ok: true } }))
+    const executeCapability = vi.fn(async (request) => ({
+      capability: request.capability, toolId: 'tool-1', toolRunId: 'tool-run-1', output: { ok: true },
+      status: 'completed' as const, artifactIds: [], usage: { calls: 1 }, errorCode: null, retryable: false,
+    }))
     const context = new SkillExecutionContext({
       runId: 'run-1', instruction: 'read', manifest: {}, input: {}, runContext: {},
       allowedCapabilities: ['web.search'], reader: new SkillPackageReader(root),

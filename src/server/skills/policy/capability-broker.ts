@@ -7,7 +7,7 @@ import { approvalBroker, type ApprovalBroker } from '../../tools/approval-broker
 import { sessionToolPermissionStore, type SessionToolPermissionStore } from '../../tools/session-permission-store'
 import { ImageStudioCapabilityAdapter, type ImageStudioBatchInput, type ImageStudioBatchResult } from '../adapters/image-studio-capability-adapter'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
-import type { CapabilityGrantRepository, CapabilityGrantSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
+import type { ArtifactRepository, CapabilityGrantRepository, CapabilityGrantSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
 
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -30,6 +30,10 @@ const FORBIDDEN_PACKAGE_CAPABILITIES = new Set([
   'dependency.install',
   'workspace.write',
   'home.read',
+  'mcp',
+  'mcp.execute',
+  'container.execute',
+  'arbitrary_workspace_write',
 ])
 
 const GATED_TOOL_PERMISSION_LEVELS = new Set(['write', 'shell', 'sandbox'])
@@ -47,6 +51,8 @@ const capabilityRequestSchema = z.object({
   runId: z.string().min(1).optional(),
   sessionId: z.string().min(1).optional(),
   grantContext: z.record(z.unknown()).optional(),
+  idempotencyKey: z.string().min(1).max(256).optional(),
+  requestedTimeoutMs: z.number().int().positive().max(10 * 60_000).optional(),
   signal: z.custom<AbortSignal>((value) => value instanceof AbortSignal).optional(),
 })
 
@@ -56,7 +62,12 @@ export type CapabilityResult = {
   capability: string
   toolId: string
   toolRunId: string
+  status: 'completed'
   output: object
+  artifactIds: string[]
+  usage: { calls: number; timeoutMs?: number }
+  errorCode: string | null
+  retryable: boolean
 }
 
 export type CapabilityToolRepository = {
@@ -87,6 +98,7 @@ export type CapabilityBrokerDependencies = {
   readonly approvals: Pick<ApprovalBroker, 'consume'>
   readonly permissions: Pick<SessionToolPermissionStore, 'has'>
   readonly imageAdapterFactory: () => CapabilityImageAdapter
+  readonly artifacts?: Pick<ArtifactRepository, 'listArtifacts'>
 }
 
 export class CapabilityError extends Error {
@@ -128,21 +140,49 @@ export function needsInteractiveApprovalForTool(tool: Pick<Tool, 'requires_permi
 }
 
 export class CapabilityBroker {
+  private readonly idempotentResults = new Map<string, CapabilityResult>()
+
   constructor(private readonly dependencies: CapabilityBrokerDependencies = createDefaultCapabilityBrokerDependencies()) {}
 
   async executeCapability(request: CapabilityRequest): Promise<CapabilityResult> {
     const parsed = capabilityRequestSchema.parse(request)
+    if (parsed.caller === 'package-runtime' && !parsed.runId) {
+      throw new CapabilityDeniedError('Package capability calls require a runId')
+    }
+    const cached = this.getIdempotentResult(parsed)
+    if (cached) return cached
+
+    if (parsed.caller === 'package-runtime') {
+      this.appendCapabilityEvent(parsed, 'capability.requested', {
+        capability: parsed.capability,
+        ...(parsed.idempotencyKey ? { idempotencyKey: parsed.idempotencyKey } : {}),
+      })
+    }
+
     const toolId = this.resolveToolId(parsed)
     const tool = this.requireEnabledTool(toolId)
     let packageScope: CapabilityScope | undefined
+    let grant: (CapabilityGrantSnapshot & { scope: CapabilityScope }) | undefined
 
     if (parsed.caller === 'package-runtime') {
-      const grant = this.requirePackageGrant(parsed)
+      grant = this.requirePackageGrant(parsed)
       this.enforcePackageScope(parsed, grant.scope)
       packageScope = grant.scope
-      if (grant.grantMode === 'once' && !this.dependencies.grants.consumeCapabilityGrant(grant.id)) {
-        throw new CapabilityApprovalRequiredError(`Capability approval has already been used: ${parsed.capability}`)
+      if (!this.dependencies.grants.consumeCapabilityGrant(grant.id, Date.now(), {
+        runId: parsed.runId,
+        sessionId: parsed.sessionId,
+      })) {
+        if (grant.maxCalls !== null && grant.callsUsed >= grant.maxCalls) {
+          throw new CapabilityDeniedError(`Capability budget exhausted (${grant.maxCalls} calls): ${parsed.capability}`)
+        }
+        throw new CapabilityApprovalRequiredError(`Capability approval has already been used or is no longer active: ${parsed.capability}`)
       }
+      this.appendCapabilityEvent(parsed, 'capability.started', {
+        capability: parsed.capability,
+        toolId,
+        grantId: grant.id,
+        ...(parsed.idempotencyKey ? { idempotencyKey: parsed.idempotencyKey } : {}),
+      })
     } else {
       this.requireLegacyToolPermission(tool, parsed.grantContext, parsed.sessionId, parsed.input)
     }
@@ -151,21 +191,39 @@ export class CapabilityBroker {
       return this.executePackageImageCapability(parsed, toolId)
     }
 
+    const timeoutMs = Math.min(parsed.requestedTimeoutMs ?? (TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS), TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS)
     try {
       const execution = await this.dependencies.executeTool(
         toolId,
         parsed.input,
         parsed.sessionId,
-        TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS,
+        timeoutMs,
         {
           caller: parsed.caller,
           signal: parsed.signal,
           allowedRoots: packageScope?.allowedRoots,
         },
       )
+      const result = this.normalizeResult(parsed, toolId, execution.toolRunId, execution.output, timeoutMs)
+      this.appendCapabilityEvent(parsed, 'capability.completed', {
+        capability: parsed.capability,
+        toolId,
+        toolRunId: execution.toolRunId,
+        ...(parsed.idempotencyKey ? { idempotencyKey: parsed.idempotencyKey } : {}),
+      })
       this.auditPackageCall(parsed, toolId, execution.toolRunId, 'completed')
-      return { capability: parsed.capability, toolId, toolRunId: execution.toolRunId, output: execution.output }
+      this.rememberIdempotentResult(parsed, result)
+      return result
     } catch (error) {
+      const toolRunId = error instanceof ToolExecutionError ? error.toolRunId : undefined
+      const errorCode = error instanceof ToolExecutionError ? `TOOL_${error.status.toUpperCase()}` : 'CAPABILITY_EXECUTION_FAILED'
+      this.appendCapabilityEvent(parsed, 'capability.failed', {
+        capability: parsed.capability,
+        toolId,
+        ...(toolRunId ? { toolRunId } : {}),
+        errorCode,
+        ...(parsed.idempotencyKey ? { idempotencyKey: parsed.idempotencyKey } : {}),
+      })
       if (error instanceof ToolExecutionError) this.auditPackageCall(parsed, toolId, error.toolRunId, 'failed', error.message)
       throw error
     }
@@ -178,6 +236,8 @@ export class CapabilityBroker {
     sessionId?: string
     approvalToken?: string
     signal?: AbortSignal
+    idempotencyKey?: string
+    requestedTimeoutMs?: number
   }): Promise<CapabilityResult> {
     return this.executeCapability({
       caller: data.caller,
@@ -185,6 +245,8 @@ export class CapabilityBroker {
       input: data.input,
       sessionId: data.sessionId,
       grantContext: data.approvalToken ? { approvalToken: data.approvalToken } : undefined,
+      idempotencyKey: data.idempotencyKey,
+      requestedTimeoutMs: data.requestedTimeoutMs,
       signal: data.signal,
     })
   }
@@ -252,7 +314,20 @@ export class CapabilityBroker {
       sessionId: request.sessionId,
       runId: request.runId,
     })
-    if (!grant) throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`)
+    if (!grant) {
+      // Active-grant lookup intentionally filters exhausted grants. Inspect all grants
+      // here so an exhausted global/run/session grant is reported as a deterministic
+      // budget denial instead of being misclassified as a new approval request.
+      const exhausted = this.dependencies.grants.listCapabilityGrants(run.skillVersionId)
+        .find((candidate) => candidate.capability === capability.data
+          && (candidate.status === 'approved' || candidate.status === 'consumed')
+          && (candidate.runId === null || candidate.runId === request.runId)
+          && (candidate.sessionId === null || request.sessionId !== undefined && candidate.sessionId === request.sessionId)
+          && candidate.maxCalls !== null
+          && candidate.callsUsed >= candidate.maxCalls)
+      if (exhausted) throw new CapabilityDeniedError(`Capability budget exhausted (${exhausted.maxCalls} calls): ${request.capability}`)
+      throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`)
+    }
 
     const parsedScope = capabilityScopeSchema.safeParse(grant.scope)
     if (!parsedScope.success) throw new CapabilityDeniedError(`Invalid capability grant scope for: ${request.capability}`)
@@ -263,12 +338,6 @@ export class CapabilityBroker {
     const capability = skillCapabilitySchema.parse(request.capability) as SkillCapability
     const allowed = isScopeAllowed({ capability, input: request.input, scope })
     if (!allowed.allowed) throw new CapabilityDeniedError(allowed.reason)
-    if (capability !== 'image.generate' || !scope.maxCalls || !request.runId) return
-
-    const calls = this.dependencies.events.listEvents(request.runId).filter((event) => {
-      return event.type === 'capability.call' && event.payload.capability === 'image.generate'
-    }).length
-    if (calls >= scope.maxCalls) throw new CapabilityDeniedError(`Image generation budget exhausted (${scope.maxCalls} calls)`)
   }
 
   private async executePackageImageCapability(request: CapabilityRequest, toolId: string): Promise<CapabilityResult> {
@@ -294,14 +363,67 @@ export class CapabilityBroker {
       })
       const output = { imageSessionId: batch.imageSessionId, status: batch.status, item: batch.items[0] }
       this.dependencies.tools.completeRun(toolRun.id, output)
+      const result = this.normalizeResult(request, toolId, toolRun.id, output, undefined)
+      this.appendCapabilityEvent(request, 'capability.completed', {
+        capability: request.capability,
+        toolId,
+        toolRunId: toolRun.id,
+        artifactIds: this.listArtifactIds(request.runId),
+        ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      })
       this.auditPackageCall(request, toolId, toolRun.id, 'completed')
-      return { capability: request.capability, toolId, toolRunId: toolRun.id, output }
+      this.rememberIdempotentResult(request, result)
+      return result
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Image generation failed'
       this.dependencies.tools.failRun(toolRun.id, message)
+      this.appendCapabilityEvent(request, 'capability.failed', {
+        capability: request.capability,
+        toolId,
+        toolRunId: toolRun.id,
+        errorCode: 'IMAGE_GENERATION_FAILED',
+        ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+      })
       this.auditPackageCall(request, toolId, toolRun.id, 'failed', message)
       throw error
     }
+  }
+
+  private normalizeResult(request: CapabilityRequest, toolId: string, toolRunId: string, output: object, timeoutMs?: number): CapabilityResult {
+    return {
+      capability: request.capability,
+      toolId,
+      toolRunId,
+      status: 'completed',
+      output,
+      artifactIds: request.runId ? this.listArtifactIds(request.runId) : [],
+      usage: { calls: 1, ...(timeoutMs !== undefined ? { timeoutMs } : {}) },
+      errorCode: null,
+      retryable: false,
+    }
+  }
+
+  private listArtifactIds(runId: string): string[] {
+    return this.dependencies.artifacts?.listArtifacts(runId).map((artifact) => artifact.id) ?? []
+  }
+
+  private getIdempotentResult(request: CapabilityRequest): CapabilityResult | undefined {
+    if (request.caller !== 'package-runtime' || !request.runId || !request.idempotencyKey) return undefined
+    return this.idempotentResults.get(`${request.runId}: ${request.idempotencyKey}`)
+  }
+
+  private rememberIdempotentResult(request: CapabilityRequest, result: CapabilityResult): void {
+    if (request.caller !== 'package-runtime' || !request.runId || !request.idempotencyKey) return
+    this.idempotentResults.set(`${request.runId}: ${request.idempotencyKey}`, result)
+  }
+
+  private appendCapabilityEvent(request: CapabilityRequest, type: 'capability.requested' | 'capability.started' | 'capability.completed' | 'capability.failed', payload: Record<string, unknown>): void {
+    if (request.caller !== 'package-runtime' || !request.runId) return
+    this.dependencies.events.appendEvent({
+      runId: request.runId,
+      seq: this.dependencies.events.nextSequence(request.runId),
+      ...normalizeSkillRunEvent({ type, payload }),
+    })
   }
 
   private auditPackageCall(
@@ -359,6 +481,7 @@ function createDefaultCapabilityBrokerDependencies(): CapabilityBrokerDependenci
     approvals: approvalBroker,
     permissions: sessionToolPermissionStore,
     imageAdapterFactory: () => new ImageStudioCapabilityAdapter(),
+    artifacts: ports.artifacts,
   }
 }
 

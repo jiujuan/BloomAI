@@ -65,7 +65,7 @@ describe('CapabilityBroker injected ports', () => {
       runId: run.id,
       sessionId: 'session-1',
     })).resolves.toMatchObject({ toolId: 'web_search', toolRunId: toolRun.id, output: { results: [] } })
-    expect(ports.events.listEvents(run.id)).toHaveLength(1)
+    expect(ports.events.listEvents(run.id).filter((event) => event.type === 'capability.call')).toHaveLength(1)
     expect(tools.get).toHaveBeenCalledWith('web_search')
   })
 })

@@ -76,10 +76,14 @@ describe('CapabilityBroker', () => {
     expect(result.output).toEqual({ results: [{ title: 'Result' }] })
     expect(result.toolRunId).toEqual(expect.any(String))
     expect(toolRepo.listRuns('web_search')[0]).toMatchObject({ id: result.toolRunId, session_id: 'session-1', status: 'success' })
-    expect(skillPackageRepo.listEvents(run.id)).toEqual([
-      expect.objectContaining({ type: 'capability.call', payload_json: expect.stringContaining(result.toolRunId) }),
+    const events = skillPackageRepo.listEvents(run.id)
+    expect(events.map((event) => event.type)).toEqual([
+      'capability.requested', 'capability.requested', 'capability.started', 'capability.completed', 'capability.call',
     ])
-    expect(skillPackageRepo.listEvents(run.id)[0].payload_json).toContain(run.id)
+    expect(events.find((event) => event.type === 'capability.call')).toMatchObject({
+      payload_json: expect.stringContaining(result.toolRunId),
+    })
+    expect(events[0].payload_json).toContain('web.search')
   })
 
   it('rejects explicitly forbidden package capabilities before a tool can run', async () => {
@@ -191,10 +195,10 @@ describe('CapabilityBroker', () => {
       runId: run.id,
     })).rejects.toThrow('search provider unavailable')
 
-    const [event] = skillPackageRepo.listEvents(run.id)
+    const event = skillPackageRepo.listEvents(run.id).find((candidate) => candidate.type === 'capability.call')
     expect(event).toMatchObject({ type: 'capability.call' })
-    expect(event.payload_json).toContain('"status":"failed"')
-    expect(event.payload_json).toMatch(/"toolRunId":"[^"]+"/)
+    expect(event?.payload_json).toContain('\"status\":\"failed\"')
+    expect(event?.payload_json).toMatch(/\"toolRunId\":\"[^\"]+\"/)
   })
 
   it('consumes once grants and rejects expired or session-mismatched grants', async () => {

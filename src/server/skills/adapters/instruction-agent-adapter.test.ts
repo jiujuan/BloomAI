@@ -142,6 +142,7 @@ describe('InstructionAgentAdapter', () => {
     const { InstructionAgentAdapter } = await import('./instruction-agent-adapter')
     const executeCapability = vi.fn(async () => ({
       capability: 'web.search', toolId: 'web_search', toolRunId: 'tool-run-1', output: { results: [] },
+      status: 'completed' as const, artifactIds: [], usage: { calls: 1 }, errorCode: null, retryable: false,
     }))
     const adapter = new InstructionAgentAdapter({
       executor: {
