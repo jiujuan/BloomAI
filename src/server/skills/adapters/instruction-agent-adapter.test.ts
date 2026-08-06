@@ -131,11 +131,13 @@ describe('InstructionAgentAdapter', () => {
     await adapter.run(runId)
 
     expect(executeCapability).not.toHaveBeenCalled()
-    expect(coordinator.subscribeEvents(runId).filter((event) => event.type === 'package.file_loaded'))
+    const fileLoadedEvents = coordinator.subscribeEvents(runId).filter((event) => event.type === 'package.file_loaded')
+    expect(fileLoadedEvents)
       .toMatchObject([
         { payload: { path: 'SKILL.md' } },
         { payload: { path: 'references/style.md' } },
       ])
+    expect(fileLoadedEvents[0]?.payload).not.toHaveProperty('content')
   })
 
   it('forwards declared capabilities through the broker with the bound run and session', async () => {

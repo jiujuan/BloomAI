@@ -200,7 +200,8 @@ export class InstructionAgentAdapter {
   }
 
   private recordFileLoaded(runId: string, file: { path: string; sha256: string; sizeBytes: number }): void {
-    this.recordEvent(runId, 'package.file_loaded', file)
+    const { path, sha256, sizeBytes } = file
+    this.recordEvent(runId, 'package.file_loaded', { path, sha256, sizeBytes })
   }
 
   private recordEvent(runId: string, type: 'package.file_loaded' | 'step.started' | 'step.completed', payload: Record<string, unknown>): void {
