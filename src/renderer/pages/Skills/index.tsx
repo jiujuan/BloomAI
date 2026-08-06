@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Box, Check, Download, Github, History, Plus, Puzzle, Search } from 'lucide-react'
+import { Archive, Box, Check, Download, Github, History, Plus, Puzzle, Search } from 'lucide-react'
 import { useSkillsStore } from '@renderer/pages/Skills/skills.store'
 import { SkillEditor } from './SkillEditor'
 import { PackageInstallDialog } from './PackageInstallDialog'
@@ -9,12 +9,17 @@ import { useSkillRuntimeStore } from './skill-runtime.store'
 import { formatDate } from './skill-runtime.types'
 import type { SkillPackage, SkillRun, SkillVersion } from './skill-runtime.types'
 import { cn } from '@renderer/utils'
+import { SkillsCenterWorkbench } from './SkillsCenterWorkbench'
+
+export { SkillsCenterWorkbench } from './SkillsCenterWorkbench'
 
 const TYPE_BADGE: Record<string, string> = { 'js-function': 'JS', 'http-api': 'HTTP', 'prompt-template': 'Prompt' }
 const TYPE_ICON: Record<string, string> = { 'js-function': '⚙️', 'http-api': '🌐', 'prompt-template': '💬' }
 type Tab = 'installed' | 'market' | 'runs'
 
-export function SkillsMarket() {
+export function SkillsMarket() { return <SkillsCenterWorkbench /> }
+
+export function LegacySkillsMarket() {
   const legacy = useSkillsStore()
   const runtime = useSkillRuntimeStore()
   const [tab, setTab] = useState<Tab>('installed')
@@ -53,7 +58,7 @@ export function SkillsMarket() {
 }
 
 function InstalledTab({ packages, legacySkills, onOpenPackage, onUninstallLegacy }: { packages: SkillPackage[]; legacySkills: any[]; onOpenPackage: (item: SkillPackage) => void; onUninstallLegacy: (id: string) => void }) {
-  return <div className="skills-tab-content"><section className="skills-section"><div className="skills-section-head"><div><span className="skills-section-title">Package Skills</span><p>已安装的版本快照、权限与运行记录。</p></div></div>{packages.length === 0 ? <EmptyState title="还没有 Package Skill" body="通过 GitHub URL 安装固定 commit、tag 或 branch；安装前会检查 Manifest 和权限声明。" /> : <div className="skills-package-grid">{packages.map((item) => <button className="skills-package-card" key={item.id} onClick={() => onOpenPackage(item)}><div className="skills-card-title"><Box size={17} /><strong>{item.name}</strong><span className="skills-status info">Package</span></div><p>{item.description || '未提供描述'}</p><div className="skills-card-footer"><span>{item.source_type}</span><span>{formatDate(item.updated_at)}</span></div></button>)}</div>}</section><section className="skills-section"><div className="skills-section-head"><div><span className="skills-section-title">Legacy Skills</span><p>旧同步运行机制仍可用；Package Skill 不会通过该接口执行。</p></div></div><div className="skills-grid">{legacySkills.map((skill) => <LegacySkillCard key={skill.id} skill={skill} installed onUninstall={() => onUninstallLegacy(skill.id)} />)}{legacySkills.length === 0 && <EmptyState title="没有匹配的 Legacy Skill" body="可从 Market 安装或创建一个轻量 Skill。" />}</div></section></div>
+  return <div className="skills-tab-content"><section className="skills-section"><div className="skills-section-head"><div><span className="skills-section-title">Package Skills</span><p>已安装的版本快照、权限与运行记录；卸载和归档不会清理审计引用。</p></div></div>{packages.length === 0 ? <EmptyState title="还没有 Package Skill" body="通过 GitHub URL 安装固定 commit、tag 或 branch；安装前会检查 Manifest 和权限声明。" /> : <div className="skills-package-grid">{packages.map((item) => { const archived = Boolean(item.deleted_at); return <button className="skills-package-card" key={item.id} onClick={() => onOpenPackage(item)}><div className="skills-card-title">{archived ? <Archive size={17} /> : <Box size={17} />}<strong>{item.name}</strong><span className={'skills-status ' + (archived ? 'warning' : 'info')}>{archived ? '已归档' : 'Package'}</span></div><p>{item.description || '未提供描述'}</p><div className="skills-card-footer"><span>{item.source_type}</span><span>{archived ? `归档于 ${formatDate(item.deleted_at)}` : formatDate(item.updated_at)}</span></div></button> })}</div>}</section><section className="skills-section"><div className="skills-section-head"><div><span className="skills-section-title">Legacy Skills</span><p>旧同步运行机制仍可用；Package Skill 不会通过该接口执行。</p></div></div><div className="skills-grid">{legacySkills.map((skill) => <LegacySkillCard key={skill.id} skill={skill} installed onUninstall={() => onUninstallLegacy(skill.id)} />)}{legacySkills.length === 0 && <EmptyState title="没有匹配的 Legacy Skill" body="可从 Market 安装或创建一个轻量 Skill。" />}</div></section></div>
 }
 
 function MarketTab({ skills, onInstall, onOpenInstaller }: { skills: any[]; onInstall: (id: string) => void; onOpenInstaller: () => void }) {

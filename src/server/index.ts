@@ -2,8 +2,8 @@ import { execSync } from 'child_process'
 import { serve } from '@hono/node-server'
 import { loadDotEnv } from './config/load-env'
 import { createHonoApp } from './http/app'
-import { runMigrations } from './db/client'
-import { SkillRunCoordinator } from './skills/runtime'
+import { getSkillRuntimeMigrationStatus, runMigrations } from './db/client'
+import { createSkillRuntime } from './skills/runtime'
 import { getDeepResearchModule } from './deepresearch'
 import { API_HOST, BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT } from '../shared/constants'
 import { serverLogger } from './logger/logger'
@@ -11,6 +11,7 @@ import { initTracing, shutdownTracing } from './telemetry/tracer'
 import { initMetrics, shutdownMetrics } from './telemetry/metrics'
 import { mastra, shutdownMastraRuntime } from './mastra'
 import { closeDefaultWebPageProviderRouter } from './tools/web/provider-router'
+import { ensureSkillRuntimeDirectories, getSkillRuntimeCapabilities, loadSkillRuntimeConfig } from './skills/config/skill-runtime.config'
 
 // On Windows, switch the attached console to UTF-8 so Chinese characters in
 // log output are not garbled (Windows default code page is GBK/CP936).
@@ -19,16 +20,22 @@ if (process.platform === 'win32') {
 }
 
 loadDotEnv()
+const skillRuntimeConfig = loadSkillRuntimeConfig()
+ensureSkillRuntimeDirectories(skillRuntimeConfig)
 initTracing() // start OTel TracerProvider before any requests arrive
 initMetrics() // start OTel MeterProvider after tracing (both need loadDotEnv first)
 
 const PORT = parseInt(process.env[BLOOMAI_PORT_ENV] || String(DEFAULT_SERVER_PORT), 10)
 
-serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT })
+serverLogger.info('BloomAI Server starting', { cwd: process.cwd(), port: PORT, skillRuntime: getSkillRuntimeCapabilities(skillRuntimeConfig) })
+
+let skillRuntime: ReturnType<typeof createSkillRuntime> | undefined
 
 runMigrations()
   .then(async () => {
-    const interrupted = new SkillRunCoordinator().markInterruptedRuns()
+    const runtime = createSkillRuntime({ config: skillRuntimeConfig })
+    skillRuntime = runtime
+    const interrupted = runtime.markInterruptedRuns({ staleAfterMs: skillRuntimeConfig.leaseTimeoutMs })
     if (interrupted > 0) serverLogger.warn('Marked interrupted skill runs after restart', { count: interrupted })
     const recovered = await getDeepResearchModule().recoverInterruptedRuns()
     if (recovered.interrupted.length > 0) serverLogger.warn('Recovered interrupted Deep Research runs after restart', { count: recovered.interrupted.length })
@@ -36,7 +43,14 @@ runMigrations()
     // Start Mastra workers before serving requests. This restores persisted task
     // schedules after app restart and lets newly created schedules dispatch runs.
     await mastra.startWorkers()
-    const app = createHonoApp()
+    const workerStart = runtime.start()
+    if (!workerStart.started) serverLogger.info('Skill Runtime worker not started', { reason: workerStart.reason })
+    const app = createHonoApp({
+      skillRuntimeObservability: {
+        health: () => runtime.getRuntimeHealth(getSkillRuntimeMigrationStatus()),
+        diagnostics: () => runtime.getRuntimeDiagnostics({ migrations: getSkillRuntimeMigrationStatus() }),
+      },
+    })
     serve({ fetch: app.fetch, port: PORT, hostname: API_HOST }, (info) => {
       serverLogger.info(`BloomAI Server ready on http://${API_HOST}:${info.port}`)
     })
@@ -46,12 +60,13 @@ runMigrations()
     process.exit(1)
   })
 
-const gracefulShutdown = () =>
-  Promise.all([
-    shutdownMastraRuntime(),
-    shutdownTracing(),
-    shutdownMetrics(),
-    closeDefaultWebPageProviderRouter(),
-  ]).finally(() => process.exit(0))
+const gracefulShutdown = async () => {
+  await skillRuntime?.stop({ drain: false, timeoutMs: 5_000 })
+  await shutdownMastraRuntime()
+  await shutdownTracing()
+  await shutdownMetrics()
+  await closeDefaultWebPageProviderRouter()
+  process.exit(0)
+}
 process.on('SIGTERM', gracefulShutdown)
 process.on('SIGINT', gracefulShutdown)

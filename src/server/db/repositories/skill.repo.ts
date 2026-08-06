@@ -11,7 +11,24 @@ export interface Skill {
 }
 
 
-export const skillRepo = {
+export type LegacySkillRepository = {
+  readonly dataPlane: 'legacy'
+  listInstalled(): Skill[]
+  listMarket(query?: string, limit?: number, offset?: number): Skill[]
+  get(id: string): Skill | undefined
+  create(data: Partial<Skill> & { name: string; description: string; type: string; source: string }): Skill
+  update(id: string, data: Partial<Skill>): Skill | undefined
+  install(id: string): void
+  uninstall(id: string): void
+  delete(id: string): void
+  startRun(skillId: string, input: object): { id: string }
+  completeRun(id: string, output: object, durationMs: number): void
+  failRun(id: string, error: string, durationMs: number): void
+  listRuns(skillId: string, limit?: number): any[]
+}
+
+export const legacySkillRepo: LegacySkillRepository = {
+  dataPlane: 'legacy',
   listInstalled(): Skill[] {
     return getOrmDb().select().from(skills).where(eq(skills.is_installed, 1)).orderBy(asc(skills.name)).all() as Skill[]
   },
@@ -98,3 +115,6 @@ export const skillRepo = {
     return getOrmDb().select().from(skill_runs).where(eq(skill_runs.skill_id, skillId)).orderBy(desc(skill_runs.created_at)).limit(limit).all()
   },
 }
+
+/** Compatibility alias for existing Legacy Skill callers. Package Runtime must not import this adapter. */
+export const skillRepo = legacySkillRepo

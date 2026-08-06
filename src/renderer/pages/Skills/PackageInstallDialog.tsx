@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Github, LoaderCircle, X } from 'lucide-rea
 import { useSkillRuntimeStore } from './skill-runtime.store'
 import type { InspectedPackage, PackageSource } from './skill-runtime.types'
 
-export function PackageInstallDialog({ onClose }: { onClose: () => void }) {
+export function PackageInstallDialog({ onClose, onOpenCreator }: { onClose: () => void; onOpenCreator?: (item: InspectedPackage) => void }) {
   const { inspectPackage, installPackage } = useSkillRuntimeStore()
   const [repositoryUrl, setRepositoryUrl] = useState('')
   const [ref, setRef] = useState('main')
@@ -28,6 +28,7 @@ export function PackageInstallDialog({ onClose }: { onClose: () => void }) {
 
   const install = async () => {
     setError(null)
+    if (typeof window !== 'undefined' && !window.confirm(`确认安装已检查的 ${packages.length} 个 Package Skill？安装会保存固定 source snapshot，并按 manifest 请求权限；不会自动授予能力。`)) return
     setBusy(true)
     try { await installPackage(source()); onClose() } catch (cause) { setError(cause instanceof Error ? cause.message : '安装 Package 失败。') } finally { setBusy(false) }
   }
@@ -49,7 +50,7 @@ export function PackageInstallDialog({ onClose }: { onClose: () => void }) {
           {error && <div className="skills-message error"><AlertTriangle size={15} />{error}</div>}
           {packages.length > 0 && <div className="skills-inspection-list">
             <div className="skills-section-label">检查结果 · {packages.length} 个 Skill</div>
-            {packages.map((item) => <InspectionCard key={item.manifestHash + item.relativeSkillPath} item={item} />)}
+            {packages.map((item) => <InspectionCard key={item.manifestHash + item.relativeSkillPath} item={item} onOpenCreator={onOpenCreator} />)}
           </div>}
         </div>
         <footer className="skills-modal-foot">
@@ -62,12 +63,12 @@ export function PackageInstallDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-function InspectionCard({ item }: { item: InspectedPackage }) {
+function InspectionCard({ item, onOpenCreator }: { item: InspectedPackage; onOpenCreator?: (item: InspectedPackage) => void }) {
   const manifest = item.manifest
   return <article className="skills-inspection-card">
     <div className="skills-list-row"><div><strong>{manifest.name}</strong><p>{manifest.description || '未提供描述'}</p></div><span className={'skills-status ' + (manifest.compatible ? 'success' : 'danger')}>{manifest.compatible ? 'B-Lite compatible' : '需要后续运行时'}</span></div>
     <dl className="skills-compact-kv"><div><dt>来源 ref</dt><dd>{item.sourceSnapshot.sourceCommit || item.sourceSnapshot.sourceRef || '已固定快照'}</dd></div><div><dt>路径</dt><dd>{item.relativeSkillPath || '.'}</dd></div></dl>
-    <div className="skills-chip-row">{manifest.requestedCapabilities.map((capability) => <span key={capability.capability} className="skills-chip">{capability.capability}</span>)}{manifest.requestedCapabilities.length === 0 && <span className="skills-muted">未声明额外能力</span>}</div>
+    {onOpenCreator && <button type="button" className="skills-text-button" onClick={() => onOpenCreator(item)}>在 Creator 中编辑此检查结果</button>}<div className="skills-chip-row">{manifest.requestedCapabilities.map((capability) => <span key={capability.capability} className="skills-chip">{capability.capability}</span>)}{manifest.requestedCapabilities.length === 0 && <span className="skills-muted">未声明额外能力</span>}</div>
     {manifest.unsupported.length > 0 && <div className="skills-message warning"><AlertTriangle size={14} />不兼容：{manifest.unsupported.join('、')}</div>}
   </article>
 }

@@ -5,7 +5,7 @@ import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Br
 import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
-import { platform } from '@renderer/api'
+import { platform, type ChatSkillReferenceDto } from '@renderer/api'
 import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore, useProjectStore } from '@renderer/store'
 import { canSendProjectWorkspaceTask, isProjectWorkspaceUnavailableError, PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE, ProjectWorkspaceContext } from './ProjectWorkspaceContext'
 import { cn } from '@renderer/utils'
@@ -21,6 +21,7 @@ import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './part
 import { AttachmentChips, type ChipItem } from './parts/AttachmentChips'
 import { DeepResearchWorkbench } from './deepresearch/DeepResearchWorkbench'
 import { ResearchRunPart, type ResearchRunPartData } from './deepresearch/ResearchRunPart'
+import { SkillRunPart } from './parts/SkillRunPart'
 import { useDeepResearchStore } from './deepresearch/deep-research.store'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_MAX_SIZE, extOf, isAllowedExt, type Attachment } from '@shared/attachments'
 
@@ -93,7 +94,7 @@ function hasRenderableContent(parts: any[]): boolean {
   return parts.some((p) => {
     if (!p) return false
     if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
-    if (p.type === 'data-workflow' || p.type === 'data-research-run') return !!p.data
+    if (p.type === 'data-workflow' || p.type === 'data-research-run' || p.type === 'data-skill-run') return !!p.data
     if (p.type === 'data-plan') return true
     if (p.type === 'data-tool-call-approval') return true
     if (p.type === 'data-error') return !!p.data
@@ -108,7 +109,7 @@ function hasAnswerContent(parts: any[]): boolean {
   return parts.some((p) => {
     if (!p) return false
     if (p.type === 'text' || p.type === 'reasoning') return !!(p.text && p.text.trim())
-    if (p.type === 'data-workflow' || p.type === 'data-research-run') return !!p.data
+    if (p.type === 'data-workflow' || p.type === 'data-research-run' || p.type === 'data-skill-run') return !!p.data
     if (p.type === 'data-tool-call-approval') return true
     return isToolPart(p)
   })
@@ -214,6 +215,9 @@ export function ChatPanelMastra() {
   // Custom right-click "粘贴" menu for the input (position in viewport coords, or null when closed).
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null)
   const [modelOverride, setModelOverride] = useState<string | null>(null)
+  const [chatSkills, setChatSkills] = useState<ChatSkillReferenceDto[]>([])
+  const [selectedChatSkillVersionId, setSelectedChatSkillVersionId] = useState('')
+  const [skillRunSubmitting, setSkillRunSubmitting] = useState(false)
   // Plan mode proposals for the current turn, in chronological order. Each entry keeps a stable
   // id so a card never changes DOM position when its status flips (ready → discarded); the newest
   // active plan is always the last non-discarded entry. Only that one is executable.
@@ -245,6 +249,21 @@ export function ChatPanelMastra() {
   useEffect(() => {
     loadTextModels()
   }, [loadTextModels])
+
+  useEffect(() => {
+    setSelectedChatSkillVersionId('')
+    if (!activeSessionId) {
+      setChatSkills([])
+      return
+    }
+    let cancelled = false
+    platform.listChatEligibleSkills(activeSessionId).then((skills) => {
+      if (!cancelled) setChatSkills(skills)
+    }).catch(() => {
+      if (!cancelled) setChatSkills([])
+    })
+    return () => { cancelled = true }
+  }, [activeSessionId])
 
 
   // Reset per-session model override when switching sessions.
@@ -531,7 +550,7 @@ export function ChatPanelMastra() {
   const uploading = attachments.some((a) => a.status === 'uploading')
   const readyAttachments = attachments.filter((a) => a.att)
   const projectWorkspaceSendBlocked = !canSendProjectWorkspaceTask(session?.project_id, workspaceUnavailableProjectIds)
-  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading && !queuedMessage && !projectWorkspaceSendBlocked
+  const canSend = (!!input.trim() || readyAttachments.length > 0) && !uploading && !queuedMessage && !skillRunSubmitting && !projectWorkspaceSendBlocked
 
   const ensureActiveSessionId = async (): Promise<string> => {
     const existing = sessionIdRef.current || activeSessionId
@@ -549,13 +568,38 @@ export function ChatPanelMastra() {
 
   const handleSend = async () => {
     const text = input.trim()
-    if (isStreaming || uploading || queuedMessage) return
+    if (isStreaming || uploading || queuedMessage || skillRunSubmitting) return
     if (!text && readyAttachments.length === 0) return
     if (!canSendProjectWorkspaceTask(session?.project_id, useProjectStore.getState().workspaceUnavailableProjectIds)) {
       setAttachError(PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE)
       return
     }
     const sessionId = await ensureActiveSessionId()
+    if (selectedChatSkillVersionId) {
+      const parts = buildUserParts(text)
+      const attachmentsForTurn = attachmentsRef.current.filter((a) => a.att).map((a) => a.att!)
+      setInput('')
+      setAttachments([])
+      setAttachError(null)
+      maybeSetTitleFromFirstMessage(text, sessionId)
+      setSkillRunSubmitting(true)
+      try {
+        await platform.startChatSkillRun({
+          sessionId,
+          skillVersionId: selectedChatSkillVersionId,
+          input: { text, attachments: attachmentsForTurn },
+          idempotencyKey: `chat-skill-${sessionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          userMessage: { content: text, parts },
+        })
+        const rows = await platform.getMessages(sessionId)
+        setMessages((rows || []).filter((m: any) => m.role === 'user' || m.role === 'assistant').map((m: any) => ({ id: m.id, role: m.role, parts: restoreParts(m) })) as any)
+      } catch (error: any) {
+        setAttachError(error?.message || 'Package Skill 运行失败')
+      } finally {
+        setSkillRunSubmitting(false)
+      }
+      return
+    }
     // Plan mode: don't answer yet — propose a task list and wait for the user to confirm.
     // If a proposal is already pending, a new question discards it in place (kept visible as
     // "已丢弃", position unchanged) and proposes afresh below — only the latest plan is executable.
@@ -783,6 +827,22 @@ export function ChatPanelMastra() {
                 >
                   <Plus size={17} />
                 </button>
+                {chatSkills.length > 0 && (
+                  <select
+                    className="chat-skill-picker"
+                    aria-label="选择 Package Skill"
+                    value={selectedChatSkillVersionId}
+                    onChange={(e) => setSelectedChatSkillVersionId(e.target.value)}
+                    disabled={isStreaming || skillRunSubmitting}
+                  >
+                    <option value="">普通聊天</option>
+                    {chatSkills.map((skill) => (
+                      <option key={skill.skillVersionId} value={skill.skillVersionId}>
+                        {skill.packageName} · v{skill.version}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <ModeMenu mode={mode} onSelect={handleModeChange} />
                 <ModelMenu model={model} models={textModels.filter(m => m.isEnabled)} onSelect={handleModelChange} up />
                 <div className="team-tabs" role="tablist" aria-label="Agent">
@@ -1050,6 +1110,8 @@ function renderAssistantParts(parts: any[], approval: ApprovalProps, onOpenResea
       items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
     } else if (part.type === 'data-research-run' && part.data) {
       items.push(<ResearchRunPart key={`research-run-${i}`} data={part.data} onOpen={onOpenResearchRun || (() => {})} />)
+    } else if (part.type === 'data-skill-run' && part.data) {
+      items.push(<SkillRunPart key={`skill-run-${i}`} data={part.data} />)
     } else if (part.type === 'data-plan' && part.data) {
       const tasks = Array.isArray(part.data.tasks) ? part.data.tasks : []
       items.push(<PlanCard key={`plan-${i}`} tasks={tasks} status="done" />)

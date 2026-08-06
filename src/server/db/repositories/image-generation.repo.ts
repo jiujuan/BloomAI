@@ -25,11 +25,21 @@ export interface ImageGeneration {
   duration_ms: number | null
   created_at: number
   updated_at: number
+  skill_run_id?: string | null
+  skill_version_id?: string | null
+  grant_id?: string | null
 }
 
 export type NewImageGeneration = Omit<ImageGeneration, 'id' | 'created_at' | 'updated_at'>
 
 export const imageGenerationRepo = {
+  listBySkillRun(runId: string): ImageGeneration[] {
+    return getOrmDb().select().from(image_generations)
+      .where(eq(image_generations.skill_run_id, runId))
+      .orderBy(asc(image_generations.created_at))
+      .all() as ImageGeneration[]
+  },
+
   listBySession(sessionId: string): ImageGeneration[] {
     return getOrmDb().select().from(image_generations)
       .where(eq(image_generations.session_id, sessionId))
@@ -64,6 +74,9 @@ export const imageGenerationRepo = {
       local_path: data.local_path ?? null,
       error_msg: data.error_msg ?? null,
       duration_ms: data.duration_ms ?? null,
+      skill_run_id: data.skill_run_id ?? null,
+      skill_version_id: data.skill_version_id ?? null,
+      grant_id: data.grant_id ?? null,
       created_at: now,
       updated_at: now,
     }).run()

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { mapErrorToHttpResponse } from '../error-mapper'
 import { skillService } from '../../services/skill.service'
 import { readJson, readIntQuery } from '../util'
+import { skillsFacade } from '../../skills/application/skills-facade.service'
 
 export const skillsRoutes = new Hono()
 
@@ -9,6 +10,17 @@ skillsRoutes.get('/', (c) => {
   try { return c.json({ data: skillService.listInstalled() }) } catch (error) { return errorResponse(c, error) }
 })
 
+
+skillsRoutes.get('/overview', (c) => {
+  try {
+    const limit = readIntQuery(c, 'limit', 20)
+    const offset = readIntQuery(c, 'offset', 0)
+    const rawRuntimeKind = c.req.query('runtimeKind')
+    const runtimeKind = rawRuntimeKind === 'legacy' || rawRuntimeKind === 'package' ? rawRuntimeKind : undefined
+    const result = skillsFacade.list({ limit, offset, runtimeKind, search: c.req.query('q') || undefined })
+    return c.json({ data: result.data, meta: { limit, offset, total: result.total, hasMore: offset + result.data.length < result.total } })
+  } catch (error) { return errorResponse(c, error) }
+})
 skillsRoutes.get('/market', (c) => {
   try {
     const limit = readIntQuery(c, 'limit', 20)
@@ -30,6 +42,9 @@ skillsRoutes.post('/', async (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 
+skillsRoutes.get('/:id/migration-preview', (c) => {
+  try { return c.json({ data: skillService.migrationPreview(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
+})
 skillsRoutes.get('/:id', (c) => {
   try { return c.json({ data: skillService.get(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })

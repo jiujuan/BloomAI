@@ -11,6 +11,9 @@ export interface ImageSession {
   status: string
   created_at: number
   updated_at: number
+  skill_run_id?: string | null
+  skill_version_id?: string | null
+  grant_id?: string | null
 }
 
 export const imageSessionRepo = {
@@ -21,11 +24,19 @@ export const imageSessionRepo = {
       .all() as ImageSession[]
   },
 
+
+  listBySkillRun(runId: string): ImageSession[] {
+    return getOrmDb().select().from(image_sessions)
+      .where(eq(image_sessions.skill_run_id, runId))
+      .orderBy(desc(image_sessions.updated_at))
+      .all() as ImageSession[]
+  },
+
   get(id: string): ImageSession | undefined {
     return getOrmDb().select().from(image_sessions).where(eq(image_sessions.id, id)).get() as ImageSession | undefined
   },
 
-  create(data: { title?: string; default_model?: string } = {}): ImageSession {
+  create(data: { title?: string; default_model?: string; skill_run_id?: string | null; skill_version_id?: string | null; grant_id?: string | null } = {}): ImageSession {
     const id = uuidv4()
     const now = Date.now()
     const defaultModel = data.default_model || settingsRepo.getValue('default_image_model') || 'agnes-image-2.1-flash'
@@ -36,14 +47,20 @@ export const imageSessionRepo = {
       status: 'active',
       created_at: now,
       updated_at: now,
+      skill_run_id: data.skill_run_id ?? null,
+      skill_version_id: data.skill_version_id ?? null,
+      grant_id: data.grant_id ?? null,
     }).run()
     return this.get(id)!
   },
 
-  update(id: string, data: Partial<Pick<ImageSession, 'title' | 'default_model'>>): ImageSession | undefined {
+  update(id: string, data: Partial<Pick<ImageSession, 'title' | 'default_model' | 'skill_run_id' | 'skill_version_id' | 'grant_id'>>): ImageSession | undefined {
     const updates: Partial<typeof image_sessions.$inferInsert> = { updated_at: Date.now() }
     if (data.title !== undefined) updates.title = data.title
     if (data.default_model !== undefined) updates.default_model = data.default_model
+    if (data.skill_run_id !== undefined) updates.skill_run_id = data.skill_run_id
+    if (data.skill_version_id !== undefined) updates.skill_version_id = data.skill_version_id
+    if (data.grant_id !== undefined) updates.grant_id = data.grant_id
     if (Object.keys(updates).length === 1) return this.get(id)
     getOrmDb().update(image_sessions).set(updates).where(eq(image_sessions.id, id)).run()
     return this.get(id)

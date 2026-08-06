@@ -1,12 +1,13 @@
 import fs from 'fs'
 import path from 'path'
+export { assertSchemaContract, getExpectedSchemaContract } from './schema-contract'
 
 export interface SqlMigration {
   version: string
   sql: string
 }
 
-type RawSqliteDb = {
+export type RawSqliteDb = {
   exec(sql: string): void
   prepare(sql: string): {
     all(): unknown[]
@@ -36,17 +37,33 @@ export function loadSqlMigrations(dir = migrationsDir): SqlMigration[] {
     }))
 }
 
-export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations()): void {
+export function getAppliedMigrationVersions(db: RawSqliteDb): string[] {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT PRIMARY KEY,
       applied_at INTEGER NOT NULL
     );
   `)
+  return db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((row: any) => String(row.version))
+}
 
-  const applied = new Set(
-    db.prepare('SELECT version FROM schema_migrations').all().map((row: any) => row.version as string)
-  )
+export function getMigrationStatus(db: RawSqliteDb, migrations = loadSqlMigrations()): { current: string | null; applied: string[]; pending: string[] } {
+  const recorded = getAppliedMigrationVersions(db)
+  const recordedSet = new Set(recorded)
+  const orderedVersions = migrations.map((migration) => migration.version)
+  const knownApplied = orderedVersions.filter((version) => recordedSet.has(version))
+  const unknownApplied = recorded.filter((version) => !orderedVersions.includes(version))
+  const applied = [...knownApplied, ...unknownApplied]
+  const pending = orderedVersions.filter((version) => !recordedSet.has(version))
+  return {
+    current: applied.length > 0 ? applied[applied.length - 1] : null,
+    applied,
+    pending,
+  }
+}
+
+export function runSqlMigrations(db: RawSqliteDb, migrations = loadSqlMigrations()): void {
+  const applied = new Set(getAppliedMigrationVersions(db))
   let appliedCount = 0
 
   for (const migration of migrations) {

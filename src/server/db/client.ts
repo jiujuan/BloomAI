@@ -1,7 +1,8 @@
 import { eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { createRequire } from 'node:module'
-import { runSqlMigrations } from './migrations'
+import { getMigrationStatus, runSqlMigrations, type SqlMigration } from './migrations'
+import { assertSchemaContract } from './schema-contract'
 import { ensureDataDir, getDbPath } from './paths'
 import * as schema from './schema'
 import { schemaToJsonSchema, toolContracts } from '../tools/contracts'
@@ -60,6 +61,12 @@ export async function initDb() {
   return state.db
 }
 
+export function getSkillRuntimeMigrationStatus(migrations?: SqlMigration[]) {
+  const database = getState().dbInstance
+  if (!database) throw new Error('Database has not been initialized. Call initDb() first.')
+  return getMigrationStatus(database, migrations)
+}
+
 export function closeDb() {
   const state = getState()
   state.dbInstance?.close()
@@ -69,7 +76,60 @@ export function closeDb() {
   syncExports()
 }
 
-function runBootstrapSql() {
+/**
+ * A deliberately tiny legacy prerequisite bootstrap. A few historical numbered
+ * migrations update old tables (settings, sessions, tool_permissions) before the
+ * full compatibility bootstrap can run. It must never create Package Runtime
+ * tables or seed business data.
+ */
+export function runLegacyMigrationPrerequisites() {
+  const rawDb = getState().db
+  if (!rawDb) throw new Error('Database has not been initialized. Call initDb() first.')
+
+  rawDb.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+      persona_id TEXT, model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022',
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS tool_permissions (
+      id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+      granted_at INTEGER, scope TEXT DEFAULT 'session'
+    );
+    CREATE TABLE IF NOT EXISTS image_sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新画图', default_model TEXT,
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      skill_run_id TEXT, skill_version_id TEXT, grant_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS image_generations (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT,
+      prompt TEXT NOT NULL, resolved_prompt TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+      aspect_ratio TEXT, style TEXT, size TEXT, seed INTEGER, reference_images TEXT,
+      status TEXT NOT NULL, provider_task_id TEXT, progress INTEGER, url TEXT, local_path TEXT,
+      error_msg TEXT, duration_ms INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      skill_run_id TEXT, skill_version_id TEXT, grant_id TEXT
+    );
+  `)
+
+  const state = getState()
+  if (!state.dbInstance) throw new Error('Database has not been initialized. Call initDb() first.')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'skill_run_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'skill_version_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'grant_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'skill_run_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'skill_version_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'grant_id', 'TEXT')
+}
+
+function ensureLegacyColumn(database: import('node:sqlite').DatabaseSync, tableName: string, columnName: string, columnType: string): void {
+  const exists = database.prepare(`PRAGMA table_info("${tableName}")`).all().some((row: any) => row.name === columnName)
+  if (!exists) database.exec(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${columnType}`)
+}
+
+export function runBootstrapSql() {
   const rawDb = getState().db
   if (!rawDb) throw new Error('Database has not been initialized. Call initDb() first.')
 
@@ -380,10 +440,16 @@ function seedSkills() {
 
 export async function runMigrations() {
   await initDb()
-  runBootstrapSql()
   const state = getState()
   if (!state.dbInstance) throw new Error('Database has not been initialized. Call initDb() first.')
+
+  // Historical migrations 015/025/027 update three legacy tables. Create only
+  // those prerequisites before SQL migrations; Package Runtime tables remain
+  // exclusively owned by numbered migrations.
+  runLegacyMigrationPrerequisites()
   runSqlMigrations(state.dbInstance)
+  assertSchemaContract(state.dbInstance)
+  runBootstrapSql()
   seedPersonas()
   seedSettings()
   seedLlm()

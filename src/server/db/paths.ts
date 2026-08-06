@@ -18,7 +18,9 @@ export function getWorkspacesDir(): string {
 }
 
 export function getSkillRunArtifactsDir(runId: string): string {
-  return path.join(getDataDir(), 'skills', 'runs', runId, 'artifacts')
+  const configured = process.env.SKILL_ARTIFACT_ROOT?.trim()
+  const root = configured ? path.resolve(configured) : path.join(getDataDir(), 'skills', 'runs')
+  return path.join(root, runId, 'artifacts')
 }
 
 /**

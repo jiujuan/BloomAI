@@ -170,6 +170,8 @@ export const skill_packages = sqliteTable('skill_packages', {
   source_ref: text('source_ref'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  deleted_at: integer('deleted_at'),
+  delete_reason: text('delete_reason'),
 })
 
 export const skill_versions = sqliteTable('skill_versions', {
@@ -182,9 +184,16 @@ export const skill_versions = sqliteTable('skill_versions', {
   package_path: text('package_path').notNull(),
   source_snapshot_json: text('source_snapshot_json').notNull().default('{}'),
   is_compatible: integer('is_compatible').notNull().default(1),
+  immutable_hash: text('immutable_hash').notNull().default(''),
+  status: text('status').notNull().default('runnable'),
+  security_status: text('security_status').notNull().default('unreviewed'),
+  snapshot_hash: text('snapshot_hash').notNull().default(''),
+  security_findings_json: text('security_findings_json').notNull().default('{}'),
+  published_at: integer('published_at'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   packageIdx: index('idx_skill_versions_package').on(table.package_id),
+  immutableIdx: index('idx_skill_versions_immutable_hash').on(table.package_id, table.immutable_hash),
 }))
 
 export const skill_installations = sqliteTable('skill_installations', {
@@ -195,8 +204,28 @@ export const skill_installations = sqliteTable('skill_installations', {
   enabled: integer('enabled').notNull().default(1),
   installed_at: integer('installed_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  previous_version_id: text('previous_version_id'),
+  revision: integer('revision').notNull().default(0),
+  changed_at: integer('changed_at'),
+  disabled_at: integer('disabled_at'),
+  uninstalled_at: integer('uninstalled_at'),
+  deleted_at: integer('deleted_at'),
+  rollback_reason: text('rollback_reason'),
 }, (table) => ({
   packageIdx: index('idx_skill_installations_package').on(table.package_id),
+  currentVersionIdx: index('idx_skill_installations_current_version').on(table.current_version_id),
+}))
+
+
+export const skill_installation_commands = sqliteTable('skill_installation_commands', {
+  id: text('id').primaryKey(),
+  installation_id: text('installation_id').notNull(),
+  idempotency_key: text('idempotency_key').notNull(),
+  result_json: text('result_json').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  installationIdx: index('idx_skill_installation_commands_installation').on(table.installation_id, table.created_at),
+  idempotencyIdx: index('idx_skill_installation_commands_idempotency').on(table.installation_id, table.idempotency_key),
 }))
 
 export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
@@ -211,14 +240,33 @@ export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
   session_id: text('session_id'),
   image_session_id: text('image_session_id'),
   waiting_reason: text('waiting_reason'),
+  waiting_since: integer('waiting_since'),
+  waiting_expires_at: integer('waiting_expires_at'),
   cancel_requested: integer('cancel_requested').notNull().default(0),
+  cancel_requested_at: integer('cancel_requested_at'),
+  interrupted_at: integer('interrupted_at'),
+  cancel_reason: text('cancel_reason'),
+  last_checkpoint_json: text('last_checkpoint_json'),
   started_at: integer('started_at'),
   updated_at: integer('updated_at').notNull(),
   finished_at: integer('finished_at'),
   error_code: text('error_code'),
   error_message: text('error_message'),
+  current_step: text('current_step'),
+  required_action_json: text('required_action_json'),
+  worker_id: text('worker_id'),
+  heartbeat_at: integer('heartbeat_at'),
+  execution_mode: text('execution_mode').notNull().default('instruction-agent'),
+  step_count: integer('step_count').notNull().default(0),
+  token_usage: integer('token_usage').notNull().default(0),
+  last_heartbeat_at: integer('last_heartbeat_at'),
+  result_summary: text('result_summary'),
 }, (table) => ({
   versionIdx: index('idx_skill_runs_v2_version').on(table.skill_version_id),
+  activeWorkerIdx: index('idx_skill_runs_v2_active_worker').on(table.status, table.worker_id, table.heartbeat_at),
+  recoveryIdx: index('idx_skill_runs_v2_recovery').on(table.status, table.interrupted_at, table.cancel_requested),
+  waitingActionsIdx: index('idx_skill_runs_v2_waiting_actions').on(table.status, table.waiting_expires_at),
+  executionMetricsIdx: index('idx_skill_runs_v2_execution_metrics').on(table.status, table.last_heartbeat_at, table.step_count),
 }))
 
 export const skill_run_events = sqliteTable('skill_run_events', {
@@ -226,11 +274,14 @@ export const skill_run_events = sqliteTable('skill_run_events', {
   run_id: text('run_id').notNull(),
   seq: integer('seq').notNull(),
   schema_version: integer('schema_version').notNull().default(1),
+  producer: text('producer').notNull().default('runtime'),
+  occurred_at: integer('occurred_at').notNull(),
   type: text('type').notNull(),
   payload_json: text('payload_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   runSeqIdx: index('idx_skill_run_events_run_seq').on(table.run_id, table.seq),
+  runOccurredIdx: index('idx_skill_run_events_run_occurred').on(table.run_id, table.occurred_at, table.seq),
 }))
 
 export const skill_run_commands = sqliteTable('skill_run_commands', {
@@ -247,14 +298,21 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
   kind: text('kind').notNull(),
+  artifact_kind: text('artifact_kind').notNull().default('unknown'),
   mime_type: text('mime_type'),
   path: text('path').notNull(),
+  relative_path: text('relative_path').notNull().default(''),
   size_bytes: integer('size_bytes').notNull().default(0),
   sha256: text('sha256').notNull(),
   metadata_json: text('metadata_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
+  retention_until: integer('retention_until'),
+  exported_at: integer('exported_at'),
+  exported_by: text('exported_by'),
 }, (table) => ({
   runIdx: index('idx_skill_artifacts_run').on(table.run_id),
+  runCreatedIdx: index('idx_skill_artifacts_run_created').on(table.run_id, table.created_at),
+  retentionIdx: index('idx_skill_artifacts_retention').on(table.retention_until, table.exported_at),
 }))
 
 export const skill_capability_grants = sqliteTable('skill_capability_grants', {
@@ -263,14 +321,115 @@ export const skill_capability_grants = sqliteTable('skill_capability_grants', {
   capability: text('capability').notNull(),
   grant_mode: text('grant_mode').notNull(),
   scope_json: text('scope_json').notNull().default('{}'),
+  requested_scope_json: text('requested_scope_json').notNull().default('{}'),
+  granted_scope_json: text('granted_scope_json'),
+  status: text('status').notNull().default('approved'),
   granted_by: text('granted_by'),
   granted_at: integer('granted_at').notNull(),
+  approved_by: text('approved_by'),
+  approved_at: integer('approved_at'),
   expires_at: integer('expires_at'),
   revoked_at: integer('revoked_at'),
+  revoke_reason: text('revoke_reason'),
   session_id: text('session_id'),
+  run_id: text('run_id'),
+  owner_id: text('owner_id'),
+  max_calls: integer('max_calls'),
+  calls_used: integer('calls_used').notNull().default(0),
   consumed_at: integer('consumed_at'),
+  idempotency_key: text('idempotency_key'),
 }, (table) => ({
   versionIdx: index('idx_skill_capability_grants_version').on(table.skill_version_id),
+  activeIdx: index('idx_skill_capability_grants_active').on(table.skill_version_id, table.capability, table.session_id),
+  runIdx: index('idx_skill_capability_grants_run').on(table.run_id, table.status),
+  idempotencyIdx: uniqueIndex('idx_skill_capability_grants_idempotency').on(table.run_id, table.idempotency_key),
+}))
+
+export const skill_run_queue = sqliteTable('skill_run_queue', {
+  id: text('id').primaryKey(),
+  run_id: text('run_id').notNull(),
+  status: text('status').notNull(),
+  available_at: integer('available_at').notNull(),
+  lease_owner: text('lease_owner'),
+  lease_until: integer('lease_until'),
+  attempt: integer('attempt').notNull().default(0),
+  last_error: text('last_error'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  claimIdx: index('idx_skill_run_queue_claim').on(table.status, table.available_at, table.lease_until),
+}))
+
+export const skill_import_reviews = sqliteTable('skill_import_reviews', {
+  id: text('id').primaryKey(),
+  source: text('source').notNull(),
+  source_sha: text('source_sha').notNull(),
+  source_ref: text('source_ref'),
+  inspection_json: text('inspection_json').notNull().default('{}'),
+  security_findings_json: text('security_findings_json').notNull().default('{}'),
+  status: text('status').notNull(),
+  reviewer: text('reviewer'),
+  decision: text('decision'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  sourceUniqueIdx: uniqueIndex('idx_skill_import_reviews_source').on(table.source, table.source_sha, table.source_ref),
+  statusIdx: index('idx_skill_import_reviews_status').on(table.status, table.updated_at),
+}))
+
+export const skill_audit_events = sqliteTable('skill_audit_events', {
+  id: text('id').primaryKey(),
+  actor: text('actor'),
+  action: text('action').notNull(),
+  resource_type: text('resource_type').notNull(),
+  resource_id: text('resource_id'),
+  payload_json: text('payload_json').notNull().default('{}'),
+  security_decision: text('security_decision').notNull().default('not_evaluated'),
+  policy_version: text('policy_version').notNull().default('legacy'),
+  source_fingerprint: text('source_fingerprint'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  resourceIdx: index('idx_skill_audit_events_resource').on(table.resource_type, table.resource_id, table.created_at),
+  createdIdx: index('idx_skill_audit_events_created').on(table.created_at),
+}))
+
+export const skill_drafts = sqliteTable('skill_drafts', {
+  id: text('id').primaryKey(),
+  owner_id: text('owner_id').notNull(),
+  status: text('status').notNull(),
+  revision: integer('revision').notNull().default(1),
+  content_json: text('content_json').notNull().default('{}'),
+  validation_json: text('validation_json').notNull().default('{}'),
+  base_version_id: text('base_version_id'),
+  published_version_id: text('published_version_id'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  ownerStatusIdx: index('idx_skill_drafts_owner_status').on(table.owner_id, table.status, table.updated_at),
+}))
+
+export const skill_version_snapshots = sqliteTable('skill_version_snapshots', {
+  id: text('id').primaryKey(),
+  version_id: text('version_id').notNull(),
+  files_manifest_json: text('files_manifest_json').notNull().default('{}'),
+  total_bytes: integer('total_bytes').notNull().default(0),
+  file_count: integer('file_count').notNull().default(0),
+  snapshot_root: text('snapshot_root').notNull(),
+  snapshot_hash: text('snapshot_hash').notNull(),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  versionIdx: uniqueIndex('idx_skill_version_snapshots_version').on(table.version_id),
+  hashIdx: index('idx_skill_version_snapshots_hash').on(table.snapshot_hash),
+}))
+
+export const skill_version_diffs = sqliteTable('skill_version_diffs', {
+  id: text('id').primaryKey(),
+  from_version_id: text('from_version_id').notNull(),
+  to_version_id: text('to_version_id').notNull(),
+  diff_json: text('diff_json').notNull().default('{}'),
+  created_at: integer('created_at').notNull(),
+}, (table) => ({
+  versionsUniqueIdx: uniqueIndex('idx_skill_version_diffs_versions').on(table.from_version_id, table.to_version_id),
 }))
 
 // AI 画图 (Image Studio) — independent feature. Sessions are decoupled from chat `sessions`
@@ -282,7 +441,12 @@ export const image_sessions = sqliteTable('image_sessions', {
   status: text('status').notNull().default('active'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
-})
+  skill_run_id: text('skill_run_id'),
+  skill_version_id: text('skill_version_id'),
+  grant_id: text('grant_id'),
+}, (table) => ({
+  skillRunIdx: index('idx_image_sessions_skill_run').on(table.skill_run_id, table.updated_at),
+}))
 
 export const image_generations = sqliteTable('image_generations', {
   id: text('id').primaryKey(),
@@ -306,8 +470,13 @@ export const image_generations = sqliteTable('image_generations', {
   duration_ms: integer('duration_ms'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  skill_run_id: text('skill_run_id'),
+  skill_version_id: text('skill_version_id'),
+  grant_id: text('grant_id'),
 }, (table) => ({
   sessionIdx: index('idx_image_gen_session').on(table.session_id, table.created_at),
+  skillRunIdx: index('idx_image_gen_skill_run').on(table.skill_run_id, table.created_at),
+  grantIdx: index('idx_image_gen_grant').on(table.grant_id, table.created_at),
 }))
 
 export type Setting = typeof settings.$inferSelect

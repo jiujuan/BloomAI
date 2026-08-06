@@ -91,6 +91,34 @@ function foreignKeyActions(tableName: string) {
 }
 
 describe('database migrations', () => {
+  it('reports applied, pending, and current migration versions without executing migrations', async () => {
+    const { getMigrationStatus, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = [
+        { version: '001-alpha', sql: 'CREATE TABLE migration_alpha (id TEXT PRIMARY KEY);' },
+        { version: '002-beta', sql: 'CREATE TABLE migration_beta (id TEXT PRIMARY KEY);' },
+      ]
+
+      expect(getMigrationStatus(db, migrations)).toEqual({
+        current: null,
+        applied: [],
+        pending: ['001-alpha', '002-beta'],
+      })
+
+      runSqlMigrations(db, migrations.slice(0, 1))
+
+      expect(getMigrationStatus(db, migrations)).toEqual({
+        current: '001-alpha',
+        applied: ['001-alpha'],
+        pending: ['002-beta'],
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-db-migrations-'))
     originalEnv = { ...process.env }
@@ -111,12 +139,190 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(29)
+    expect(migrationVersions()).toHaveLength(43)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(29)
+    expect(migrationVersions()).toHaveLength(43)
+  })
+
+  it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const securityMigration = migrations.find((migration) => migration.version === '043-skill-security-audit-fields')
+      expect(securityMigration).toBeDefined()
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+          persona_id TEXT, model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022',
+          status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+      `)
+      runSqlMigrations(db, migrations.filter((migration) => migration.version !== securityMigration!.version))
+
+      db.exec(`
+        INSERT INTO skill_packages (id, name, description, source_type, created_at, updated_at)
+        VALUES ('security-package', 'Security package', '', 'local-directory', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, runtime, manifest_json, manifest_hash, package_path,
+          source_snapshot_json, is_compatible, immutable_hash, status, security_status,
+          snapshot_hash, published_at, created_at
+        ) VALUES (
+          'security-version', 'security-package', '1.0.0', 'instruction-agent', '{}', 'manifest',
+          '/packages/security', '{}', 1, 'immutable', 'runnable', 'unreviewed', 'snapshot', NULL, 1
+        );
+        INSERT INTO skill_import_reviews (
+          id, source, source_sha, source_ref, inspection_json, status, reviewer, decision, created_at, updated_at
+        ) VALUES ('security-review', 'local-directory', 'source-sha', NULL, '{}', 'pending', NULL, NULL, 1, 1);
+        INSERT INTO skill_audit_events (
+          id, actor, action, resource_type, resource_id, payload_json, created_at
+        ) VALUES ('security-audit', 'legacy-actor', 'import', 'skill-package', 'security-package', '{}', 1);
+      `)
+
+      runSqlMigrations(db, [securityMigration!])
+      runSqlMigrations(db, [securityMigration!])
+
+      const auditColumns = db.prepare("PRAGMA table_info('skill_audit_events')").all() as any[]
+      const reviewColumns = db.prepare("PRAGMA table_info('skill_import_reviews')").all() as any[]
+      const versionColumns = db.prepare("PRAGMA table_info('skill_versions')").all() as any[]
+      const column = (rows: any[], name: string) => rows.find((row) => row.name === name)
+
+      expect(auditColumns.filter((row) => row.name === 'actor')).toHaveLength(1)
+      expect(column(auditColumns, 'security_decision')).toMatchObject({ notnull: 1, dflt_value: "'not_evaluated'" })
+      expect(column(auditColumns, 'policy_version')).toMatchObject({ notnull: 1, dflt_value: "'legacy'" })
+      expect(column(auditColumns, 'source_fingerprint')).toMatchObject({ notnull: 0 })
+      expect(column(reviewColumns, 'security_findings_json')).toMatchObject({ notnull: 1, dflt_value: "'{}'" })
+      expect(column(versionColumns, 'security_findings_json')).toMatchObject({ notnull: 1, dflt_value: "'{}'" })
+      expect(db.prepare(`
+        SELECT security_decision, policy_version, source_fingerprint
+        FROM skill_audit_events WHERE id = 'security-audit'
+      `).get()).toEqual({ security_decision: 'not_evaluated', policy_version: 'legacy', source_fingerprint: null })
+      expect(db.prepare("SELECT security_findings_json FROM skill_import_reviews WHERE id = 'security-review'").get())
+        .toEqual({ security_findings_json: '{}' })
+      expect(db.prepare("SELECT security_findings_json FROM skill_versions WHERE id = 'security-version'").get())
+        .toEqual({ security_findings_json: '{}' })
+      expect(migrationVersions()).toEqual(migrations.map((migration) => migration.version))
+    } finally {
+      db.close()
+    }
+  })
+
+  it('adds Image Studio skill-link columns before applying the link indexes to a legacy database', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const legacy = openRawDb()
+    legacy.exec(`
+      CREATE TABLE image_sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, default_model TEXT,
+        status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE image_generations (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT,
+        prompt TEXT NOT NULL, resolved_prompt TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+        aspect_ratio TEXT, style TEXT, size TEXT, seed INTEGER, reference_images TEXT,
+        status TEXT NOT NULL, provider_task_id TEXT, progress INTEGER, url TEXT, local_path TEXT,
+        error_msg TEXT, duration_ms INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+    `)
+    legacy.close()
+
+    const client = await loadClient()
+    await client.initDb()
+    client.runLegacyMigrationPrerequisites()
+    const migrations = loadSqlMigrations()
+    const imageMigration = migrations.find((migration) => migration.version === '042-image-studio-skill-links')
+    expect(imageMigration).toBeDefined()
+    const migrationDb = openRawDb()
+    try {
+      runSqlMigrations(migrationDb, [imageMigration!])
+    } finally {
+      migrationDb.close()
+    }
+
+    const upgraded = openRawDb()
+    try {
+      expect(upgraded.prepare("SELECT name FROM pragma_table_info('image_sessions') WHERE name IN ('skill_run_id', 'skill_version_id', 'grant_id') ORDER BY name").all()).toEqual([
+        { name: 'grant_id' }, { name: 'skill_run_id' }, { name: 'skill_version_id' },
+      ])
+      expect(upgraded.prepare("SELECT name FROM pragma_table_info('image_generations') WHERE name IN ('skill_run_id', 'skill_version_id', 'grant_id') ORDER BY name").all()).toEqual([
+        { name: 'grant_id' }, { name: 'skill_run_id' }, { name: 'skill_version_id' },
+      ])
+      expect(indexNames('image_sessions')).toContain('idx_image_sessions_skill_run')
+      expect(indexNames('image_generations')).toEqual(expect.arrayContaining(['idx_image_generations_skill_run', 'idx_image_generations_grant']))
+      expect(upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '042-image-studio-skill-links'").get()).toEqual({ count: 1 })
+    } finally {
+      upgraded.close()
+    }
+  })
+
+  it('adds artifact policy columns and backfills legacy artifact rows incrementally', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const artifactMigration = migrations.find((migration) => migration.version === '041-skill-artifact-policy')
+      expect(artifactMigration).toBeDefined()
+      db.exec(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, persona_id TEXT, model TEXT NOT NULL,
+          status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE messages (
+          id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+          tool_calls TEXT, parts TEXT, tokens INTEGER, created_at INTEGER NOT NULL
+        );
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER NOT NULL,
+          scope TEXT NOT NULL, granted_at INTEGER NOT NULL
+        );
+      `)
+      runSqlMigrations(db, migrations.filter((migration) => migration.version !== '041-skill-artifact-policy'))
+      db.exec(`
+        INSERT INTO skill_packages (id, name, source_type, created_at, updated_at)
+        VALUES ('package-artifact-policy', 'Artifact Policy', 'local', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-artifact-policy', 'package-artifact-policy', '1.0.0', '{}', 'hash', '/pkg', 1);
+        INSERT INTO skill_runs_v2 (
+          id, skill_version_id, status, input_json, context_json, updated_at, revision
+        ) VALUES ('run-artifact-policy', 'version-artifact-policy', 'created', '{}', '{}', 1, 0);
+        INSERT INTO skill_artifacts (
+          id, run_id, kind, mime_type, path, size_bytes, sha256, metadata_json, created_at
+        ) VALUES ('artifact-legacy', 'run-artifact-policy', 'markdown', 'text/markdown', 'summary.md', 2, 'hash', '{}', 2);
+      `)
+
+      runSqlMigrations(db, [artifactMigration!])
+      runSqlMigrations(db, [artifactMigration!])
+
+      expect(db.prepare("SELECT name FROM pragma_table_info('skill_artifacts') WHERE name IN ('artifact_kind', 'relative_path') ORDER BY name").all()).toEqual([
+        { name: 'artifact_kind' },
+        { name: 'relative_path' },
+      ])
+      expect(db.prepare("SELECT artifact_kind, relative_path FROM skill_artifacts WHERE id = 'artifact-legacy'").get()).toEqual({
+        artifact_kind: 'markdown',
+        relative_path: 'summary.md',
+      })
+      expect(indexNames('skill_artifacts')).toEqual(expect.arrayContaining([
+        'idx_skill_artifacts_run_created',
+        'idx_skill_artifacts_retention',
+      ]))
+      expect(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '041-skill-artifact-policy'").get()).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
   })
 
   it('orders SQL migration files by numeric prefix', async () => {
@@ -151,6 +357,12 @@ describe('database migrations', () => {
         'skill_run_events',
         'skill_artifacts',
         'skill_capability_grants',
+        'skill_run_queue',
+        'skill_import_reviews',
+        'skill_audit_events',
+        'skill_drafts',
+        'skill_version_snapshots',
+        'skill_version_diffs',
         'research_runs',
         'research_questions',
         'research_search_queries',
@@ -205,6 +417,20 @@ describe('database migrations', () => {
       '027-tool-permissions-permanent-only',
       '028-tools-platform-b1',
       '029-tools-platform-b1-patch',
+      '030-skill-runtime-queue-and-control-plane',
+      '031-skill-version-drafts-and-snapshots',
+      '032-skill-run-state-machine',
+      '033-skill-run-event-protocol',
+      '034-skill-run-execution-metrics',
+      '035-skill-run-recovery',
+      '036-skill-capability-grant-lifecycle',
+      '037-skill-run-waiting-actions',
+      '038-skill-artifact-retention-export',
+      '039-skill-version-lifecycle',
+      '040-skill-lifecycle-delete',
+      '041-skill-artifact-policy',
+      '042-image-studio-skill-links',
+      '043-skill-security-audit-fields',
     ])
     const emptyDb = openRawDb()
     try {
@@ -350,6 +576,85 @@ describe('database migrations', () => {
     })
   })
 
+
+  it('enforces Skills Runtime uniqueness, foreign-key, and active-lease invariants', async () => {
+    const { runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      db.exec('PRAGMA foreign_keys = ON')
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+          persona_id TEXT, model TEXT NOT NULL DEFAULT 'model',
+          status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+      `)
+      runSqlMigrations(db)
+      db.exec(`
+        INSERT INTO skill_packages (id, name, description, source_type, created_at, updated_at)
+        VALUES ('package-invariants', 'Invariant package', '', 'local', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-invariants', 'package-invariants', '1.0.0', '{}', 'manifest-hash', '/tmp/package-invariants', 1);
+        INSERT INTO skill_runs_v2 (id, skill_version_id, status, input_json, context_json, updated_at)
+        VALUES ('run-invariants', 'version-invariants', 'created', '{}', '{}', 1);
+      `)
+
+      expect(() => db.prepare(`
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-duplicate', 'package-invariants', '1.0.0', '{}', 'manifest-hash', '/tmp/duplicate', 2)
+      `).run()).toThrow()
+
+      db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES (?, ?, ?, ?, '{}', ?)
+      `).run('event-invariants-1', 'run-invariants', 1, 'run.started', 1)
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES ('event-invariants-duplicate', 'run-invariants', 1, 'run.started', '{}', 2)
+      `).run()).toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES ('event-invariants-invalid-run', 'missing-run', 2, 'run.started', '{}', 2)
+      `).run()).toThrow()
+
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_commands (id, run_id, idempotency_key, result_json, created_at)
+        VALUES ('command-invariants-1', 'run-invariants', 'same-command', '{}', 1)
+      `).run()).not.toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_commands (id, run_id, idempotency_key, result_json, created_at)
+        VALUES ('command-invariants-duplicate', 'run-invariants', 'same-command', '{}', 2)
+      `).run()).toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_artifacts (id, run_id, kind, path, size_bytes, sha256, metadata_json, created_at)
+        VALUES ('artifact-invariants-invalid-run', 'missing-run', 'text', '/tmp/missing', 0, 'hash', '{}', 1)
+      `).run()).toThrow()
+
+      db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-1', 'run-invariants', 'queued', 1, 0, 1, 1)
+      `).run()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-duplicate-active', 'run-invariants', 'retry_wait', 2, 1, 2, 2)
+      `).run()).toThrow()
+      db.prepare(`UPDATE skill_run_queue SET status = 'done', updated_at = 3 WHERE id = 'queue-invariants-1'`).run()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-2', 'run-invariants', 'queued', 4, 0, 4, 4)
+      `).run()).not.toThrow()
+    } finally {
+      db.close()
+    }
+  })
 
   it('upgrades a pre-scheduled-task database without changing Chat tables and enforces task-run uniqueness', async () => {
     const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
@@ -746,6 +1051,8 @@ describe('database migrations', () => {
       const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row: any) => row.name)
       expect(names).not.toContain('rollback_probe')
       expect(db.prepare('SELECT COUNT(*) as c FROM schema_migrations').get()).toEqual({ c: 0 })
+      expect(() => runSqlMigrations(db, [{ version: '100-identifiable-failure', sql: 'INSERT INTO missing_table VALUES (1);' }]))
+        .toThrow('[db:migrate] Failed to apply 100-identifiable-failure:')
     } finally {
       db.close()
     }

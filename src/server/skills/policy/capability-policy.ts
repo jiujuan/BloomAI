@@ -1,5 +1,6 @@
 import path from 'path'
 import { z } from 'zod'
+import { FORBIDDEN_PACKAGE_CAPABILITIES as SECURITY_FORBIDDEN_PACKAGE_CAPABILITIES } from '../security/skill-security-checklist'
 
 export const skillCapabilitySchema = z.enum([
   'web.search',
@@ -12,10 +13,12 @@ export const skillCapabilitySchema = z.enum([
 
 export type SkillCapability = z.infer<typeof skillCapabilitySchema>
 
+export const FORBIDDEN_PACKAGE_CAPABILITIES = SECURITY_FORBIDDEN_PACKAGE_CAPABILITIES
+
 export const capabilityGrantModeSchema = z.enum(['once', 'session', 'persistent'])
 export type CapabilityGrantMode = z.infer<typeof capabilityGrantModeSchema>
 
-const capabilityScopeSchema = z.object({
+export const capabilityScopeSchema = z.object({
   allowedRoots: z.array(z.string().min(1)).min(1).optional(),
   allowedDomains: z.array(z.string().min(1)).min(1).optional(),
   allowedModels: z.array(z.string().min(1)).min(1).optional(),
@@ -23,10 +26,10 @@ const capabilityScopeSchema = z.object({
 }).strict()
 
 export type CapabilityScope = {
-  allowedRoots?: readonly string[]
-  allowedDomains?: readonly string[]
-  allowedModels?: readonly string[]
-  maxCalls?: number
+  readonly allowedRoots?: readonly string[]
+  readonly allowedDomains?: readonly string[]
+  readonly allowedModels?: readonly string[]
+  readonly maxCalls?: number
 }
 
 export const capabilityGrantRequestSchema = z.object({
@@ -50,14 +53,21 @@ export type CapabilityScopeCheck = {
   scope: CapabilityScope
 }
 
+export function isForbiddenPackageCapability(capability: string): boolean {
+  return FORBIDDEN_PACKAGE_CAPABILITIES.has(capability)
+}
+
 export function isScopeAllowed(check: CapabilityScopeCheck): { allowed: true } | { allowed: false; reason: string } {
   if (check.capability === 'web.fetch' || check.capability === 'web.search') {
     if (!check.scope.allowedDomains) return { allowed: true }
-    const rawUrl = typeof check.input.url === 'string' ? check.input.url : undefined
-    if (!rawUrl) return { allowed: false, reason: 'A URL is required for this scoped capability' }
+    const rawUrl = typeof check.input.url === 'string' ? check.input.url : typeof check.input.domain === 'string' ? `https://${check.input.domain}` : undefined
+    if (!rawUrl) return { allowed: false, reason: 'A URL or domain is required for this scoped capability' }
     try {
       const hostname = new URL(rawUrl).hostname.toLowerCase()
-      return check.scope.allowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+      return check.scope.allowedDomains.some((domain) => {
+        const normalized = domain.toLowerCase().replace(/^\*\./, '')
+        return hostname === normalized || hostname.endsWith(`.${normalized}`)
+      })
         ? { allowed: true }
         : { allowed: false, reason: `Domain is not allowed: ${hostname}` }
     } catch {
@@ -90,6 +100,68 @@ export function isScopeAllowed(check: CapabilityScopeCheck): { allowed: true } |
 
 export type RequestedCapability = { capability: SkillCapability; scope: CapabilityScope }
 
+export function normalizeCapabilityScope(value: unknown): CapabilityScope {
+  const parsed = capabilityScopeSchema.safeParse(value ?? {})
+  if (!parsed.success) throw new Error(`Invalid capability scope: ${parsed.error.issues[0]?.message ?? 'invalid scope'}`)
+  return parsed.data
+}
+
+function listIsSubset(granted: readonly string[] | undefined, requested: readonly string[] | undefined): boolean {
+  if (!granted) return !requested
+  if (!requested) return true
+  return granted.every((value) => requested.includes(value))
+}
+
+function numberIsSubset(granted: number | undefined, requested: number | undefined): boolean {
+  if (granted === undefined) return requested === undefined
+  return requested === undefined || granted <= requested
+}
+
+export function isScopeSubset(granted: CapabilityScope, requested: CapabilityScope): boolean {
+  return listIsSubset(granted.allowedRoots, requested.allowedRoots)
+    && listIsSubset(granted.allowedDomains, requested.allowedDomains)
+    && listIsSubset(granted.allowedModels, requested.allowedModels)
+    && numberIsSubset(granted.maxCalls, requested.maxCalls)
+}
+
+export function isScopeEqual(left: CapabilityScope, right: CapabilityScope): boolean {
+  return isScopeSubset(left, right) && isScopeSubset(right, left)
+}
+
+export type StoredCapabilityGrant = {
+  readonly id: string
+  readonly capability: string
+  readonly grant_mode: string
+  readonly scope_json: string
+  readonly granted_by: string | null
+  readonly granted_at: number
+  readonly expires_at: number | null
+  readonly revoked_at: number | null
+  readonly session_id: string | null
+  readonly consumed_at: number | null
+}
+
+/** Select grants that can be safely reused when the new request is no broader. */
+export function selectInheritableGrants(
+  grants: readonly StoredCapabilityGrant[],
+  requested: readonly RequestedCapability[],
+): StoredCapabilityGrant[] {
+  const requestedByCapability = new Map(requested.map((entry) => [entry.capability, entry.scope]))
+  return grants.filter((grant) => {
+    if (grant.revoked_at !== null || grant.consumed_at !== null || grant.expires_at !== null && grant.expires_at <= Date.now()) return false
+    const capability = skillCapabilitySchema.safeParse(grant.capability)
+    if (!capability.success) return false
+    const requestedScope = requestedByCapability.get(capability.data)
+    if (!requestedScope) return false
+    try {
+      const parsed = capabilityScopeSchema.safeParse(JSON.parse(grant.scope_json))
+      return parsed.success && isScopeSubset(requestedScope, parsed.data)
+    } catch {
+      return false
+    }
+  })
+}
+
 export function calculateCapabilityDiff(previous: readonly RequestedCapability[], next: readonly RequestedCapability[]) {
   const previousByCapability = new Map(previous.map((entry) => [entry.capability, entry.scope]))
   const nextByCapability = new Map(next.map((entry) => [entry.capability, entry.scope]))
@@ -101,59 +173,11 @@ export function calculateCapabilityDiff(previous: readonly RequestedCapability[]
 
   for (const [capability, scope] of nextByCapability) {
     const before = previousByCapability.get(capability)
-    if (!before) {
-      added.push(capability)
-    } else if (isScopeSubset(scope, before) && isScopeSubset(before, scope)) {
-      unchanged.push(capability)
-    } else if (isScopeSubset(scope, before)) {
-      narrowed.push(capability)
-    } else {
-      broadened.push(capability)
-    }
+    if (!before) added.push(capability)
+    else if (isScopeEqual(scope, before)) unchanged.push(capability)
+    else if (isScopeSubset(scope, before)) narrowed.push(capability)
+    else broadened.push(capability)
   }
   for (const capability of previousByCapability.keys()) if (!nextByCapability.has(capability)) removed.push(capability)
   return { added, removed, broadened, narrowed, unchanged }
-}
-
-export type StoredCapabilityGrant = {
-  id: string
-  capability: string
-  grant_mode: string
-  scope_json: string
-  granted_by: string | null
-  granted_at: number
-  expires_at: number | null
-  revoked_at: number | null
-  session_id: string | null
-  consumed_at: number | null
-}
-
-export function selectInheritableGrants(grants: readonly StoredCapabilityGrant[], requested: readonly RequestedCapability[]): StoredCapabilityGrant[] {
-  const requestedByCapability = new Map(requested.map((entry) => [entry.capability, entry.scope]))
-  return grants.filter((grant) => {
-    if (grant.revoked_at !== null || grant.consumed_at !== null || grant.expires_at !== null && grant.expires_at <= Date.now()) return false
-    const capability = skillCapabilitySchema.safeParse(grant.capability)
-    if (!capability.success) return false
-    const requestedScope = requestedByCapability.get(capability.data)
-    if (!requestedScope) return false
-    try {
-      const scope = capabilityScopeSchema.safeParse(JSON.parse(grant.scope_json))
-      return scope.success && isScopeSubset(requestedScope, scope.data)
-    } catch {
-      return false
-    }
-  })
-}
-
-function isScopeSubset(candidate: CapabilityScope, boundary: CapabilityScope): boolean {
-  return isArraySubset(candidate.allowedRoots, boundary.allowedRoots)
-    && isArraySubset(candidate.allowedDomains, boundary.allowedDomains)
-    && isArraySubset(candidate.allowedModels, boundary.allowedModels)
-    && (boundary.maxCalls === undefined || candidate.maxCalls !== undefined && candidate.maxCalls <= boundary.maxCalls)
-}
-
-function isArraySubset(candidate: readonly string[] | undefined, boundary: readonly string[] | undefined): boolean {
-  if (!boundary) return true
-  if (!candidate) return false
-  return candidate.every((value) => boundary.includes(value))
 }

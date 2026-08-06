@@ -1,0 +1,129 @@
+name: Skills Runtime
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+    paths:
+      - 'src/server/skills/**'
+      - 'src/server/db/**'
+      - 'src/server/http/routes/skill-*.ts'
+      - 'tests/fixtures/skills/**'
+      - 'tests/integration/skill-runtime/**'
+      - 'tests/security/**'
+      - 'tests/e2e/skills/**'
+      - 'scripts/migrations/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/skills-runtime.yml'
+  pull_request:
+    paths:
+      - 'src/server/skills/**'
+      - 'src/server/db/**'
+      - 'src/server/http/routes/skill-*.ts'
+      - 'tests/fixtures/skills/**'
+      - 'tests/integration/skill-runtime/**'
+      - 'tests/security/**'
+      - 'tests/e2e/skills/**'
+      - 'scripts/migrations/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/skills-runtime.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skills-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  # The suites use deterministic local fixtures/mocks. These flags prevent an
+  # accidental CI run from reaching real GitHub, npx, LLM, or image services.
+  SKILL_GITHUB_IMPORT_ENABLED: 'false'
+  SKILL_NPX_IMPORT_ENABLED: 'false'
+  SKILL_TEST_OFFLINE: 'true'
+  OPENAI_API_KEY: ''
+  ANTHROPIC_API_KEY: ''
+  GOOGLE_GENERATIVE_AI_API_KEY: ''
+
+jobs:
+  skills-runtime:
+    name: Skills Runtime offline release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Prepare evidence directory
+        run: mkdir -p .tmp/skills-evidence/ci
+
+      - name: Validate Skills Runtime scripts
+        shell: bash
+        run: |
+          node <<'NODE'
+          const packageJson = require('./package.json')
+          const required = [
+            'lint',
+            'typecheck:skills',
+            'test:skills:unit',
+            'test:skills:integration',
+            'test:skills:security',
+            'test:skills:migration',
+            'test:skills:e2e',
+            'test:skills:release-gate',
+          ]
+          const missing = required.filter((name) => !packageJson.scripts?.[name])
+          if (missing.length > 0) {
+            throw new Error(`Missing Skills Runtime scripts: ${missing.join(', ')}`)
+          }
+          console.log(`Validated ${required.length} Skills Runtime scripts.`)
+          NODE
+
+      - name: Lint
+        run: npm run lint 2>&1 | tee .tmp/skills-evidence/ci/lint.log
+
+      - name: Skills typecheck
+        run: npm run typecheck:skills 2>&1 | tee .tmp/skills-evidence/ci/typecheck-skills.log
+
+      - name: Skills unit tests
+        run: npm run test:skills:unit 2>&1 | tee .tmp/skills-evidence/ci/unit.log
+
+      - name: Skills integration tests
+        run: npm run test:skills:integration 2>&1 | tee .tmp/skills-evidence/ci/integration.log
+
+      - name: Skills security tests
+        run: npm run test:skills:security 2>&1 | tee .tmp/skills-evidence/ci/security.log
+
+      - name: Skills migration tests
+        run: npm run test:skills:migration 2>&1 | tee .tmp/skills-evidence/ci/migration.log
+
+      - name: Skills browser E2E tests
+        run: npm run test:skills:e2e 2>&1 | tee .tmp/skills-evidence/ci/e2e.log
+
+      - name: Skills release gate
+        run: npm run test:skills:release-gate 2>&1 | tee .tmp/skills-evidence/ci/release-gate.log
+
+      - name: Upload Skills Runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-runtime-evidence-${{ github.sha }}
+          if-no-files-found: ignore
+          path: |
+            .tmp/skills-evidence/**
+            coverage/**
+            test-results/**

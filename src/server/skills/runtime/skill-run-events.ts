@@ -1,93 +1,139 @@
 import { z } from 'zod'
+import {
+  getSkillRunEventDefinition,
+  isSkillRunEventType,
+  SKILL_RUN_EVENT_SCHEMA_VERSION,
+  skillRunEventRegistry,
+  type SkillRunEventPayload,
+  type SkillRunEventType,
+} from './skill-run-event-registry'
+import {
+  sanitizeEventPayload as sanitizeSecurityEventPayload,
+  SkillSecurityError,
+} from '../security/skill-security-checklist'
 
-export const skillRunEventSchemaVersion = 1
-const maxEventPayloadBytes = 8 * 1024
-const sensitiveKeyPattern = /authorization|api[_-]?key|token|secret|password|headers?|cookies?/i
+export const skillRunEventSchemaVersion = SKILL_RUN_EVENT_SCHEMA_VERSION
+export const maxEventPayloadBytes = 8 * 1024
+
 const base64KeyPattern = /(?:^|_)(?:b64|base64)(?:_|$)/i
 const base64DataUriPattern = /^data:[^,]+;base64,/i
+const producerPattern = /^[a-z][a-z0-9._-]{0,127}$/i
 
-const passthroughObject = z.object({}).passthrough()
+export const skillRunEventInputSchema = z.object({
+  type: z.string(),
+  payload: z.record(z.unknown()),
+  producer: z.string().optional(),
+})
 
-export const skillRunEventInputSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('run.status_changed'),
-    payload: z.object({ from: z.string(), to: z.string(), revision: z.number().int().nonnegative() }),
-  }),
-  z.object({
-    type: z.literal('input.summarized'),
-    payload: z.object({ keys: z.array(z.string()), byteLength: z.number().int().nonnegative() }),
-  }),
-  z.object({
-    type: z.literal('package.file_loaded'),
-    payload: z.object({ path: z.string(), sha256: z.string(), sizeBytes: z.number().int().nonnegative() }).passthrough(),
-  }),
-  z.object({ type: z.literal('step.started'), payload: z.object({ title: z.string().max(512) }) }),
-  z.object({ type: z.literal('step.completed'), payload: z.object({ title: z.string().max(512) }).passthrough() }),
-  z.object({
-    type: z.literal('capability.call'),
-    payload: z.object({
-      capability: z.string(), toolId: z.string(), toolRunId: z.string(), status: z.enum(['completed', 'failed']),
-    }).passthrough(),
-  }),
-  z.object({
-    type: z.literal('approval.required'),
-    payload: z.object({ reason: z.string().max(2_000), capabilities: z.array(z.string()) }),
-  }),
-  z.object({
-    type: z.literal('artifact.created'),
-    payload: z.object({ artifactId: z.string(), kind: z.string(), path: z.string(), sha256: z.string(), sizeBytes: z.number().int().nonnegative() }),
-  }),
-  z.object({ type: z.literal('run.completed'), payload: z.object({ revision: z.number().int().nonnegative() }) }),
-  z.object({ type: z.literal('run.completed_with_errors'), payload: z.object({ revision: z.number().int().nonnegative() }) }),
-  z.object({ type: z.literal('run.cancel_requested'), payload: z.object({ revision: z.number().int().nonnegative() }) }),
-  z.object({
-    type: z.literal('run.failed'),
-    payload: z.object({ code: z.string(), message: z.string().max(2_000), revision: z.number().int().nonnegative() }),
-  }),
-])
-
-export type SkillRunEventInput = z.infer<typeof skillRunEventInputSchema>
-export type SkillRunEventType = SkillRunEventInput['type']
+export type SkillRunEventInput = {
+  type: SkillRunEventType
+  payload: SkillRunEventPayload
+  producer?: string
+  occurredAt?: number
+}
 
 export type NormalizedSkillRunEvent = {
   schemaVersion: typeof skillRunEventSchemaVersion
   type: SkillRunEventType
-  payload: Record<string, unknown>
+  payload: SkillRunEventPayload
+  producer: string
+  occurredAt: number
 }
 
-export function normalizeSkillRunEvent(input: { type: string; payload: Record<string, unknown> }): NormalizedSkillRunEvent {
+export class SkillRunEventProtocolError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'SkillRunEventProtocolError'
+  }
+}
+
+export function normalizeSkillRunEvent(input: { type: string; payload: Record<string, unknown>; producer?: string; occurredAt?: number }): NormalizedSkillRunEvent {
+  const parsedInput = skillRunEventInputSchema.safeParse(input)
+  if (!parsedInput.success) throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be an object')
+
+  const definition = getSkillRunEventDefinition(input.type)
+  if (!definition || !isSkillRunEventType(input.type)) {
+    throw new SkillRunEventProtocolError('UNKNOWN_EVENT_TYPE', `Unknown skill run event type: ${input.type}`)
+  }
+
+  const producer = input.producer ?? 'runtime'
+  if (!producerPattern.test(producer)) {
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PRODUCER', 'Skill run event producer is invalid')
+  }
+  const occurredAt = input.occurredAt ?? Date.now()
+  if (!Number.isSafeInteger(occurredAt) || occurredAt < 0) {
+    throw new SkillRunEventProtocolError('INVALID_EVENT_TIME', 'Skill run event occurredAt must be a non-negative integer')
+  }
+
   const sanitizedPayload = sanitizePayload(input.payload)
-  const parsed = skillRunEventInputSchema.safeParse({ type: input.type, payload: sanitizedPayload })
-  if (!parsed.success) throw new Error(`Invalid skill run event: ${parsed.error.issues[0]?.message ?? 'schema validation failed'}`)
+  const payloadResult = definition.payload.safeParse(sanitizedPayload)
+  if (!payloadResult.success) {
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', `Invalid skill run event payload: ${payloadResult.error.issues[0]?.message ?? 'schema validation failed'}`)
+  }
 
-  const serialized = JSON.stringify(parsed.data.payload)
+  let serialized: string
+  try {
+    serialized = JSON.stringify(payloadResult.data)
+  } catch {
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be JSON serializable')
+  }
   if (Buffer.byteLength(serialized, 'utf8') > maxEventPayloadBytes) {
-    throw new Error(`Skill run event payload exceeds ${maxEventPayloadBytes} bytes`)
+    throw new SkillRunEventProtocolError('EVENT_PAYLOAD_TOO_LARGE', `Skill run event payload exceeds ${maxEventPayloadBytes} bytes`)
   }
-  return { schemaVersion: skillRunEventSchemaVersion, type: parsed.data.type, payload: parsed.data.payload }
+
+  return {
+    schemaVersion: definition.schemaVersion as typeof skillRunEventSchemaVersion,
+    type: input.type,
+    payload: payloadResult.data as SkillRunEventPayload,
+    producer,
+    occurredAt,
+  }
 }
 
-function sanitizePayload(value: unknown): Record<string, unknown> {
-  const sanitized = sanitizeValue(value)
-  const parsed = passthroughObject.safeParse(sanitized)
-  if (!parsed.success || Array.isArray(sanitized)) throw new Error('Skill run event payload must be an object')
-  return parsed.data
+function sanitizePayload(value: unknown): SkillRunEventPayload {
+  let sanitized: unknown
+  try {
+    sanitized = sanitizeSecurityEventPayload(value)
+  } catch (error) {
+    if (error instanceof SkillRunEventProtocolError) throw error
+    if (error instanceof SkillSecurityError) {
+      const code = error.code.startsWith('PAYLOAD_') ? error.code : 'INVALID_EVENT_PAYLOAD'
+      throw new SkillRunEventProtocolError(code, error.message)
+    }
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be JSON serializable')
+  }
+
+  rejectBase64Markers(sanitized)
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be an object')
+  }
+  return sanitized as SkillRunEventPayload
 }
 
-function sanitizeValue(value: unknown): unknown {
+function rejectBase64Markers(value: unknown, seen = new WeakSet<object>()): void {
   if (typeof value === 'string') {
-    if (base64DataUriPattern.test(value)) throw new Error('Skill run event payload must not contain Base64 media')
-    return value
+    if (base64DataUriPattern.test(value)) rejectBase64Payload()
+    return
   }
-  if (Array.isArray(value)) return value.map(sanitizeValue)
-  if (!value || typeof value !== 'object') return value
-
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
-    key,
-    base64KeyPattern.test(key) ? rejectBase64Payload() : sensitiveKeyPattern.test(key) ? '[REDACTED]' : sanitizeValue(child),
-  ]))
+  if (!value || typeof value !== 'object') return
+  if (seen.has(value)) throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload cannot contain circular references')
+  seen.add(value)
+  try {
+    if (Array.isArray(value)) {
+      for (const child of value) rejectBase64Markers(child, seen)
+      return
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (base64KeyPattern.test(key)) rejectBase64Payload()
+      rejectBase64Markers(child, seen)
+    }
+  } finally {
+    seen.delete(value)
+  }
 }
 
 function rejectBase64Payload(): never {
-  throw new Error('Skill run event payload must not contain Base64 media')
+  throw new SkillRunEventProtocolError('EVENT_BASE64_FORBIDDEN', 'Skill run event payload must not contain Base64 media')
 }
+
+export { skillRunEventRegistry }

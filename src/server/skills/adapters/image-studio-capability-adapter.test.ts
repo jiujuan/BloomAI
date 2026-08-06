@@ -194,3 +194,65 @@ describe('ImageStudioCapabilityAdapter', () => {
     expect(generateForSession).toHaveBeenCalledTimes(2)
   })
 })
+
+  it('validates package image boundaries and persists run/version/grant ownership on session and generation', async () => {
+    const { run, imageGenerationRepo } = await createFixture()
+    const { ImageStudioCapabilityAdapter } = await import('./image-studio-capability-adapter')
+    const generateForSession = vi.fn(async (input: { sessionId: string; prompt: string; model: string; referenceImages?: string[]; size?: string }) => imageGenerationRepo.create({
+      session_id: input.sessionId,
+      prompt: input.prompt,
+      provider_id: 'fixture',
+      model: input.model,
+      size: input.size ?? null,
+      reference_images: input.referenceImages ? JSON.stringify(input.referenceImages) : null,
+      status: 'completed',
+    }))
+    const adapter = new ImageStudioCapabilityAdapter({ generateForSession })
+
+    const result = await adapter.run({
+      runId: run.id,
+      skillVersionId: run.skill_version_id,
+      grantId: 'grant-image-1',
+      count: 1,
+      items: [{
+        id: 'cover',
+        prompt: 'A safe cover illustration',
+        model: 'safe-model',
+        size: '1024x1024',
+        referenceImages: [{ artifactId: 'artifact-ref-1', runId: run.id, mimeType: 'image/png', sha256: 'a'.repeat(64), sizeBytes: 12 }],
+      }],
+    })
+
+    expect(result.status).toBe('completed')
+    expect(generateForSession).toHaveBeenCalledWith(expect.objectContaining({
+      size: '1024x1024',
+      referenceImages: ['artifact-ref-1'],
+    }))
+    const generation = imageGenerationRepo.get(result.items[0].generationId!)!
+    expect(generation).toMatchObject({ skill_run_id: run.id, skill_version_id: run.skill_version_id, grant_id: 'grant-image-1' })
+    const session = (await import('../../db/repositories/image-session.repo')).imageSessionRepo.get(result.imageSessionId)!
+    expect(session).toMatchObject({ skill_run_id: run.id, skill_version_id: run.skill_version_id, grant_id: 'grant-image-1' })
+  })
+
+  it('rejects unsafe reference metadata and count mismatches before invoking the provider', async () => {
+    const { run, imageGenerationRepo } = await createFixture()
+    const { ImageStudioCapabilityAdapter, ImageStudioCapabilityAdapterError } = await import('./image-studio-capability-adapter')
+    const generateForSession = vi.fn(async (input: { sessionId: string; prompt: string; model: string }) => imageGenerationRepo.create({
+      session_id: input.sessionId, prompt: input.prompt, provider_id: 'fixture', model: input.model, status: 'completed',
+    }))
+    const adapter = new ImageStudioCapabilityAdapter({ generateForSession })
+
+    await expect(adapter.run({
+      runId: run.id,
+      count: 2,
+      items: [{ id: 'cover', prompt: 'safe', model: 'safe-model' }],
+    })).rejects.toThrow(ImageStudioCapabilityAdapterError)
+    await expect(adapter.run({
+      runId: run.id,
+      items: [{
+        id: 'cover', prompt: 'safe', model: 'safe-model',
+        referenceImages: [{ artifactId: '../escape', runId: run.id, mimeType: 'image/png', sha256: 'b'.repeat(64), sizeBytes: 1 }],
+      }],
+    })).rejects.toThrow(/reference/i)
+    expect(generateForSession).not.toHaveBeenCalled()
+  })

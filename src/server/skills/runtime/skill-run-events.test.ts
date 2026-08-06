@@ -88,6 +88,26 @@ describe('skill run event protocol', () => {
     })).toThrow(/payload/i)
   })
 
+  it('enforces recursive security payload limits before registry validation', async () => {
+    const { normalizeSkillRunEvent, SkillRunEventProtocolError } = await import('./skill-run-events')
+    let nested: Record<string, unknown> = { value: 'leaf' }
+    for (let index = 0; index < 9; index += 1) nested = { nested }
+
+    expect(() => normalizeSkillRunEvent({ type: 'step.completed', payload: { title: 'deep', nested } }))
+      .toThrowError(expect.objectContaining({ code: 'PAYLOAD_DEPTH_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({
+      type: 'step.completed',
+      payload: { title: 'wide', values: Array.from({ length: 101 }, (_, index) => index) },
+    })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_ARRAY_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({
+      type: 'step.completed',
+      payload: Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`field-${index}`, index])),
+    })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_FIELD_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({ type: 'step.completed', payload: { title: 'x'.repeat(4_097) } }))
+      .toThrowError(expect.objectContaining({ code: 'PAYLOAD_STRING_LIMIT' }))
+    expect(SkillRunEventProtocolError).toBeDefined()
+  })
+
   it('rejects unknown event types', async () => {
     const { normalizeSkillRunEvent } = await import('./skill-run-events')
     expect(() => normalizeSkillRunEvent({ type: 'run.unknown', payload: {} })).toThrow(/event/i)
@@ -111,4 +131,28 @@ describe('skill run event protocol', () => {
       type: 'step.completed', payload: { title: 'fetch', raw: 'x'.repeat(8_193) },
     })).toThrow(/payload/i)
   })
+  it('records a registry producer and rejects circular/non-JSON payloads', async () => {
+    const { normalizeSkillRunEvent } = await import('./skill-run-events')
+    const circular: Record<string, unknown> = { title: 'cycle' }
+    circular.self = circular
+
+    const event = normalizeSkillRunEvent({
+      type: 'step.started',
+      producer: 'worker-1',
+      occurredAt: 1_700_000_000_000,
+      payload: { title: 'load package' },
+    })
+
+    expect(event).toMatchObject({ producer: 'worker-1', occurredAt: 1_700_000_000_000, schemaVersion: 1 })
+    expect(() => normalizeSkillRunEvent({ type: 'step.started', payload: circular })).toThrow(/circular/i)
+  })
+
+  it('rejects invalid producer names and unknown registry events with stable codes', async () => {
+    const { normalizeSkillRunEvent, SkillRunEventProtocolError } = await import('./skill-run-events')
+
+    expect(() => normalizeSkillRunEvent({ type: 'step.started', producer: 'worker/unsafe', payload: { title: 'x' } }))
+      .toThrowError(new SkillRunEventProtocolError('INVALID_EVENT_PRODUCER', 'Skill run event producer is invalid'))
+    expect(() => normalizeSkillRunEvent({ type: 'run.unknown', payload: {} })).toThrow(/unknown/i)
+  })
+
 })

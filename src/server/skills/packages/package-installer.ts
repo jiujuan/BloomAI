@@ -3,20 +3,40 @@ import fs from 'fs'
 import path from 'path'
 import { inflateRawSync } from 'zlib'
 import { runMigrations } from '../../db/client'
-import { getDataDir } from '../../db/paths'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { isSkillPackageRuntimeEnabled } from './feature-flag'
+import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skill-runtime.config'
+import { getSkillCorrelation, withSkillCorrelation } from '../observability/skill-runtime.logger'
+import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observability/skill-runtime.metrics'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
+import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
+import { SkillPackageReader } from './package-reader'
+import { detectNpxSkillsArtifact, isIgnoredArtifactPath, type NpxArtifactLayout } from './npx-artifact-detector'
+import { packageInstallReviewService } from './package-install-review.service'
+import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGitHubCommit } from './github-source'
+import { assertPackageLimits, validateExternalSource, SkillSecurityError } from '../security/skill-security-checklist'
 
-const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-const MAX_FILE_COUNT = 10_000
-const MAX_FILE_BYTES = 10 * 1024 * 1024
-const MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
-type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
-type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string }
+type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: Record<string, unknown> }
+type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: Record<string, unknown> }
 type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
 export type PackageInstallSource = LocalDirectorySource | ZipSource | GitHubArchiveSource
+
+export type PackageSourceSnapshot = {
+  sourceSha256: string
+  sourceCommit?: string
+  sourceRef?: string
+  sourceUrl?: string
+  archiveUrl?: string
+  archiveSha256?: string
+  fetchedAt?: string
+  etag?: string
+  resolvedCommitSha?: string
+  source_origin?: 'local' | 'npx-artifact'
+  detected_layout?: NpxArtifactLayout
+  ignored_paths?: string[]
+  execution_disclaimer?: string
+  files: Array<{ path: string; sha256: string; sizeBytes: number }>
+}
 
 export type InstalledPackage = {
   packageId: string
@@ -27,25 +47,54 @@ export type InstalledPackage = {
   relativeSkillPath: string
   packagePath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: NonNullable<SkillManifest['diagnostics']>
+  importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
-  sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  sourceSnapshot: PackageSourceSnapshot
 }
 export type InspectedPackage = {
   sourceType: PackageInstallSource['kind']
   relativeSkillPath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: NonNullable<SkillManifest['diagnostics']>
+  importReviewRequired: boolean
   manifest: SkillManifest & { files: Array<{ path: string; sha256: string; sizeBytes: number }> }
-  sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string; files: Array<{ path: string; sha256: string; sizeBytes: number }> }
+  sourceSnapshot: PackageSourceSnapshot
 }
 
 
-export type PackageInstallResult = { status: 'awaiting_permission_review'; packages: InstalledPackage[] }
+export type PackageInstallOptions = {
+  reviewId: string
+  sourceFingerprint: string
+  confirm: boolean
+}
+
+export type PackageInstallFailure = {
+  relativeSkillPath: string
+  code: string
+  message: string
+}
+
+export type PackageInstallResult = {
+  status: 'awaiting_permission_review' | 'partial_failure'
+  packages: InstalledPackage[]
+  partialFailures?: PackageInstallFailure[]
+}
 
 export class PackageInstallError extends Error {
-  constructor(message: string) {
+  readonly code: string
+
+  constructor(message: string, code: string = 'PACKAGE_INSTALL_ERROR') {
     super(message)
     this.name = 'PackageInstallError'
+    this.code = code
   }
+}
+
+export type PackageInstallerDependencies = {
+  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordImportReject'>
 }
 
 type ZipEntry = {
@@ -59,61 +108,126 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
-  async inspect(source: PackageInstallSource): Promise<{ packages: InspectedPackage[] }> {
-    if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
-    const roots = getPackageRoots()
-    fs.mkdirSync(roots.staging, { recursive: true })
-    const stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
-    try {
-      const sourceRoot = path.join(stage, 'source')
-      const sourceSnapshot = await materializeSource(source, sourceRoot)
-      const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
-      const skills = discoverSkillDirectories(selectedRoot)
-      if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
-      return {
-        packages: skills.map((skillDirectory) => {
-          const files = collectFiles(skillDirectory)
-          return {
-            sourceType: source.kind,
-            relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
-            manifestHash: hashJson(files),
-            manifest: { ...resolveSkillManifest(skillDirectory), files },
-            sourceSnapshot: { ...sourceSnapshot, files },
-          }
-        }),
-      }
-    } catch (error) {
-      if (error instanceof PackageInstallError) throw error
-      throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
-    } finally {
-      fs.rmSync(stage, { recursive: true, force: true })
-    }
+  private readonly metrics: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+
+  constructor(dependencies: PackageInstallerDependencies = {}) {
+    this.metrics = dependencies.metrics ?? SkillRuntimeMetrics.global()
   }
 
-  async install(source: PackageInstallSource): Promise<PackageInstallResult> {
-    if (!isSkillPackageRuntimeEnabled()) throw new PackageInstallError('Skill Package Runtime is disabled')
-
-    const roots = getPackageRoots()
-    fs.mkdirSync(roots.staging, { recursive: true })
-    fs.mkdirSync(roots.packages, { recursive: true })
-    const stage = fs.mkdtempSync(path.join(roots.staging, 'install-'))
-    try {
+  async inspect(source: PackageInstallSource): Promise<{
+    reviewId: string
+    sourceFingerprint: string
+    resolvedCommitSha?: string
+    packages: InspectedPackage[]
+  }> {
+    const correlation = getSkillCorrelation()
+    return withSkillCorrelation(correlation, async () => {
+      let stage: string | undefined
+      try {
+        assertPackageImportEnabled()
+        const securedSource = validatePackageInstallSource(source)
+        const roots = getPackageRoots()
+        fs.mkdirSync(roots.staging, { recursive: true })
+        stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
       const sourceRoot = path.join(stage, 'source')
-      const sourceSnapshot = await materializeSource(source, sourceRoot)
-      const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
+      const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
+      const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
+      const skills = discoverSkillDirectories(selectedRoot)
+      if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
+      const packages = skills.map((skillDirectory) => {
+        const files = collectFiles(skillDirectory)
+        const resolvedManifest = resolveSkillManifest(skillDirectory)
+        return {
+          sourceType: securedSource.kind,
+          relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
+          manifestHash: resolvedManifest.canonicalHash ?? hashJson(files),
+          sourceFingerprint: hashJson(files),
+          diagnostics: resolvedManifest.diagnostics ?? [],
+          importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
+          manifest: { ...resolvedManifest, files },
+          sourceSnapshot: { ...sourceSnapshot, files },
+        }
+      })
+      const review = packageInstallReviewService.create({
+        source: securedSource,
+        sourceFingerprint: sourceSnapshot.sourceSha256,
+        inspection: { sourceType: securedSource.kind, sourceFingerprint: sourceSnapshot.sourceSha256, packages },
+        securityFindings: {
+          unsupportedCapabilities: packages.flatMap((item) => item.manifest.unsupported),
+          diagnostics: packages.flatMap((item) => item.diagnostics),
+        },
+      })
+      return {
+        reviewId: review.id,
+        sourceFingerprint: sourceSnapshot.sourceSha256,
+        ...(sourceSnapshot.resolvedCommitSha ? { resolvedCommitSha: sourceSnapshot.resolvedCommitSha } : {}),
+        packages,
+      }
+      } catch (error) {
+        this.recordImportReject(error, correlation)
+        if (error instanceof PackageInstallError) throw error
+        throw new PackageInstallError(error instanceof Error ? error.message : 'Package inspection failed')
+      } finally {
+        if (stage) fs.rmSync(stage, { recursive: true, force: true })
+      }
+    })
+  }
+
+  async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
+    const correlation = getSkillCorrelation()
+    return withSkillCorrelation(correlation, async () => {
+      let stage: string | undefined
+      try {
+        assertPackageImportEnabled()
+        const securedSource = validatePackageInstallSource(source)
+        if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
+        if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
+
+        const roots = getPackageRoots()
+        fs.mkdirSync(roots.staging, { recursive: true })
+        fs.mkdirSync(roots.packages, { recursive: true })
+        stage = fs.mkdtempSync(path.join(roots.staging, 'install-'))
+      const sourceRoot = path.join(stage, 'source')
+      const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
+      if (sourceSnapshot.sourceSha256 !== options.sourceFingerprint) {
+        throw new PackageInstallError('Package source fingerprint changed since inspection')
+      }
+      const review = packageInstallReviewService.assertInstallable(options.reviewId, options.sourceFingerprint, options.confirm)
+      if (review.status === 'installed' && review.decision?.result) {
+        return review.decision.result as unknown as PackageInstallResult
+      }
+
+      const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
       const skills = discoverSkillDirectories(selectedRoot)
       if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
       const packages: InstalledPackage[] = []
+      const partialFailures: PackageInstallFailure[] = []
       for (const skillDirectory of skills) {
-        packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source, sourceSnapshot }))
+        const relativeSkillPath = normalizeRelative(path.relative(selectedRoot, skillDirectory))
+        try {
+          packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source: securedSource, sourceSnapshot }))
+        } catch (error) {
+          this.recordImportReject(error)
+          partialFailures.push({
+            relativeSkillPath,
+            code: error instanceof PackageInstallError ? error.code : 'PACKAGE_INSTALL_ERROR',
+            message: error instanceof Error ? error.message : 'Package installation failed',
+          })
+        }
       }
-      return { status: 'awaiting_permission_review', packages }
-    } catch (error) {
-      if (error instanceof PackageInstallError) throw error
-      throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
-    } finally {
-      fs.rmSync(stage, { recursive: true, force: true })
-    }
+      const result: PackageInstallResult = partialFailures.length > 0
+        ? { status: 'partial_failure', packages, partialFailures }
+        : { status: 'awaiting_permission_review', packages }
+      packageInstallReviewService.markInstalled(options.reviewId, result as unknown as Record<string, unknown>)
+      return result
+      } catch (error) {
+        this.recordImportReject(error, correlation)
+        if (error instanceof PackageInstallError) throw error
+        throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
+      } finally {
+        if (stage) fs.rmSync(stage, { recursive: true, force: true })
+      }
+    })
   }
 
   private async persistSkill(data: {
@@ -121,113 +235,251 @@ export class PackageInstaller {
     selectedRoot: string
     roots: ReturnType<typeof getPackageRoots>
     source: PackageInstallSource
-    sourceSnapshot: { sourceSha256: string; sourceCommit?: string; sourceRef?: string }
+    sourceSnapshot: Omit<PackageSourceSnapshot, 'files'>
   }): Promise<InstalledPackage> {
     const files = collectFiles(data.skillDirectory)
     const resolvedManifest = resolveSkillManifest(data.skillDirectory)
-    const manifestHash = hashJson(files)
-    const finalPath = path.join(data.roots.packages, manifestHash)
+    const manifestHash = resolvedManifest.canonicalHash ?? hashJson(files)
+    const sourceFingerprint = hashJson(files)
+    const finalPath = path.join(data.roots.packages, sourceFingerprint)
+    let createdPackagePath = false
     if (!fs.existsSync(finalPath)) {
       const materializingRoot = fs.mkdtempSync(path.join(data.roots.staging, `package-${manifestHash}-`))
       const materializingPath = path.join(materializingRoot, 'package')
       try {
         copySafeDirectory(data.skillDirectory, materializingPath)
         fs.renameSync(materializingPath, finalPath)
+        createdPackagePath = true
       } catch (error) {
         if (!fs.existsSync(finalPath)) throw error
       } finally {
         fs.rmSync(materializingRoot, { recursive: true, force: true })
       }
     }
+
     const relativeSkillPath = normalizeRelative(path.relative(data.selectedRoot, data.skillDirectory))
-    const sourceSnapshot = { ...data.sourceSnapshot, files }
+    const sourceSnapshot = { ...data.sourceSnapshot, files, snapshotHash: sourceFingerprint }
     const manifest = { ...resolvedManifest, files }
-    await runMigrations()
-    const packageRecord = skillPackageRepo.createPackage({
-      name: path.basename(data.skillDirectory), description: '', sourceType: data.source.kind,
-      sourceUri: sourceUriFor(data.source), sourceRef: data.sourceSnapshot.sourceCommit ?? data.sourceSnapshot.sourceRef ?? null,
-    })
-    const versionRecord = skillPackageRepo.createVersion({
-      packageId: packageRecord.id, version: manifestHash.slice(0, 12), manifest, manifestHash,
-      packagePath: finalPath, sourceSnapshot,
-    })
-    const installationRecord = skillPackageRepo.createInstallation({
-      packageId: packageRecord.id, currentVersionId: versionRecord.id, status: 'awaiting_permission_review', enabled: false,
-    })
-    return {
-      packageId: packageRecord.id, versionId: versionRecord.id, installationId: installationRecord.id,
-      status: 'awaiting_permission_review', sourceType: data.source.kind, relativeSkillPath, packagePath: finalPath,
-      manifestHash, manifest, sourceSnapshot,
+    const snapshotFiles = Object.fromEntries(files.map((file) => [file.path, { sha256: file.sha256, sizeBytes: file.sizeBytes }]))
+    try {
+      const records = skillPackageRepo.createPackageVersionInstallationTransaction({
+        package: {
+          name: typeof manifest.name === 'string' ? manifest.name : path.basename(data.skillDirectory),
+          description: typeof manifest.description === 'string' ? manifest.description : '',
+          sourceType: data.source.kind,
+          sourceUri: sourceUriFor(data.source),
+          sourceRef: data.sourceSnapshot.sourceCommit ?? data.sourceSnapshot.sourceRef ?? null,
+        },
+        version: {
+          version: typeof manifest.version === 'string' ? manifest.version : `0.0.0+${manifestHash.slice(0, 12)}`,
+          manifest,
+          manifestHash,
+          packagePath: finalPath,
+          sourceSnapshot,
+          securityFindings: {
+            sourceFingerprint,
+            unsupportedCapabilities: resolvedManifest.unsupported,
+            diagnostics: resolvedManifest.diagnostics ?? [],
+          },
+        },
+        snapshot: {
+          filesManifest: snapshotFiles,
+          totalBytes: files.reduce((total, file) => total + file.sizeBytes, 0),
+          fileCount: files.length,
+          snapshotRoot: finalPath,
+          snapshotHash: sourceFingerprint,
+        },
+        installation: { status: 'awaiting_permission_review', enabled: false },
+      })
+      return {
+        packageId: records.package.id,
+        versionId: records.version.id,
+        installationId: records.installation.id,
+        status: 'awaiting_permission_review',
+        sourceType: data.source.kind,
+        relativeSkillPath,
+        packagePath: finalPath,
+        manifestHash,
+        manifest,
+        sourceSnapshot,
+        sourceFingerprint,
+        diagnostics: resolvedManifest.diagnostics ?? [],
+        importReviewRequired: Boolean(resolvedManifest.requestedCapabilities.length || resolvedManifest.unsupported.length),
+      }
+    } catch (error) {
+      if (createdPackagePath) fs.rmSync(finalPath, { recursive: true, force: true })
+      throw error
     }
   }
+
+  private recordImportReject(error: unknown, correlation: SkillRuntimeCorrelation = getSkillCorrelation()): void {
+    try {
+      this.metrics.recordImportReject(classifyImportRejectReason(error), {
+        ...correlation,
+        ...getSkillCorrelation(),
+      })
+    } catch {
+      // Import telemetry must never change package validation or installation behavior.
+    }
+  }
+}
+
+type ImportRejectReason =
+  | 'unsupported_capability'
+  | 'invalid_manifest'
+  | 'security_policy'
+  | 'size_limit'
+  | 'file_limit'
+  | 'archive_corrupt'
+  | 'source_not_allowed'
+  | 'unsupported_runtime'
+  | 'review_required'
+  | 'fingerprint_changed'
+  | 'unknown'
+
+function classifyImportRejectReason(error: unknown): ImportRejectReason {
+  const candidate = error as { code?: unknown; message?: unknown }
+  const code = typeof candidate.code === 'string' ? candidate.code.toUpperCase() : ''
+  const message = typeof candidate.message === 'string' ? candidate.message : ''
+  const normalizedMessage = message.toLowerCase()
+
+  if (code === 'REVIEW_FINGERPRINT_MISMATCH' || normalizedMessage.includes('fingerprint changed')) return 'fingerprint_changed'
+  if (code === 'REVIEW_NOT_APPROVED' || code === 'REVIEW_REJECTED' || code === 'REVIEW_NOT_FOUND' || normalizedMessage.includes('requires explicit confirmation')) return 'review_required'
+  if (code === 'SOURCE_HOST_NOT_ALLOWED' || code === 'INVALID_SOURCE_URL' || code === 'INVALID_SOURCE_REF' || normalizedMessage.includes('source host') || normalizedMessage.includes('official github')) return 'source_not_allowed'
+  if (code === 'PACKAGE_FILE_BYTES_LIMIT' || code === 'PACKAGE_ARCHIVE_BYTES_LIMIT' || normalizedMessage.includes('maximum size') || normalizedMessage.includes('size limit') || normalizedMessage.includes('bytes exceed')) return 'size_limit'
+  if (code === 'PACKAGE_FILE_COUNT_LIMIT' || normalizedMessage.includes('too many files') || normalizedMessage.includes('file count') || normalizedMessage.includes('file limit')) return 'file_limit'
+  if (code === 'MANIFEST_INVALID' || normalizedMessage.includes('manifest') || normalizedMessage.includes('frontmatter') || normalizedMessage.includes('skill.md was not found')) return 'invalid_manifest'
+  if (code === 'UNSUPPORTED_RUNTIME' || normalizedMessage.includes('unsupported runtime')) return 'unsupported_runtime'
+  if (code === 'CAPABILITY_DENIED' || normalizedMessage.includes('capability is not allowed')) return 'unsupported_capability'
+  if (code === 'FEATURE_DISABLED' || code === 'INVALID_PATH' || code === 'SECURITY_POLICY_VIOLATION' || normalizedMessage.includes('symbolic link') || normalizedMessage.includes('unsafe archive') || normalizedMessage.includes('path escapes') || normalizedMessage.includes('path is not allowed') || normalizedMessage.includes('non-regular') || normalizedMessage.includes('security policy') || normalizedMessage.includes('traversal')) return 'security_policy'
+  if (normalizedMessage.includes('zip') || normalizedMessage.includes('archive') || normalizedMessage.includes('central directory') || normalizedMessage.includes('local file header')) return 'archive_corrupt'
+  return 'unknown'
+}
+
+function validatePackageInstallSource(source: PackageInstallSource): PackageInstallSource {
+  try {
+    return validateExternalSource(source) as PackageInstallSource
+  } catch (error) {
+    if (error instanceof SkillSecurityError) throw new PackageInstallError(error.message, error.code)
+    throw error
+  }
+}
+
+function assertPackageImportEnabled(): void {
+  try { assertSkillRuntimeFeature('importEnabled') } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Skill Package import is disabled', 'FEATURE_DISABLED') }
+}
+
+function assertPackageFeatureEnabled(feature: 'githubImportEnabled' | 'npxImportEnabled'): void {
+  try { assertSkillRuntimeFeature(feature) } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Skill Runtime feature is disabled: ${feature}`, 'FEATURE_DISABLED') }
 }
 
 function getPackageRoots() {
-  const root = path.join(getDataDir(), 'skills')
-  return { root, packages: path.join(root, 'packages'), staging: path.join(root, 'staging') }
+  const root = getSkillRuntimeConfig().packageDataRoot
+  return { root: path.dirname(root), packages: root, staging: path.join(path.dirname(root), 'staging') }
 }
 
-async function materializeSource(source: PackageInstallSource, target: string) {
-  if (source.kind === 'local-directory') {
-    const directory = path.resolve(source.directory)
+function getPackageLimits() {
+  const config = getSkillRuntimeConfig()
+  return {
+    maxArchiveBytes: config.maxPackageBytes,
+    maxFileCount: config.maxPackageFiles,
+    maxFileBytes: config.maxFileBytes,
+    maxUnpackedBytes: config.maxPackageBytes,
+    maxPathLength: 240,
+    maxDepth: 32,
+  } satisfies PackagePathPolicy
+}
+
+async function materializeSource(source: PackageInstallSource, target: string): Promise<Omit<PackageSourceSnapshot, 'files'>> {
+  const securedSource = validatePackageInstallSource(source)
+  if (securedSource.kind === 'local-directory') {
+    const directory = securedSource.directory
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
     copySafeDirectory(directory, target)
-    return { sourceSha256: hashDirectory(target), sourceRef: directory }
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    return { sourceSha256: hashDirectory(target), sourceRef: directory, ...artifactMetadata }
   }
-  if (source.kind === 'zip') {
-    const zipPath = path.resolve(source.zipPath)
+  if (securedSource.kind === 'zip') {
+    const zipPath = securedSource.zipPath
     if (!fs.statSync(zipPath).isFile()) throw new PackageInstallError(`ZIP package not found: ${zipPath}`)
     const archive = fs.readFileSync(zipPath)
     extractZip(archive, target)
-    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath }
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, ...artifactMetadata }
   }
-  const { owner, repository } = parseGitHubRepository(source.repositoryUrl)
-  const commitResponse = await fetch(`https://api.github.com/repos/${owner}/${repository}/commits/${encodeURIComponent(source.ref)}`)
-  if (!commitResponse.ok) throw new PackageInstallError(`Unable to resolve GitHub ref: ${source.ref}`)
-  const commit = await commitResponse.json() as { sha?: unknown }
-  if (typeof commit.sha !== 'string' || !/^[a-f0-9]{40}$/i.test(commit.sha)) throw new PackageInstallError('GitHub did not return a valid commit SHA')
-  const archiveResponse = await fetch(`https://github.com/${owner}/${repository}/archive/${commit.sha}.zip`)
-  if (!archiveResponse.ok) throw new PackageInstallError(`Unable to download GitHub archive for ${commit.sha}`)
-  const contentLength = Number(archiveResponse.headers.get('content-length'))
-  if (Number.isFinite(contentLength) && contentLength > MAX_ARCHIVE_BYTES) throw new PackageInstallError('Archive exceeds the maximum allowed size')
-  const archive = await readResponseBuffer(archiveResponse, MAX_ARCHIVE_BYTES)
-  extractZip(archive, target)
-  return { sourceSha256: hashBuffer(archive), sourceCommit: commit.sha, sourceRef: source.ref }
-}
-
-async function readResponseBuffer(response: Response, maxBytes: number): Promise<Buffer> {
-  if (!response.body) return Buffer.from(await response.arrayBuffer())
-  const reader = response.body.getReader()
-  const chunks: Buffer[] = []
-  let totalBytes = 0
+  let parsedSource
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      totalBytes += value.byteLength
-      if (totalBytes > maxBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
-      chunks.push(Buffer.from(value))
+    parsedSource = parseGitHubSource(securedSource.repositoryUrl, securedSource.ref, securedSource.subdirectory)
+    const config = getSkillRuntimeConfig()
+    const { commitSha } = await resolveGitHubCommit(parsedSource, {
+      timeoutMs: config.githubRequestTimeoutMs,
+      allowedHosts: config.githubAllowedHosts,
+    })
+    const downloaded = await downloadGitHubArchive(parsedSource, commitSha, {
+      timeoutMs: config.githubRequestTimeoutMs,
+      maxArchiveBytes: config.githubMaxArchiveBytes,
+      allowedHosts: config.githubAllowedHosts,
+    })
+    extractZip(downloaded.archive, target)
+    return {
+      sourceSha256: downloaded.archiveSha256,
+      sourceCommit: downloaded.resolvedCommitSha,
+      sourceRef: downloaded.sourceRef,
+      sourceUrl: downloaded.sourceUrl,
+      archiveUrl: downloaded.archiveUrl,
+      archiveSha256: downloaded.archiveSha256,
+      fetchedAt: downloaded.fetchedAt,
+      ...(downloaded.etag ? { etag: downloaded.etag } : {}),
+      resolvedCommitSha: downloaded.resolvedCommitSha,
     }
-  } finally {
-    reader.releaseLock()
+  } catch (error) {
+    if (error instanceof GitHubSourceError) throw new PackageInstallError(error.message, error.code)
+    throw error
   }
-  return Buffer.concat(chunks, totalBytes)
 }
 
-function parseGitHubRepository(repositoryUrl: string) {
-  let url: URL
-  try { url = new URL(repositoryUrl) } catch { throw new PackageInstallError('GitHub repository URL must be valid') }
-  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com') throw new PackageInstallError('Only https://github.com repository URLs are supported')
-  const segments = url.pathname.split('/').filter(Boolean)
-  const repository = segments[1]?.replace(/\.git$/, '')
-  if (segments.length !== 2 || !/^[A-Za-z0-9_.-]+$/.test(segments[0]) || !repository || !/^[A-Za-z0-9_.-]+$/.test(repository)) throw new PackageInstallError('GitHub repository URL must identify exactly one owner and repository')
-  return { owner: segments[0], repository }
+function detectAndSanitizeNpxArtifact(root: string): Pick<PackageSourceSnapshot, 'source_origin' | 'detected_layout' | 'ignored_paths' | 'execution_disclaimer'> {
+  const limits = getPackageLimits()
+  const reader = new SkillPackageReader(root, {
+    ...limits,
+    maxReadBytes: limits.maxFileBytes,
+    maxFilesPerRun: limits.maxFileCount,
+  })
+  const detection = detectNpxSkillsArtifact(reader)
+  if (!detection.isNpxArtifact) return {}
+  assertPackageFeatureEnabled('npxImportEnabled')
+  pruneIgnoredArtifactPaths(root, detection.ignoredPaths)
+  return {
+    source_origin: 'npx-artifact',
+    detected_layout: detection.layout,
+    ignored_paths: detection.ignoredPaths,
+    execution_disclaimer: detection.executionDisclaimer,
+  }
+}
+
+function pruneIgnoredArtifactPaths(root: string, ignoredPaths: string[]): void {
+  const pathsToRemove = new Set<string>()
+  for (const relativePath of ignoredPaths) {
+    pathsToRemove.add(relativePath)
+    const segments = relativePath.split('/').filter(Boolean)
+    for (let index = 0; index < segments.length; index += 1) {
+      if (isIgnoredArtifactPath(segments[index]) || isIgnoredArtifactPath(segments.slice(0, index + 1).join('/'))) {
+        pathsToRemove.add(segments.slice(0, index + 1).join('/'))
+        break
+      }
+    }
+  }
+  for (const relativePath of [...pathsToRemove].sort((a, b) => b.length - a.length)) {
+    const target = safeDestination(root, relativePath)
+    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true })
+  }
 }
 
 function extractZip(archive: Buffer, target: string): void {
-  if (archive.length > MAX_ARCHIVE_BYTES) throw new PackageInstallError('Archive exceeds the maximum allowed size')
+  if (archive.length > getPackageLimits().maxArchiveBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
+  const limits = getPackageLimits()
   const entries = parseZipEntries(archive)
-  if (entries.length > MAX_FILE_COUNT) throw new PackageInstallError('Archive contains too many files')
+  if (entries.length > limits.maxFileCount) throw new PackageInstallError('Archive contains too many files')
   let totalBytes = 0
   const seen = new Set<string>()
   for (const entry of entries) {
@@ -235,9 +487,9 @@ function extractZip(archive: Buffer, target: string): void {
     const name = normalizeArchivePath(entry.name)
     if (seen.has(name)) throw new PackageInstallError(`Archive contains duplicate file path: ${name}`)
     seen.add(name)
-    if (entry.uncompressedSize > MAX_FILE_BYTES) throw new PackageInstallError(`Archive file exceeds the maximum size: ${name}`)
+    try { assertPackageLimits({ fileCount: seen.size, totalBytes: totalBytes + entry.uncompressedSize, fileBytes: entry.uncompressedSize, ...limits }) }
+    catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Archive entry exceeds package limits: ${name}`, error instanceof SkillSecurityError ? error.code : 'PACKAGE_INSTALL_ERROR') }
     totalBytes += entry.uncompressedSize
-    if (totalBytes > MAX_UNPACKED_BYTES) throw new PackageInstallError('Archive expands beyond the maximum allowed size')
     const unixType = (entry.externalAttributes >>> 16) & 0o170000
     if (unixType === 0o120000 || unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new PackageInstallError(`Archive contains a non-regular file: ${name}`)
     if (isDirectory) continue
@@ -313,12 +565,13 @@ function copySafeDirectoryWithBudget(source: string, target: string, budget: { f
     if (entry.isDirectory()) { if (!isSensitivePath(entry.name)) copySafeDirectoryWithBudget(sourcePath, targetPath, budget); continue }
     if (!entry.isFile()) throw new PackageInstallError(`Non-regular package file is not allowed: ${sourcePath}`)
     if (entryStat.nlink > 1) throw new PackageInstallError(`Hard-linked package files are not allowed: ${sourcePath}`)
-    if (entryStat.size > MAX_FILE_BYTES) throw new PackageInstallError(`Package file exceeds the maximum size: ${sourcePath}`)
+    if (entryStat.size > getPackageLimits().maxFileBytes) throw new PackageInstallError(`Package file exceeds the maximum size: ${sourcePath}`)
     if (isSensitivePath(entry.name)) continue
     budget.fileCount += 1
-    if (budget.fileCount > MAX_FILE_COUNT) throw new PackageInstallError('Package source contains too many files')
     budget.totalBytes += entryStat.size
-    if (budget.totalBytes > MAX_UNPACKED_BYTES) throw new PackageInstallError('Package source exceeds the maximum allowed size')
+    const limits = getPackageLimits()
+    try { assertPackageLimits({ fileCount: budget.fileCount, totalBytes: budget.totalBytes, fileBytes: entryStat.size, ...limits }) }
+    catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Package source exceeds the configured limits', error instanceof SkillSecurityError ? error.code : 'PACKAGE_INSTALL_ERROR') }
     fs.mkdirSync(path.dirname(targetPath), { recursive: true })
     fs.copyFileSync(sourcePath, targetPath)
   }
@@ -340,16 +593,17 @@ function discoverSkillDirectories(root: string): string[] {
 }
 
 function collectFiles(root: string) {
-  const files: Array<{ path: string; sha256: string; sizeBytes: number }> = []
-  const visit = (directory: string) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const fullPath = path.join(directory, entry.name)
-      if (entry.isDirectory()) visit(fullPath)
-      else if (entry.isFile()) { const stat = fs.statSync(fullPath); files.push({ path: normalizeRelative(path.relative(root, fullPath)), sha256: hashBuffer(fs.readFileSync(fullPath)), sizeBytes: stat.size }) }
-    }
-  }
-  visit(root)
-  return files.sort((a, b) => a.path.localeCompare(b.path))
+  const limits = getPackageLimits()
+  const reader = new SkillPackageReader(root, {
+    ...limits,
+    maxReadBytes: limits.maxFileBytes,
+    maxFilesPerRun: limits.maxFileCount,
+  })
+  return reader.listFiles()
+    .filter((file) => isAllowedSnapshotPath(file))
+    .map((file) => reader.readBuffer(file, limits.maxFileBytes))
+    .map(({ path: filePath, sha256, sizeBytes }) => ({ path: filePath, sha256, sizeBytes }))
+    .sort((a, b) => a.path.localeCompare(b.path))
 }
 
 function resolveSubdirectory(root: string, subdirectory?: string): string {
@@ -366,12 +620,9 @@ function resolveSubdirectory(root: string, subdirectory?: string): string {
 }
 
 function normalizeArchivePath(value: string): string {
-  const normalized = value.replace(/\\/g, '/')
-  const withoutTrailingSlash = normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
-  if (!withoutTrailingSlash || withoutTrailingSlash.startsWith('/') || /^[A-Za-z]:\//.test(withoutTrailingSlash)) throw new PackageInstallError(`Unsafe archive path: ${value}`)
-  const pieces = withoutTrailingSlash.split('/')
-  if (pieces.some((piece) => !piece || piece === '.' || piece === '..')) throw new PackageInstallError(`Unsafe archive path: ${value}`)
-  return pieces.join('/')
+  const withoutTrailingSlash = value.endsWith('/') ? value.slice(0, -1) : value
+  try { return assertArchiveEntryPath(withoutTrailingSlash, getPackageLimits()) }
+  catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Unsafe archive path: ${value}`) }
 }
 
 function safeDestination(root: string, relative: string): string {
