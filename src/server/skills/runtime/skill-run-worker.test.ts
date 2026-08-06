@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createFakeSkillRuntimePorts } from '../application/test-doubles'
+import { getSkillCorrelation } from '../observability/skill-runtime.logger'
+import { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
 import { SkillRunCoordinator } from './skill-run-coordinator'
 import { PersistentSkillRunQueue } from './skill-run-queue'
 import { SkillRunWorker } from './skill-run-worker'
@@ -79,6 +81,32 @@ describe('SkillRunWorker', () => {
     await expect(worker.runOne()).resolves.toBe(true)
     expect(executions).toBe(0)
     expect(coordinator.getRun(runId).status).toBe('cancelled')
+  })
+
+  it('propagates run/worker correlation and records terminal run metrics', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 50_000 })
+    const metrics = new SkillRuntimeMetrics({ now: ports.clock.now })
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-observed', input: {}, context: {} })
+    coordinator.startRun({ skillVersionId: 'version-pending', input: {}, context: {} })
+    const queue = new PersistentSkillRunQueue(ports.queue, { clock: ports.clock, metrics })
+    let correlation: ReturnType<typeof getSkillCorrelation> = {}
+    const worker = new SkillRunWorker({
+      queue,
+      coordinator,
+      workerId: 'worker-observed',
+      metrics,
+      executor: async () => {
+        correlation = getSkillCorrelation()
+        return { status: 'completed' }
+      },
+    })
+
+    await expect(worker.runOne()).resolves.toBe(true)
+
+    expect(correlation).toMatchObject({ runId, workerId: 'worker-observed' })
+    expect(metrics.snapshot().counters.runsByStatus.completed).toBe(1)
+    expect(metrics.snapshot().counters.queueDepth).toBe(1)
   })
 })
 

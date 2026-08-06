@@ -2,6 +2,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createFakeSkillRuntimePorts } from '../application/test-doubles'
+import { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
+import { SkillRunCoordinator } from './skill-run-coordinator'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -178,5 +181,18 @@ describe('SkillRunCoordinator', () => {
 
     expect(run).toMatchObject({ status: 'completed_with_errors', output: { generated: 5, failed: 1 } })
     expect(run.finishedAt).toEqual(expect.any(Number))
+  })
+
+  it('records approval wait time when an approval resumes a run', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 60_000 })
+    const metrics = new SkillRuntimeMetrics({ now: ports.clock.now })
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock, metrics })
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-observed', input: {}, context: {} })
+
+    coordinator.transition(runId, 'waiting_approval', { expectedRevision: 1, waitingReason: 'approve action' })
+    ports.clock.advance(250)
+    coordinator.dispatchCommand(runId, { type: 'approve', idempotencyKey: 'approve-observed', expectedRevision: 2 })
+
+    expect(metrics.snapshot().counters.approvalWaitMs).toBe(250)
   })
 })

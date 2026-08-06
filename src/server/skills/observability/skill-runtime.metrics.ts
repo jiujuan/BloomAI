@@ -202,17 +202,26 @@ export class SkillRuntimeMetrics {
     this.push({
       point: { timestamp, kind: 'run', value: durationMs, attributes },
       counters: {
-        queueDepth,
-        queueLagMs,
+        ...(input.queueDepth === undefined ? {} : { queueDepth }),
+        ...(input.queueLagMs === undefined ? {} : { queueLagMs }),
         leaseExpired: leaseExpired ? 1 : 0,
         retry: retry ? 1 : 0,
         deadLetter: deadLetter ? 1 : 0,
-        artifactBytes,
-        approvalWaitMs,
-        runDurationMs: durationMs,
+        ...(input.artifactBytes === undefined ? {} : { artifactBytes }),
+        ...(input.approvalWaitMs === undefined ? {} : { approvalWaitMs }),
+        ...(input.durationMs === undefined ? {} : { runDurationMs: durationMs }),
         ...(importRejectReason ? { importRejectReason } : {}),
         runStatus: status,
       },
+    })
+  }
+
+  recordApprovalWait(waitMs: number, correlation?: SkillRuntimeCorrelation): void {
+    const timestamp = safeTimestamp(this.now())
+    const value = finiteNonNegative(waitMs)
+    this.push({
+      point: { timestamp, kind: 'run', value, attributes: { event: 'approval_wait' } },
+      counters: { approvalWaitMs: value },
     })
   }
 

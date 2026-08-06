@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createSqliteSkillRuntimePorts } from '../../db/repositories/skill-package.repo'
 import { SkillDomainError } from '../application/errors'
+import type { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
 import type { Clock, JsonObject, RunEventSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunQueueRepository, SkillRunRepository } from '../application/ports'
 import { normalizeSkillRunEvent } from './skill-run-events'
 import {
@@ -121,6 +122,7 @@ export type SkillRunCoordinatorDependencies = {
   events: SkillRunEventRepository
   clock: Clock
   queue?: SkillRunQueueRepository
+  metrics?: SkillRuntimeMetrics
 }
 
 export class SkillRunCoordinator {
@@ -128,12 +130,14 @@ export class SkillRunCoordinator {
   private readonly events: SkillRunEventRepository
   private readonly clock: Clock
   private readonly queue?: SkillRunQueueRepository
+  private readonly metrics?: SkillRuntimeMetrics
 
   constructor(dependencies: SkillRunCoordinatorDependencies = createDefaultDependencies()) {
     this.runs = dependencies.runs
     this.events = dependencies.events
     this.clock = dependencies.clock
     this.queue = dependencies.queue
+    this.metrics = dependencies.metrics
   }
 
   startRun(input: {
@@ -206,6 +210,9 @@ export class SkillRunCoordinator {
       throw new SkillRunTransitionError(current.status, targetStatus)
     }
     const now = this.clock.now()
+    const approvalWaitMs = current.status === 'waiting_approval' && targetStatus !== 'waiting_approval' && current.waitingSince !== null
+      ? Math.max(0, now - current.waitingSince)
+      : 0
     const waitingReason = isWaitingStatus(targetStatus) ? data.waitingReason ?? null : null
     const requiredAction = data.requiredAction === undefined
       ? defaultRequiredAction(targetStatus, waitingReason, data.approvalCapabilities)
@@ -242,6 +249,9 @@ export class SkillRunCoordinator {
       event,
     })
     if (!result) throw new SkillRunConflictError(runId)
+    if (approvalWaitMs > 0) {
+      this.metrics?.recordApprovalWait(approvalWaitMs, { runId, skillVersionId: current.skillVersionId })
+    }
     return mapRun(result.run)
   }
 
@@ -379,6 +389,10 @@ export class SkillRunCoordinator {
     changes: Record<string, unknown>,
   ): SkillRun {
     if (!canTransition(current.status, targetStatus)) throw new SkillRunTransitionError(current.status, targetStatus)
+    const now = this.clock.now()
+    const approvalWaitMs = current.status === 'waiting_approval' && targetStatus !== 'waiting_approval' && current.waitingSince !== null
+      ? Math.max(0, now - current.waitingSince)
+      : 0
     const result = this.runs.applyRunChange({
       runId,
       expectedRevision: command.expectedRevision,
@@ -408,6 +422,9 @@ export class SkillRunCoordinator {
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)
+    if (!result.duplicate && approvalWaitMs > 0) {
+      this.metrics?.recordApprovalWait(approvalWaitMs, { runId, skillVersionId: current.skillVersionId })
+    }
     const next = mapRun(result.run)
     if (!result.duplicate && isWaitingStatus(current.status) && (targetStatus === 'running' || targetStatus === 'validating')) {
       this.enqueueIfInactive(runId)

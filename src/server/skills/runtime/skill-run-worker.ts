@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { JsonObject, SkillRunQueueSnapshot } from '../application/ports'
+import type { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
+import { withSkillCorrelation } from '../observability/skill-runtime.logger'
 import type { SkillRun } from './skill-run-coordinator'
 import { SkillRunCoordinator } from './skill-run-coordinator'
 import { PersistentSkillRunQueue } from './skill-run-queue'
@@ -29,6 +31,7 @@ export type SkillRunWorkerOptions = {
   readonly leaseMs?: number
   readonly pollIntervalMs?: number
   readonly retryDelayMs?: (attempt: number) => number
+  readonly metrics?: SkillRuntimeMetrics
 }
 
 export class SkillRunWorker {
@@ -37,6 +40,7 @@ export class SkillRunWorker {
   private readonly leaseMs: number
   private readonly pollIntervalMs: number
   private readonly retryDelayMs: (attempt: number) => number
+  private readonly metrics?: SkillRuntimeMetrics
   private readonly active = new Set<Promise<boolean>>()
   private running = false
   private drainRequested = false
@@ -50,6 +54,7 @@ export class SkillRunWorker {
     this.leaseMs = options.leaseMs ?? 30_000
     this.pollIntervalMs = options.pollIntervalMs ?? 250
     this.retryDelayMs = options.retryDelayMs ?? ((attempt) => Math.min(60_000, 100 * 2 ** Math.max(0, attempt - 1)))
+    this.metrics = options.metrics
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) throw new Error('concurrency must be a positive integer')
     if (!Number.isInteger(this.leaseMs) || this.leaseMs < 1) throw new Error('leaseMs must be a positive integer')
     if (!options.executor && !options.adapter) throw new Error('executor or adapter is required')
@@ -85,76 +90,116 @@ export class SkillRunWorker {
     const item = this.options.queue.claimNext(this.workerId, this.leaseMs)
     if (!item) return false
 
-    const abortController = new AbortController()
-    this.controllers.add(abortController)
-    let leaseLost = false
-    const heartbeatTimer = setInterval(() => {
-      const lease = this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
-      if (!lease) {
-        leaseLost = true
-        abortController.abort()
-        return
-      }
-      try {
-        const current = this.options.coordinator.getRun(item.runId)
-        if (current.cancelRequested) abortController.abort()
-      } catch { /* run may have been concurrently finalized */ }
-    }, Math.max(50, Math.floor(this.leaseMs / 3)))
-
-    try {
-      let run = this.options.coordinator.getRun(item.runId)
-      if (isTerminal(run.status)) {
-        this.options.queue.ack(item.id, this.workerId)
-        return true
-      }
-
-      if (run.cancelRequested) {
-        run = this.options.coordinator.transition(run.id, 'cancelled', { expectedRevision: run.revision })
-        this.options.queue.ack(item.id, this.workerId)
-        return true
-      }
-
-      if (run.status === 'interrupted') {
-        run = this.options.coordinator.resumeRun(run.id, { expectedRevision: run.revision })
-      }
-      if (run.status === 'created' || run.status === 'validating') {
-        run = this.options.coordinator.transition(run.id, 'running', { expectedRevision: run.revision })
-      }
-      if (run.status === 'waiting_input' || run.status === 'waiting_approval') {
-        this.options.queue.ack(item.id, this.workerId)
-        return true
-      }
-
-      const result = this.options.adapter
-        ? toExecutionResult(await this.options.adapter.run(run.id))
-        : await this.options.executor!(run, { queueItem: item, signal: abortController.signal })
-      const refreshed = this.options.coordinator.getRun(run.id)
-      if (result?.status) {
-        if (!isTerminal(refreshed.status) && refreshed.status !== 'waiting_input' && refreshed.status !== 'waiting_approval') {
-          this.options.coordinator.transition(run.id, result.status, {
-            expectedRevision: refreshed.revision,
-            output: result.output,
-            waitingReason: result.waitingReason,
-          })
+    return withSkillCorrelation({ runId: item.runId, workerId: this.workerId }, async () => {
+      const startedAt = Date.now()
+      const abortController = new AbortController()
+      this.controllers.add(abortController)
+      let leaseLost = false
+      let run: SkillRun | undefined
+      const heartbeatTimer = setInterval(() => {
+        const lease = this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
+        if (!lease) {
+          leaseLost = true
+          abortController.abort()
+          return
         }
-      } else if (refreshed.status === 'running') {
-        throw new Error('Skill executor returned without transitioning the run')
-      }
+        try {
+          const current = this.options.coordinator.getRun(item.runId)
+          if (current.cancelRequested) abortController.abort()
+        } catch { /* run may have been concurrently finalized */ }
+      }, Math.max(50, Math.floor(this.leaseMs / 3)))
 
-      if (leaseLost) throw new Error(`Queue lease lost before ack: ${item.id}`)
-      if (!this.options.queue.ack(item.id, this.workerId)) throw new Error(`Queue lease lost before ack: ${item.id}`)
-      return true
-    } catch (error) {
-      await this.handleFailure(item, error)
-      return false
-    } finally {
-      abortController.abort()
-      clearInterval(heartbeatTimer)
-      this.controllers.delete(abortController)
-    }
+      try {
+        run = this.options.coordinator.getRun(item.runId)
+        return await withSkillCorrelation({ skillVersionId: run.skillVersionId }, async () => {
+          if (isTerminal(run!.status)) {
+            this.options.queue.ack(item.id, this.workerId)
+            this.recordRunMetric(item, run, startedAt)
+            return true
+          }
+
+          if (run!.cancelRequested) {
+            run = this.options.coordinator.transition(run!.id, 'cancelled', { expectedRevision: run!.revision })
+            this.options.queue.ack(item.id, this.workerId)
+            this.recordRunMetric(item, run, startedAt)
+            return true
+          }
+
+          if (run!.status === 'interrupted') {
+            run = this.options.coordinator.resumeRun(run!.id, { expectedRevision: run!.revision })
+          }
+          if (run!.status === 'created' || run!.status === 'validating') {
+            run = this.options.coordinator.transition(run!.id, 'running', { expectedRevision: run!.revision })
+          }
+          if (run!.status === 'waiting_input' || run!.status === 'waiting_approval') {
+            this.options.queue.ack(item.id, this.workerId)
+            this.recordRunMetric(item, run, startedAt)
+            return true
+          }
+
+          const result = this.options.adapter
+            ? toExecutionResult(await this.options.adapter.run(run!.id))
+            : await this.options.executor!(run!, { queueItem: item, signal: abortController.signal })
+          const refreshed = this.options.coordinator.getRun(run!.id)
+          if (result?.status) {
+            if (!isTerminal(refreshed.status) && refreshed.status !== 'waiting_input' && refreshed.status !== 'waiting_approval') {
+              this.options.coordinator.transition(run!.id, result.status, {
+                expectedRevision: refreshed.revision,
+                output: result.output,
+                waitingReason: result.waitingReason,
+              })
+            }
+          } else if (refreshed.status === 'running') {
+            throw new Error('Skill executor returned without transitioning the run')
+          }
+
+          if (leaseLost) throw new Error(`Queue lease lost before ack: ${item.id}`)
+          if (!this.options.queue.ack(item.id, this.workerId)) throw new Error(`Queue lease lost before ack: ${item.id}`)
+          run = this.options.coordinator.getRun(run!.id)
+          this.recordRunMetric(item, run, startedAt)
+          return true
+        })
+      } catch (error) {
+        const next = await this.handleFailure(item, error)
+        try {
+          run = this.options.coordinator.getRun(item.runId)
+        } catch { /* the run may have been deleted or never created */ }
+        this.recordRunMetric(item, run, startedAt, {
+          leaseExpired: leaseLost,
+          retry: next?.status === 'retry_wait',
+          deadLetter: next?.status === 'dead',
+        })
+        return false
+      } finally {
+        abortController.abort()
+        clearInterval(heartbeatTimer)
+        this.controllers.delete(abortController)
+      }
+    })
   }
 
-  private async handleFailure(item: SkillRunQueueSnapshot, error: unknown): Promise<void> {
+  private recordRunMetric(
+    item: SkillRunQueueSnapshot,
+    run: SkillRun | undefined,
+    startedAt: number,
+    flags: { leaseExpired?: boolean; retry?: boolean; deadLetter?: boolean } = {},
+  ): void {
+    if (!this.metrics) return
+    try {
+      this.metrics.recordRun({
+        status: run?.status ?? 'failed',
+        durationMs: Math.max(0, Date.now() - startedAt),
+        ...flags,
+        correlation: {
+          runId: item.runId,
+          workerId: this.workerId,
+          ...(run ? { skillVersionId: run.skillVersionId } : {}),
+        },
+      })
+    } catch { /* observability must never block worker execution */ }
+  }
+
+  private async handleFailure(item: SkillRunQueueSnapshot, error: unknown): Promise<SkillRunQueueSnapshot | undefined> {
     const message = error instanceof Error ? error.message : String(error)
     if (this.shutdownRequested) {
       try {
@@ -169,8 +214,7 @@ export class SkillRunWorker {
           })
         }
       } catch { /* a concurrent command owns the run */ }
-      this.options.queue.retry(item.id, this.workerId, 'worker_shutdown', 0)
-      return
+      return this.options.queue.retry(item.id, this.workerId, 'worker_shutdown', 0)
     }
     const next = this.options.queue.retry(
       item.id,
@@ -178,7 +222,7 @@ export class SkillRunWorker {
       message,
       this.retryDelayMs(item.attempt),
     )
-    if (!next || next.status !== 'dead') return
+    if (!next || next.status !== 'dead') return next
 
     try {
       const run = this.options.coordinator.getRun(item.runId)
@@ -193,6 +237,7 @@ export class SkillRunWorker {
       // The queue is the source of truth for retry/dead-letter state. If the
       // run disappeared or was concurrently finalized, do not resurrect it.
     }
+    return next
   }
 
   private async pump(): Promise<void> {
