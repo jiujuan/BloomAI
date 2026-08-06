@@ -523,6 +523,14 @@ export const skillPackageRepo = {
       .orderBy(desc(skill_installations.updated_at)).all()
   },
 
+  listAllInstallations(options: { limit: number; offset: number }) {
+    const data = getOrmDb().select().from(skill_installations)
+      .orderBy(desc(skill_installations.updated_at))
+      .limit(options.limit).offset(options.offset).all()
+    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_installations).get()?.count ?? 0
+    return { data, total: Number(total) }
+  },
+
 
   deleteInstallation(id: string): boolean {
     return getOrmDb().delete(skill_installations).where(eq(skill_installations.id, id)).run().changes === 1
@@ -1281,6 +1289,10 @@ export function createSqlitePackageRepository(): PackageSkillRepository {
     },
     listInstallations(packageId) {
       return skillPackageRepo.listInstallations(packageId).map(mapInstallation)
+    },
+    listAllInstallations(options) {
+      const result = skillPackageRepo.listAllInstallations(options)
+      return { data: result.data.map(mapInstallation), total: result.total }
     },
     deleteInstallation(id) {
       return skillPackageRepo.deleteInstallation(id)

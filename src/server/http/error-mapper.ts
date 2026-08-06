@@ -1,7 +1,7 @@
-﻿import type { Context } from 'hono'
+import type { Context } from 'hono'
 import { isServiceError, type ServiceErrorCode, type ServiceErrorDetails } from '../services/errors'
 
-export type HttpErrorStatus = 400 | 403 | 404 | 409 | 500 | 502
+export type HttpErrorStatus = 400 | 403 | 404 | 409 | 429 | 500 | 502
 
 export type HttpErrorResponse = {
   status: HttpErrorStatus
@@ -33,9 +33,12 @@ const STATUS_BY_SERVICE_ERROR: Record<ServiceErrorCode, HttpErrorStatus> = {
   PACKAGE_INSTALL_ERROR: 400,
   SKILL_VERSION_INCOMPATIBLE: 409,
   REVISION_CONFLICT: 409,
+  IDEMPOTENCY_CONFLICT: 409,
   INVALID_RUN_TRANSITION: 409,
   WAITING_ACTION_EXPIRED: 409,
   ARTIFACT_ERROR: 400,
+  ARTIFACT_NOT_FOUND: 404,
+  RATE_LIMITED: 429,
   ARTICLE_TEXT_TOO_LONG: 400,
   URL_CONSENT_REQUIRED: 400,
   URL_NOT_ALLOWED: 400,

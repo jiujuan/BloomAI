@@ -124,6 +124,13 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntimeError(() => dependencies.packageRepository.listPackages(page))
     },
 
+    listInstallations(page: { limit: number; offset: number }) {
+      return mapRuntimeError(() => {
+        if (!dependencies.packageRepository.listAllInstallations) return { data: [], total: 0 }
+        return dependencies.packageRepository.listAllInstallations(page)
+      })
+    },
+
     listVersions(packageId: string) {
       return mapRuntimeError(() => skillVersionService.listVersions(packageId))
     },

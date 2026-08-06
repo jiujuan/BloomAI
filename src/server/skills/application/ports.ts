@@ -268,6 +268,7 @@ export interface PackageSkillRepository {
   getInstallationCommandResult?(installationId: string, idempotencyKey: string): InstallationSnapshot | undefined
   setInstallationEnabledCas?(data: { installationId: string; enabled: boolean; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
   listInstallations(packageId: string): readonly InstallationSnapshot[]
+  listAllInstallations?(options: { limit: number; offset: number }): Page<InstallationSnapshot>
   deleteInstallation(id: string): boolean
   uninstallInstallation?(data: { installationId: string; expectedRevision: number; idempotencyKey: string }): InstallationSnapshot | undefined
   rollbackInstallation?(data: { installationId: string; versionId: string; expectedRevision: number; idempotencyKey: string; reason: string }): InstallationSnapshot | undefined

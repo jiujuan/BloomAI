@@ -1,10 +1,12 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { z } from 'zod'
-import { mapErrorToHttpResponse } from '../error-mapper'
 import { ServiceError } from '../../services/errors'
 import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
 import { getSkillRuntimeCapabilities } from '../../skills/config/skill-runtime.config'
+import { errorResponse } from '../dtos/skill-runtime.error'
+import { toPageMeta } from '../dtos/skill-runtime.dto'
 
 const jsonObjectSchema = z.record(z.unknown())
 const idSchema = z.string().min(1).max(200)
@@ -111,7 +113,14 @@ skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   try {
     const page = paginationSchema.parse(c.req.query())
     const result = skillPackageRuntimeService.listPackages(page)
-    return c.json({ data: result.data, meta: pageMeta(page, result.total) })
+    return c.json({ data: result.data, meta: toPageMeta(page, result.total) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-installations', (c) => {
+  try {
+    const page = paginationSchema.parse(c.req.query())
+    const result = skillPackageRuntimeService.listInstallations(page)
+    return c.json({ data: result.data.map(toInstallationHttpDto), meta: toPageMeta(page, result.total) })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-packages/:id', async (c) => {
@@ -200,7 +209,7 @@ skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
   try {
     const page = paginationSchema.extend({ status: runStatusSchema.optional(), skillVersionId: idSchema.optional() }).parse(c.req.query())
     const result = skillPackageRuntimeService.listRuns(page)
-    return c.json({ data: result.data, meta: pageMeta(page, result.total) })
+    return c.json({ data: result.data, meta: toPageMeta(page, result.total) })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/next-action', (c) => {
@@ -216,7 +225,24 @@ skillPackageRuntimeRoutes.get('/skill-runs/:id/events', (c) => {
   try {
     const id = idSchema.parse(c.req.param('id'))
     const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(c.req.query())
-    return c.json({ data: skillPackageRuntimeService.listRunEvents(id, afterSeq), meta: { afterSeq } })
+    const events = skillPackageRuntimeService.listRunEvents(id, afterSeq)
+    return c.json({ data: events, meta: { afterSeq } })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-runs/:id/stream', (c) => {
+  try {
+    const id = idSchema.parse(c.req.param('id'))
+    const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(c.req.query())
+    const events = skillPackageRuntimeService.listRunEvents(id, afterSeq)
+    return streamSSE(c, async (stream) => {
+      if (events.length === 0) {
+        await stream.writeSSE({ id: String(afterSeq), event: 'ready', data: JSON.stringify({ runId: id, afterSeq }) })
+        return
+      }
+      for (const event of events) {
+        await stream.writeSSE({ id: String(event.seq), event: event.type, data: JSON.stringify(event) })
+      }
+    })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs/:id/commands', async (c) => {
@@ -272,12 +298,4 @@ function toPackageDetailHttpDto(detail: any) {
 function toInstallationHttpDto(installation: any) {
   if (!installation || typeof installation !== 'object') return installation
   return { ...installation, enabled: typeof installation.enabled === 'boolean' ? (installation.enabled ? 1 : 0) : installation.enabled }
-}
-
-function pageMeta(page: { limit: number; offset: number }, total: number) { return { ...page, total } }
-function errorResponse(c: Context, error: unknown) {
-  if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)
-  const response = mapErrorToHttpResponse(error)
-
-  return c.json(response.body, response.status)
 }
