@@ -6,6 +6,8 @@ import { runMigrations } from '../../db/client'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
+import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
+import { SkillPackageReader } from './package-reader'
 
 
 type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
@@ -193,7 +195,9 @@ function getPackageLimits() {
     maxFileCount: config.maxPackageFiles,
     maxFileBytes: config.maxFileBytes,
     maxUnpackedBytes: config.maxPackageBytes,
-  }
+    maxPathLength: 240,
+    maxDepth: 32,
+  } satisfies PackagePathPolicy
 }
 
 async function materializeSource(source: PackageInstallSource, target: string) {
@@ -371,16 +375,17 @@ function discoverSkillDirectories(root: string): string[] {
 }
 
 function collectFiles(root: string) {
-  const files: Array<{ path: string; sha256: string; sizeBytes: number }> = []
-  const visit = (directory: string) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const fullPath = path.join(directory, entry.name)
-      if (entry.isDirectory()) visit(fullPath)
-      else if (entry.isFile()) { const stat = fs.statSync(fullPath); files.push({ path: normalizeRelative(path.relative(root, fullPath)), sha256: hashBuffer(fs.readFileSync(fullPath)), sizeBytes: stat.size }) }
-    }
-  }
-  visit(root)
-  return files.sort((a, b) => a.path.localeCompare(b.path))
+  const limits = getPackageLimits()
+  const reader = new SkillPackageReader(root, {
+    ...limits,
+    maxReadBytes: limits.maxFileBytes,
+    maxFilesPerRun: limits.maxFileCount,
+  })
+  return reader.listFiles()
+    .filter((file) => isAllowedSnapshotPath(file))
+    .map((file) => reader.readBuffer(file, limits.maxFileBytes))
+    .map(({ path: filePath, sha256, sizeBytes }) => ({ path: filePath, sha256, sizeBytes }))
+    .sort((a, b) => a.path.localeCompare(b.path))
 }
 
 function resolveSubdirectory(root: string, subdirectory?: string): string {
@@ -397,12 +402,9 @@ function resolveSubdirectory(root: string, subdirectory?: string): string {
 }
 
 function normalizeArchivePath(value: string): string {
-  const normalized = value.replace(/\\/g, '/')
-  const withoutTrailingSlash = normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
-  if (!withoutTrailingSlash || withoutTrailingSlash.startsWith('/') || /^[A-Za-z]:\//.test(withoutTrailingSlash)) throw new PackageInstallError(`Unsafe archive path: ${value}`)
-  const pieces = withoutTrailingSlash.split('/')
-  if (pieces.some((piece) => !piece || piece === '.' || piece === '..')) throw new PackageInstallError(`Unsafe archive path: ${value}`)
-  return pieces.join('/')
+  const withoutTrailingSlash = value.endsWith('/') ? value.slice(0, -1) : value
+  try { return assertArchiveEntryPath(withoutTrailingSlash, getPackageLimits()) }
+  catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Unsafe archive path: ${value}`) }
 }
 
 function safeDestination(root: string, relative: string): string {
