@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { API_BASE } from '@shared/constants'
+import { apiFetch } from '@renderer/api'
 
 export interface SkillMigrationPreview {
   runtimeKind: 'legacy'
@@ -22,6 +22,14 @@ export interface Skill {
   install_count: number; created_at: number
 }
 
+export interface LegacySkillRun {
+  runtimeKind: 'legacy'
+  skillId: string
+  status: string
+  output?: Record<string, unknown>
+  runId?: string
+}
+
 interface SkillsState { installed: Skill[]; market: Skill[]; loading: boolean }
 interface SkillsActions {
   loadInstalled: () => Promise<void>
@@ -31,32 +39,60 @@ interface SkillsActions {
   installSkill: (id: string) => Promise<void>
   uninstallSkill: (id: string) => Promise<void>
   deleteSkill: (id: string) => Promise<void>
-  runSkill: (id: string, input: object) => Promise<any>
+  runSkill: (id: string, input: Record<string, unknown>) => Promise<LegacySkillRun>
 }
 
-async function apiFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`)
-  return data
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function dataArray(value: unknown): unknown[] {
+  const payload = asRecord(value)
+  return Array.isArray(payload.data) ? payload.data : []
+}
+
+function toLegacySkill(value: unknown): Skill {
+  const row = asRecord(value)
+  return {
+    id: String(row.id ?? ''), name: String(row.name ?? ''), description: String(row.description ?? ''), type: String(row.type ?? ''),
+    source: String(row.source ?? ''), params_schema: String(row.params_schema ?? row.paramsSchema ?? '{}'), author: typeof row.author === 'string' ? row.author : null,
+    version: String(row.version ?? ''), is_public: Number(row.is_public ?? row.isPublic ?? 0), is_installed: Number(row.is_installed ?? row.isInstalled ?? 0),
+    install_count: Number(row.install_count ?? row.installCount ?? 0), created_at: Number(row.created_at ?? row.createdAt ?? 0),
+  }
+}
+
+function toLegacySkills(value: unknown): Skill[] {
+  return dataArray(value).map(toLegacySkill)
+}
+
+function toLegacySkillRun(value: unknown, skillId: string): LegacySkillRun {
+  const row = asRecord(value)
+  const output = row.output && typeof row.output === 'object' && !Array.isArray(row.output) ? row.output as Record<string, unknown> : undefined
+  return {
+    runtimeKind: 'legacy', skillId, status: String(row.status ?? 'completed'), output,
+    runId: typeof row.runId === 'string' ? row.runId : typeof row.run_id === 'string' ? row.run_id : undefined,
+  }
 }
 
 export const useSkillsStore = create<SkillsState & SkillsActions>()(
   devtools((set, get) => ({
     installed: [], market: [], loading: false,
-    loadInstalled: async () => { const { data } = await apiFetch('/skills'); set({ installed: data }) },
+    loadInstalled: async () => {
+      const payload: unknown = await apiFetch('/skills')
+      set({ installed: toLegacySkills(payload) })
+    },
     loadMarket: async (query) => {
       set({ loading: true })
       try {
         const q = query ? `?q=${encodeURIComponent(query)}` : ''
-        const { data } = await apiFetch(`/skills/market${q}`)
-        set({ market: data, loading: false })
+        const payload: unknown = await apiFetch(`/skills/market${q}`)
+        set({ market: toLegacySkills(payload), loading: false })
       } catch { set({ loading: false }) }
     },
     createSkill: async (data) => {
-      const { data: skill } = await apiFetch('/skills', { method: 'POST', body: JSON.stringify(data) })
+      const payload: unknown = await apiFetch('/skills', { method: 'POST', body: JSON.stringify(data) })
       await get().loadInstalled()
-      return skill
+      return toLegacySkill(asRecord(payload).data)
     },
     updateSkill: async (id, data) => {
       await apiFetch(`/skills/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
@@ -69,8 +105,8 @@ export const useSkillsStore = create<SkillsState & SkillsActions>()(
     uninstallSkill: async (id) => { await apiFetch(`/skills/${id}`, { method: 'DELETE' }); await get().loadInstalled() },
     deleteSkill: async (id) => { await apiFetch(`/skills/${id}`, { method: 'DELETE' }); await get().loadInstalled() },
     runSkill: async (id, input) => {
-      const { data } = await apiFetch(`/skills/${id}/run`, { method: 'POST', body: JSON.stringify({ input }) })
-      return data
+      const payload: unknown = await apiFetch(`/skills/${id}/run`, { method: 'POST', body: JSON.stringify({ input }) })
+      return toLegacySkillRun(asRecord(payload).data, id)
     },
   }), { name: 'bloomai-skills' })
 )

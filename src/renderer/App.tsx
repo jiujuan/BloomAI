@@ -13,6 +13,7 @@ import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/Articl
 import { SchedulesPage } from '@renderer/pages/Schedules'
 import { useSessionStore, usePersonaStore, useProjectStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme, applyFont } from '@renderer/api'
+import { useSkillRuntimeStore } from '@renderer/pages/Skills/skill-runtime.store'
 
 export function App() {
   const { loadRecentSessions, createSession } = useSessionStore()
@@ -29,6 +30,7 @@ export function App() {
       await Promise.all([loadProjects(), loadRecentSessions({ replace: true, limit: 15 })])
     }
     init()
+    void useSkillRuntimeStore.getState().loadCapabilities().catch(() => undefined)
   }, [])
 
   useEffect(() => {

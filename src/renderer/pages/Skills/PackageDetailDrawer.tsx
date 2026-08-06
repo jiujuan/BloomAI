@@ -89,17 +89,17 @@ function CompatibilityPanel({ manifest, activeGrants }: { manifest: PackageManif
   return <><div className={'skills-message ' + (manifest.compatible ? 'success' : 'warning')}><ShieldCheck size={15} />{manifest.compatible ? '该版本仅使用 B-Lite 支持的运行时能力。' : '该版本包含 B-Lite 尚不支持的声明。'}</div>{manifest.unsupported.length > 0 && <div className="skills-chip-row">{manifest.unsupported.map((item) => <span className="skills-chip danger" key={item}>{item}</span>)}</div>}<div className="skills-permission-diff">{requested.map((request) => <div className="skills-permission-row" key={request.capability}><span>{request.capability}</span><span className={'skills-status ' + (granted.has(request.capability) ? 'success' : 'warning')}>{granted.has(request.capability) ? '已授权' : '待授权'}</span></div>)}{requested.length === 0 && <p className="skills-muted">Manifest 未声明能力请求。</p>}</div></>
 }
 
-function installationStatusLabel(installation: { status: string; enabled: number } | undefined) {
+function installationStatusLabel(installation: { status: string; enabled: boolean | 0 | 1 } | undefined) {
   if (!installation) return '未安装'
   if (installation.status === 'uninstalled') return '已卸载'
   if (installation.status === 'deleted') return '已删除'
   return installation.enabled === 1 ? '已启用' : '已禁用'
 }
 
-function installationStatusTone(status: string | undefined, enabled: number | undefined) {
+function installationStatusTone(status: string | undefined, enabled: boolean | 0 | 1 | undefined) {
   if (status === 'uninstalled' || status === 'deleted') return 'warning'
   return enabled === 1 ? 'success' : 'muted'
 }
 
-function isActiveGrant(grant: CapabilityGrant) { return grant.revoked_at === null && grant.consumed_at === null && (grant.expires_at === null || grant.expires_at > Date.now()) }
+function isActiveGrant(grant: CapabilityGrant) { return grant.revoked_at == null && grant.consumed_at == null && (grant.expires_at == null || grant.expires_at > Date.now()) }
 function statusTone(status: string) { if (status === 'completed') return 'success'; if (status === 'failed' || status === 'cancelled') return 'danger'; if (status.startsWith('waiting')) return 'warning'; return 'info' }
