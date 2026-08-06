@@ -96,6 +96,22 @@ describe('ArtifactStore', () => {
     expect(() => store.readContent({ artifactId: linked.id, runId: run.id })).toThrow(/regular/i)
   })
 
+  it('sanitizes Markdown previews before returning list metadata', async () => {
+    const { run } = await createRunFixture()
+    const { ArtifactStore } = await import('./artifact-store')
+    const store = new ArtifactStore()
+    store.writeText({
+      runId: run.id,
+      kind: 'markdown',
+      fileName: 'unsafe.md',
+      content: '<a href=\"javascript:alert(1)\" onclick=\"steal()\">safe</a><script>alert(2)</script>',
+    })
+
+    const preview = store.listArtifacts({ runId: run.id }).data[0]?.summary.contentPreview ?? ''
+    expect(preview).toContain('safe')
+    expect(preview).not.toMatch(/script|onclick|javascript:/i)
+  })
+
   it('exports an artifact only to an existing destination and retains files when a run is removed', async () => {
     const { artifactRoot, run } = await createRunFixture()
     const { ArtifactStore, ArtifactStoreError } = await import('./artifact-store')

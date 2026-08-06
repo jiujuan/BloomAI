@@ -11,10 +11,11 @@ import { SkillPackageReader } from './package-reader'
 import { detectNpxSkillsArtifact, isIgnoredArtifactPath, type NpxArtifactLayout } from './npx-artifact-detector'
 import { packageInstallReviewService } from './package-install-review.service'
 import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGitHubCommit } from './github-source'
+import { assertPackageLimits, validateExternalSource, SkillSecurityError } from '../security/skill-security-checklist'
 
 
-type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: { origin?: 'local' | 'npx-artifact' } }
-type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: { origin?: 'local' | 'npx-artifact' }}
+type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: Record<string, unknown> }
+type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: Record<string, unknown> }
 type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
 export type PackageInstallSource = LocalDirectorySource | ZipSource | GitHubArchiveSource
 
@@ -108,20 +109,21 @@ export class PackageInstaller {
     packages: InspectedPackage[]
   }> {
     assertPackageImportEnabled()
+    const securedSource = validatePackageInstallSource(source)
     const roots = getPackageRoots()
     fs.mkdirSync(roots.staging, { recursive: true })
     const stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
     try {
       const sourceRoot = path.join(stage, 'source')
-      const sourceSnapshot = await materializeSource(source, sourceRoot)
-      const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
+      const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
+      const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
       const skills = discoverSkillDirectories(selectedRoot)
       if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
       const packages = skills.map((skillDirectory) => {
         const files = collectFiles(skillDirectory)
         const resolvedManifest = resolveSkillManifest(skillDirectory)
         return {
-          sourceType: source.kind,
+          sourceType: securedSource.kind,
           relativeSkillPath: normalizeRelative(path.relative(selectedRoot, skillDirectory)),
           manifestHash: resolvedManifest.canonicalHash ?? hashJson(files),
           sourceFingerprint: hashJson(files),
@@ -132,9 +134,13 @@ export class PackageInstaller {
         }
       })
       const review = packageInstallReviewService.create({
-        source,
+        source: securedSource,
         sourceFingerprint: sourceSnapshot.sourceSha256,
-        inspection: { sourceType: source.kind, sourceFingerprint: sourceSnapshot.sourceSha256, packages },
+        inspection: { sourceType: securedSource.kind, sourceFingerprint: sourceSnapshot.sourceSha256, packages },
+        securityFindings: {
+          unsupportedCapabilities: packages.flatMap((item) => item.manifest.unsupported),
+          diagnostics: packages.flatMap((item) => item.diagnostics),
+        },
       })
       return {
         reviewId: review.id,
@@ -152,7 +158,8 @@ export class PackageInstaller {
 
   async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
     assertPackageImportEnabled()
-    if (source.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
+    const securedSource = validatePackageInstallSource(source)
+    if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
     if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
 
     const roots = getPackageRoots()
@@ -161,7 +168,7 @@ export class PackageInstaller {
     const stage = fs.mkdtempSync(path.join(roots.staging, 'install-'))
     try {
       const sourceRoot = path.join(stage, 'source')
-      const sourceSnapshot = await materializeSource(source, sourceRoot)
+      const sourceSnapshot = await materializeSource(securedSource, sourceRoot)
       if (sourceSnapshot.sourceSha256 !== options.sourceFingerprint) {
         throw new PackageInstallError('Package source fingerprint changed since inspection')
       }
@@ -170,7 +177,7 @@ export class PackageInstaller {
         return review.decision.result as unknown as PackageInstallResult
       }
 
-      const selectedRoot = resolveSubdirectory(sourceRoot, source.subdirectory)
+      const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
       const skills = discoverSkillDirectories(selectedRoot)
       if (skills.length === 0) throw new PackageInstallError('No SKILL.md file was found in the selected package source')
       const packages: InstalledPackage[] = []
@@ -178,7 +185,7 @@ export class PackageInstaller {
       for (const skillDirectory of skills) {
         const relativeSkillPath = normalizeRelative(path.relative(selectedRoot, skillDirectory))
         try {
-          packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source, sourceSnapshot }))
+          packages.push(await this.persistSkill({ skillDirectory, selectedRoot, roots, source: securedSource, sourceSnapshot }))
         } catch (error) {
           partialFailures.push({
             relativeSkillPath,
@@ -246,6 +253,11 @@ export class PackageInstaller {
           manifestHash,
           packagePath: finalPath,
           sourceSnapshot,
+          securityFindings: {
+            sourceFingerprint,
+            unsupportedCapabilities: resolvedManifest.unsupported,
+            diagnostics: resolvedManifest.diagnostics ?? [],
+          },
         },
         snapshot: {
           filesManifest: snapshotFiles,
@@ -278,6 +290,15 @@ export class PackageInstaller {
   }
 }
 
+function validatePackageInstallSource(source: PackageInstallSource): PackageInstallSource {
+  try {
+    return validateExternalSource(source) as PackageInstallSource
+  } catch (error) {
+    if (error instanceof SkillSecurityError) throw new PackageInstallError(error.message, error.code)
+    throw error
+  }
+}
+
 function assertPackageImportEnabled(): void {
   try { assertSkillRuntimeFeature('importEnabled') } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Skill Package import is disabled', 'FEATURE_DISABLED') }
 }
@@ -304,15 +325,16 @@ function getPackageLimits() {
 }
 
 async function materializeSource(source: PackageInstallSource, target: string): Promise<Omit<PackageSourceSnapshot, 'files'>> {
-  if (source.kind === 'local-directory') {
-    const directory = path.resolve(source.directory)
+  const securedSource = validatePackageInstallSource(source)
+  if (securedSource.kind === 'local-directory') {
+    const directory = securedSource.directory
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
     copySafeDirectory(directory, target)
     const artifactMetadata = detectAndSanitizeNpxArtifact(target)
     return { sourceSha256: hashDirectory(target), sourceRef: directory, ...artifactMetadata }
   }
-  if (source.kind === 'zip') {
-    const zipPath = path.resolve(source.zipPath)
+  if (securedSource.kind === 'zip') {
+    const zipPath = securedSource.zipPath
     if (!fs.statSync(zipPath).isFile()) throw new PackageInstallError(`ZIP package not found: ${zipPath}`)
     const archive = fs.readFileSync(zipPath)
     extractZip(archive, target)
@@ -321,7 +343,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
   }
   let parsedSource
   try {
-    parsedSource = parseGitHubSource(source.repositoryUrl, source.ref, source.subdirectory)
+    parsedSource = parseGitHubSource(securedSource.repositoryUrl, securedSource.ref, securedSource.subdirectory)
     const config = getSkillRuntimeConfig()
     const { commitSha } = await resolveGitHubCommit(parsedSource, {
       timeoutMs: config.githubRequestTimeoutMs,
@@ -399,9 +421,9 @@ function extractZip(archive: Buffer, target: string): void {
     const name = normalizeArchivePath(entry.name)
     if (seen.has(name)) throw new PackageInstallError(`Archive contains duplicate file path: ${name}`)
     seen.add(name)
-    if (entry.uncompressedSize > limits.maxFileBytes) throw new PackageInstallError(`Archive file exceeds the maximum size: ${name}`)
+    try { assertPackageLimits({ fileCount: seen.size, totalBytes: totalBytes + entry.uncompressedSize, fileBytes: entry.uncompressedSize, ...limits }) }
+    catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Archive entry exceeds package limits: ${name}`, error instanceof SkillSecurityError ? error.code : 'PACKAGE_INSTALL_ERROR') }
     totalBytes += entry.uncompressedSize
-    if (totalBytes > limits.maxUnpackedBytes) throw new PackageInstallError('Archive expands beyond the maximum allowed size')
     const unixType = (entry.externalAttributes >>> 16) & 0o170000
     if (unixType === 0o120000 || unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new PackageInstallError(`Archive contains a non-regular file: ${name}`)
     if (isDirectory) continue
@@ -480,9 +502,10 @@ function copySafeDirectoryWithBudget(source: string, target: string, budget: { f
     if (entryStat.size > getPackageLimits().maxFileBytes) throw new PackageInstallError(`Package file exceeds the maximum size: ${sourcePath}`)
     if (isSensitivePath(entry.name)) continue
     budget.fileCount += 1
-    if (budget.fileCount > getPackageLimits().maxFileCount) throw new PackageInstallError('Package source contains too many files')
     budget.totalBytes += entryStat.size
-    if (budget.totalBytes > getPackageLimits().maxUnpackedBytes) throw new PackageInstallError('Package source exceeds the maximum allowed size')
+    const limits = getPackageLimits()
+    try { assertPackageLimits({ fileCount: budget.fileCount, totalBytes: budget.totalBytes, fileBytes: entryStat.size, ...limits }) }
+    catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Package source exceeds the configured limits', error instanceof SkillSecurityError ? error.code : 'PACKAGE_INSTALL_ERROR') }
     fs.mkdirSync(path.dirname(targetPath), { recursive: true })
     fs.copyFileSync(sourcePath, targetPath)
   }

@@ -346,6 +346,22 @@ describe('PackageInstaller', () => {
     expect(fs.existsSync(path.join(result.packages[0].packagePath, 'scripts'))).toBe(false)
   })
 
+  it('rejects unsafe GitHub refs before any network request', async () => {
+    const fetchSpy = vi.fn()
+    globalThis.fetch = fetchSpy as typeof fetch
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+
+    await expect(new PackageInstaller().inspect({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main..',
+    })).rejects.toMatchObject({
+      constructor: PackageInstallError,
+      code: 'INVALID_SOURCE_REF',
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('rejects detected npx artifacts when npx import is disabled', async () => {
     process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
     writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')

@@ -188,6 +188,7 @@ export const skill_versions = sqliteTable('skill_versions', {
   status: text('status').notNull().default('runnable'),
   security_status: text('security_status').notNull().default('unreviewed'),
   snapshot_hash: text('snapshot_hash').notNull().default(''),
+  security_findings_json: text('security_findings_json').notNull().default('{}'),
   published_at: integer('published_at'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
@@ -364,6 +365,7 @@ export const skill_import_reviews = sqliteTable('skill_import_reviews', {
   source_sha: text('source_sha').notNull(),
   source_ref: text('source_ref'),
   inspection_json: text('inspection_json').notNull().default('{}'),
+  security_findings_json: text('security_findings_json').notNull().default('{}'),
   status: text('status').notNull(),
   reviewer: text('reviewer'),
   decision: text('decision'),
@@ -381,6 +383,9 @@ export const skill_audit_events = sqliteTable('skill_audit_events', {
   resource_type: text('resource_type').notNull(),
   resource_id: text('resource_id'),
   payload_json: text('payload_json').notNull().default('{}'),
+  security_decision: text('security_decision').notNull().default('not_evaluated'),
+  policy_version: text('policy_version').notNull().default('legacy'),
+  source_fingerprint: text('source_fingerprint'),
   created_at: integer('created_at').notNull(),
 }, (table) => ({
   resourceIdx: index('idx_skill_audit_events_resource').on(table.resource_type, table.resource_id, table.created_at),

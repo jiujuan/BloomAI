@@ -38,6 +38,7 @@ export type VersionSnapshot = {
   readonly status?: string
   readonly securityStatus?: string
   readonly snapshotHash?: string
+  readonly securityFindings?: JsonObject
   readonly publishedAt?: number | null
   readonly createdAt: number
 }
@@ -228,6 +229,9 @@ export type AuditEvent = {
   readonly action: string
   readonly resourceType: string
   readonly resourceId?: string | null
+  readonly securityDecision?: string
+  readonly policyVersion?: string
+  readonly sourceFingerprint?: string | null
   readonly payload?: JsonObject
 }
 
@@ -253,6 +257,7 @@ export interface PackageSkillRepository {
     status?: string
     securityStatus?: string
     snapshotHash?: string
+    securityFindings?: JsonObject
   }): VersionSnapshot
   getVersion(id: string): VersionSnapshot | undefined
   listVersions(packageId: string): readonly VersionSnapshot[]

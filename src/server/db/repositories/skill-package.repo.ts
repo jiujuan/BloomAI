@@ -19,6 +19,7 @@ import {
   skill_audit_events,
   skill_drafts,
 } from '../schema'
+import { sanitizeSecurityPayload } from '../../skills/security/skill-security-checklist'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
@@ -141,6 +142,7 @@ export const skillPackageRepo = {
     status?: string
     securityStatus?: string
     snapshotHash?: string
+    securityFindings?: Record<string, unknown>
   }) {
     const row = {
       id: uuidv4(),
@@ -156,6 +158,7 @@ export const skillPackageRepo = {
       status: data.status ?? 'runnable',
       security_status: data.securityStatus ?? 'unreviewed',
       snapshot_hash: data.snapshotHash ?? '',
+      security_findings_json: stringifySecurityFindings(data.securityFindings),
       published_at: null,
       created_at: Date.now(),
     }
@@ -223,6 +226,7 @@ export const skillPackageRepo = {
     sourceSha: string
     sourceRef?: string | null
     inspection: Record<string, unknown>
+    securityFindings?: Record<string, unknown>
     status?: string
   }) {
     const now = Date.now()
@@ -239,7 +243,8 @@ export const skillPackageRepo = {
       source: data.source,
       source_sha: data.sourceSha,
       source_ref: data.sourceRef ?? null,
-      inspection_json: stringifyJsonObject(data.inspection, 'inspection'),
+      inspection_json: stringifySecurityObject(data.inspection, 'inspection'),
+      security_findings_json: stringifySecurityFindings(data.securityFindings),
       status: data.status ?? 'pending',
       reviewer: null,
       decision: null,
@@ -254,11 +259,17 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_import_reviews).where(eq(skill_import_reviews.id, id)).get()
   },
 
-  updateImportReview(id: string, data: { status?: string; reviewer?: string | null; decision?: string | null }) {
+  updateImportReview(id: string, data: {
+    status?: string
+    reviewer?: string | null
+    decision?: string | null
+    securityFindings?: Record<string, unknown>
+  }) {
     const patch = {
       ...(data.status === undefined ? {} : { status: data.status }),
       ...(data.reviewer === undefined ? {} : { reviewer: data.reviewer }),
       ...(data.decision === undefined ? {} : { decision: data.decision }),
+      ...(data.securityFindings === undefined ? {} : { security_findings_json: stringifySecurityFindings(data.securityFindings) }),
       updated_at: Date.now(),
     }
     const result = getOrmDb().update(skill_import_reviews).set(patch).where(eq(skill_import_reviews.id, id)).run()
@@ -280,6 +291,11 @@ export const skillPackageRepo = {
       packagePath: string
       sourceSnapshot: Record<string, unknown>
       isCompatible?: boolean
+      immutableHash?: string
+      status?: string
+      securityStatus?: string
+      snapshotHash?: string
+      securityFindings?: Record<string, unknown>
     }
     snapshot: {
       filesManifest: Record<string, unknown>
@@ -314,10 +330,11 @@ export const skillPackageRepo = {
         package_path: data.version.packagePath,
         source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
         is_compatible: data.version.isCompatible === false ? 0 : 1,
-        immutable_hash: (data.version as any).immutableHash ?? '',
-        status: (data.version as any).status ?? 'runnable',
-        security_status: (data.version as any).securityStatus ?? 'unreviewed',
-        snapshot_hash: (data.version as any).snapshotHash ?? '',
+        immutable_hash: data.version.immutableHash ?? '',
+        status: data.version.status ?? 'runnable',
+        security_status: data.version.securityStatus ?? 'unreviewed',
+        snapshot_hash: data.version.snapshotHash ?? '',
+        security_findings_json: stringifySecurityFindings(data.version.securityFindings),
         published_at: null,
         created_at: now,
       }
@@ -935,14 +952,30 @@ export const skillPackageRepo = {
     return this.getArtifact(data.id)
   },
 
-  appendAudit(event: { actor?: string | null; action: string; resourceType: string; resourceId?: string | null; payload?: Record<string, unknown> }) {
+  appendAudit(event: {
+    actor?: string | null
+    action: string
+    resourceType: string
+    resourceId?: string | null
+    securityDecision?: string
+    policyVersion?: string
+    sourceFingerprint?: string | null
+    payload?: Record<string, unknown>
+  }) {
+    const sourceFingerprint = event.sourceFingerprint ?? null
+    if (sourceFingerprint !== null && !/^[a-f0-9]{64}$/i.test(sourceFingerprint)) {
+      throw new Error('sourceFingerprint must be a SHA-256 hex string')
+    }
     getOrmDb().insert(skill_audit_events).values({
       id: uuidv4(),
       actor: event.actor ?? null,
       action: event.action,
       resource_type: event.resourceType,
       resource_id: event.resourceId ?? null,
-      payload_json: stringifyJsonObject(event.payload ?? {}, 'audit payload'),
+      payload_json: stringifySecurityObject(event.payload ?? {}, 'audit payload'),
+      security_decision: event.securityDecision ?? 'not_evaluated',
+      policy_version: event.policyVersion ?? 'legacy',
+      source_fingerprint: sourceFingerprint,
       created_at: Date.now(),
     }).run()
   },
@@ -1512,6 +1545,15 @@ function parseObject(value: string, fieldName: string): JsonObject {
   return parsed.data
 }
 
+function stringifySecurityObject(value: unknown, fieldName: string): string {
+  const sanitized = sanitizeSecurityPayload(value)
+  return stringifyJsonObject(sanitized ?? {}, fieldName)
+}
+
+function stringifySecurityFindings(value: unknown): string {
+  return stringifySecurityObject(value ?? {}, 'security findings')
+}
+
 function mapPackage(row: any): PackageSnapshot {
   return {
     id: row.id,
@@ -1542,6 +1584,7 @@ function mapVersion(row: any): VersionSnapshot {
     status: row.status ?? 'runnable',
     securityStatus: row.security_status ?? 'unreviewed',
     snapshotHash: row.snapshot_hash ?? '',
+    securityFindings: parseObject(row.security_findings_json ?? '{}', 'security findings'),
     publishedAt: row.published_at ?? null,
     createdAt: row.created_at,
   }

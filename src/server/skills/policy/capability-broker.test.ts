@@ -104,6 +104,13 @@ describe('CapabilityBroker', () => {
       runId: run.id,
     })).rejects.toBeInstanceOf(CapabilityDeniedError)
 
+    await expect(executeCapability({
+      caller: 'package-runtime',
+      capability: 'sub-agent.execute',
+      input: { prompt: 'bypass' },
+      runId: run.id,
+    })).rejects.toBeInstanceOf(CapabilityDeniedError)
+
     expect(toolRepo.listRuns('shell')).toEqual([])
     expect(toolRepo.listRuns('python_runner')).toEqual([])
   })

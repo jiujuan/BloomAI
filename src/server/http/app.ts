@@ -19,6 +19,8 @@ import { articleIllustrationRoutes } from './routes/article-illustrations'
 import { deepResearchRoutes } from './routes/deep-research'
 import { schedulesRoutes } from './routes/schedules'
 import { skillCreatorRoutes } from './routes/skill-creator'
+import { skillSecurityRoutes } from './routes/skill-security'
+import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checklist'
 
 /**
  * Single Hono HTTP server for BloomAI 鈥?replaces the previous Express app.
@@ -31,7 +33,14 @@ export function createHonoApp(): Hono {
   // Lazily created on first request 鈥?after initMetrics() has registered the global MeterProvider.
   let _httpDuration: ReturnType<ReturnType<typeof getMeter>['createHistogram']> | null = null
 
-  app.use('*', cors({ origin: '*' }))
+  app.use('*', async (c, next) => {
+    const origin = c.req.header('Origin')
+    if (origin && !isAllowedBrowserOrigin(origin)) {
+      return c.json({ error: { code: 'FORBIDDEN', message: 'Browser origin is not allowed' } }, 403)
+    }
+    await next()
+  })
+  app.use('*', cors({ origin: (origin) => isAllowedBrowserOrigin(origin) ? origin : undefined }))
 
   // HTTP trace span 鈥?must come before the access-log middleware so the span wraps the full request.
   app.use('*', async (c, next) => {
@@ -83,6 +92,7 @@ export function createHonoApp(): Hono {
   app.route('/api/v1/attachments', attachmentsRoutes)
   app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', skillCreatorRoutes)
+  app.route('/api/v1', skillSecurityRoutes)
   app.route('/api/v1', imageStudioRoutes)
   app.route('/api/v1', articleIllustrationRoutes)
   app.route('/api/v1/deep-research', deepResearchRoutes)

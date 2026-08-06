@@ -1,5 +1,6 @@
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import type { PackageInstallSource } from './package-installer'
+import { sanitizeSecurityPayload, validateExternalSource } from '../security/skill-security-checklist'
 
 export type PackageImportReviewStatus = 'pending' | 'approved' | 'rejected' | 'installed'
 
@@ -9,6 +10,7 @@ export type PackageImportReview = {
   sourceSha: string
   sourceRef: string | null
   inspection: Record<string, unknown>
+  securityFindings: Record<string, unknown>
   status: PackageImportReviewStatus
   reviewer: string | null
   decision: Record<string, unknown> | null
@@ -31,12 +33,16 @@ export class PackageInstallReviewService {
     source: PackageInstallSource
     sourceFingerprint: string
     inspection: Record<string, unknown>
+    securityFindings?: Record<string, unknown>
   }): PackageImportReview {
+    const source = validateExternalSource(input.source) as PackageInstallSource
+    const inspection = sanitizeReviewObject(input.inspection, 'inspection')
     const row = skillPackageRepo.createImportReview({
-      source: input.source.kind,
+      source: source.kind,
       sourceSha: input.sourceFingerprint,
-      sourceRef: sourceRef(input.source),
-      inspection: input.inspection,
+      sourceRef: sourceRef(source),
+      inspection,
+      securityFindings: sanitizeReviewObject(input.securityFindings ?? {}, 'security findings'),
       status: 'pending',
     })
     return mapReview(row)
@@ -51,7 +57,7 @@ export class PackageInstallReviewService {
   approve(id: string, reviewer: string): PackageImportReview {
     const review = this.get(id)
     if (review.status === 'rejected') throw new PackageInstallReviewError('REVIEW_REJECTED', 'Rejected import reviews cannot be approved')
-    const row = skillPackageRepo.updateImportReview(id, { status: 'approved', reviewer, decision: JSON.stringify({ action: 'approve' }) })
+    const row = skillPackageRepo.updateImportReview(id, { status: 'approved', reviewer: sanitizeReviewString(reviewer, 'reviewer'), decision: JSON.stringify(sanitizeReviewObject({ action: 'approve' }, 'decision')) })
     if (!row) throw new PackageInstallReviewError('REVIEW_NOT_FOUND', `Import review not found: ${id}`)
     return mapReview(row)
   }
@@ -61,8 +67,8 @@ export class PackageInstallReviewService {
     if (review.status === 'installed') throw new PackageInstallReviewError('REVIEW_REJECTED', 'Installed import reviews cannot be rejected')
     const row = skillPackageRepo.updateImportReview(id, {
       status: 'rejected',
-      reviewer,
-      decision: JSON.stringify({ action: 'reject', reason: reason ?? null }),
+      reviewer: sanitizeReviewString(reviewer, 'reviewer'),
+      decision: JSON.stringify(sanitizeReviewObject({ action: 'reject', reason: reason ?? null }, 'decision')),
     })
     if (!row) throw new PackageInstallReviewError('REVIEW_NOT_FOUND', `Import review not found: ${id}`)
     return mapReview(row)
@@ -80,7 +86,8 @@ export class PackageInstallReviewService {
   }
 
   markInstalled(id: string, result: Record<string, unknown>): PackageImportReview {
-    const row = skillPackageRepo.updateImportReview(id, { status: 'installed', decision: JSON.stringify({ action: 'install', result }) })
+    const decision = sanitizeReviewObject({ action: 'install', result }, 'decision')
+    const row = skillPackageRepo.updateImportReview(id, { status: 'installed', decision: JSON.stringify(decision) })
     if (!row) throw new PackageInstallReviewError('REVIEW_NOT_FOUND', `Import review not found: ${id}`)
     return mapReview(row)
   }
@@ -95,6 +102,7 @@ function mapReview(row: any): PackageImportReview {
     sourceSha: row.source_sha,
     sourceRef: row.source_ref ?? null,
     inspection: parseJsonObject(row.inspection_json),
+    securityFindings: parseJsonObject(row.security_findings_json ?? '{}'),
     status: row.status as PackageImportReviewStatus,
     reviewer: row.reviewer ?? null,
     decision: row.decision ? parseJsonObject(row.decision) : null,
@@ -109,11 +117,24 @@ function sourceRef(source: PackageInstallSource): string | null {
   return `${source.repositoryUrl}#${source.ref}${source.subdirectory ? `/${source.subdirectory}` : ''}`
 }
 
-function parseJsonObject(value: string): Record<string, unknown> {
+function parseJsonObject(value: string, fieldName = 'stored review payload'): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return sanitizeReviewObject(parsed as Record<string, unknown>, fieldName)
   } catch {
     return {}
   }
+}
+
+function sanitizeReviewObject(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {
+  const sanitized = sanitizeSecurityPayload(value)
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) throw new Error(`${fieldName} must be a JSON object`)
+  return sanitized as Record<string, unknown>
+}
+
+function sanitizeReviewString(value: string, fieldName: string): string {
+  const sanitized = sanitizeSecurityPayload(value, { maxStringLength: 256 })
+  if (typeof sanitized !== 'string') throw new Error(`${fieldName} must be a string`)
+  return sanitized
 }

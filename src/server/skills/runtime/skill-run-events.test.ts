@@ -88,6 +88,26 @@ describe('skill run event protocol', () => {
     })).toThrow(/payload/i)
   })
 
+  it('enforces recursive security payload limits before registry validation', async () => {
+    const { normalizeSkillRunEvent, SkillRunEventProtocolError } = await import('./skill-run-events')
+    let nested: Record<string, unknown> = { value: 'leaf' }
+    for (let index = 0; index < 9; index += 1) nested = { nested }
+
+    expect(() => normalizeSkillRunEvent({ type: 'step.completed', payload: { title: 'deep', nested } }))
+      .toThrowError(expect.objectContaining({ code: 'PAYLOAD_DEPTH_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({
+      type: 'step.completed',
+      payload: { title: 'wide', values: Array.from({ length: 101 }, (_, index) => index) },
+    })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_ARRAY_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({
+      type: 'step.completed',
+      payload: Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`field-${index}`, index])),
+    })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_FIELD_LIMIT' }))
+    expect(() => normalizeSkillRunEvent({ type: 'step.completed', payload: { title: 'x'.repeat(4_097) } }))
+      .toThrowError(expect.objectContaining({ code: 'PAYLOAD_STRING_LIMIT' }))
+    expect(SkillRunEventProtocolError).toBeDefined()
+  })
+
   it('rejects unknown event types', async () => {
     const { normalizeSkillRunEvent } = await import('./skill-run-events')
     expect(() => normalizeSkillRunEvent({ type: 'run.unknown', payload: {} })).toThrow(/event/i)

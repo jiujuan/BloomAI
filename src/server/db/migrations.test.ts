@@ -111,12 +111,81 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(42)
+    expect(migrationVersions()).toHaveLength(43)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(42)
+    expect(migrationVersions()).toHaveLength(43)
+  })
+
+  it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const securityMigration = migrations.find((migration) => migration.version === '043-skill-security-audit-fields')
+      expect(securityMigration).toBeDefined()
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+          persona_id TEXT, model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022',
+          status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+      `)
+      runSqlMigrations(db, migrations.filter((migration) => migration.version !== securityMigration!.version))
+
+      db.exec(`
+        INSERT INTO skill_packages (id, name, description, source_type, created_at, updated_at)
+        VALUES ('security-package', 'Security package', '', 'local-directory', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, runtime, manifest_json, manifest_hash, package_path,
+          source_snapshot_json, is_compatible, immutable_hash, status, security_status,
+          snapshot_hash, published_at, created_at
+        ) VALUES (
+          'security-version', 'security-package', '1.0.0', 'instruction-agent', '{}', 'manifest',
+          '/packages/security', '{}', 1, 'immutable', 'runnable', 'unreviewed', 'snapshot', NULL, 1
+        );
+        INSERT INTO skill_import_reviews (
+          id, source, source_sha, source_ref, inspection_json, status, reviewer, decision, created_at, updated_at
+        ) VALUES ('security-review', 'local-directory', 'source-sha', NULL, '{}', 'pending', NULL, NULL, 1, 1);
+        INSERT INTO skill_audit_events (
+          id, actor, action, resource_type, resource_id, payload_json, created_at
+        ) VALUES ('security-audit', 'legacy-actor', 'import', 'skill-package', 'security-package', '{}', 1);
+      `)
+
+      runSqlMigrations(db, [securityMigration!])
+      runSqlMigrations(db, [securityMigration!])
+
+      const auditColumns = db.prepare("PRAGMA table_info('skill_audit_events')").all() as any[]
+      const reviewColumns = db.prepare("PRAGMA table_info('skill_import_reviews')").all() as any[]
+      const versionColumns = db.prepare("PRAGMA table_info('skill_versions')").all() as any[]
+      const column = (rows: any[], name: string) => rows.find((row) => row.name === name)
+
+      expect(auditColumns.filter((row) => row.name === 'actor')).toHaveLength(1)
+      expect(column(auditColumns, 'security_decision')).toMatchObject({ notnull: 1, dflt_value: "'not_evaluated'" })
+      expect(column(auditColumns, 'policy_version')).toMatchObject({ notnull: 1, dflt_value: "'legacy'" })
+      expect(column(auditColumns, 'source_fingerprint')).toMatchObject({ notnull: 0 })
+      expect(column(reviewColumns, 'security_findings_json')).toMatchObject({ notnull: 1, dflt_value: "'{}'" })
+      expect(column(versionColumns, 'security_findings_json')).toMatchObject({ notnull: 1, dflt_value: "'{}'" })
+      expect(db.prepare(`
+        SELECT security_decision, policy_version, source_fingerprint
+        FROM skill_audit_events WHERE id = 'security-audit'
+      `).get()).toEqual({ security_decision: 'not_evaluated', policy_version: 'legacy', source_fingerprint: null })
+      expect(db.prepare("SELECT security_findings_json FROM skill_import_reviews WHERE id = 'security-review'").get())
+        .toEqual({ security_findings_json: '{}' })
+      expect(db.prepare("SELECT security_findings_json FROM skill_versions WHERE id = 'security-version'").get())
+        .toEqual({ security_findings_json: '{}' })
+      expect(migrationVersions()).toEqual(migrations.map((migration) => migration.version))
+    } finally {
+      db.close()
+    }
   })
 
   it('adds Image Studio skill-link columns before applying the link indexes to a legacy database', async () => {
@@ -333,6 +402,7 @@ describe('database migrations', () => {
       '040-skill-lifecycle-delete',
       '041-skill-artifact-policy',
       '042-image-studio-skill-links',
+      '043-skill-security-audit-fields',
     ])
     const emptyDb = openRawDb()
     try {

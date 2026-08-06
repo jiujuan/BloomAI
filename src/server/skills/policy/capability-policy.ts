@@ -1,5 +1,6 @@
 import path from 'path'
 import { z } from 'zod'
+import { FORBIDDEN_PACKAGE_CAPABILITIES as SECURITY_FORBIDDEN_PACKAGE_CAPABILITIES } from '../security/skill-security-checklist'
 
 export const skillCapabilitySchema = z.enum([
   'web.search',
@@ -12,17 +13,7 @@ export const skillCapabilitySchema = z.enum([
 
 export type SkillCapability = z.infer<typeof skillCapabilitySchema>
 
-export const FORBIDDEN_PACKAGE_CAPABILITIES = new Set([
-  'shell.execute',
-  'python.execute',
-  'mcp',
-  'mcp.execute',
-  'container.execute',
-  'arbitrary_workspace_write',
-  'workspace.write',
-  'dependency.install',
-  'home.read',
-])
+export const FORBIDDEN_PACKAGE_CAPABILITIES = SECURITY_FORBIDDEN_PACKAGE_CAPABILITIES
 
 export const capabilityGrantModeSchema = z.enum(['once', 'session', 'persistent'])
 export type CapabilityGrantMode = z.infer<typeof capabilityGrantModeSchema>

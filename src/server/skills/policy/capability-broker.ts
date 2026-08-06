@@ -9,6 +9,7 @@ import { ImageStudioCapabilityAdapter, type ImageStudioBatchInput, type ImageStu
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
 import type { ArtifactRepository, CapabilityGrantRepository, CapabilityGrantSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
+import { assertCapabilityAllowed } from '../security/skill-security-checklist'
 
 const DEFAULT_TIMEOUT_MS = 15_000
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
@@ -23,18 +24,6 @@ const PACKAGE_CAPABILITY_TO_TOOL: Record<string, string> = {
   'document.read_uploaded': 'doc_markdown',
   'image.generate': 'image_gen',
 }
-
-const FORBIDDEN_PACKAGE_CAPABILITIES = new Set([
-  'shell.execute',
-  'python.execute',
-  'dependency.install',
-  'workspace.write',
-  'home.read',
-  'mcp',
-  'mcp.execute',
-  'container.execute',
-  'arbitrary_workspace_write',
-])
 
 const GATED_TOOL_PERMISSION_LEVELS = new Set(['write', 'shell', 'sandbox'])
 const capabilityScopeSchema = z.object({
@@ -267,11 +256,21 @@ export class CapabilityBroker {
 
   private resolveToolId(request: CapabilityRequest): string {
     if (request.caller !== 'package-runtime') return request.capability.slice('tool.'.length)
-    if (FORBIDDEN_PACKAGE_CAPABILITIES.has(request.capability)) {
-      throw new CapabilityDeniedError(`Capability is not supported by the B-Lite package runtime: ${request.capability}`)
+
+    let capability: string
+    try {
+      capability = assertCapabilityAllowed(request.capability)
+    } catch (error) {
+      throw new CapabilityDeniedError(
+        error instanceof Error
+          ? error.message
+          : `Capability is not supported by the B-Lite package runtime: ${request.capability}`,
+        { capability: request.capability },
+      )
     }
-    const toolId = PACKAGE_CAPABILITY_TO_TOOL[request.capability]
-    if (!toolId) throw new CapabilityNotSupportedError(`Capability is not available yet: ${request.capability}`)
+
+    const toolId = PACKAGE_CAPABILITY_TO_TOOL[capability]
+    if (!toolId) throw new CapabilityNotSupportedError(`Capability is not available yet: ${capability}`, { capability })
     return toolId
   }
 

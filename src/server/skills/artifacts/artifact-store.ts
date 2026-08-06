@@ -19,6 +19,7 @@ import {
   type ArtifactKind,
 } from './artifact-policy'
 import { ArtifactPolicyError } from './artifact-policy'
+import { assertArtifactOwnership, sanitizeMarkdownHtml } from '../security/skill-security-checklist'
 
 export class ArtifactStoreError extends Error {
   constructor(message: string) {
@@ -102,7 +103,7 @@ export class ArtifactStore {
       const content = readArtifactBytes(getSkillRuntimeConfig().artifactRoot, artifact)
       return {
         ...record,
-        summary: { contentPreview: summarizeArtifactContent(content, artifact.mimeType ?? 'application/octet-stream') },
+        summary: { contentPreview: summarizeArtifactPreview(content, artifact.mimeType ?? 'application/octet-stream') },
       }
     })
     const nextOffset = offset + data.length < artifacts.length ? offset + data.length : null
@@ -220,7 +221,24 @@ export class ArtifactStore {
 
 function requireArtifactOwnership(artifact: Pick<ArtifactSnapshot, 'id' | 'runId'>, runId: string, runs: SkillRunRepository): void {
   requireExistingRunId(runId, runs)
-  if (artifact.runId !== runId) throw new ArtifactStoreError(`Artifact not found for run: ${artifact.id}`)
+  try {
+    assertArtifactOwnership(artifact, runId)
+  } catch (error) {
+    throw new ArtifactStoreError(error instanceof Error ? error.message : `Artifact not found for run: ${artifact.id}`)
+  }
+}
+
+function summarizeArtifactPreview(content: Buffer, mimeType: string): string | null {
+  const preview = summarizeArtifactContent(content, mimeType)
+  if (preview === null) return null
+  if (mimeType === 'text/markdown' || mimeType === 'text/html' || mimeType.endsWith('+html')) {
+    try {
+      return sanitizeMarkdownHtml(preview)
+    } catch (error) {
+      throw new ArtifactStoreError(error instanceof Error ? error.message : 'Artifact preview could not be sanitized')
+    }
+  }
+  return preview
 }
 
 function requireExistingRunId(runId: string, runs: SkillRunRepository): void {

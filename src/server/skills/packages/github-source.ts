@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { SkillSecurityError, validateExternalSource } from '../security/skill-security-checklist'
 
 export type GitHubSource = {
   kind: 'github-archive'
@@ -80,6 +81,10 @@ const OWNER_OR_REPOSITORY = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
 const VALID_SHA = /^[a-f0-9]{40}$/i
 
 export function parseGitHubSource(repositoryUrl: string, ref: string, subdirectory?: string): ParsedGitHubSource {
+  const validated = validateGitHubSource(repositoryUrl, ref, subdirectory)
+  repositoryUrl = validated.repositoryUrl
+  ref = validated.ref
+  subdirectory = validated.subdirectory
   if (typeof repositoryUrl !== 'string' || !repositoryUrl.trim()) {
     throw new GitHubSourceError('GITHUB_SOURCE_INVALID', 'GitHub repository URL is required')
   }
@@ -225,8 +230,16 @@ export async function downloadGitHubArchive(
 }
 
 function ensureParsedSource(source: GitHubSource | ParsedGitHubSource): ParsedGitHubSource {
-  if ('owner' in source && 'repository' in source) return source
   return parseGitHubSource(source.repositoryUrl, source.ref, source.subdirectory)
+}
+
+function validateGitHubSource(repositoryUrl: string, ref: string, subdirectory?: string): GitHubSource {
+  try {
+    return validateExternalSource({ kind: 'github-archive', repositoryUrl, ref, subdirectory }) as GitHubSource
+  } catch (error) {
+    if (error instanceof SkillSecurityError) throw new GitHubSourceError('GITHUB_SOURCE_INVALID', error.message)
+    throw error
+  }
 }
 
 function validateArchiveRedirect(location: string, currentUrl: string, source: ParsedGitHubSource, commitSha: string, allowedHosts: ReadonlySet<string>): string {

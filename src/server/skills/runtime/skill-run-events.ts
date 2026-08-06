@@ -7,11 +7,14 @@ import {
   type SkillRunEventPayload,
   type SkillRunEventType,
 } from './skill-run-event-registry'
+import {
+  sanitizeEventPayload as sanitizeSecurityEventPayload,
+  SkillSecurityError,
+} from '../security/skill-security-checklist'
 
 export const skillRunEventSchemaVersion = SKILL_RUN_EVENT_SCHEMA_VERSION
 export const maxEventPayloadBytes = 8 * 1024
 
-const sensitiveKeyPattern = /authorization|api[_-]?key|token|secret|password|headers?|cookies?/i
 const base64KeyPattern = /(?:^|_)(?:b64|base64)(?:_|$)/i
 const base64DataUriPattern = /^data:[^,]+;base64,/i
 const producerPattern = /^[a-z][a-z0-9._-]{0,127}$/i
@@ -88,41 +91,45 @@ export function normalizeSkillRunEvent(input: { type: string; payload: Record<st
 }
 
 function sanitizePayload(value: unknown): SkillRunEventPayload {
-  const seen = new WeakSet<object>()
-  const sanitized = sanitizeValue(value, seen)
+  let sanitized: unknown
+  try {
+    sanitized = sanitizeSecurityEventPayload(value)
+  } catch (error) {
+    if (error instanceof SkillRunEventProtocolError) throw error
+    if (error instanceof SkillSecurityError) {
+      const code = error.code.startsWith('PAYLOAD_') ? error.code : 'INVALID_EVENT_PAYLOAD'
+      throw new SkillRunEventProtocolError(code, error.message)
+    }
+    throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be JSON serializable')
+  }
+
+  rejectBase64Markers(sanitized)
   if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
     throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be an object')
   }
   return sanitized as SkillRunEventPayload
 }
 
-function sanitizeValue(value: unknown, seen: WeakSet<object>): unknown {
+function rejectBase64Markers(value: unknown, seen = new WeakSet<object>()): void {
   if (typeof value === 'string') {
-    if (base64DataUriPattern.test(value)) throw new SkillRunEventProtocolError('EVENT_BASE64_FORBIDDEN', 'Skill run event payload must not contain Base64 media')
-    return value
+    if (base64DataUriPattern.test(value)) rejectBase64Payload()
+    return
   }
-  if (Array.isArray(value)) {
-    if (seen.has(value)) throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload cannot contain circular references')
-    seen.add(value)
-    const result = value.map((child) => sanitizeValue(child, seen))
-    seen.delete(value)
-    return result
-  }
-  if (!value || typeof value !== 'object') {
-    if (typeof value === 'bigint' || typeof value === 'symbol' || typeof value === 'function') {
-      throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload must be JSON serializable')
-    }
-    return value
-  }
-
+  if (!value || typeof value !== 'object') return
   if (seen.has(value)) throw new SkillRunEventProtocolError('INVALID_EVENT_PAYLOAD', 'Skill run event payload cannot contain circular references')
   seen.add(value)
-  const result = Object.fromEntries(Object.entries(value).map(([key, child]) => [
-    key,
-    base64KeyPattern.test(key) ? rejectBase64Payload() : sensitiveKeyPattern.test(key) ? '[REDACTED]' : sanitizeValue(child, seen),
-  ]))
-  seen.delete(value)
-  return result
+  try {
+    if (Array.isArray(value)) {
+      for (const child of value) rejectBase64Markers(child, seen)
+      return
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (base64KeyPattern.test(key)) rejectBase64Payload()
+      rejectBase64Markers(child, seen)
+    }
+  } finally {
+    seen.delete(value)
+  }
 }
 
 function rejectBase64Payload(): never {

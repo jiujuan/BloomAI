@@ -112,6 +112,57 @@ describe('skillPackageRepo', () => {
     ).toThrow(/manifest must be a JSON object/)
   })
 
+  it('persists security findings and audit decisions without exposing secret payloads', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const pkg = skillPackageRepo.createPackage({ name: 'Security Pkg', description: '', sourceType: 'local-directory' })
+    const version = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '1.0.0',
+      manifest: {},
+      manifestHash: 'security-manifest',
+      packagePath: '/packages/security',
+      securityFindings: { rejectedFiles: ['run.sh'], apiKey: 'secret-value' },
+    })
+    const review = skillPackageRepo.createImportReview({
+      source: 'local-directory',
+      sourceSha: 'security-source',
+      inspection: { files: 1 },
+      securityFindings: { dangerousFiles: ['run.sh'], token: 'secret-value' },
+    })
+
+    skillPackageRepo.updateImportReview(review.id, {
+      securityFindings: { dangerousFiles: ['run.sh'], password: 'secret-value' },
+    })
+    const sourceFingerprint = 'a'.repeat(64)
+    skillPackageRepo.appendAudit({
+      actor: 'security-reviewer',
+      action: 'security.decision',
+      resourceType: 'skill-version',
+      resourceId: version.id,
+      securityDecision: 'rejected',
+      policyVersion: 'skills-security-v1',
+      sourceFingerprint,
+      payload: { token: 'secret-value', reason: 'dangerous file' },
+    })
+
+    expect(skillPackageRepo.getVersion(version.id)).toMatchObject({ security_findings_json: '{"rejectedFiles":["run.sh"],"apiKey":"[REDACTED]"}' })
+    expect(skillPackageRepo.getImportReview(review.id)).toMatchObject({ security_findings_json: '{"dangerousFiles":["run.sh"],"password":"[REDACTED]"}' })
+    const db = new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+    try {
+      expect(db.prepare(`
+        SELECT security_decision, policy_version, source_fingerprint, payload_json
+        FROM skill_audit_events WHERE resource_id = ?
+      `).get(version.id)).toEqual({
+        security_decision: 'rejected',
+        policy_version: 'skills-security-v1',
+        source_fingerprint: sourceFingerprint,
+        payload_json: '{"token":"[REDACTED]","reason":"dangerous file"}',
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps database-level foreign keys active for run version locks', async () => {
     await loadRepo()
     const db = new DatabaseSync(path.join(dataDir, 'bloomai.db'))

@@ -1,8 +1,9 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { DEFAULT_PACKAGE_PATH_POLICY, normalizeSafeRelativePath, type PackagePathPolicy, assertPackageBudget } from './package-path-policy'
+import { DEFAULT_PACKAGE_PATH_POLICY, normalizeSafeRelativePath, type PackagePathPolicy } from './package-path-policy'
 import { assertReadableDirectory, SkillPathPolicyError } from '../filesystem/skill-path-policy'
+import { assertPackageLimits, validateExternalSource } from '../security/skill-security-checklist'
 
 const DEFAULT_MAX_READ_BYTES = 1024 * 1024
 const DEFAULT_MAX_FILES_PER_RUN = 32
@@ -41,8 +42,12 @@ export class SkillPackageReader {
   private closed = false
 
   constructor(packagePath: string, options: SkillPackageReaderOptions = {}) {
+    let securedPath: string
     try {
-      this.root = assertReadableDirectory(packagePath)
+      const source = validateExternalSource({ kind: 'local-directory', directory: packagePath })
+      if (source.kind !== 'local-directory') throw new SkillPackageReadError('Package source must be a local directory', 'PATH_NOT_ALLOWED')
+      securedPath = source.directory
+      this.root = assertReadableDirectory(securedPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Package directory is not readable'
       throw new SkillPackageReadError(message, error instanceof SkillPathPolicyError && error.code === 'ROOT_NOT_FOUND' ? 'PACKAGE_READ_ERROR' : 'PATH_NOT_ALLOWED')
@@ -72,7 +77,7 @@ export class SkillPackageReader {
           this.checkFileBudget(packagePath, stat.size)
           files.push(packagePath)
           totalBytes += stat.size
-          try { assertPackageBudget({ fileCount: files.length, totalBytes }, this.policy) }
+          try { assertPackageLimits({ fileCount: files.length, totalBytes, ...this.policy }) }
           catch (error) { throw new SkillPackageReadError(error instanceof Error ? error.message : 'Package exceeds the configured file budget', 'FILE_LIMIT_EXCEEDED') }
         }
       }
@@ -145,7 +150,8 @@ export class SkillPackageReader {
   private recordLoadedFile(file: LoadedPackageFile): void {
     if (!this.loaded.has(file.path)) {
       if (this.loaded.size >= this.maxFilesPerRun) throw new SkillPackageReadError('Package read exceeded the per-run file count limit', 'FILE_LIMIT_EXCEEDED')
-      if (this.loadedBytes + file.sizeBytes > this.policy.maxUnpackedBytes) throw new SkillPackageReadError('Package read exceeded the total byte limit', 'FILE_LIMIT_EXCEEDED')
+      try { assertPackageLimits({ fileCount: this.loaded.size + 1, totalBytes: this.loadedBytes + file.sizeBytes, fileBytes: file.sizeBytes, ...this.policy }) }
+      catch (error) { throw new SkillPackageReadError(error instanceof Error ? error.message : 'Package read exceeded the configured limits', 'FILE_LIMIT_EXCEEDED') }
       this.loadedBytes += file.sizeBytes
     }
     this.loaded.set(file.path, file)
@@ -153,7 +159,8 @@ export class SkillPackageReader {
 
   private checkFileBudget(relativePath: string, sizeBytes: number): void {
     try { normalizeSafeRelativePath(relativePath, this.policy) } catch (error) { throw new SkillPackageReadError(error instanceof Error ? error.message : 'Path is not allowed', 'PATH_NOT_ALLOWED') }
-    if (sizeBytes > this.policy.maxFileBytes) throw new SkillPackageReadError(`Package file exceeds the maximum size: ${relativePath}`, 'FILE_LIMIT_EXCEEDED')
+    try { assertPackageLimits({ fileCount: this.loaded.size + 1, totalBytes: this.loadedBytes + sizeBytes, fileBytes: sizeBytes, ...this.policy }) }
+    catch (error) { throw new SkillPackageReadError(error instanceof Error ? error.message : `Package file exceeds the configured limit: ${relativePath}`, 'FILE_LIMIT_EXCEEDED') }
   }
 
   private safePath(relativePath: string): string {
