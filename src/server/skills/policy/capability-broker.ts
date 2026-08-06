@@ -7,6 +7,8 @@ import { approvalBroker, type ApprovalBroker } from '../../tools/approval-broker
 import { sessionToolPermissionStore, type SessionToolPermissionStore } from '../../tools/session-permission-store'
 import { ImageStudioCapabilityAdapter, type ImageStudioBatchInput, type ImageStudioBatchResult } from '../adapters/image-studio-capability-adapter'
 import { normalizeSkillRunEvent } from '../runtime/skill-run-events'
+import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observability/skill-runtime.metrics'
+import { withSkillCorrelation } from '../observability/skill-runtime.logger'
 import type { ArtifactRepository, CapabilityGrantRepository, CapabilityGrantSnapshot, RunSnapshot, SkillRunEventRepository, SkillRunRepository } from '../application/ports'
 import { isScopeAllowed, skillCapabilitySchema, type CapabilityScope, type SkillCapability } from './capability-policy'
 import { assertCapabilityAllowed } from '../security/skill-security-checklist'
@@ -88,6 +90,8 @@ export type CapabilityBrokerDependencies = {
   readonly permissions: Pick<SessionToolPermissionStore, 'has'>
   readonly imageAdapterFactory: () => CapabilityImageAdapter
   readonly artifacts?: Pick<ArtifactRepository, 'listArtifacts'>
+  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordCapability'>
+  readonly now?: () => number
 }
 
 export type CapabilityErrorDetails = {
@@ -137,13 +141,33 @@ export function needsInteractiveApprovalForTool(tool: Pick<Tool, 'requires_permi
   return !!tool.requires_permission && GATED_TOOL_PERMISSION_LEVELS.has(tool.requires_permission)
 }
 
+type CapabilityMetricContext = { correlation: SkillRuntimeCorrelation }
+
 export class CapabilityBroker {
   private readonly idempotentResults = new Map<string, CapabilityResult>()
+  private readonly now: () => number
 
-  constructor(private readonly dependencies: CapabilityBrokerDependencies = createDefaultCapabilityBrokerDependencies()) {}
+  constructor(private readonly dependencies: CapabilityBrokerDependencies = createDefaultCapabilityBrokerDependencies()) {
+    this.now = dependencies.now ?? (() => Date.now())
+  }
 
   async executeCapability(request: CapabilityRequest): Promise<CapabilityResult> {
     const parsed = capabilityRequestSchema.parse(request)
+    const context: CapabilityMetricContext = { correlation: this.resolveCorrelation(parsed) }
+    const startedAt = this.now()
+    return withSkillCorrelation(context.correlation, async () => {
+      try {
+        const result = await this.executeCapabilityInternal(parsed, context)
+        this.recordCapabilityMetric(parsed, startedAt, 'success', null, context.correlation)
+        return result
+      } catch (error) {
+        this.recordCapabilityMetric(parsed, startedAt, 'error', this.toMetricErrorCode(error), context.correlation)
+        throw error
+      }
+    })
+  }
+
+  private async executeCapabilityInternal(parsed: CapabilityRequest, context: CapabilityMetricContext): Promise<CapabilityResult> {
     if (parsed.caller === 'package-runtime' && !parsed.runId) {
       throw new CapabilityDeniedError('Package capability calls require a runId')
     }
@@ -164,6 +188,11 @@ export class CapabilityBroker {
 
     if (parsed.caller === 'package-runtime') {
       grant = this.requirePackageGrant(parsed)
+      context.correlation = {
+        ...context.correlation,
+        skillVersionId: grant.skillVersionId,
+        grantId: grant.id,
+      }
       this.enforcePackageScope(parsed, grant.scope)
       packageScope = grant.scope
       if (!this.dependencies.grants.consumeCapabilityGrant(grant.id, Date.now(), {
@@ -191,12 +220,12 @@ export class CapabilityBroker {
     }
 
     if (parsed.caller === 'package-runtime' && parsed.capability === 'image.generate') {
-      return this.executePackageImageCapability(parsed, toolId, grant!)
+      return withSkillCorrelation(context.correlation, () => this.executePackageImageCapability(parsed, toolId, grant!))
     }
 
     const timeoutMs = Math.min(parsed.requestedTimeoutMs ?? (TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS), TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS)
     try {
-      const execution = await this.dependencies.executeTool(
+      const execution = await withSkillCorrelation(context.correlation, () => this.dependencies.executeTool(
         toolId,
         parsed.input,
         parsed.sessionId,
@@ -206,7 +235,7 @@ export class CapabilityBroker {
           signal: parsed.signal,
           allowedRoots: packageScope?.allowedRoots,
         },
-      )
+      ))
       const result = this.normalizeResult(parsed, toolId, execution.toolRunId, execution.output, timeoutMs)
       this.appendCapabilityEvent(parsed, 'capability.completed', {
         capability: parsed.capability,
@@ -252,6 +281,53 @@ export class CapabilityBroker {
       requestedTimeoutMs: data.requestedTimeoutMs,
       signal: data.signal,
     })
+  }
+
+  private resolveCorrelation(request: CapabilityRequest): SkillRuntimeCorrelation {
+    const correlation: SkillRuntimeCorrelation = request.runId ? { runId: request.runId } : {}
+    if (!request.runId) return correlation
+    try {
+      const run = this.dependencies.runs.getRun(request.runId)
+      if (run) correlation.skillVersionId = run.skillVersionId
+    } catch { /* diagnostics must not block capability validation */ }
+    return correlation
+  }
+
+  private recordCapabilityMetric(
+    request: CapabilityRequest,
+    startedAt: number,
+    outcome: 'success' | 'error',
+    errorCode: string | null,
+    correlation: SkillRuntimeCorrelation,
+  ): void {
+    try {
+      this.dependencies.metrics?.recordCapability({
+        capability: request.capability,
+        durationMs: Math.max(0, this.now() - startedAt),
+        outcome,
+        errorCode,
+        correlation: { ...correlation },
+      })
+    } catch { /* telemetry must never block a capability call */ }
+  }
+
+  private toMetricErrorCode(error: unknown): string {
+    if (error instanceof CapabilityError) {
+      if (error.details?.reasonCode === 'CAPABILITY_BUDGET_EXHAUSTED') return 'BUDGET_EXHAUSTED'
+      switch (error.code) {
+        case 'CAPABILITY_APPROVAL_REQUIRED': return 'APPROVAL_REQUIRED'
+        case 'CAPABILITY_DISABLED': return 'DISABLED'
+        case 'CAPABILITY_NOT_SUPPORTED': return 'NOT_SUPPORTED'
+        case 'CAPABILITY_DENIED': return 'DENIED'
+      }
+    }
+    if (error instanceof ToolExecutionError) {
+      const status = error.status.toUpperCase()
+      if (status === 'TIMEOUT') return 'TIMEOUT'
+      if (status === 'ABORTED' || status === 'CANCELLED') return 'ABORTED'
+      return 'EXECUTION_ERROR'
+    }
+    return 'UNKNOWN_ERROR'
   }
 
   private resolveToolId(request: CapabilityRequest): string {
@@ -523,6 +599,7 @@ function createDefaultCapabilityBrokerDependencies(): CapabilityBrokerDependenci
     permissions: sessionToolPermissionStore,
     imageAdapterFactory: () => new ImageStudioCapabilityAdapter(),
     artifacts: ports.artifacts,
+    metrics: SkillRuntimeMetrics.global(),
   }
 }
 
