@@ -78,6 +78,29 @@ describe('skills route contract', () => {
     expect(uninstalled.body.data).toEqual({ uninstalled: true })
   })
 
+  it('exposes a paginated overview without collapsing package skills into legacy DTOs', async () => {
+    const { app, skillPackageRepo } = await createApp()
+    const packageRecord = skillPackageRepo.createPackage({ name: 'Overview package', description: 'package-only', sourceType: 'local-directory' })
+
+    const packageOverview = await requestJson(app, '/skills/overview?runtimeKind=package&limit=1&q=overview')
+    expect(packageOverview.response.status).toBe(200)
+    expect(packageOverview.body.data).toHaveLength(1)
+    expect(packageOverview.body.data[0]).toMatchObject({
+      reference: `package:${packageRecord.id}`,
+      runtimeKind: 'package',
+      sourceType: 'local-directory',
+      version: null,
+      capabilities: [],
+      supportedActions: ['install', 'versions'],
+    })
+    expect(packageOverview.body.meta).toEqual({ limit: 1, offset: 0, total: 1, hasMore: false })
+
+    await requestJson(app, '/skills/install', { method: 'POST', body: JSON.stringify({ id: 'json-formatter' }) })
+    const legacyOverview = await requestJson(app, '/skills/overview?runtimeKind=legacy&q=json-formatter&limit=1')
+    expect(legacyOverview.response.status).toBe(200)
+    expect(legacyOverview.body.data[0]).toMatchObject({ runtimeKind: 'legacy', reference: 'legacy:json-formatter' })
+  })
+
   it('runs legacy skills and retains their run history endpoint', async () => {
     const { app } = await createApp()
     const run = await requestJson(app, '/skills/legacy:json-formatter/run', {
