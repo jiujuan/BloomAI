@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BloomAI Skills Runtime Control Plane v1.1 admin prototype">
+  <title>Skills Runtime · BloomAI</title>
+  <style>
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f4;
+      --bg-tertiary: #eeede9;
+      --bg-info: #eff5fc;
+      --bg-success: #edf7f2;
+      --bg-warning: #fef5e8;
+      --bg-danger: #fcebeb;
+      --text-primary: #1a1a18;
+      --text-secondary: #3d3d3a;
+      --text-tertiary: #73726c;
+      --text-info: #0c447c;
+      --text-success: #085041;
+      --text-warning: #633806;
+      --text-danger: #7a1b1b;
+      --border-primary: #1a1a18;
+      --border-secondary: #b8b5ae;
+      --border-tertiary: #dddbd6;
+      --border-info: #85b7eb;
+      --border-success: #5dcaa5;
+      --border-danger: #f09595;
+      --brand-a: #7c6ff7;
+      --brand-b: #4b9bf5;
+      --status-active: #2563eb;
+      --status-success: #1d9e75;
+      --status-waiting: #ef9f27;
+      --status-warning: #ba7517;
+      --status-danger: #e5484d;
+      --status-disabled: #73726c;
+      --status-info: #534ab7;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .08);
+      --shadow-md: 0 12px 30px rgba(25, 24, 20, .13);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 10px;
+      --radius-xl: 14px;
+      --content-max: 1600px;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1a1a18;
+      --bg-secondary: #242422;
+      --bg-tertiary: #2e2e2b;
+      --bg-info: #0c1f35;
+      --bg-success: #071f18;
+      --bg-warning: #201200;
+      --bg-danger: #1f0808;
+      --text-primary: #e8e6e0;
+      --text-secondary: #c2c0b6;
+      --text-tertiary: #888780;
+      --text-info: #7ab8f0;
+      --text-success: #5dcaa5;
+      --text-warning: #dda348;
+      --text-danger: #f09595;
+      --border-primary: #e8e6e0;
+      --border-secondary: #4a4845;
+      --border-tertiary: #35342f;
+      --border-info: #1a4a7c;
+      --border-success: #0d5040;
+      --border-danger: #7a2020;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .3);
+      --shadow-md: 0 12px 30px rgba(0, 0, 0, .35);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--brand-b) 38%, transparent);
+      outline-offset: 2px;
+    }
+    .skip-link { position: fixed; left: 12px; top: 12px; z-index: 100; padding: 8px 12px; border-radius: 6px; background: var(--text-primary); color: var(--bg-primary); transform: translateY(-160%); transition: transform .2s; }
+    .skip-link:focus { transform: translateY(0); }
+    .app-shell { display: grid; min-height: 100vh; grid-template-columns: 248px minmax(0, 1fr); }
+    .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--border-tertiary); background: var(--bg-primary); }
+    .main-shell { min-width: 0; display: flex; flex-direction: column; }
+    .topbar { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 28px; border-bottom: 1px solid var(--border-tertiary); background: color-mix(in srgb, var(--bg-primary) 94%, transparent); backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 20; }
+    .content { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: 28px; }
+    .drawer-root, .dialog-root, .toast-root { position: fixed; inset: 0; pointer-events: none; z-index: 80; }
+    .drawer-root > *, .dialog-root > *, .toast-root > * { pointer-events: auto; }
+    .no-js { padding: 24px; max-width: 680px; margin: 40px auto; color: var(--text-danger); background: var(--bg-danger); border: 1px solid var(--border-danger); border-radius: var(--radius-lg); }
+    @media (max-width: 1024px) { .app-shell { grid-template-columns: 220px minmax(0, 1fr); } .content { padding: 22px; } .topbar { padding-inline: 22px; } }
+    @media (max-width: 768px) { .app-shell { grid-template-columns: 74px minmax(0, 1fr); } .content { padding: 18px; } .topbar { padding-inline: 16px; } }
+    @media (max-width: 520px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 64px; border-top: 1px solid var(--border-tertiary); border-right: 0; } .topbar { position: static; align-items: flex-start; } .content { padding: 14px; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳转到主要内容</a>
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar" aria-label="Skills Runtime navigation">
+      <div style="padding:20px">Skills Runtime</div>
+    </aside>
+    <div class="main-shell">
+      <header id="topbar" class="topbar" aria-label="Runtime context"></header>
+      <main id="main-content" class="content" tabindex="-1">
+        <div class="no-js" role="status">正在加载 Skills Runtime Control Plane 原型。</div>
+      </main>
+    </div>
+  </div>
+  <div id="drawer-root" class="drawer-root" aria-live="polite"></div>
+  <div id="dialog-root" class="dialog-root" aria-live="assertive"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <noscript><div class="no-js">此原型需要启用 JavaScript 以展示导航、抽屉、弹窗和角色切换。</div></noscript>
+</body>
+</html>
