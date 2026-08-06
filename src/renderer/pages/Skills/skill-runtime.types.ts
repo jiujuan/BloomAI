@@ -219,6 +219,56 @@ export type VersionCandidate = {
 
 export type SkillRunStatus = 'created' | 'validating' | 'running' | 'waiting_input' | 'waiting_approval' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled' | 'interrupted'
 
+export type RunActionType = 'confirm' | 'approve' | 'reject' | 'resume' | 'retry' | 'submit_input' | 'modify' | 'cancel'
+
+export type RunBudget = {
+  used?: number
+  limit?: number
+  unit?: string
+  remaining?: number
+  [key: string]: unknown
+}
+
+export type RunCapabilityCall = {
+  id: string
+  capability: string
+  status: string
+  scope?: CapabilityScope
+  startedAt?: number | null
+  finishedAt?: number | null
+  error?: string | null
+  [key: string]: unknown
+}
+
+export type RunVersionSummary = {
+  id: string
+  version: string
+  source?: string | null
+  sourceHash?: string | null
+}
+
+export type RunInputField = {
+  name: string
+  label: string
+  type?: 'text' | 'textarea' | 'number' | 'url' | 'select' | 'boolean' | string
+  required?: boolean
+  secret?: boolean
+  placeholder?: string
+  options?: Array<{ label: string; value: string }>
+}
+
+export type RunRequiredAction = {
+  type?: string
+  grantId?: string
+  capability?: string
+  requestedScope?: CapabilityScope
+  grantedScope?: CapabilityScope
+  risk?: string
+  fields?: RunInputField[]
+  reason?: string
+  [key: string]: unknown
+}
+
 export type RunAction =
   | { type: 'confirm'; idempotencyKey: string; expectedRevision: number }
   | { type: 'approve'; idempotencyKey: string; expectedRevision: number }
@@ -243,7 +293,14 @@ export type SkillRun = {
   waitingReason: string | null
   waitingSince?: number | null
   waitingExpiresAt?: number | null
-  requiredAction?: Record<string, unknown> | null
+  requiredAction?: RunRequiredAction | null
+  supportedActions?: RunActionType[]
+  version?: RunVersionSummary | null
+  source?: string | null
+  budget?: RunBudget | null
+  capabilityCalls?: RunCapabilityCall[]
+  inputSummary?: Record<string, unknown> | null
+  outputSummary?: Record<string, unknown> | null
   cancelRequested: boolean
   startedAt: number | null
   updatedAt: number

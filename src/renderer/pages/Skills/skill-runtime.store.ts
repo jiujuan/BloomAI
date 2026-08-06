@@ -103,6 +103,7 @@ type RuntimeState = {
   eventsByRun: Record<string, SkillRunEvent[]>
   eventCursorByRun: Record<string, number>
   artifactsByRun: Record<string, SkillArtifact[]>
+  runCapabilitiesByRun: Record<string, CapabilityDto[]>
   drafts: Record<string, DraftDto>
   pendingMutations: Record<string, boolean>
   capabilities: SkillRuntimeCapabilities | null
@@ -136,6 +137,9 @@ type RuntimeActions = {
   loadRuns: (input?: PaginationInput & { status?: SkillRun['status']; skillVersionId?: string }) => Promise<Page<SkillRun>>
   loadRun: (id: string) => Promise<SkillRun>
   loadRunEvents: (id: string, afterSeq?: number) => Promise<SkillRunEvent[]>
+  loadRunCapabilities: (id: string) => Promise<CapabilityDto[]>
+  subscribeRunEvents: (id: string) => () => void
+  stopRunEvents: (id: string) => void
   appendEvents: (runId: string, events: SkillRunEvent[]) => SkillRunEvent[]
   reconnectRunEvents: (runId: string) => Promise<SkillRunEvent[]>
   loadArtifacts: (id: string, input?: PaginationInput) => Promise<SkillArtifact[]>
@@ -148,6 +152,7 @@ type RuntimeActions = {
   rejectRun: (id: string, expectedRevision: number, reason?: string) => Promise<SkillRun>
   cancelRun: (id: string, expectedRevision: number, reason?: string) => Promise<SkillRun>
   retryRun: (id: string, expectedRevision: number) => Promise<SkillRun>
+  submitRunInput: (id: string, expectedRevision: number, input: Record<string, unknown>) => Promise<SkillRun>
   refreshAfterConflict: (scope?: 'package' | 'run' | 'draft', id?: string) => Promise<void>
   loadDraft: (id: string) => Promise<DraftDto>
   createDraft: (input: Parameters<typeof platform.createSkillDraft>[0]) => Promise<DraftDto>
@@ -161,6 +166,7 @@ type RuntimeActions = {
 export type SkillRuntimeStore = RuntimeState & RuntimeActions
 
 export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, get) => {
+  const eventStreams = new Map<string, { close: () => void }>()
   const withMutation = async <T>(key: string, action: () => Promise<T>): Promise<T> => {
     set((state) => ({ pendingMutations: { ...state.pendingMutations, [key]: true }, error: null, errorDetails: null }))
     try {
@@ -184,7 +190,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
 
   return {
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [], runs: [], runPage: null, selectedRun: null,
-    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, drafts: {}, pendingMutations: {}, capabilities: null, loading: false, error: null, errorDetails: null,
+    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, pendingMutations: {}, capabilities: null, loading: false, error: null, errorDetails: null,
     runEvents: [], runArtifacts: [],
     clearError: () => set({ error: null, errorDetails: null }),
     loadCapabilities: async () => {
@@ -306,6 +312,40 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         throw error
       }
     },
+    loadRunCapabilities: async (id) => {
+      try {
+        const capabilities = await platform.getSkillRunCapabilities(id)
+        set((state) => ({ runCapabilitiesByRun: { ...state.runCapabilitiesByRun, [id]: capabilities } }))
+        return capabilities
+      } catch (error) {
+        const details = asRuntimeError(error)
+        set({ error: details.message, errorDetails: details })
+        throw error
+      }
+    },
+    subscribeRunEvents: (id) => {
+      eventStreams.get(id)?.close()
+      const cursor = get().eventCursorByRun[id] ?? 0
+      try {
+        const stream = platform.subscribeSkillRunEvents(id, cursor, {
+          onEvent: (event) => { get().appendEvents(id, [event]) },
+          onError: (error) => { set({ error: error.message, errorDetails: error }) },
+        })
+        eventStreams.set(id, stream)
+        return () => {
+          if (eventStreams.get(id) === stream) eventStreams.delete(id)
+          stream.close()
+        }
+      } catch (error) {
+        const details = asRuntimeError(error)
+        set({ error: details.message, errorDetails: details })
+        return () => undefined
+      }
+    },
+    stopRunEvents: (id) => {
+      eventStreams.get(id)?.close()
+      eventStreams.delete(id)
+    },
     appendEvents: (runId, events) => {
       const current = get().eventsByRun[runId] ?? []
       const bySeq = new Map(current.map((event) => [event.seq, event]))
@@ -351,6 +391,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       return run
     }),
     retryRun: (id, expectedRevision) => get().dispatchCommand(id, { type: 'retry', expectedRevision, idempotencyKey: makeIdempotencyKey('retry') }),
+    submitRunInput: (id, expectedRevision, input) => get().dispatchCommand(id, { type: 'submit_input', expectedRevision, input, idempotencyKey: makeIdempotencyKey('submit_input') }),
     refreshAfterConflict: async (scope, id) => {
       if (scope === 'package' || (!scope && get().selectedPackage)) {
         const packageId = id ?? get().selectedPackage?.package.id

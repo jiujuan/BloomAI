@@ -51,6 +51,39 @@ const eventRow = {
   created_at: 14,
 }
 
+class MockEventSource {
+  static instances: MockEventSource[] = []
+  readonly url: string
+  readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: (() => void) | null = null
+  closed = false
+
+  constructor(url: string) {
+    this.url = url
+    MockEventSource.instances.push(this)
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const callback = typeof listener === 'function' ? listener as (event: MessageEvent) => void : (event: MessageEvent) => listener.handleEvent(event)
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback])
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const current = this.listeners.get(type) ?? []
+    const callback = typeof listener === 'function' ? listener as (event: MessageEvent) => void : (event: MessageEvent) => listener.handleEvent(event)
+    this.listeners.set(type, current.filter((candidate) => candidate !== callback))
+  }
+
+  close() { this.closed = true }
+
+  emit(type: string, value: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(value) })
+    if (type === 'message') this.onmessage?.(event)
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -84,6 +117,34 @@ describe('Package Runtime renderer API', () => {
       payload: { percent: 50 }, occurredAt: 14, createdAt: 14,
     }])
     expect(platform.skillRunEventsStreamUrl('run/1', 2)).toBe(`${API_BASE}/skill-runs/run%2F1/stream?afterSeq=2`)
+  })
+
+
+  it('loads run capabilities and consumes named SSE events with an afterSeq cursor', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: [{
+      id: 'grant-1', skill_version_id: 'version-1', capability: 'image.generate', status: 'approved',
+      scope_json: '{\"allowedModels\":[\"medium\"]}', requested_scope_json: '{\"allowedModels\":[\"medium\"]}',
+      granted_scope_json: '{\"allowedModels\":[\"medium\"]}', grant_mode: 'run', granted_at: 15,
+    }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    MockEventSource.instances = []
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    await expect(platform.getSkillRunCapabilities('run/1')).resolves.toEqual([expect.objectContaining({
+      id: 'grant-1', skillVersionId: 'version-1', capability: 'image.generate', scope: { allowedModels: ['medium'] },
+      requestedScope: { allowedModels: ['medium'] }, grantedScope: { allowedModels: ['medium'] },
+    })])
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/skill-runs/run%2F1/capabilities`, expect.any(Object))
+
+    const received: unknown[] = []
+    const subscription = platform.subscribeSkillRunEvents('run/1', 7, { onEvent: (event) => received.push(event) })
+    const source = MockEventSource.instances[0]
+    source.emit('run.status_changed', { ...eventRow, type: 'run.status_changed', seq: 8 })
+
+    expect(source.url).toBe(`${API_BASE}/skill-runs/run%2F1/stream?afterSeq=7`)
+    expect(received).toEqual([expect.objectContaining({ runId: 'run-1', seq: 8, type: 'run.status_changed' })])
+    subscription.close()
+    expect(source.closed).toBe(true)
   })
 
   it('sends typed commands, drafts and artifact exports and normalizes structured errors', async () => {

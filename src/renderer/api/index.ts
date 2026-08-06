@@ -6,7 +6,7 @@ import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
 import type { CreateProjectInput, ProjectSummary, Session, SessionPage } from '@shared/schemas'
 import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
-import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageInstallInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageInstallInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!window.bloomai
@@ -130,16 +130,47 @@ function toPackageDetail(value: unknown): PackageDetail {
     capabilityGrants: Array.isArray(row.capabilityGrants) ? row.capabilityGrants.map(toCapability) : [],
   }
 }
+const SKILL_RUN_EVENT_TYPES = [
+  'package.loaded', 'package.file_loaded', 'input.summarized', 'step.started', 'step.completed',
+  'capability.requested', 'capability.approval_required', 'capability.started', 'capability.completed',
+  'capability.failed', 'capability.call', 'approval.required', 'artifact.created', 'run.started',
+  'run.status_changed', 'run.waiting', 'run.resumed', 'run.interrupted', 'run.completed',
+  'run.completed_with_errors', 'run.cancel_requested', 'run.cancelled', 'run.failed', 'ready',
+] as const
+
+function asArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 function toSkillRun(value: unknown): SkillRun {
   const row = asRecord(value)
-  const requiredActionValue = row.requiredAction ?? row.required_action
+  const requiredActionValue = readValue(row, 'requiredAction', 'required_action_json', row.required_action)
+  const versionValue = readValue(row, 'version', 'version_json', null)
+  const capabilityCallsValue: unknown = readValue(row, 'capabilityCalls', 'capability_calls_json', undefined)
+  const supportedActionsValue: unknown = readValue(row, 'supportedActions', 'supported_actions', undefined)
   return {
     id: String(row.id ?? ''), skillVersionId: String(readValue(row, 'skillVersionId', 'skill_version_id', '')), status: String(row.status ?? 'created') as SkillRun['status'],
     revision: asNumber(row.revision), input: asObject(row.input), output: row.output && typeof row.output === 'object' ? row.output as Record<string, unknown> : null,
     context: asObject(row.context), surface: typeof row.surface === 'string' ? row.surface : null, sessionId: readValue(row, 'sessionId', 'session_id', null),
     imageSessionId: readValue(row, 'imageSessionId', 'image_session_id', null), waitingReason: readValue(row, 'waitingReason', 'waiting_reason', null),
     waitingSince: readValue(row, 'waitingSince', 'waiting_since', null), waitingExpiresAt: readValue(row, 'waitingExpiresAt', 'waiting_expires_at', null),
-    requiredAction: requiredActionValue && typeof requiredActionValue === 'object' ? asObject(requiredActionValue) : null,
+    requiredAction: requiredActionValue && (typeof requiredActionValue === 'object' || typeof requiredActionValue === 'string') ? asObject(requiredActionValue) : null,
+    supportedActions: asArray(supportedActionsValue).filter((item: unknown): item is string => typeof item === 'string') as SkillRun['supportedActions'],
+    version: versionValue && (typeof versionValue === 'object' || typeof versionValue === 'string') ? asObject(versionValue) as SkillRun['version'] : null,
+    source: typeof row.source === 'string' ? row.source : null,
+    budget: readValue(row, 'budget', 'budget_json', null) && (typeof readValue(row, 'budget', 'budget_json', null) === 'object' || typeof readValue(row, 'budget', 'budget_json', null) === 'string') ? asObject(readValue(row, 'budget', 'budget_json', null)) as SkillRun['budget'] : null,
+    capabilityCalls: asArray(capabilityCallsValue).filter((item: unknown): item is Record<string, unknown> => Boolean(item && typeof item === 'object')).map((item: Record<string, unknown>) => item as RunCapabilityCall),
+    inputSummary: readValue(row, 'inputSummary', 'input_summary_json', null) && (typeof readValue(row, 'inputSummary', 'input_summary_json', null) === 'object' || typeof readValue(row, 'inputSummary', 'input_summary_json', null) === 'string') ? asObject(readValue(row, 'inputSummary', 'input_summary_json', null)) : null,
+    outputSummary: readValue(row, 'outputSummary', 'output_summary_json', null) && (typeof readValue(row, 'outputSummary', 'output_summary_json', null) === 'object' || typeof readValue(row, 'outputSummary', 'output_summary_json', null) === 'string') ? asObject(readValue(row, 'outputSummary', 'output_summary_json', null)) : null,
     cancelRequested: asBoolean(readValue(row, 'cancelRequested', 'cancel_requested', false)), startedAt: readValue(row, 'startedAt', 'started_at', null),
     updatedAt: asNumber(readValue(row, 'updatedAt', 'updated_at', 0)), finishedAt: readValue(row, 'finishedAt', 'finished_at', null),
     errorCode: readValue(row, 'errorCode', 'error_code', null), errorMessage: readValue(row, 'errorMessage', 'error_message', null), resultSummary: readValue(row, 'resultSummary', 'result_summary', null),
@@ -402,9 +433,24 @@ export const platform = {
   subscribeSkillRunEvents(runId: string, afterSeq: number, handlers: { onEvent?: (event: SkillRunEvent) => void; onError?: (error: RuntimeError) => void } = {}): { close: () => void } {
     if (typeof EventSource === 'undefined') throw new SkillRuntimeApiError({ code: 'STREAM_UNAVAILABLE', message: 'EventSource is unavailable', status: 0, retryable: true })
     const source = new EventSource(this.skillRunEventsStreamUrl(runId, afterSeq))
-    source.onmessage = (message) => { try { handlers.onEvent?.(toSkillRunEvent(JSON.parse(message.data) as unknown)) } catch (error) { handlers.onError?.(normalizeRuntimeError(null, 0, error instanceof Error ? error.message : 'Invalid event payload')) } }
+    const onMessage = (message: MessageEvent) => {
+      try {
+        const payload = JSON.parse(message.data) as unknown
+        if (asRecord(payload).runId || asRecord(payload).run_id) handlers.onEvent?.(toSkillRunEvent(payload))
+      } catch (error) {
+        handlers.onError?.(normalizeRuntimeError(null, 0, error instanceof Error ? error.message : 'Invalid event payload'))
+      }
+    }
+    source.onmessage = onMessage
+    const eventTypes = [...SKILL_RUN_EVENT_TYPES]
+    for (const type of eventTypes) source.addEventListener(type, onMessage as EventListener)
     source.onerror = () => handlers.onError?.(normalizeRuntimeError(null, 0, 'Skill Run event stream disconnected'))
-    return { close: () => source.close() }
+    return {
+      close: () => {
+        for (const type of eventTypes) source.removeEventListener(type, onMessage as EventListener)
+        source.close()
+      },
+    }
   },
   async dispatchSkillRunCommand(runId: string, action: RunAction): Promise<SkillRun> {
     const { data } = await apiFetch(`/skill-runs/${encodeURIComponent(runId)}/commands`, { method: 'POST', body: JSON.stringify(action) })

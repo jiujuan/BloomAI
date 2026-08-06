@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
+import type { SkillRun } from './skill-runtime.types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -77,6 +78,31 @@ describe('Package Runtime Zustand store', () => {
     const loaded = await useSkillRuntimeStore.getState().loadRun('run-1')
     expect(loaded.id).toBe('run-1')
     expect(useSkillRuntimeStore.getState().runs).toEqual([])
+  })
+
+  it('passes server revision and unique idempotency keys for approval, waiting input, retry and cancel commands', async () => {
+    const serverRun: SkillRun = {
+      id: 'run-1', skillVersionId: 'version-1', status: 'running', revision: 2, input: {}, output: null, context: {},
+      surface: 'skills', sessionId: null, imageSessionId: null, waitingReason: null, requiredAction: null,
+      cancelRequested: false, startedAt: 1, updatedAt: 2, finishedAt: null, errorCode: null, errorMessage: null,
+    }
+    const dispatchMock = vi.spyOn(platform, 'dispatchSkillRunCommand').mockResolvedValue(serverRun)
+    const cancelMock = vi.spyOn(platform, 'cancelSkillRun').mockResolvedValue(serverRun)
+    vi.spyOn(platform, 'listSkillRunEvents').mockResolvedValue([])
+
+    await useSkillRuntimeStore.getState().approveRun('run-1', 7)
+    await useSkillRuntimeStore.getState().rejectRun('run-1', 8, 'not needed')
+    await useSkillRuntimeStore.getState().submitRunInput('run-1', 9, { topic: 'image' })
+    await useSkillRuntimeStore.getState().retryRun('run-1', 10)
+    await useSkillRuntimeStore.getState().cancelRun('run-1', 11, 'user requested')
+
+    expect(dispatchMock).toHaveBeenNthCalledWith(1, 'run-1', expect.objectContaining({ type: 'approve', expectedRevision: 7, idempotencyKey: expect.stringMatching(/^approve-/) }))
+    expect(dispatchMock).toHaveBeenNthCalledWith(2, 'run-1', expect.objectContaining({ type: 'reject', expectedRevision: 8, reason: 'not needed', idempotencyKey: expect.stringMatching(/^reject-/) }))
+    expect(dispatchMock).toHaveBeenNthCalledWith(3, 'run-1', expect.objectContaining({ type: 'submit_input', expectedRevision: 9, input: { topic: 'image' }, idempotencyKey: expect.stringMatching(/^submit_input-/) }))
+    expect(dispatchMock).toHaveBeenNthCalledWith(4, 'run-1', expect.objectContaining({ type: 'retry', expectedRevision: 10, idempotencyKey: expect.stringMatching(/^retry-/) }))
+    expect(cancelMock).toHaveBeenCalledWith('run-1', expect.objectContaining({ expectedRevision: 11, reason: 'user requested', idempotencyKey: expect.stringMatching(/^cancel-/) }))
+    expect(new Set(dispatchMock.mock.calls.map(([, command]) => command.idempotencyKey)).size).toBe(4)
+    expect(new Set([...dispatchMock.mock.calls.map(([, command]) => command.idempotencyKey), cancelMock.mock.calls[0][1].idempotencyKey]).size).toBe(5)
   })
 
   it('exports an Artifact through the typed runtime action with an audit reason', async () => {
