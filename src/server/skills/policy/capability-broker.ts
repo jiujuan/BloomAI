@@ -250,6 +250,7 @@ export class CapabilityBroker {
       skillVersionId: run.skillVersionId,
       capability: capability.data,
       sessionId: request.sessionId,
+      runId: request.runId,
     })
     if (!grant) throw new CapabilityApprovalRequiredError(`Capability approval required: ${request.capability}`)
 

@@ -170,6 +170,46 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(after.body.data.capabilityGrants[0].revoked_at).toEqual(expect.any(Number))
   })
 
+  it('exposes capability approval lifecycle and run capability status', async () => {
+    const { app, skillPackageRepo } = await loadApi()
+    const pkg = skillPackageRepo.createPackage({ name: 'Approval Package', description: '', sourceType: 'local-directory' })
+    const version = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '1.0.0',
+      manifest: { requestedCapabilities: [{ capability: 'web.search', scope: { allowedDomains: ['example.com'], maxCalls: 2 } }] },
+      manifestHash: 'approval-package-hash',
+      packagePath: path.join(dataDir, 'packages', 'approval-package-hash'),
+    })
+    skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
+
+    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: version.id, input: {} }) })
+    expect(created.response.status).toBe(201)
+    const runId = created.body.data.runId as string
+
+    const pending = await requestJson(app, `/skill-runs/${runId}/capabilities`)
+    expect(pending.response.status).toBe(200)
+    expect(pending.body.data).toEqual([expect.objectContaining({ capability: 'web.search', state: 'approval_required', grantStatus: 'pending' })])
+    const grantId = pending.body.data[0].grantId as string
+
+    const approved = await requestJson(app, `/skill-capability-grants/${grantId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ actor: 'admin-1', scope: { allowedDomains: ['example.com'], maxCalls: 1 } }),
+    })
+    expect(approved.response.status).toBe(200)
+    expect(approved.body.data).toMatchObject({ grantId, status: 'approved', approvedBy: 'admin-1', grantedScope: { allowedDomains: ['example.com'], maxCalls: 1 } })
+
+    const granted = await requestJson(app, `/skill-runs/${runId}/capabilities`)
+    expect(granted.body.data[0]).toMatchObject({ state: 'granted', grantStatus: 'approved' })
+
+    const invalidActor = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: '' }) })
+    expect(invalidActor.response.status).toBe(400)
+    expect(invalidActor.body.error.code).toBe('VALIDATION_ERROR')
+
+    const revoked = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: 'admin-1', reason: 'test cleanup' }) })
+    expect(revoked.response.status).toBe(200)
+    expect(revoked.body.data).toMatchObject({ grantId, status: 'revoked', revokeReason: 'test cleanup' })
+  })
+
   it('creates, lists, retrieves, filters events, commands idempotently, and cancels runs', async () => {
     const { app, skillPackageRepo } = await loadApi()
     const { pkg, version } = createRunnableFixture(skillPackageRepo)

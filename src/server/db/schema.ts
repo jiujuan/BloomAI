@@ -281,14 +281,28 @@ export const skill_capability_grants = sqliteTable('skill_capability_grants', {
   capability: text('capability').notNull(),
   grant_mode: text('grant_mode').notNull(),
   scope_json: text('scope_json').notNull().default('{}'),
+  requested_scope_json: text('requested_scope_json').notNull().default('{}'),
+  granted_scope_json: text('granted_scope_json'),
+  status: text('status').notNull().default('approved'),
   granted_by: text('granted_by'),
   granted_at: integer('granted_at').notNull(),
+  approved_by: text('approved_by'),
+  approved_at: integer('approved_at'),
   expires_at: integer('expires_at'),
   revoked_at: integer('revoked_at'),
+  revoke_reason: text('revoke_reason'),
   session_id: text('session_id'),
+  run_id: text('run_id'),
+  owner_id: text('owner_id'),
+  max_calls: integer('max_calls'),
+  calls_used: integer('calls_used').notNull().default(0),
   consumed_at: integer('consumed_at'),
+  idempotency_key: text('idempotency_key'),
 }, (table) => ({
   versionIdx: index('idx_skill_capability_grants_version').on(table.skill_version_id),
+  activeIdx: index('idx_skill_capability_grants_active').on(table.skill_version_id, table.capability, table.session_id),
+  runIdx: index('idx_skill_capability_grants_run').on(table.run_id, table.status),
+  idempotencyIdx: uniqueIndex('idx_skill_capability_grants_idempotency').on(table.run_id, table.idempotency_key),
 }))
 
 export const skill_run_queue = sqliteTable('skill_run_queue', {

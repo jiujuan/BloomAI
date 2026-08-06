@@ -410,19 +410,87 @@ export class FakeArtifactRepository implements ArtifactRepository {
 export class FakeCapabilityGrantRepository implements CapabilityGrantRepository {
   private readonly grants = new Map<string, CapabilityGrantSnapshot>()
   constructor(private readonly ids: IdGenerator, private readonly clock: Clock) {}
-  createCapabilityGrant(data: { skillVersionId: string; capability: string; grantMode: string; scope?: JsonObject; grantedBy?: string | null; expiresAt?: number | null; sessionId?: string | null }): CapabilityGrantSnapshot {
-    const row: CapabilityGrantSnapshot = { id: this.ids.next(), skillVersionId: data.skillVersionId, capability: data.capability, grantMode: data.grantMode, scope: clone(data.scope ?? {}), grantedBy: data.grantedBy ?? null, grantedAt: this.clock.now(), expiresAt: data.expiresAt ?? null, revokedAt: null, sessionId: data.sessionId ?? null, consumedAt: null }
+  createCapabilityGrant(data: {
+    skillVersionId: string
+    capability: string
+    grantMode: string
+    scope?: JsonObject
+    requestedScope?: JsonObject
+    grantedScope?: JsonObject | null
+    status?: CapabilityGrantSnapshot['status']
+    grantedBy?: string | null
+    approvedBy?: string | null
+    approvedAt?: number | null
+    expiresAt?: number | null
+    sessionId?: string | null
+    runId?: string | null
+    maxCalls?: number | null
+    callsUsed?: number
+  }): CapabilityGrantSnapshot {
+    const requestedScope = clone(data.requestedScope ?? data.scope ?? {})
+    const grantedScope = data.grantedScope === undefined ? (data.status === 'approved' || data.status === undefined ? clone(data.scope ?? requestedScope) : null) : cloneNullable(data.grantedScope)
+    const row: CapabilityGrantSnapshot = {
+      id: this.ids.next(), skillVersionId: data.skillVersionId, capability: data.capability, grantMode: data.grantMode,
+      scope: clone(grantedScope ?? {}), requestedScope, grantedScope, status: data.status ?? 'approved',
+      grantedBy: data.grantedBy ?? null, grantedAt: this.clock.now(), approvedBy: data.approvedBy ?? null,
+      approvedAt: data.approvedAt ?? null, expiresAt: data.expiresAt ?? null, revokedAt: null,
+      revokeReason: null, sessionId: data.sessionId ?? null, runId: data.runId ?? null,
+      maxCalls: data.maxCalls ?? (typeof requestedScope.maxCalls === 'number' ? requestedScope.maxCalls : null),
+      callsUsed: data.callsUsed ?? 0, consumedAt: null,
+    }
     this.grants.set(row.id, row)
     return clone(row)
   }
-  listCapabilityGrants(skillVersionId: string): readonly CapabilityGrantSnapshot[] { return [...this.grants.values()].filter((row) => row.skillVersionId === skillVersionId).map(clone) }
-  findActiveCapabilityGrant(data: { skillVersionId: string; capability: string; sessionId?: string | null; now?: number }): CapabilityGrantSnapshot | undefined {
+  getCapabilityGrant(id: string): CapabilityGrantSnapshot | undefined { const row = this.grants.get(id); return row ? clone(row) : undefined }
+  listCapabilityGrants(skillVersionId: string, options: { runId?: string | null; sessionId?: string | null } = {}): readonly CapabilityGrantSnapshot[] {
+    return [...this.grants.values()].filter((row) => row.skillVersionId === skillVersionId
+      && (options.runId === undefined || row.runId === options.runId)
+      && (options.sessionId === undefined || row.sessionId === options.sessionId)).map(clone)
+  }
+  findActiveCapabilityGrant(data: { skillVersionId: string; capability: string; sessionId?: string | null; runId?: string | null; now?: number }): CapabilityGrantSnapshot | undefined {
     const now = data.now ?? this.clock.now()
-    const row = [...this.grants.values()].find((candidate) => candidate.skillVersionId === data.skillVersionId && candidate.capability === data.capability && candidate.revokedAt === null && candidate.consumedAt === null && (candidate.expiresAt === null || candidate.expiresAt > now) && (candidate.sessionId === null || candidate.sessionId === (data.sessionId ?? null)))
+    const row = [...this.grants.values()].find((candidate) => candidate.skillVersionId === data.skillVersionId && candidate.capability === data.capability
+      && candidate.status === 'approved' && candidate.revokedAt === null && candidate.consumedAt === null
+      && (candidate.expiresAt === null || candidate.expiresAt > now)
+      && (candidate.maxCalls === null || candidate.callsUsed < candidate.maxCalls)
+      && (candidate.sessionId === null || candidate.sessionId === (data.sessionId ?? null))
+      && (candidate.runId === null || candidate.runId === (data.runId ?? null)))
     return row ? clone(row) : undefined
   }
-  consumeCapabilityGrant(id: string, now = this.clock.now()): boolean { const row = this.grants.get(id); if (!row || row.revokedAt !== null || row.consumedAt !== null) return false; this.grants.set(id, { ...row, consumedAt: now }); return true }
-  revokeCapabilityGrant(id: string, now = this.clock.now()): boolean { const row = this.grants.get(id); if (!row || row.revokedAt !== null) return false; this.grants.set(id, { ...row, revokedAt: now }); return true }
+  updateCapabilityGrant(data: { id: string; status?: CapabilityGrantSnapshot['status']; grantedScope?: JsonObject | null; approvedBy?: string | null; approvedAt?: number | null; revokeReason?: string | null; revokedAt?: number | null; expiresAt?: number | null; maxCalls?: number | null }): CapabilityGrantSnapshot | undefined {
+    const row = this.grants.get(data.id)
+    if (!row) return undefined
+    const grantedScope = data.grantedScope === undefined ? row.grantedScope : cloneNullable(data.grantedScope)
+    const next: CapabilityGrantSnapshot = { ...row,
+      status: data.status ?? row.status, grantedScope, scope: clone(grantedScope ?? {}),
+      approvedBy: data.approvedBy === undefined ? row.approvedBy : data.approvedBy,
+      approvedAt: data.approvedAt === undefined ? row.approvedAt : data.approvedAt,
+      revokeReason: data.revokeReason === undefined ? row.revokeReason : data.revokeReason,
+      revokedAt: data.revokedAt === undefined ? row.revokedAt : data.revokedAt,
+      expiresAt: data.expiresAt === undefined ? row.expiresAt : data.expiresAt,
+      maxCalls: data.maxCalls === undefined ? row.maxCalls : data.maxCalls,
+    }
+    this.grants.set(row.id, next)
+    return clone(next)
+  }
+  consumeCapabilityGrant(id: string, now = this.clock.now(), context: { runId?: string | null; sessionId?: string | null } = {}): boolean {
+    const row = this.grants.get(id)
+    if (!row || row.status !== 'approved' || row.revokedAt !== null || row.consumedAt !== null) return false
+    if (row.expiresAt !== null && row.expiresAt <= now) { this.grants.set(id, { ...row, status: 'expired' }); return false }
+    if (context.runId !== undefined && row.runId !== null && context.runId !== row.runId) return false
+    if (context.sessionId !== undefined && row.sessionId !== null && context.sessionId !== row.sessionId) return false
+    if (row.maxCalls !== null && row.callsUsed >= row.maxCalls) return false
+    const callsUsed = row.callsUsed + 1
+    const exhausted = row.grantMode === 'once' || row.maxCalls !== null && callsUsed >= row.maxCalls
+    this.grants.set(id, { ...row, callsUsed, consumedAt: row.grantMode === 'once' ? now : null, status: exhausted ? 'consumed' : 'approved' })
+    return true
+  }
+  revokeCapabilityGrant(id: string, now = this.clock.now(), reason?: string): boolean {
+    const row = this.grants.get(id)
+    if (!row || row.revokedAt !== null || row.status !== 'approved') return false
+    this.grants.set(id, { ...row, status: 'revoked', revokedAt: now, revokeReason: reason ?? null })
+    return true
+  }
 }
 
 export function createFakeSkillRuntimePorts(options: { now?: number } = {}): SkillRuntimePorts & { clock: FakeClock; ids: FakeIdGenerator } {

@@ -10,6 +10,7 @@ import { ArtifactStore, ArtifactStoreError } from '../skills/artifacts'
 import { PackageInstallError, PackageInstaller, type PackageInstallSource } from '../skills/packages/package-installer'
 import { SkillRuntimeFeatureDisabledError } from '../skills/config/skill-runtime.config'
 import { SkillRunCoordinator } from '../skills/runtime'
+import { CapabilityGrantService, CapabilityGrantServiceError } from '../skills/application/capability-grant.service'
 import {
   SkillRunConflictError,
   SkillRunNotFoundError,
@@ -27,6 +28,7 @@ export type SkillPackageRuntimeDependencies = {
   createInstaller: () => PackageInstaller
   coordinator: SkillRunCoordinator
   artifactStore: ArtifactStore
+  capabilityGrantService: CapabilityGrantService
   /** @deprecated Compatibility seam for callers still assembling the old adapter. */
   repo?: Record<string, any>
 }
@@ -53,6 +55,15 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
   const grantRepository = overrides.grantRepository ?? createSqliteGrantRepository()
   const artifactRepository = overrides.artifactRepository ?? createSqliteArtifactRepository()
   const queueRepository = overrides.queueRepository ?? createSqliteQueueRepository()
+  const eventRepository = createSqliteEventRepository()
+  const clock = { now: () => Date.now() }
+  const capabilityGrantService = overrides.capabilityGrantService ?? new CapabilityGrantService({
+    packages: packageRepository,
+    runs: runRepository,
+    grants: grantRepository,
+    clock,
+    events: eventRepository,
+  })
   const dependencies: SkillPackageRuntimeDependencies = {
     ...overrides,
     packageRepository,
@@ -60,11 +71,12 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     grantRepository,
     artifactRepository,
     queueRepository,
+    capabilityGrantService,
     createInstaller: overrides.createInstaller ?? (() => new PackageInstaller()),
     coordinator: overrides.coordinator ?? new SkillRunCoordinator({
       runs: runRepository,
-      events: createSqliteEventRepository(),
-      clock: { now: () => Date.now() },
+      events: eventRepository,
+      clock,
       queue: queueRepository,
     }),
     artifactStore: overrides.artifactStore ?? new ArtifactStore(),
@@ -129,6 +141,22 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       })
     },
 
+    approveCapabilityGrant(id: string, input: { actor: string; scope?: unknown; expiresAt?: number | null }) {
+      return mapRuntimeError(() => dependencies.capabilityGrantService.approveGrant(id, input))
+    },
+
+    rejectCapabilityGrant(id: string, input: { actor: string; reason?: string }) {
+      return mapRuntimeError(() => dependencies.capabilityGrantService.rejectGrant(id, input))
+    },
+
+    revokeCapabilityGrantByActor(id: string, input: { actor: string; reason?: string }) {
+      return mapRuntimeError(() => dependencies.capabilityGrantService.revokeGrant(id, input))
+    },
+
+    getRunCapabilities(runId: string) {
+      return mapRuntimeError(() => dependencies.capabilityGrantService.getRunCapabilities(runId))
+    },
+
     removeInstallation(id: string) {
       return mapRuntimeError(() => {
         const removed = dependencies.repo?.deleteInstallation ? dependencies.repo.deleteInstallation(id) : dependencies.packageRepository.deleteInstallation(id)
@@ -153,6 +181,7 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
           imageSessionId: input.imageSessionId,
         })
         const run = dependencies.coordinator.getRun(started.runId)
+        dependencies.capabilityGrantService.requestCapabilities(run.id)
         return { runId: run.id, status: run.status, revision: run.revision }
       })
     },
@@ -180,7 +209,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     },
 
     cancelRun(id: string, command: { idempotencyKey: string, expectedRevision: number, reason?: string }) {
-      return mapRuntimeError(() => dependencies.coordinator.requestCancel(id, command))
+      return mapRuntimeError(() => {
+        if (typeof (dependencies.coordinator as any).requestCancel === 'function') return (dependencies.coordinator as any).requestCancel(id, command)
+        return dependencies.coordinator.dispatchCommand(id, { type: 'cancel', ...command })
+      })
     },
 
     listRunArtifacts(runId: string) {
@@ -216,6 +248,15 @@ function mapRuntimeError<T>(operation: () => T): T {
   }
 }
 
+function normalizeServiceErrorDetails(details: Record<string, unknown> | undefined) {
+  if (!details) return undefined
+  const normalized: Record<string, string | number | boolean | null> = {}
+  for (const [key, value] of Object.entries(details)) {
+    if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') normalized[key] = value
+  }
+  return normalized
+}
+
 function isPromiseLike(value: unknown): value is Promise<unknown> {
   return !!value && typeof (value as Promise<unknown>).then === 'function'
 }
@@ -226,6 +267,17 @@ function rethrowMappedRuntimeError(error: unknown): never {
   if (error instanceof SkillRunConflictError) throw new ServiceError('REVISION_CONFLICT', error.message)
   if (error instanceof SkillRunTransitionError) throw new ServiceError('INVALID_RUN_TRANSITION', error.message)
   if (error instanceof SkillRuntimeFeatureDisabledError) throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
+  if (error instanceof CapabilityGrantServiceError) {
+    const code = error.code === 'NOT_FOUND' ? 'NOT_FOUND'
+      : error.code === 'VALIDATION_ERROR' ? 'VALIDATION_ERROR'
+        : error.code === 'INVALID_GRANT_STATE' ? 'CONFLICT'
+          : error.code === 'APPROVAL_REQUIRED' ? 'CAPABILITY_APPROVAL_REQUIRED'
+            : error.code === 'FORBIDDEN_CAPABILITY' ? 'CAPABILITY_NOT_SUPPORTED'
+              : error.code === 'OWNERSHIP_VIOLATION' ? 'FORBIDDEN'
+                : error.code === 'SCOPE_EXCEEDED' ? 'FORBIDDEN'
+                  : 'CAPABILITY_GRANT_ERROR'
+    throw new ServiceError(code, error.message, normalizeServiceErrorDetails(error.details))
+  }
   if (error instanceof PackageInstallError) {
     if (error.code === 'FEATURE_DISABLED') throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
     throw new ServiceError('PACKAGE_INSTALL_ERROR', error.message)

@@ -164,17 +164,29 @@ export type ApplyRunChangeResult = {
   readonly duplicate: boolean
 }
 
+export type CapabilityGrantStatus = 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired' | 'consumed'
+
 export type CapabilityGrantSnapshot = {
   readonly id: string
   readonly skillVersionId: string
   readonly capability: string
   readonly grantMode: string
+  /** Legacy alias for grantedScope retained for existing broker callers. */
   readonly scope: JsonObject
+  readonly requestedScope: JsonObject
+  readonly grantedScope: JsonObject | null
+  readonly status: CapabilityGrantStatus
   readonly grantedBy: string | null
   readonly grantedAt: number
+  readonly approvedBy: string | null
+  readonly approvedAt: number | null
   readonly expiresAt: number | null
   readonly revokedAt: number | null
+  readonly revokeReason: string | null
   readonly sessionId: string | null
+  readonly runId: string | null
+  readonly maxCalls: number | null
+  readonly callsUsed: number
   readonly consumedAt: number | null
 }
 
@@ -311,19 +323,40 @@ export interface CapabilityGrantRepository {
     capability: string
     grantMode: string
     scope?: JsonObject
+    requestedScope?: JsonObject
+    grantedScope?: JsonObject | null
+    status?: CapabilityGrantStatus
     grantedBy?: string | null
+    approvedBy?: string | null
+    approvedAt?: number | null
     expiresAt?: number | null
     sessionId?: string | null
+    runId?: string | null
+    maxCalls?: number | null
+    callsUsed?: number
   }): CapabilityGrantSnapshot
-  listCapabilityGrants(skillVersionId: string): readonly CapabilityGrantSnapshot[]
+  getCapabilityGrant(id: string): CapabilityGrantSnapshot | undefined
+  listCapabilityGrants(skillVersionId: string, options?: { runId?: string | null; sessionId?: string | null }): readonly CapabilityGrantSnapshot[]
   findActiveCapabilityGrant(data: {
     skillVersionId: string
     capability: string
     sessionId?: string | null
+    runId?: string | null
     now?: number
   }): CapabilityGrantSnapshot | undefined
-  consumeCapabilityGrant(id: string, now?: number): boolean
-  revokeCapabilityGrant(id: string, now?: number): boolean
+  updateCapabilityGrant(data: {
+    id: string
+    status?: CapabilityGrantStatus
+    grantedScope?: JsonObject | null
+    approvedBy?: string | null
+    approvedAt?: number | null
+    revokeReason?: string | null
+    revokedAt?: number | null
+    expiresAt?: number | null
+    maxCalls?: number | null
+  }): CapabilityGrantSnapshot | undefined
+  consumeCapabilityGrant(id: string, now?: number, context?: { runId?: string | null; sessionId?: string | null }): boolean
+  revokeCapabilityGrant(id: string, now?: number, reason?: string): boolean
 }
 
 export interface ArtifactRepository {

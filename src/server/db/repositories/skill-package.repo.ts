@@ -535,74 +535,154 @@ export const skillPackageRepo = {
     capability: string
     grantMode: string
     scope?: Record<string, unknown>
+    requestedScope?: Record<string, unknown>
+    grantedScope?: Record<string, unknown> | null
+    status?: 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired' | 'consumed'
     grantedBy?: string | null
+    approvedBy?: string | null
+    approvedAt?: number | null
     expiresAt?: number | null
     sessionId?: string | null
+    runId?: string | null
+    ownerId?: string | null
+    maxCalls?: number | null
+    callsUsed?: number
   }) {
+    const requestedScope = data.requestedScope ?? data.scope ?? {}
+    const grantedScope = data.grantedScope === undefined ? (data.scope ?? (data.status === 'approved' ? requestedScope : null)) : data.grantedScope
+    const now = Date.now()
     const row = {
       id: uuidv4(),
       skill_version_id: data.skillVersionId,
       capability: data.capability,
       grant_mode: data.grantMode,
-      scope_json: stringifyJsonObject(data.scope ?? {}, 'scope'),
+      scope_json: stringifyJsonObject(grantedScope ?? {}, 'scope'),
+      requested_scope_json: stringifyJsonObject(requestedScope, 'requested scope'),
+      granted_scope_json: grantedScope === null ? null : stringifyJsonObject(grantedScope, 'granted scope'),
+      status: data.status ?? 'approved',
       granted_by: data.grantedBy ?? null,
-      granted_at: Date.now(),
+      granted_at: now,
+      approved_by: data.approvedBy ?? (data.status === 'approved' ? data.grantedBy ?? null : null),
+      approved_at: data.approvedAt ?? (data.status === 'approved' ? now : null),
       expires_at: data.expiresAt ?? null,
       revoked_at: null,
+      revoke_reason: null,
       session_id: data.sessionId ?? null,
+      run_id: data.runId ?? null,
+      owner_id: data.ownerId ?? null,
+      max_calls: data.maxCalls ?? (typeof requestedScope.maxCalls === 'number' ? requestedScope.maxCalls : null),
+      calls_used: data.callsUsed ?? 0,
       consumed_at: null,
+      idempotency_key: null,
     }
     getOrmDb().insert(skill_capability_grants).values(row).run()
     return row
   },
 
-  listCapabilityGrants(skillVersionId: string) {
-    return getOrmDb()
-      .select()
-      .from(skill_capability_grants)
-      .where(eq(skill_capability_grants.skill_version_id, skillVersionId))
-      .all()
+  getCapabilityGrant(id: string) {
+    const row = getOrmDb().select().from(skill_capability_grants).where(eq(skill_capability_grants.id, id)).get()
+    return row
+  },
+
+  listCapabilityGrants(skillVersionId: string, options: { runId?: string | null; sessionId?: string | null } = {}) {
+    const predicates = [eq(skill_capability_grants.skill_version_id, skillVersionId)]
+    if (options.runId !== undefined) predicates.push(options.runId === null ? isNull(skill_capability_grants.run_id) : eq(skill_capability_grants.run_id, options.runId))
+    if (options.sessionId !== undefined) predicates.push(options.sessionId === null ? isNull(skill_capability_grants.session_id) : eq(skill_capability_grants.session_id, options.sessionId))
+    return getOrmDb().select().from(skill_capability_grants).where(and(...predicates)).orderBy(asc(skill_capability_grants.granted_at)).all()
   },
 
   findActiveCapabilityGrant(data: {
     skillVersionId: string
     capability: string
     sessionId?: string | null
+    runId?: string | null
     now?: number
   }) {
     const now = data.now ?? Date.now()
     const sessionPredicate = data.sessionId
       ? or(isNull(skill_capability_grants.session_id), eq(skill_capability_grants.session_id, data.sessionId))
       : isNull(skill_capability_grants.session_id)
-    return getOrmDb()
+    const runPredicate = data.runId
+      ? or(isNull(skill_capability_grants.run_id), eq(skill_capability_grants.run_id, data.runId))
+      : isNull(skill_capability_grants.run_id)
+    const row = getOrmDb()
       .select()
       .from(skill_capability_grants)
       .where(and(
         eq(skill_capability_grants.skill_version_id, data.skillVersionId),
         eq(skill_capability_grants.capability, data.capability),
+        eq(skill_capability_grants.status, 'approved'),
         isNull(skill_capability_grants.revoked_at),
         isNull(skill_capability_grants.consumed_at),
         or(isNull(skill_capability_grants.expires_at), sql`${skill_capability_grants.expires_at} > ${now}`),
+        or(isNull(skill_capability_grants.max_calls), sql`${skill_capability_grants.calls_used} < ${skill_capability_grants.max_calls}`),
         sessionPredicate,
+        runPredicate,
       ))
       .orderBy(asc(skill_capability_grants.granted_at))
       .get()
+    return row
   },
 
-  consumeCapabilityGrant(id: string, now = Date.now()): boolean {
-    const result = getOrmDb()
-      .update(skill_capability_grants)
-      .set({ consumed_at: now })
-      .where(and(eq(skill_capability_grants.id, id), isNull(skill_capability_grants.consumed_at), isNull(skill_capability_grants.revoked_at)))
-      .run()
+  updateCapabilityGrant(data: {
+    id: string
+    status?: 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired' | 'consumed'
+    grantedScope?: Record<string, unknown> | null
+    approvedBy?: string | null
+    approvedAt?: number | null
+    revokeReason?: string | null
+    revokedAt?: number | null
+    expiresAt?: number | null
+    maxCalls?: number | null
+  }) {
+    const current = getOrmDb().select().from(skill_capability_grants).where(eq(skill_capability_grants.id, data.id)).get()
+    if (!current) return undefined
+    const grantedScope = data.grantedScope === undefined ? current.granted_scope_json : data.grantedScope === null ? '{}' : stringifyJsonObject(data.grantedScope, 'granted scope')
+    const patch: Record<string, unknown> = {}
+    if (data.status !== undefined) patch.status = data.status
+    if (data.grantedScope !== undefined) { patch.granted_scope_json = data.grantedScope === null ? null : grantedScope; patch.scope_json = data.grantedScope === null ? '{}' : grantedScope }
+    if (data.approvedBy !== undefined) patch.approved_by = data.approvedBy
+    if (data.approvedAt !== undefined) patch.approved_at = data.approvedAt
+    if (data.revokeReason !== undefined) patch.revoke_reason = data.revokeReason
+    if (data.revokedAt !== undefined) patch.revoked_at = data.revokedAt
+    if (data.expiresAt !== undefined) patch.expires_at = data.expiresAt
+    if (data.maxCalls !== undefined) patch.max_calls = data.maxCalls
+    if (Object.keys(patch).length) getOrmDb().update(skill_capability_grants).set(patch as any).where(eq(skill_capability_grants.id, data.id)).run()
+    const next = getOrmDb().select().from(skill_capability_grants).where(eq(skill_capability_grants.id, data.id)).get()
+    return next
+  },
+
+  consumeCapabilityGrant(id: string, now = Date.now(), context: { runId?: string | null; sessionId?: string | null } = {}): boolean {
+    const current = getOrmDb().select().from(skill_capability_grants).where(eq(skill_capability_grants.id, id)).get()
+    if (!current || current.status !== 'approved' || current.revoked_at !== null || current.consumed_at !== null) return false
+    if (current.expires_at !== null && current.expires_at <= now) {
+      getOrmDb().update(skill_capability_grants).set({ status: 'expired' }).where(eq(skill_capability_grants.id, id)).run()
+      return false
+    }
+    if (context.runId !== undefined && current.run_id !== null && current.run_id !== context.runId) return false
+    if (context.sessionId !== undefined && current.session_id !== null && current.session_id !== context.sessionId) return false
+    if (current.max_calls !== null && current.calls_used >= current.max_calls) return false
+    const nextCalls = current.calls_used + 1
+    const exhausted = current.grant_mode === 'once' || current.max_calls !== null && nextCalls >= current.max_calls
+    const result = getOrmDb().update(skill_capability_grants).set({
+      calls_used: nextCalls,
+      consumed_at: current.grant_mode === 'once' ? now : current.consumed_at,
+      status: exhausted ? 'consumed' : 'approved',
+    }).where(and(
+      eq(skill_capability_grants.id, id),
+      eq(skill_capability_grants.status, 'approved'),
+      eq(skill_capability_grants.calls_used, current.calls_used),
+      isNull(skill_capability_grants.revoked_at),
+      isNull(skill_capability_grants.consumed_at),
+    )).run()
     return result.changes === 1
   },
 
-  revokeCapabilityGrant(id: string, now = Date.now()): boolean {
+  revokeCapabilityGrant(id: string, now = Date.now(), reason?: string): boolean {
     const result = getOrmDb()
       .update(skill_capability_grants)
-      .set({ revoked_at: now })
-      .where(and(eq(skill_capability_grants.id, id), isNull(skill_capability_grants.revoked_at)))
+      .set({ revoked_at: now, status: 'revoked', revoke_reason: reason ?? null })
+      .where(and(eq(skill_capability_grants.id, id), isNull(skill_capability_grants.revoked_at), eq(skill_capability_grants.status, 'approved')))
       .run()
     return result.changes === 1
   },
@@ -920,18 +1000,26 @@ export function createSqliteGrantRepository(): CapabilityGrantRepository {
     createCapabilityGrant(data) {
       return mapGrant(skillPackageRepo.createCapabilityGrant(data))
     },
-    listCapabilityGrants(skillVersionId) {
-      return skillPackageRepo.listCapabilityGrants(skillVersionId).map(mapGrant)
+    getCapabilityGrant(id) {
+      const row = skillPackageRepo.getCapabilityGrant(id)
+      return row ? mapGrant(row) : undefined
+    },
+    listCapabilityGrants(skillVersionId, options) {
+      return skillPackageRepo.listCapabilityGrants(skillVersionId, options).map(mapGrant)
     },
     findActiveCapabilityGrant(data) {
       const row = skillPackageRepo.findActiveCapabilityGrant(data)
       return row ? mapGrant(row) : undefined
     },
-    consumeCapabilityGrant(id, now) {
-      return skillPackageRepo.consumeCapabilityGrant(id, now)
+    updateCapabilityGrant(data) {
+      const row = skillPackageRepo.updateCapabilityGrant(data)
+      return row ? mapGrant(row) : undefined
     },
-    revokeCapabilityGrant(id, now) {
-      return skillPackageRepo.revokeCapabilityGrant(id, now)
+    consumeCapabilityGrant(id, now, context) {
+      return skillPackageRepo.consumeCapabilityGrant(id, now, context)
+    },
+    revokeCapabilityGrant(id, now, reason) {
+      return skillPackageRepo.revokeCapabilityGrant(id, now, reason)
     },
   }
 }
@@ -1009,7 +1097,33 @@ function mapEvent(row: any): RunEventSnapshot {
 }
 
 function mapGrant(row: any): CapabilityGrantSnapshot {
-  return { id: row.id, skillVersionId: row.skill_version_id, capability: row.capability, grantMode: row.grant_mode, scope: parseObject(row.scope_json, 'grant scope'), grantedBy: row.granted_by, grantedAt: row.granted_at, expiresAt: row.expires_at, revokedAt: row.revoked_at, sessionId: row.session_id, consumedAt: row.consumed_at }
+  const legacyScope = parseObject(row.scope_json ?? '{}', 'grant scope')
+  const requestedScope = parseObject(row.requested_scope_json ?? row.scope_json ?? '{}', 'requested grant scope')
+  const grantedScope = row.granted_scope_json === null || row.granted_scope_json === undefined
+    ? (row.status === 'approved' || row.status === undefined ? legacyScope : null)
+    : parseObject(row.granted_scope_json, 'granted grant scope')
+  return {
+    id: row.id,
+    skillVersionId: row.skill_version_id,
+    capability: row.capability,
+    grantMode: row.grant_mode,
+    scope: grantedScope ?? {},
+    requestedScope,
+    grantedScope,
+    status: row.status ?? 'approved',
+    grantedBy: row.granted_by,
+    grantedAt: row.granted_at,
+    approvedBy: row.approved_by ?? row.granted_by ?? null,
+    approvedAt: row.approved_at ?? row.granted_at ?? null,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    revokeReason: row.revoke_reason ?? null,
+    sessionId: row.session_id,
+    runId: row.run_id ?? null,
+    maxCalls: row.max_calls ?? null,
+    callsUsed: row.calls_used ?? 0,
+    consumedAt: row.consumed_at,
+  }
 }
 
 function mapArtifact(row: any): ArtifactSnapshot {

@@ -19,6 +19,9 @@ const packageSourceSchema = z.discriminatedUnion('kind', [
 ])
 const packageMutationSchema = z.object({ source: packageSourceSchema })
 const installationUpdateSchema = z.object({ enabled: z.boolean() })
+const grantApproveSchema = z.object({ actor: idSchema, scope: jsonObjectSchema.optional(), expiresAt: z.number().int().positive().nullable().optional() }).strict()
+const grantRejectSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
+const grantRevokeSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
 const createRunSchema = z.object({
   skillId: idSchema.optional(),
   skillVersionId: idSchema.optional(),
@@ -70,6 +73,24 @@ skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
   try { return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
+skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/approve', async (c) => {
+  try {
+    const input = await readValidated(c, grantApproveSchema)
+    return c.json({ data: skillPackageRuntimeService.approveCapabilityGrant(idSchema.parse(c.req.param('id')), input) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/reject', async (c) => {
+  try {
+    const input = await readValidated(c, grantRejectSchema)
+    return c.json({ data: skillPackageRuntimeService.rejectCapabilityGrant(idSchema.parse(c.req.param('id')), input) })
+  } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/revoke', async (c) => {
+  try {
+    const input = await readValidated(c, grantRevokeSchema)
+    return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), input) })
+  } catch (error) { return errorResponse(c, error) }
+})
 skillPackageRuntimeRoutes.delete('/skill-installations/:id', (c) => {
   try { return c.json({ data: skillPackageRuntimeService.removeInstallation(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
@@ -85,6 +106,9 @@ skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id', (c) => {
   try { return c.json({ data: skillPackageRuntimeService.getRun(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+})
+skillPackageRuntimeRoutes.get('/skill-runs/:id/capabilities', (c) => {
+  try { return c.json({ data: skillPackageRuntimeService.getRunCapabilities(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/events', (c) => {
   try {
