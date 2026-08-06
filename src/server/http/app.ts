@@ -18,6 +18,7 @@ import { attachmentsRoutes } from './routes/attachments'
 import { articleIllustrationRoutes } from './routes/article-illustrations'
 import { deepResearchRoutes } from './routes/deep-research'
 import { schedulesRoutes } from './routes/schedules'
+import { skillCreatorRoutes } from './routes/skill-creator'
 
 /**
  * Single Hono HTTP server for BloomAI 鈥?replaces the previous Express app.
@@ -81,6 +82,7 @@ export function createHonoApp(): Hono {
   app.route('/api/v1/skills', skillsRoutes)
   app.route('/api/v1/attachments', attachmentsRoutes)
   app.route('/api/v1', skillPackageRuntimeRoutes)
+  app.route('/api/v1', skillCreatorRoutes)
   app.route('/api/v1', imageStudioRoutes)
   app.route('/api/v1', articleIllustrationRoutes)
   app.route('/api/v1/deep-research', deepResearchRoutes)

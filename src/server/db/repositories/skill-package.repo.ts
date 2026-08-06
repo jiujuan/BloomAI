@@ -17,6 +17,7 @@ import {
   skill_runs_v2,
   skill_versions,
   skill_audit_events,
+  skill_drafts,
 } from '../schema'
 import type {
   ApplyRunChangeRequest,
@@ -77,6 +78,47 @@ export const skillPackageRepo = {
 
   getPackage(id: string) {
     return getOrmDb().select().from(skill_packages).where(eq(skill_packages.id, id)).get()
+  },
+
+  createDraft(data: { ownerId: string; content: Record<string, unknown>; baseVersionId?: string | null }) {
+    const now = Date.now()
+    const row = {
+      id: uuidv4(), owner_id: data.ownerId, status: 'draft', revision: 1,
+      content_json: stringifyJsonObject(data.content, 'content'), validation_json: '{}',
+      base_version_id: data.baseVersionId ?? null, published_version_id: null,
+      created_at: now, updated_at: now,
+    }
+    getOrmDb().insert(skill_drafts).values(row).run()
+    return row
+  },
+
+  getDraft(id: string) {
+    return getOrmDb().select().from(skill_drafts).where(eq(skill_drafts.id, id)).get()
+  },
+
+  updateDraftCas(data: { id: string; ownerId: string; expectedRevision: number; content: Record<string, unknown> }) {
+    const result = getOrmDb().update(skill_drafts).set({
+      content_json: stringifyJsonObject(data.content, 'content'), revision: data.expectedRevision + 1, updated_at: Date.now(),
+    }).where(and(eq(skill_drafts.id, data.id), eq(skill_drafts.owner_id, data.ownerId), eq(skill_drafts.revision, data.expectedRevision), eq(skill_drafts.status, 'draft'))).run()
+    return result.changes === 1 ? this.getDraft(data.id) : undefined
+  },
+
+  saveDraftValidation(data: { id: string; ownerId: string; validation: Record<string, unknown> }) {
+    const result = getOrmDb().update(skill_drafts).set({ validation_json: JSON.stringify(data.validation), updated_at: Date.now() })
+      .where(and(eq(skill_drafts.id, data.id), eq(skill_drafts.owner_id, data.ownerId))).run()
+    return result.changes === 1 ? this.getDraft(data.id) : undefined
+  },
+
+  markDraftPublished(data: { id: string; ownerId: string; versionId: string; validation: Record<string, unknown> }) {
+    const result = getOrmDb().update(skill_drafts).set({ status: 'published', published_version_id: data.versionId, validation_json: JSON.stringify(data.validation), updated_at: Date.now() })
+      .where(and(eq(skill_drafts.id, data.id), eq(skill_drafts.owner_id, data.ownerId), eq(skill_drafts.status, 'draft'))).run()
+    return result.changes === 1 ? this.getDraft(data.id) : undefined
+  },
+
+  discardDraft(data: { id: string; ownerId: string }) {
+    const result = getOrmDb().update(skill_drafts).set({ status: 'discarded', updated_at: Date.now() })
+      .where(and(eq(skill_drafts.id, data.id), eq(skill_drafts.owner_id, data.ownerId), eq(skill_drafts.status, 'draft'))).run()
+    return result.changes === 1 ? this.getDraft(data.id) : undefined
   },
 
   listPackages(options: { limit: number; offset: number }) {
