@@ -121,6 +121,7 @@ type RuntimeActions = {
   loadPackages: (input?: PaginationInput) => Promise<Page<SkillPackage>>
   loadPackage: (id: string) => Promise<PackageDetail>
   loadVersions: (packageId: string) => Promise<SkillVersion[]>
+  selectVersion: (version: SkillVersion | null) => void
   inspectPackage: (source: PackageSource) => Promise<InspectedPackage[]>
   installPackage: (input: PackageSource | PackageInstallInput) => Promise<PackageDetail | Record<string, unknown>>
   setInstallationEnabled: (id: string, enabled: boolean, expectedRevision: number) => Promise<SkillInstallation>
@@ -138,6 +139,7 @@ type RuntimeActions = {
   appendEvents: (runId: string, events: SkillRunEvent[]) => SkillRunEvent[]
   reconnectRunEvents: (runId: string) => Promise<SkillRunEvent[]>
   loadArtifacts: (id: string, input?: PaginationInput) => Promise<SkillArtifact[]>
+  exportArtifact: (artifactId: string, input: { runId: string; destinationDir: string; confirmed: true; actor?: string; auditReason: string }) => Promise<{ path: string }>
   startRun: (input: { skillVersionId: string; input: Record<string, unknown>; surface?: 'skills' | 'chat' | 'image' }) => Promise<SkillRun>
   createRun: (input: Parameters<typeof platform.createSkillRun>[0]) => Promise<SkillRun>
   commandRun: (id: string, command: Extract<RunAction, { type: 'confirm' | 'cancel' }> | { type: 'confirm' | 'cancel'; expectedRevision: number; idempotencyKey?: string }) => Promise<SkillRun>
@@ -224,6 +226,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       set({ selectedVersion: versions[0] ?? null })
       return versions
     },
+    selectVersion: (version) => set({ selectedVersion: version }),
     inspectPackage: (source) => platform.inspectSkillPackage(source),
     installPackage: async (input) => {
       if ('reviewId' in input) {
@@ -325,6 +328,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       set((state) => ({ artifactsByRun: { ...state.artifactsByRun, [id]: artifacts }, runArtifacts: state.selectedRun?.id === id ? artifacts.map(legacyArtifact) : state.runArtifacts }))
       return artifacts
     },
+    exportArtifact: (artifactId, input) => withMutation(`artifact:${artifactId}`, async () => platform.exportSkillArtifact(artifactId, input)),
     startRun: async (input) => get().createRun(input),
     createRun: async (input) => withMutation('run:create', async () => {
       const run = await platform.createSkillRun(input)

@@ -16,6 +16,7 @@ export interface SkillMigrationPreview {
 }
 
 export interface Skill {
+  runtimeKind?: 'legacy'
   id: string; name: string; description: string; type: string
   source: string; params_schema: string; author: string | null
   version: string; is_public: number; is_installed: number
@@ -54,6 +55,7 @@ function dataArray(value: unknown): unknown[] {
 function toLegacySkill(value: unknown): Skill {
   const row = asRecord(value)
   return {
+    runtimeKind: 'legacy',
     id: String(row.id ?? ''), name: String(row.name ?? ''), description: String(row.description ?? ''), type: String(row.type ?? ''),
     source: String(row.source ?? ''), params_schema: String(row.params_schema ?? row.paramsSchema ?? '{}'), author: typeof row.author === 'string' ? row.author : null,
     version: String(row.version ?? ''), is_public: Number(row.is_public ?? row.isPublic ?? 0), is_installed: Number(row.is_installed ?? row.isInstalled ?? 0),

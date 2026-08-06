@@ -8,28 +8,29 @@ export function PackageDetailDrawer({ detail, runs, onClose, onRun, onOpenRun }:
   const { setInstallationEnabled, uninstallPackage, rollbackInstallation, deletePackage: deletePackageAction, revokeCapabilityGrant } = useSkillRuntimeStore()
   const [busy, setBusy] = useState<string | null>(null)
   const currentInstallation = detail.installations[0]
-  const currentVersion = detail.versions.find((version) => version.id === currentInstallation?.current_version_id) || detail.versions[0]
+  const currentVersion = detail.versions.find((version) => version.id === (currentInstallation?.currentVersionId || currentInstallation?.current_version_id)) || detail.versions[0]
   const manifest = parseJson<PackageManifest>(currentVersion?.manifest_json, emptyManifest)
   const snapshot = parseJson<{ sourceCommit?: string; sourceRef?: string; sourceSha256?: string }>(currentVersion?.source_snapshot_json, {})
   const recentRuns = runs.filter((run) => run.skillVersionId === currentVersion?.id).slice(0, 5)
-  const grants = detail.capabilityGrants.filter((grant) => grant.skill_version_id === currentVersion?.id)
+  const grants = detail.capabilityGrants.filter((grant) => (grant.skillVersionId || grant.skill_version_id) === currentVersion?.id)
   const activeGrants = grants.filter(isActiveGrant)
   const packageDeleted = Boolean(detail.package.deleted_at)
   const installationRetired = currentInstallation?.status === 'uninstalled' || currentInstallation?.status === 'deleted'
   const lifecycleLocked = packageDeleted || installationRetired
+  const installationEnabled = currentInstallation?.enabled === true || currentInstallation?.enabled === 1
   const rollbackCandidates = useMemo(() => detail.versions.filter((version) => (
     version.id !== currentVersion?.id &&
     version.is_compatible === 1 &&
     version.status === 'runnable' &&
     (version.security_status === 'verified' || version.security_status === 'approved')
   )), [currentVersion?.id, detail.versions])
-  const rollbackTarget = rollbackCandidates.find((version) => version.id === currentInstallation?.previous_version_id) || rollbackCandidates[0]
+  const rollbackTarget = rollbackCandidates.find((version) => version.id === currentInstallation?.previousVersionId || currentInstallation?.previous_version_id) || rollbackCandidates[0]
 
   const updateEnabled = async () => {
     if (!currentInstallation || lifecycleLocked) return
     setBusy('enabled')
     try {
-      await setInstallationEnabled(currentInstallation.id, currentInstallation.enabled !== 1, currentInstallation.revision ?? 0)
+      await setInstallationEnabled(currentInstallation.id, !installationEnabled, currentInstallation.revision ?? 0)
     } finally { setBusy(null) }
   }
   const uninstall = async () => {

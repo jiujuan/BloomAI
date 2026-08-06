@@ -9,12 +9,17 @@ import { useSkillRuntimeStore } from './skill-runtime.store'
 import { formatDate } from './skill-runtime.types'
 import type { SkillPackage, SkillRun, SkillVersion } from './skill-runtime.types'
 import { cn } from '@renderer/utils'
+import { SkillsCenterWorkbench } from './SkillsCenterWorkbench'
+
+export { SkillsCenterWorkbench } from './SkillsCenterWorkbench'
 
 const TYPE_BADGE: Record<string, string> = { 'js-function': 'JS', 'http-api': 'HTTP', 'prompt-template': 'Prompt' }
 const TYPE_ICON: Record<string, string> = { 'js-function': '⚙️', 'http-api': '🌐', 'prompt-template': '💬' }
 type Tab = 'installed' | 'market' | 'runs'
 
-export function SkillsMarket() {
+export function SkillsMarket() { return <SkillsCenterWorkbench /> }
+
+export function LegacySkillsMarket() {
   const legacy = useSkillsStore()
   const runtime = useSkillRuntimeStore()
   const [tab, setTab] = useState<Tab>('installed')

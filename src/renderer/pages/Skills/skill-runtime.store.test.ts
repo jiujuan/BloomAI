@@ -68,4 +68,11 @@ describe('Package Runtime Zustand store', () => {
     expect(loaded.id).toBe('run-1')
     expect(useSkillRuntimeStore.getState().runs).toEqual([])
   })
+
+  it('exports an Artifact through the typed runtime action with an audit reason', async () => {
+    const exportMock = vi.spyOn(platform, 'exportSkillArtifact').mockResolvedValue({ path: 'D:/exports/report.md' })
+    await expect(useSkillRuntimeStore.getState().exportArtifact('artifact-1', { runId: 'run-1', destinationDir: 'D:/exports', confirmed: true, auditReason: 'Skills Center acceptance' })).resolves.toEqual({ path: 'D:/exports/report.md' })
+    expect(exportMock).toHaveBeenCalledWith('artifact-1', { runId: 'run-1', destinationDir: 'D:/exports', confirmed: true, auditReason: 'Skills Center acceptance' })
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+  })
 })

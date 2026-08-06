@@ -7,7 +7,7 @@ import { PersonasPage } from '@renderer/pages/Personas'
 import { Onboarding } from '@renderer/pages/Onboarding'
 import { ToolManagePage } from '@renderer/pages/Tools'
 import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
-import { SkillsMarket } from '@renderer/pages/Skills'
+import { LegacySkillsMarket, SkillsCenterWorkbench } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
 import { SchedulesPage } from '@renderer/pages/Schedules'
@@ -22,6 +22,7 @@ export function App() {
   const { loadSettings, settings } = useSettingsStore()
   const { activePage, showOnboarding, setShowOnboarding, theme } = useUIStore()
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null)
+  const skillsCenterEnabled = useSkillRuntimeStore((state) => state.capabilities?.runtimeEnabled !== false)
 
   useEffect(() => {
     const init = async () => {
@@ -108,7 +109,7 @@ export function App() {
         )}
         {activePage === 'skills' && (
           <div className="page-full">
-            <SkillsMarket />
+            {skillsCenterEnabled ? <SkillsCenterWorkbench /> : <LegacySkillsMarket />}
           </div>
         )}
         {activePage === 'schedules' && <SchedulesPage />}

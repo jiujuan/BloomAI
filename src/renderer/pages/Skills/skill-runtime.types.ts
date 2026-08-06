@@ -1,6 +1,9 @@
 import { API_BASE } from '@shared/constants'
 
 export type PaginationInput = { limit?: number; offset?: number }
+export type SkillRuntimeSourceFilter = 'all' | 'legacy' | 'package'
+export type SkillRuntimeFilterStatus = 'all' | 'enabled' | 'disabled' | 'attention'
+
 export type PaginationMeta = { limit: number; offset: number; total: number; hasMore: boolean; nextOffset: number | null }
 export type Page<T> = { data: T[]; meta: PaginationMeta }
 
