@@ -435,7 +435,12 @@ export const image_sessions = sqliteTable('image_sessions', {
   status: text('status').notNull().default('active'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
-})
+  skill_run_id: text('skill_run_id'),
+  skill_version_id: text('skill_version_id'),
+  grant_id: text('grant_id'),
+}, (table) => ({
+  skillRunIdx: index('idx_image_sessions_skill_run').on(table.skill_run_id, table.updated_at),
+}))
 
 export const image_generations = sqliteTable('image_generations', {
   id: text('id').primaryKey(),
@@ -459,8 +464,13 @@ export const image_generations = sqliteTable('image_generations', {
   duration_ms: integer('duration_ms'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
+  skill_run_id: text('skill_run_id'),
+  skill_version_id: text('skill_version_id'),
+  grant_id: text('grant_id'),
 }, (table) => ({
   sessionIdx: index('idx_image_gen_session').on(table.session_id, table.created_at),
+  skillRunIdx: index('idx_image_gen_skill_run').on(table.skill_run_id, table.created_at),
+  grantIdx: index('idx_image_gen_grant').on(table.grant_id, table.created_at),
 }))
 
 export type Setting = typeof settings.$inferSelect

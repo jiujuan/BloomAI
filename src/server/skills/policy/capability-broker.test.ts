@@ -182,6 +182,57 @@ describe('CapabilityBroker', () => {
     })).rejects.toBeInstanceOf(CapabilityDeniedError)
   })
 
+  it('passes Package Run version and consumed grant into image generation records and keeps idempotent retries side-effect free', async () => {
+    const { skillPackageRepo, executeCapability } = await loadRuntime()
+    const { imageGenerationRepo, imageSessionRepo } = await import('../../db/repositories/image-generation.repo').then(async ({ imageGenerationRepo }) => ({
+      imageGenerationRepo,
+      imageSessionRepo: (await import('../../db/repositories/image-session.repo')).imageSessionRepo,
+    }))
+    const { version, run } = await createPackageRun(skillPackageRepo)
+    const grant = skillPackageRepo.createCapabilityGrant({
+      skillVersionId: version.id,
+      capability: 'image.generate',
+      grantMode: 'persistent',
+      scope: { allowedModels: ['agnes-image-2.1-flash'], maxCalls: 2 },
+    })
+    const imageStudio = await import('../../services/image-studio.service')
+    const generate = vi.spyOn(imageStudio, 'generateForSession').mockImplementation(async (input) => imageGenerationRepo.create({
+      session_id: input.sessionId,
+      prompt: input.prompt,
+      provider_id: 'fixture',
+      model: input.model,
+      size: input.size ?? null,
+      reference_images: input.referenceImages ? JSON.stringify(input.referenceImages) : null,
+      status: 'completed',
+      url: 'https://example.test/generated.png',
+      duration_ms: 1,
+      skill_run_id: input.skillRunId,
+      skill_version_id: input.skillVersionId,
+      grant_id: input.grantId,
+    }))
+
+    const request = {
+      caller: 'package-runtime' as const,
+      capability: 'image.generate',
+      input: { prompt: 'A lighthouse', model: 'agnes-image-2.1-flash', size: '1024x1024' },
+      runId: run.id,
+      idempotencyKey: 'image-generation-1',
+    }
+    const first = await executeCapability(request)
+    const duplicate = await executeCapability(request)
+
+    expect(first.output).toMatchObject({ status: 'completed', imageSessionId: expect.any(String) })
+    expect(duplicate).toEqual(first)
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(skillPackageRepo.getCapabilityGrant(grant.id)).toMatchObject({ calls_used: 1 })
+    expect(imageSessionRepo.listBySkillRun(run.id)).toEqual([
+      expect.objectContaining({ skill_run_id: run.id, skill_version_id: version.id, grant_id: grant.id }),
+    ])
+    expect(imageGenerationRepo.listBySkillRun(run.id)).toEqual([
+      expect.objectContaining({ skill_run_id: run.id, skill_version_id: version.id, grant_id: grant.id }),
+    ])
+  })
+
   it('audits a failed package tool invocation with the linked toolRunId', async () => {
     const { skillPackageRepo, toolRegistry, executeCapability } = await loadRuntime()
     const { version, run } = await createPackageRun(skillPackageRepo)

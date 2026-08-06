@@ -93,7 +93,34 @@ export function runLegacyMigrationPrerequisites() {
       id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
       granted_at INTEGER, scope TEXT DEFAULT 'session'
     );
+    CREATE TABLE IF NOT EXISTS image_sessions (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新画图', default_model TEXT,
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      skill_run_id TEXT, skill_version_id TEXT, grant_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS image_generations (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT,
+      prompt TEXT NOT NULL, resolved_prompt TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+      aspect_ratio TEXT, style TEXT, size TEXT, seed INTEGER, reference_images TEXT,
+      status TEXT NOT NULL, provider_task_id TEXT, progress INTEGER, url TEXT, local_path TEXT,
+      error_msg TEXT, duration_ms INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      skill_run_id TEXT, skill_version_id TEXT, grant_id TEXT
+    );
   `)
+
+  const state = getState()
+  if (!state.dbInstance) throw new Error('Database has not been initialized. Call initDb() first.')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'skill_run_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'skill_version_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_sessions', 'grant_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'skill_run_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'skill_version_id', 'TEXT')
+  ensureLegacyColumn(state.dbInstance, 'image_generations', 'grant_id', 'TEXT')
+}
+
+function ensureLegacyColumn(database: import('node:sqlite').DatabaseSync, tableName: string, columnName: string, columnType: string): void {
+  const exists = database.prepare(`PRAGMA table_info("${tableName}")`).all().some((row: any) => row.name === columnName)
+  if (!exists) database.exec(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${columnType}`)
 }
 
 export function runBootstrapSql() {

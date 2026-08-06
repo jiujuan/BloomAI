@@ -1,11 +1,34 @@
+import { z } from 'zod'
 import { imageSessionRepo, type ImageSession } from '../../db/repositories/image-session.repo'
+import { imageGenerationRepo } from '../../db/repositories/image-generation.repo'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { generateForSession, type GenerateForSessionInput } from '../../services/image-studio.service'
 import { ArtifactStore } from '../artifacts/artifact-store'
 
 export type ImageStudioItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'cancelled'
-export type ImageStudioItemInput = Omit<GenerateForSessionInput, 'sessionId'> & { id: string }
-export type ImageStudioBatchInput = { runId: string; items: ImageStudioItemInput[]; imageSessionId?: string; title?: string }
+export const imageReferenceMetadataSchema = z.object({
+  artifactId: z.string().min(1).max(256),
+  runId: z.string().min(1).max(256),
+  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  sizeBytes: z.number().int().nonnegative().max(10 * 1024 * 1024),
+}).strict()
+
+export type ImageReferenceMetadata = z.infer<typeof imageReferenceMetadataSchema>
+export type ImageReferenceInput = string | ImageReferenceMetadata
+export type ImageStudioItemInput = Omit<GenerateForSessionInput, 'sessionId' | 'referenceImages'> & {
+  id: string
+  referenceImages?: ImageReferenceInput[]
+}
+export type ImageStudioBatchInput = {
+  runId: string
+  skillVersionId?: string
+  grantId?: string
+  count?: number
+  items: ImageStudioItemInput[]
+  imageSessionId?: string
+  title?: string
+}
 export type ImageStudioItemResult = { id: string; prompt: string; status: ImageStudioItemStatus; generationId?: string; error?: string; attempts: number }
 export type ImageStudioBatchResult = { status: 'completed' | 'completed_with_errors' | 'cancelled'; imageSessionId: string; items: ImageStudioItemResult[] }
 type BatchItem = ImageStudioItemResult & { input: ImageStudioItemInput }
@@ -36,6 +59,8 @@ export class ImageStudioCapabilityAdapter {
 
 export class ImageStudioBatch {
   private readonly runId: string
+  private readonly skillVersionId?: string
+  private readonly grantId?: string
   private readonly requestedSessionId?: string
   private readonly title?: string
   private readonly generateForSession: GenerateForSession
@@ -47,17 +72,33 @@ export class ImageStudioBatch {
 
   constructor(options: { input: ImageStudioBatchInput; generateForSession: GenerateForSession; concurrency: number }) {
     const { input } = options
-    if (!skillPackageRepo.getRun(input.runId)) throw new ImageStudioCapabilityAdapterError(`Skill run not found: ${input.runId}`)
+    const run = skillPackageRepo.getRun(input.runId)
+    if (!run) throw new ImageStudioCapabilityAdapterError(`Skill run not found: ${input.runId}`)
+    if (input.skillVersionId && input.skillVersionId !== run.skill_version_id) {
+      throw new ImageStudioCapabilityAdapterError('Image capability skillVersionId does not match the Package Run')
+    }
+    if (input.grantId !== undefined && (!input.grantId.trim() || input.grantId.length > 256)) {
+      throw new ImageStudioCapabilityAdapterError('Image capability grantId is invalid')
+    }
     if (!input.items.length) throw new ImageStudioCapabilityAdapterError('At least one image item is required')
+    if (input.items.length > 4) throw new ImageStudioCapabilityAdapterError('Image capability count cannot exceed 4')
+    if (input.count !== undefined && (!Number.isInteger(input.count) || input.count < 1 || input.count > 4 || input.count !== input.items.length)) {
+      throw new ImageStudioCapabilityAdapterError('Image capability count must match items and be between 1 and 4')
+    }
     const ids = new Set<string>()
     this.items = input.items.map((item) => {
       if (!item.id || ids.has(item.id)) throw new ImageStudioCapabilityAdapterError(`Image item id must be unique: ${item.id}`)
       if (!item.prompt.trim()) throw new ImageStudioCapabilityAdapterError(`Image item prompt is required: ${item.id}`)
-      if (!item.model.trim()) throw new ImageStudioCapabilityAdapterError(`Image item model is required: ${item.id}`)
+      if (item.prompt.trim().length > 20_000) throw new ImageStudioCapabilityAdapterError(`Image item prompt is too long: ${item.id}`)
+      if (!item.model.trim() || item.model.trim().length > 200) throw new ImageStudioCapabilityAdapterError(`Image item model is invalid: ${item.id}`)
+      if (item.size !== undefined && !/^\d{2,5}x\d{2,5}$/.test(item.size)) throw new ImageStudioCapabilityAdapterError(`Image item size is invalid: ${item.id}`)
+      const referenceImages = normalizeReferenceImages(item.referenceImages, run.id)
       ids.add(item.id)
-      return { id: item.id, prompt: item.prompt, status: 'pending' as const, attempts: 0, input: { ...item } }
+      return { id: item.id, prompt: item.prompt, status: 'pending' as const, attempts: 0, input: { ...item, referenceImages } }
     })
     this.runId = input.runId
+    this.skillVersionId = input.skillVersionId ?? run.skill_version_id
+    this.grantId = input.grantId
     this.requestedSessionId = input.imageSessionId
     this.title = input.title
     this.generateForSession = options.generateForSession
@@ -112,11 +153,18 @@ export class ImageStudioBatch {
     if (id) {
       const session = imageSessionRepo.get(id)
       if (!session) throw new ImageStudioCapabilityAdapterError(`Image Studio session not found: ${id}`)
-      this.session = session
+      if (session.skill_run_id && session.skill_run_id !== this.runId) {
+        throw new ImageStudioCapabilityAdapterError('Image Studio session belongs to another Package Run')
+      }
+      this.session = imageSessionRepo.update(id, {
+        skill_run_id: this.runId,
+        skill_version_id: this.skillVersionId ?? null,
+        grant_id: this.grantId ?? null,
+      })!
       skillPackageRepo.setRunImageSessionId(this.runId, session.id)
       return
     }
-    this.session = imageSessionRepo.create({ title: this.title })
+    this.session = imageSessionRepo.create({ title: this.title, skill_run_id: this.runId, skill_version_id: this.skillVersionId ?? null, grant_id: this.grantId ?? null })
     skillPackageRepo.setRunImageSessionId(this.runId, this.session.id)
   }
 
@@ -138,7 +186,20 @@ export class ImageStudioBatch {
     item.status = 'running'
     item.attempts += 1
     try {
-      const generation = await this.generateForSession({ ...item.input, prompt: item.prompt, sessionId: this.session!.id })
+      const generation = await this.generateForSession({
+        ...item.input,
+        referenceImages: item.input.referenceImages?.map((reference) => typeof reference === 'string' ? reference : reference.artifactId),
+        prompt: item.prompt,
+        sessionId: this.session!.id,
+        skillRunId: this.runId,
+        skillVersionId: this.skillVersionId,
+        grantId: this.grantId,
+      })
+      imageGenerationRepo.update(generation.id, {
+        skill_run_id: this.runId,
+        skill_version_id: this.skillVersionId ?? null,
+        grant_id: this.grantId ?? null,
+      })
       item.generationId = generation.id
       if (generation.status === 'completed') {
         item.status = 'completed'
@@ -159,12 +220,12 @@ export class ImageStudioBatch {
     const stem = artifactStem(item.id, item.attempts)
     store.writeText({
       runId: this.runId, kind: 'prompt', fileName: `${stem}.txt`, content: item.prompt,
-      metadata: { itemId: item.id, attempt: item.attempts, imageSessionId: this.session!.id },
+      metadata: { itemId: item.id, attempt: item.attempts, imageSessionId: this.session!.id, skillVersionId: this.skillVersionId, grantId: this.grantId },
     })
     store.writeImageReference({
       runId: this.runId, fileName: `${stem}.json`,
       reference: { itemId: item.id, generationId, imageSessionId: this.session!.id, status: item.status },
-      metadata: { itemId: item.id, generationId, attempt: item.attempts },
+      metadata: { itemId: item.id, generationId, attempt: item.attempts, skillVersionId: this.skillVersionId, grantId: this.grantId },
     })
   }
 
@@ -182,7 +243,7 @@ export class ImageStudioBatch {
     ]
     new ArtifactStore().writeText({
       runId: this.runId, kind: 'markdown', fileName, content: lines.join('\n'),
-      metadata: { imageSessionId: this.session!.id, status: this.result().status, revision: this.manifestRevision },
+      metadata: { imageSessionId: this.session!.id, skillVersionId: this.skillVersionId, grantId: this.grantId, status: this.result().status, revision: this.manifestRevision },
     })
   }
 
@@ -218,4 +279,25 @@ function artifactStem(itemId: string, attempt: number): string {
 
 function escapeMarkdown(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ')
+}
+
+
+function normalizeReferenceImages(value: ImageReferenceInput[] | undefined, runId: string): string[] | undefined {
+  if (!value) return undefined
+  if (value.length > 4) throw new ImageStudioCapabilityAdapterError('At most four reference images are allowed')
+  return value.map((reference) => {
+    if (typeof reference === 'string') {
+      if (!reference.trim() || reference.length > 256 || /[\u0000-\u001f]/.test(reference)) {
+        throw new ImageStudioCapabilityAdapterError('Reference image id is invalid')
+      }
+      return reference
+    }
+    const parsed = imageReferenceMetadataSchema.safeParse(reference)
+    if (!parsed.success) throw new ImageStudioCapabilityAdapterError(`Invalid reference image metadata: ${parsed.error.issues[0]?.message ?? 'invalid metadata'}`)
+    if (parsed.data.runId !== runId) throw new ImageStudioCapabilityAdapterError('Reference image belongs to another Package Run')
+    if (/[/\\]/.test(parsed.data.artifactId) || parsed.data.artifactId === '.' || parsed.data.artifactId === '..') {
+      throw new ImageStudioCapabilityAdapterError('Reference image artifactId is invalid')
+    }
+    return parsed.data.artifactId
+  })
 }

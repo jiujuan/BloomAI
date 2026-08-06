@@ -111,12 +111,60 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(41)
+    expect(migrationVersions()).toHaveLength(42)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(41)
+    expect(migrationVersions()).toHaveLength(42)
+  })
+
+  it('adds Image Studio skill-link columns before applying the link indexes to a legacy database', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const legacy = openRawDb()
+    legacy.exec(`
+      CREATE TABLE image_sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, default_model TEXT,
+        status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE image_generations (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT,
+        prompt TEXT NOT NULL, resolved_prompt TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL,
+        aspect_ratio TEXT, style TEXT, size TEXT, seed INTEGER, reference_images TEXT,
+        status TEXT NOT NULL, provider_task_id TEXT, progress INTEGER, url TEXT, local_path TEXT,
+        error_msg TEXT, duration_ms INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+    `)
+    legacy.close()
+
+    const client = await loadClient()
+    await client.initDb()
+    client.runLegacyMigrationPrerequisites()
+    const migrations = loadSqlMigrations()
+    const imageMigration = migrations.find((migration) => migration.version === '042-image-studio-skill-links')
+    expect(imageMigration).toBeDefined()
+    const migrationDb = openRawDb()
+    try {
+      runSqlMigrations(migrationDb, [imageMigration!])
+    } finally {
+      migrationDb.close()
+    }
+
+    const upgraded = openRawDb()
+    try {
+      expect(upgraded.prepare("SELECT name FROM pragma_table_info('image_sessions') WHERE name IN ('skill_run_id', 'skill_version_id', 'grant_id') ORDER BY name").all()).toEqual([
+        { name: 'grant_id' }, { name: 'skill_run_id' }, { name: 'skill_version_id' },
+      ])
+      expect(upgraded.prepare("SELECT name FROM pragma_table_info('image_generations') WHERE name IN ('skill_run_id', 'skill_version_id', 'grant_id') ORDER BY name").all()).toEqual([
+        { name: 'grant_id' }, { name: 'skill_run_id' }, { name: 'skill_version_id' },
+      ])
+      expect(indexNames('image_sessions')).toContain('idx_image_sessions_skill_run')
+      expect(indexNames('image_generations')).toEqual(expect.arrayContaining(['idx_image_generations_skill_run', 'idx_image_generations_grant']))
+      expect(upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '042-image-studio-skill-links'").get()).toEqual({ count: 1 })
+    } finally {
+      upgraded.close()
+    }
   })
 
   it('adds artifact policy columns and backfills legacy artifact rows incrementally', async () => {
@@ -284,6 +332,7 @@ describe('database migrations', () => {
       '039-skill-version-lifecycle',
       '040-skill-lifecycle-delete',
       '041-skill-artifact-policy',
+      '042-image-studio-skill-links',
     ])
     const emptyDb = openRawDb()
     try {

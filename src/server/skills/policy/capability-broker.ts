@@ -202,7 +202,7 @@ export class CapabilityBroker {
     }
 
     if (parsed.caller === 'package-runtime' && parsed.capability === 'image.generate') {
-      return this.executePackageImageCapability(parsed, toolId)
+      return this.executePackageImageCapability(parsed, toolId, grant!)
     }
 
     const timeoutMs = Math.min(parsed.requestedTimeoutMs ?? (TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS), TOOL_TIMEOUT_OVERRIDES[toolId] ?? DEFAULT_TIMEOUT_MS)
@@ -379,19 +379,22 @@ export class CapabilityBroker {
     })
   }
 
-  private async executePackageImageCapability(request: CapabilityRequest, toolId: string): Promise<CapabilityResult> {
+  private async executePackageImageCapability(request: CapabilityRequest, toolId: string, grant: CapabilityGrantSnapshot): Promise<CapabilityResult> {
     if (!request.runId) throw new CapabilityDeniedError('Package capability calls require a runId')
     const input = imageGenerationInputSchema.parse(request.input)
     const toolRun = this.dependencies.tools.startRun(toolId, request.sessionId ?? null, input)
     try {
       const batch = await this.dependencies.imageAdapterFactory().run({
         runId: request.runId,
+        skillVersionId: grant.skillVersionId,
+        grantId: grant.id,
         imageSessionId: input.imageSessionId,
         title: input.title,
         items: [{
           id: toolRun.id,
           prompt: input.prompt,
           model: input.model,
+          size: input.size,
           aspectRatioId: input.aspectRatioId,
           styleId: input.styleId,
           referenceImages: input.referenceImages,
@@ -527,6 +530,7 @@ function createDefaultCapabilityBrokerDependencies(): CapabilityBrokerDependenci
 const imageGenerationInputSchema = z.object({
   prompt: z.string().min(1),
   model: z.string().min(1),
+  size: z.string().min(1).max(64).optional(),
   imageSessionId: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
   aspectRatioId: z.string().min(1).optional(),

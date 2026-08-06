@@ -20,6 +20,10 @@ export interface GenerateForSessionInput {
   aspectRatioId?: string
   styleId?: string | null
   referenceImages?: string[]
+  size?: string
+  skillRunId?: string
+  skillVersionId?: string
+  grantId?: string
   negativePrompt?: string
   seed?: number
   optimize?: boolean // default true
@@ -256,7 +260,7 @@ export async function generateForSession(input: GenerateForSessionInput): Promis
 
       const ratio = getAspectRatio(input.aspectRatioId)
       const style = getImageStyle(input.styleId)
-      const size = resolveSize(providerId, ratio)
+      const size = input.size ?? resolveSize(providerId, ratio)
 
       const optimize = input.optimize !== false
       const withStyle = (base: string) => (style ? `${base}${style.promptSuffix}` : base)
@@ -283,6 +287,9 @@ export async function generateForSession(input: GenerateForSessionInput): Promis
         seed: input.seed ?? null,
         reference_images: reference.length ? JSON.stringify(reference) : null,
         status: 'in_progress',
+        skill_run_id: input.skillRunId ?? null,
+        skill_version_id: input.skillVersionId ?? null,
+        grant_id: input.grantId ?? null,
       })
 
       const startedAt = Date.now()
