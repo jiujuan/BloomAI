@@ -577,6 +577,85 @@ describe('database migrations', () => {
   })
 
 
+  it('enforces Skills Runtime uniqueness, foreign-key, and active-lease invariants', async () => {
+    const { runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      db.exec('PRAGMA foreign_keys = ON')
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+          persona_id TEXT, model TEXT NOT NULL DEFAULT 'model',
+          status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+      `)
+      runSqlMigrations(db)
+      db.exec(`
+        INSERT INTO skill_packages (id, name, description, source_type, created_at, updated_at)
+        VALUES ('package-invariants', 'Invariant package', '', 'local', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-invariants', 'package-invariants', '1.0.0', '{}', 'manifest-hash', '/tmp/package-invariants', 1);
+        INSERT INTO skill_runs_v2 (id, skill_version_id, status, input_json, context_json, updated_at)
+        VALUES ('run-invariants', 'version-invariants', 'created', '{}', '{}', 1);
+      `)
+
+      expect(() => db.prepare(`
+        INSERT INTO skill_versions (
+          id, package_id, version, manifest_json, manifest_hash, package_path, created_at
+        ) VALUES ('version-duplicate', 'package-invariants', '1.0.0', '{}', 'manifest-hash', '/tmp/duplicate', 2)
+      `).run()).toThrow()
+
+      db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES (?, ?, ?, ?, '{}', ?)
+      `).run('event-invariants-1', 'run-invariants', 1, 'run.started', 1)
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES ('event-invariants-duplicate', 'run-invariants', 1, 'run.started', '{}', 2)
+      `).run()).toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_events (id, run_id, seq, type, payload_json, created_at)
+        VALUES ('event-invariants-invalid-run', 'missing-run', 2, 'run.started', '{}', 2)
+      `).run()).toThrow()
+
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_commands (id, run_id, idempotency_key, result_json, created_at)
+        VALUES ('command-invariants-1', 'run-invariants', 'same-command', '{}', 1)
+      `).run()).not.toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_commands (id, run_id, idempotency_key, result_json, created_at)
+        VALUES ('command-invariants-duplicate', 'run-invariants', 'same-command', '{}', 2)
+      `).run()).toThrow()
+      expect(() => db.prepare(`
+        INSERT INTO skill_artifacts (id, run_id, kind, path, size_bytes, sha256, metadata_json, created_at)
+        VALUES ('artifact-invariants-invalid-run', 'missing-run', 'text', '/tmp/missing', 0, 'hash', '{}', 1)
+      `).run()).toThrow()
+
+      db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-1', 'run-invariants', 'queued', 1, 0, 1, 1)
+      `).run()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-duplicate-active', 'run-invariants', 'retry_wait', 2, 1, 2, 2)
+      `).run()).toThrow()
+      db.prepare(`UPDATE skill_run_queue SET status = 'done', updated_at = 3 WHERE id = 'queue-invariants-1'`).run()
+      expect(() => db.prepare(`
+        INSERT INTO skill_run_queue (id, run_id, status, available_at, attempt, created_at, updated_at)
+        VALUES ('queue-invariants-2', 'run-invariants', 'queued', 4, 0, 4, 4)
+      `).run()).not.toThrow()
+    } finally {
+      db.close()
+    }
+  })
+
   it('upgrades a pre-scheduled-task database without changing Chat tables and enforces task-run uniqueness', async () => {
     const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
     fs.mkdirSync(dataDir, { recursive: true })

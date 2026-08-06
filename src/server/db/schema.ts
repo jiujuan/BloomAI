@@ -266,6 +266,7 @@ export const skill_runs_v2 = sqliteTable('skill_runs_v2', {
   activeWorkerIdx: index('idx_skill_runs_v2_active_worker').on(table.status, table.worker_id, table.heartbeat_at),
   recoveryIdx: index('idx_skill_runs_v2_recovery').on(table.status, table.interrupted_at, table.cancel_requested),
   waitingActionsIdx: index('idx_skill_runs_v2_waiting_actions').on(table.status, table.waiting_expires_at),
+  executionMetricsIdx: index('idx_skill_runs_v2_execution_metrics').on(table.status, table.last_heartbeat_at, table.step_count),
 }))
 
 export const skill_run_events = sqliteTable('skill_run_events', {

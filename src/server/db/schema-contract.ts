@@ -24,6 +24,7 @@ export type SchemaForeignKeyContract = {
 export type SchemaTableContract = {
   columns: Record<string, SchemaColumnContract>
   indexes?: Record<string, SchemaIndexContract>
+  uniqueConstraints?: string[][]
   foreignKeys?: SchemaForeignKeyContract[]
 }
 
@@ -42,8 +43,10 @@ function normalizeForeignKeys(rows: unknown[]): SchemaForeignKeyContract[] {
   return rows.map((row: any) => ({ from: String(row.from), table: String(row.table), to: String(row.to) }))
 }
 
-function readIndexes(db: SchemaContractDatabase, table: string): Map<string, { unique: boolean; partial: boolean; columns: string[] }> {
-  const result = new Map<string, { unique: boolean; partial: boolean; columns: string[] }>()
+type ReadSchemaIndex = { unique: boolean; partial: boolean; columns: string[] }
+
+function readIndexes(db: SchemaContractDatabase, table: string): Map<string, ReadSchemaIndex> {
+  const result = new Map<string, ReadSchemaIndex>()
   const indexRows = db.prepare(`PRAGMA index_list(${quoteIdentifier(table)})`).all() as any[]
   for (const row of indexRows) {
     const name = String(row.name)
@@ -105,6 +108,8 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_versions_package: { columns: ['package_id'] },
           idx_skill_versions_immutable_hash: { columns: ['package_id', 'immutable_hash'] },
         },
+        uniqueConstraints: [['package_id', 'version', 'manifest_hash']],
+        foreignKeys: [{ from: 'package_id', table: 'skill_packages', to: 'id' }],
       },
       skill_installations: {
         columns: {
@@ -127,6 +132,10 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_installations_package: { columns: ['package_id'] },
           idx_skill_installations_current_version: { columns: ['current_version_id'] },
         },
+        foreignKeys: [
+          { from: 'package_id', table: 'skill_packages', to: 'id' },
+          { from: 'current_version_id', table: 'skill_versions', to: 'id' },
+        ],
       },
       skill_installation_commands: {
         columns: {
@@ -168,13 +177,23 @@ export function getExpectedSchemaContract(): SchemaContract {
           required_action_json: optional,
           worker_id: optional,
           heartbeat_at: optional,
+          execution_mode: required,
+          step_count: required,
+          token_usage: required,
+          last_heartbeat_at: optional,
+          result_summary: optional,
+          interrupted_at: optional,
+          cancel_reason: optional,
+          last_checkpoint_json: optional,
         },
         indexes: {
           idx_skill_runs_v2_version: { columns: ['skill_version_id'] },
           idx_skill_runs_v2_active_worker: { columns: ['status', 'worker_id', 'heartbeat_at'] },
           idx_skill_runs_v2_recovery: { columns: ['status', 'interrupted_at', 'cancel_requested'] },
           idx_skill_runs_v2_waiting_actions: { columns: ['status', 'waiting_expires_at'] },
+          idx_skill_runs_v2_execution_metrics: { columns: ['status', 'last_heartbeat_at', 'step_count'] },
         },
+        foreignKeys: [{ from: 'skill_version_id', table: 'skill_versions', to: 'id' }],
       },
       skill_run_events: {
         columns: {
@@ -192,6 +211,8 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_run_events_run_seq: { columns: ['run_id', 'seq'] },
           idx_skill_run_events_run_occurred: { columns: ['run_id', 'occurred_at', 'seq'] },
         },
+        uniqueConstraints: [['run_id', 'seq']],
+        foreignKeys: [{ from: 'run_id', table: 'skill_runs_v2', to: 'id' }],
       },
       skill_run_commands: {
         columns: {
@@ -204,6 +225,8 @@ export function getExpectedSchemaContract(): SchemaContract {
         indexes: {
           idx_skill_run_commands_run: { columns: ['run_id', 'created_at'] },
         },
+        uniqueConstraints: [['run_id', 'idempotency_key']],
+        foreignKeys: [{ from: 'run_id', table: 'skill_runs_v2', to: 'id' }],
       },
       skill_artifacts: {
         columns: {
@@ -227,6 +250,7 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_artifacts_run_created: { columns: ['run_id', 'created_at'] },
           idx_skill_artifacts_retention: { columns: ['retention_until', 'exported_at'] },
         },
+        foreignKeys: [{ from: 'run_id', table: 'skill_runs_v2', to: 'id' }],
       },
       skill_capability_grants: {
         columns: {
@@ -259,6 +283,7 @@ export function getExpectedSchemaContract(): SchemaContract {
           idx_skill_capability_grants_run: { columns: ['run_id', 'status'] },
           idx_skill_capability_grants_idempotency: { columns: ['run_id', 'idempotency_key'], unique: true, partial: true },
         },
+        foreignKeys: [{ from: 'skill_version_id', table: 'skill_versions', to: 'id' }],
       },
       skill_run_queue: {
         columns: {
@@ -410,6 +435,15 @@ export function assertSchemaContract(db: SchemaContractDatabase, contract = getE
       if (indexContract.partial === true && !index.partial) violations.push(`index ${indexName} must be partial`)
       if (JSON.stringify(index.columns) !== JSON.stringify(indexContract.columns)) {
         violations.push(`index ${indexName} columns mismatch: expected ${indexContract.columns.join(',')} got ${index.columns.join(',')}`)
+      }
+    }
+
+    for (const expectedColumns of tableContract.uniqueConstraints ?? []) {
+      const hasMatchingUniqueConstraint = [...indexes.values()].some((index) =>
+        index.unique && JSON.stringify(index.columns) === JSON.stringify(expectedColumns),
+      )
+      if (!hasMatchingUniqueConstraint) {
+        violations.push(`missing unique constraint ${tableName}(${expectedColumns.join(',')})`)
       }
     }
 
