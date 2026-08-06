@@ -12,10 +12,11 @@ const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 })
+const staticSourceMetadataSchema = z.object({ origin: z.enum(['local', 'npx-artifact']).optional() }).strict()
 const packageSourceSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('local-directory'), directory: z.string().min(1), subdirectory: z.string().min(1).optional() }),
-  z.object({ kind: z.literal('zip'), zipPath: z.string().min(1), subdirectory: z.string().min(1).optional() }),
-  z.object({ kind: z.literal('github-archive'), repositoryUrl: z.string().url(), ref: z.string().min(1), subdirectory: z.string().min(1).optional() }),
+  z.object({ kind: z.literal('local-directory'), directory: z.string().min(1), subdirectory: z.string().min(1).optional(), metadata: staticSourceMetadataSchema.optional() }).strict(),
+  z.object({ kind: z.literal('zip'), zipPath: z.string().min(1), subdirectory: z.string().min(1).optional(), metadata: staticSourceMetadataSchema.optional() }).strict(),
+  z.object({ kind: z.literal('github-archive'), repositoryUrl: z.string().url(), ref: z.string().min(1), subdirectory: z.string().min(1).optional() }).strict(),
 ])
 const packageMutationSchema = z.object({ source: packageSourceSchema })
 const packageInstallSchema = z.object({

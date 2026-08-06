@@ -8,12 +8,13 @@ import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skil
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
 import { SkillPackageReader } from './package-reader'
+import { detectNpxSkillsArtifact, isIgnoredArtifactPath, type NpxArtifactLayout } from './npx-artifact-detector'
 import { packageInstallReviewService } from './package-install-review.service'
 import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGitHubCommit } from './github-source'
 
 
-type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string }
-type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string }
+type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: { origin?: 'local' | 'npx-artifact' } }
+type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: { origin?: 'local' | 'npx-artifact' }}
 type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
 export type PackageInstallSource = LocalDirectorySource | ZipSource | GitHubArchiveSource
 
@@ -27,6 +28,10 @@ export type PackageSourceSnapshot = {
   fetchedAt?: string
   etag?: string
   resolvedCommitSha?: string
+  source_origin?: 'local' | 'npx-artifact'
+  detected_layout?: NpxArtifactLayout
+  ignored_paths?: string[]
+  execution_disclaimer?: string
   files: Array<{ path: string; sha256: string; sizeBytes: number }>
 }
 
@@ -303,14 +308,16 @@ async function materializeSource(source: PackageInstallSource, target: string): 
     const directory = path.resolve(source.directory)
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
     copySafeDirectory(directory, target)
-    return { sourceSha256: hashDirectory(target), sourceRef: directory }
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    return { sourceSha256: hashDirectory(target), sourceRef: directory, ...artifactMetadata }
   }
   if (source.kind === 'zip') {
     const zipPath = path.resolve(source.zipPath)
     if (!fs.statSync(zipPath).isFile()) throw new PackageInstallError(`ZIP package not found: ${zipPath}`)
     const archive = fs.readFileSync(zipPath)
     extractZip(archive, target)
-    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath }
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, ...artifactMetadata }
   }
   let parsedSource
   try {
@@ -340,6 +347,43 @@ async function materializeSource(source: PackageInstallSource, target: string): 
   } catch (error) {
     if (error instanceof GitHubSourceError) throw new PackageInstallError(error.message, error.code)
     throw error
+  }
+}
+
+function detectAndSanitizeNpxArtifact(root: string): Pick<PackageSourceSnapshot, 'source_origin' | 'detected_layout' | 'ignored_paths' | 'execution_disclaimer'> {
+  const limits = getPackageLimits()
+  const reader = new SkillPackageReader(root, {
+    ...limits,
+    maxReadBytes: limits.maxFileBytes,
+    maxFilesPerRun: limits.maxFileCount,
+  })
+  const detection = detectNpxSkillsArtifact(reader)
+  if (!detection.isNpxArtifact) return {}
+  assertPackageFeatureEnabled('npxImportEnabled')
+  pruneIgnoredArtifactPaths(root, detection.ignoredPaths)
+  return {
+    source_origin: 'npx-artifact',
+    detected_layout: detection.layout,
+    ignored_paths: detection.ignoredPaths,
+    execution_disclaimer: detection.executionDisclaimer,
+  }
+}
+
+function pruneIgnoredArtifactPaths(root: string, ignoredPaths: string[]): void {
+  const pathsToRemove = new Set<string>()
+  for (const relativePath of ignoredPaths) {
+    pathsToRemove.add(relativePath)
+    const segments = relativePath.split('/').filter(Boolean)
+    for (let index = 0; index < segments.length; index += 1) {
+      if (isIgnoredArtifactPath(segments[index]) || isIgnoredArtifactPath(segments.slice(0, index + 1).join('/'))) {
+        pathsToRemove.add(segments.slice(0, index + 1).join('/'))
+        break
+      }
+    }
+  }
+  for (const relativePath of [...pathsToRemove].sort((a, b) => b.length - a.length)) {
+    const target = safeDestination(root, relativePath)
+    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true })
   }
 }
 

@@ -303,7 +303,7 @@ function rethrowMappedRuntimeError(error: unknown): never {
   }
   if (error instanceof PackageInstallError) {
     if (error.code === 'FEATURE_DISABLED') throw new ServiceError('FEATURE_DISABLED', error.message, { feature: error.message.split(': ').at(-1) ?? 'unknown' })
-    throw new ServiceError('PACKAGE_INSTALL_ERROR', error.message)
+    throw new ServiceError('PACKAGE_INSTALL_ERROR', error.message, { providerCode: error.code })
   }
   if (error instanceof ArtifactStoreError) {
     const code = error.message.startsWith('Artifact not found') ? 'NOT_FOUND' : 'ARTIFACT_ERROR'

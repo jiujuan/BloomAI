@@ -87,6 +87,16 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(result.body.error).toMatchObject({ code: 'FEATURE_DISABLED' })
   })
 
+  it('rejects command-shaped source metadata instead of accepting arbitrary shell input', async () => {
+    const { app } = await loadApi()
+    const result = await requestJson(app, '/skill-packages/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir, command: 'powershell -Command Get-ChildItem' } }),
+    })
+    expect(result.response.status).toBe(400)
+    expect(result.body.error).toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
   it('validates JSON input and returns the uniform error envelope', async () => {
     const { app } = await loadApi()
     const response = await app.request('/api/v1/skill-runs', {
