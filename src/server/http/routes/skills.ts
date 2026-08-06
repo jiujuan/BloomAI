@@ -42,6 +42,9 @@ skillsRoutes.post('/', async (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 
+skillsRoutes.get('/:id/migration-preview', (c) => {
+  try { return c.json({ data: skillService.migrationPreview(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
+})
 skillsRoutes.get('/:id', (c) => {
   try { return c.json({ data: skillService.get(c.req.param('id')) }) } catch (error) { return errorResponse(c, error) }
 })

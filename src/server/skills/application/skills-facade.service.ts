@@ -3,6 +3,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { resolveLegacySkillId, resolvePackageSkillId, toLegacySkillReference, toPackageSkillReference } from '../../../shared/skill-references'
 import { createSkillService } from '../../services/skill.service'
 import { ServiceError } from '../../services/errors'
+import { getLegacyCapabilityProfile, type LegacyCapabilityProfile } from './legacy-skill.adapter'
 
 export type SkillsFacadeRuntimeKind = 'legacy' | 'package'
 
@@ -21,6 +22,7 @@ export type SkillOverviewCard = {
   packageId?: string
   installationId?: string
   currentVersionId?: string
+  capabilityProfile?: LegacyCapabilityProfile
 }
 
 type LegacyRepository = Pick<typeof skillRepo, 'listInstalled' | 'get' | 'listRuns'>
@@ -79,6 +81,7 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
       supportedActions: skill.is_installed === 1 ? ['run', 'uninstall', 'delete'] : ['install'],
       runtimeKind: 'legacy',
       enabled: skill.is_installed === 1,
+      capabilityProfile: getLegacyCapabilityProfile(skill.type),
     }
   }
 

@@ -30,7 +30,7 @@ describe('skills facade', () => {
     const facade = createSkillsFacade(deps())
     const result = facade.list({ limit: 10, offset: 0 })
     expect(result.data.map((item) => item.runtimeKind)).toEqual(['legacy', 'package'])
-    expect(result.data[0]).toMatchObject({ reference: 'legacy:legacy-1', runtimeKind: 'legacy', supportedActions: ['run', 'uninstall', 'delete'] })
+    expect(result.data[0]).toMatchObject({ reference: 'legacy:legacy-1', runtimeKind: 'legacy', supportedActions: ['run', 'uninstall', 'delete'], capabilityProfile: { riskLevel: 'medium', canConvertToPackage: true } })
     expect(result.data[1]).toMatchObject({ reference: 'package:package-1', version: '1.2.0', capabilities: ['web.search'] })
   })
 

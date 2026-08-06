@@ -1,38 +1,44 @@
 import { skillRepo } from '../db/repositories/skill.repo'
 import { skillPackageRepo } from '../db/repositories/skill-package.repo'
 import { resolveLegacySkillId } from '../../shared/skill-references'
-import { runSkill } from '../skills/legacy'
+import { createLegacySkillAdapter, type LegacySkillAdapter } from '../skills/application/legacy-skill.adapter'
+import { createLegacyToDraftService, type LegacyMigrationPreview } from '../skills/creator/legacy-to-draft.service'
 import { ServiceError } from './errors'
 
 type SkillServiceDependencies = {
   skillRepo: typeof skillRepo
   skillPackageRepo: typeof skillPackageRepo
   resolveLegacySkillId: typeof resolveLegacySkillId
-  runSkill: typeof runSkill
+  runSkill?: (referenceId: string, input: object) => Promise<object> | object
+  legacyAdapter?: LegacySkillAdapter
+  legacyToDraft?: Pick<ReturnType<typeof createLegacyToDraftService>, 'preview'>
 }
 
 export function createSkillService(overrides: Partial<SkillServiceDependencies> = {}) {
-  const dependencies: SkillServiceDependencies = {
+  const dependencies = {
     skillRepo,
     skillPackageRepo,
     resolveLegacySkillId,
-    runSkill,
     ...overrides,
   }
+  const legacyAdapter = dependencies.legacyAdapter ?? createLegacySkillAdapter({
+    repo: dependencies.skillRepo,
+    resolveLegacySkillId: dependencies.resolveLegacySkillId,
+    runSkill: dependencies.runSkill ? (async (referenceId, input) => dependencies.runSkill!(referenceId, input)) : undefined,
+  })
+  const legacyToDraft = dependencies.legacyToDraft ?? createLegacyToDraftService({ legacy: legacyAdapter })
 
   return {
     listInstalled() {
-      return dependencies.skillRepo.listInstalled()
+      return legacyAdapter.listInstalled()
     },
 
     listMarket(input: { query?: string, limit?: number, offset?: number } = {}) {
-      return dependencies.skillRepo.listMarket(input.query || undefined, input.limit ?? 20, input.offset ?? 0)
+      return legacyAdapter.listMarket(input)
     },
 
     install(id: unknown) {
-      if (!dependencies.skillRepo.get(id as string)) throw new ServiceError('NOT_FOUND', 'Skill not found')
-      dependencies.skillRepo.install(id as string)
-      return dependencies.skillRepo.get(id as string)
+      return legacyAdapter.install(String(id))
     },
 
     create(input: Record<string, unknown>) {
@@ -53,57 +59,37 @@ export function createSkillService(overrides: Partial<SkillServiceDependencies> 
     },
 
     get(id: string) {
-      const skill = dependencies.skillRepo.get(id)
-      if (!skill) throw new ServiceError('NOT_FOUND', 'Skill not found')
-      return skill
+      return legacyAdapter.get(id)
     },
 
     update(id: string, input: Record<string, unknown>) {
-      const skill = dependencies.skillRepo.update(id, input)
-      if (!skill) throw new ServiceError('NOT_FOUND', 'Skill not found')
-      return skill
+      return legacyAdapter.update(id, input)
     },
 
     remove(id: string): { kind: 'uninstalled' | 'deleted' } {
-      const skill = dependencies.skillRepo.get(id)
-      if (!skill) throw new ServiceError('NOT_FOUND', 'Skill not found')
-      if (skill.author === 'official') {
-        dependencies.skillRepo.uninstall(id)
-        return { kind: 'uninstalled' }
-      }
-      dependencies.skillRepo.delete(id)
-      return { kind: 'deleted' }
+      return legacyAdapter.delete(id)
     },
 
     async run(referenceId: string, input: unknown) {
-      try {
-        const legacySkillId = dependencies.resolveLegacySkillId(referenceId)
-        if (!legacySkillId || !dependencies.skillRepo.get(legacySkillId)) {
-          if (dependencies.skillPackageRepo.isPackageReference(referenceId)) {
-            throw new ServiceError('PACKAGE_SKILL_ASYNC_ONLY', 'Package Skills must be started through POST /skill-runs')
-          }
+      const legacySkillId = dependencies.resolveLegacySkillId(referenceId)
+      if (!legacySkillId || !dependencies.skillRepo.get(legacySkillId)) {
+        if (dependencies.skillPackageRepo.isPackageReference(referenceId)) {
+          throw new ServiceError('PACKAGE_SKILL_ASYNC_ONLY', 'Package Skills must be started through POST /skill-runs')
         }
-        return await dependencies.runSkill(referenceId, isRecord(input) ? input : {})
-      } catch (error) {
-        if (error instanceof ServiceError) throw error
-        throw new ServiceError('SKILL_ERROR', messageOf(error, 'Skill execution failed'))
       }
+      return legacyAdapter.run(referenceId, input)
     },
 
     listRuns(referenceId: string, limit = 20) {
       const legacySkillId = dependencies.resolveLegacySkillId(referenceId)
       if (!legacySkillId) return []
-      return dependencies.skillRepo.listRuns(legacySkillId, limit)
+      return legacyAdapter.listRuns(legacySkillId, limit)
+    },
+
+    migrationPreview(referenceId: string): LegacyMigrationPreview {
+      return legacyToDraft.preview(referenceId)
     },
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function messageOf(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
 }
 
 export const skillService = createSkillService()

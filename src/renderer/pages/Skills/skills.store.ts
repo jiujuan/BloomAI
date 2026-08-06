@@ -2,6 +2,19 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { API_BASE } from '@shared/constants'
 
+export interface SkillMigrationPreview {
+  runtimeKind: 'legacy'
+  legacySkillId: string
+  legacyReference: string
+  readOnly: true
+  published: false
+  riskLevel: 'low' | 'medium' | 'high' | 'critical'
+  blockers: string[]
+  recommendation: string
+  templateVariables: string[]
+  draft: { manifest: Record<string, unknown>; skillMd: string; source: string } | null
+}
+
 export interface Skill {
   id: string; name: string; description: string; type: string
   source: string; params_schema: string; author: string | null

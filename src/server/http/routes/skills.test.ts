@@ -115,6 +115,19 @@ describe('skills route contract', () => {
     expect(history.body.data[0]).toMatchObject({ skill_id: 'json-formatter', status: 'success' })
   })
 
+  it('exposes a read-only migration preview for prompt-template Legacy Skills', async () => {
+    const { app } = await createApp()
+    const preview = await requestJson(app, '/skills/text-summarizer/migration-preview')
+
+    expect(preview.response.status).toBe(200)
+    expect(preview.body.data).toMatchObject({
+      runtimeKind: 'legacy',
+      legacySkillId: 'text-summarizer',
+      readOnly: true,
+      published: false,
+      draft: { manifest: { runtime: 'instruction-agent', entryPath: 'SKILL.md' } },
+    })
+  })
   it('keeps package references async-only on the legacy skill endpoint', async () => {
     const { app, skillPackageRepo } = await createApp()
     const packageRecord = skillPackageRepo.createPackage({ name: 'Package route skill', description: '', sourceType: 'local-directory' })
