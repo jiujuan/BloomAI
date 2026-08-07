@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { isServiceError, type ServiceErrorCode, type ServiceErrorDetails } from '../services/errors'
 
-export type HttpErrorStatus = 400 | 403 | 404 | 409 | 429 | 500 | 502
+export type HttpErrorStatus = 400 | 403 | 404 | 409 | 422 | 429 | 500 | 502
 
 export type HttpErrorResponse = {
   status: HttpErrorStatus
@@ -29,6 +29,11 @@ const STATUS_BY_SERVICE_ERROR: Record<ServiceErrorCode, HttpErrorStatus> = {
   FEATURE_DISABLED: 409,
   TOOL_ERROR: 500,
   SKILL_ERROR: 500,
+  LEGACY_SKILL_FROZEN: 409,
+  LEGACY_SKILL_RUN_DISABLED: 409,
+  LEGACY_MIGRATION_MANUAL_REVIEW: 409,
+  LEGACY_MIGRATION_CRITICAL_BLOCKED: 409,
+  LEGACY_MIGRATION_UNSUPPORTED_TYPE: 422,
   PACKAGE_SKILL_ASYNC_ONLY: 409,
   PACKAGE_INSTALL_ERROR: 400,
   SKILL_VERSION_INCOMPATIBLE: 409,

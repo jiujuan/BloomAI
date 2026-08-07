@@ -20,10 +20,18 @@ describe('skill runtime config', () => {
     const config = loadSkillRuntimeConfig({ NODE_ENV: 'production' }, fsAdapter)
     expect(config.runtimeEnabled).toBe(true)
     expect(config.packageExecutionEnabled).toBe(false)
+    expect(config.legacyLifecycle).toBe('frozen')
+    expect(config.legacyReadOnly).toBe(true)
+    expect(config.legacyExecutionEnabled).toBe(false)
     expect(config.importEnabled).toBe(false)
     expect(config.githubImportEnabled).toBe(false)
     expect(config.npxImportEnabled).toBe(false)
     expect(config.creatorPublishEnabled).toBe(false)
+    expect(getSkillRuntimeCapabilities(config)).toMatchObject({
+      legacyLifecycle: 'frozen',
+      legacyReadOnly: true,
+      legacyExecutionEnabled: false,
+    })
     expect(config.githubRequestTimeoutMs).toBe(15_000)
     expect(config.githubMaxArchiveBytes).toBe(100 * 1024 * 1024)
     expect(config.githubAllowedHosts).toEqual(['github.com', 'api.github.com', 'codeload.github.com'])
@@ -74,10 +82,24 @@ describe('skill runtime config', () => {
     expect(() => loadSkillRuntimeConfig({ SKILL_PACKAGE_DATA_ROOT: shared, SKILL_EXPORT_ROOT: shared }, fsAdapter)).toThrow(/overlap/)
   })
 
+  it('allows an explicitly enabled active Legacy baseline only in tests or a controlled rollback', () => {
+    const config = loadSkillRuntimeConfig({
+      SKILL_LEGACY_LIFECYCLE: 'active',
+      SKILL_LEGACY_READ_ONLY: 'false',
+      SKILL_LEGACY_EXECUTION_ENABLED: 'true',
+      SKILL_PACKAGE_DATA_ROOT: root(),
+      SKILL_EXPORT_ROOT: root(),
+    }, fsAdapter)
+    expect(config.legacyLifecycle).toBe('active')
+    expect(config.legacyReadOnly).toBe(false)
+    expect(config.legacyExecutionEnabled).toBe(true)
+  })
+
   it('rejects unsafe feature combinations', () => {
     expect(() => loadSkillRuntimeConfig({ SKILL_PACKAGE_EXECUTION_ENABLED: 'true', SKILL_RUNTIME_ENABLED: 'false' }, fsAdapter)).toThrow(/requires runtimeEnabled/)
     expect(() => loadSkillRuntimeConfig({ SKILL_GITHUB_IMPORT_ENABLED: 'true' }, fsAdapter)).toThrow(/requires importEnabled/)
     expect(() => loadSkillRuntimeConfig({ SKILL_CREATOR_PUBLISH_ENABLED: 'true' }, fsAdapter)).toThrow(/requires creatorEnabled/)
+    expect(() => loadSkillRuntimeConfig({ SKILL_LEGACY_EXECUTION_ENABLED: 'true' }, fsAdapter)).toThrow(/active, writable Legacy lifecycle/)
   })
 
   it('checks manually assembled configs as well as env-derived configs', () => {

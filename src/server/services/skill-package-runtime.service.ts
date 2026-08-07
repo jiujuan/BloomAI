@@ -23,6 +23,8 @@ import {
 } from '../skills/runtime/skill-run-coordinator'
 import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunQueueRepository, SkillRunRepository } from '../skills/application/ports'
 import { ServiceError } from './errors'
+import { isLegacySkillReference } from '../../shared/skill-references'
+import { recordMigrationMetric } from '../skills/observability/skill-runtime.metrics'
 
 export type SkillPackageRuntimeDependencies = {
   packageRepository: PackageSkillRepository
@@ -245,7 +247,15 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
 
     startRun(input: StartSkillRunInput) {
       return mapRuntimeError(() => {
-        const version: any = dependencies.packageRepository.resolveRunnableVersion(input.skillVersionId ?? input.skillId!)
+        const reference = input.skillVersionId ?? input.skillId
+        if (reference && isLegacySkillReference(reference)) {
+          recordMigrationMetric('legacy_run_blocked')
+          throw new ServiceError('LEGACY_SKILL_RUN_DISABLED', 'Legacy Skill execution is disabled; migrate it to a Package Skill before running', {
+            legacyReference: reference,
+            migrationAction: 'preview-legacy-skill-migration',
+          })
+        }
+        const version: any = dependencies.packageRepository.resolveRunnableVersion(reference!)
         if (!version) throw new ServiceError('NOT_FOUND', 'Installed and enabled Package Skill was not found')
         const compatible = version.isCompatible === undefined ? version.is_compatible === 1 : version.isCompatible
         if (!compatible) throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Skill version is incompatible with the Package Runtime')
@@ -258,6 +268,7 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
           sessionId: input.sessionId,
           imageSessionId: input.imageSessionId,
         })
+        recordMigrationMetric('package_run_started')
         const run = dependencies.coordinator.getRun(started.runId)
         dependencies.capabilityGrantService.requestCapabilities(run.id)
         return { runId: run.id, status: run.status, revision: run.revision }

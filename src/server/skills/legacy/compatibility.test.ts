@@ -14,24 +14,25 @@ async function loadCompatibilityRuntime() {
   await client.runMigrations()
   const { skillRepo } = await import('../../db/repositories/skill.repo')
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
+  const { createSkillService } = await import('../../services/skill.service')
   const {
     resolveLegacySkillId,
     resolvePackageSkillId,
     toLegacySkillReference,
     toPackageSkillReference,
   } = await import('../../../shared/skill-references')
-  const { runSkill } = await import('./run-skill')
-  const { toLegacySkillToolId } = await import('./mastra-tool-id')
+  const { buildLegacySkillTools, getLegacySkillMigrationHint } = await import('../../mastra/tools')
 
   return {
     skillRepo,
     skillPackageRepo,
+    createSkillService,
     resolveLegacySkillId,
     resolvePackageSkillId,
     toLegacySkillReference,
     toPackageSkillReference,
-    runSkill,
-    toLegacySkillToolId,
+    buildLegacySkillTools,
+    getLegacySkillMigrationHint,
   }
 }
 
@@ -49,20 +50,21 @@ describe('Legacy and Package Skill compatibility boundaries', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('runs a Legacy Skill through its namespaced reference without changing its stored ID', async () => {
-    const { skillRepo, toLegacySkillReference, runSkill } = await loadCompatibilityRuntime()
+  it('blocks Legacy execution through the service without creating a skill_runs row', async () => {
+    const { skillRepo, skillPackageRepo, createSkillService, toLegacySkillReference } = await loadCompatibilityRuntime()
     const legacy = skillRepo.create({
       name: 'Namespaced adder',
       description: 'Adds two numbers',
       type: 'js-function',
       source: 'function run(input) { return { total: input.a + input.b } }',
     })
+    const service = createSkillService({ skillRepo, skillPackageRepo })
 
-    await expect(runSkill(toLegacySkillReference(legacy.id), { a: 4, b: 5 })).resolves.toMatchObject({ total: 9 })
-    expect(skillRepo.listRuns(legacy.id)).toHaveLength(1)
+    await expect(service.run(toLegacySkillReference(legacy.id), { a: 4, b: 5 })).rejects.toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
+    expect(skillRepo.listRuns(legacy.id)).toHaveLength(0)
   })
 
-  it('uses distinct Legacy and Package reference namespaces', async () => {
+  it('uses distinct Legacy and Package reference namespaces and rejects unprefixed Package IDs', async () => {
     const {
       skillRepo,
       skillPackageRepo,
@@ -70,11 +72,10 @@ describe('Legacy and Package Skill compatibility boundaries', () => {
       resolvePackageSkillId,
       toLegacySkillReference,
       toPackageSkillReference,
-      toLegacySkillToolId,
     } = await loadCompatibilityRuntime()
     const legacy = skillRepo.create({
-      name: 'Legacy tool',
-      description: 'Legacy Mastra tool',
+      name: 'Legacy archive',
+      description: 'Legacy archive record',
       type: 'js-function',
       source: 'function run() { return { ok: true } }',
     })
@@ -86,11 +87,21 @@ describe('Legacy and Package Skill compatibility boundaries', () => {
 
     expect(toLegacySkillReference(legacy.id)).toBe(`legacy:${legacy.id}`)
     expect(toPackageSkillReference(packageRecord.id)).toBe(`package:${packageRecord.id}`)
-    expect(toLegacySkillReference(legacy.id)).not.toBe(toPackageSkillReference(legacy.id))
-    expect(toLegacySkillToolId(legacy.id)).toBe(`legacy_skill_${legacy.id}`)
     expect(resolveLegacySkillId(`package:${packageRecord.id}`)).toBeUndefined()
     expect(resolvePackageSkillId(`legacy:${legacy.id}`)).toBeUndefined()
+    expect(resolvePackageSkillId(packageRecord.id)).toBeUndefined()
     expect(resolveLegacySkillId('legacy:')).toBeUndefined()
     expect(resolvePackageSkillId('package:')).toBeUndefined()
+  })
+
+  it('removes Legacy synchronous Mastra tools but retains a structured migration hint', async () => {
+    const { buildLegacySkillTools, getLegacySkillMigrationHint } = await loadCompatibilityRuntime()
+    expect(Object.keys(buildLegacySkillTools())).not.toContain(expect.stringMatching(/^legacy_skill_/))
+    expect(getLegacySkillMigrationHint('legacy:fixture')).toEqual(expect.objectContaining({
+      runtimeKind: 'legacy',
+      readOnly: true,
+      migrationAction: 'preview',
+      reference: 'legacy:fixture',
+    }))
   })
 })

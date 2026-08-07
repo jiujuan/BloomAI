@@ -55,8 +55,7 @@ skillsRoutes.patch('/:id', async (c) => {
 
 skillsRoutes.delete('/:id', (c) => {
   try {
-    const result = skillService.remove(c.req.param('id'))
-    if (result.kind === 'uninstalled') return c.json({ data: { uninstalled: true } })
+    skillService.remove(c.req.param('id'))
     return c.body(null, 204)
   } catch (error) { return errorResponse(c, error) }
 })

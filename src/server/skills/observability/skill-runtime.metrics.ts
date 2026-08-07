@@ -11,7 +11,7 @@ export type SkillRuntimeCorrelation = {
 }
 
 type MetricAttribute = string | number | boolean
-type MetricKind = 'queue' | 'run' | 'capability' | 'artifact' | 'import'
+type MetricKind = 'queue' | 'run' | 'capability' | 'artifact' | 'import' | 'migration'
 
 export type SkillRuntimeMetricPoint = {
   timestamp: number
@@ -35,6 +35,7 @@ export type SkillRuntimeMetricCounters = {
   importRejects: Record<string, number>
   runsByStatus: Record<string, number>
   capabilityErrors: Record<string, number>
+  migrationEvents: Record<string, number>
 }
 
 export type SkillRuntimeMetricSnapshot = {
@@ -88,6 +89,25 @@ export type RecordQueueMetricInput = {
   correlation?: SkillRuntimeCorrelation
 }
 
+export const migrationEvents = [
+  'legacy_run_blocked',
+  'migration_previewed',
+  'migration_manual_review',
+  'migration_critical_blocked',
+  'migration_published',
+  'package_run_started',
+  'migration_secret_redaction_failed',
+  'migration_transaction_rolled_back',
+] as const
+
+export type MigrationMetricEvent = typeof migrationEvents[number]
+
+export type RecordMigrationMetricInput = {
+  event: MigrationMetricEvent | string
+  value?: number
+  correlation?: SkillRuntimeCorrelation
+}
+
 const RUN_STATUSES = new Set([
   'created', 'validating', 'running', 'waiting_input', 'waiting_approval',
   'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted',
@@ -107,6 +127,7 @@ const IMPORT_REJECT_REASONS = new Set([
   'file_limit', 'archive_corrupt', 'source_not_allowed', 'unsupported_runtime',
   'review_required', 'fingerprint_changed', 'unknown',
 ])
+const MIGRATION_EVENTS = new Set<string>(migrationEvents)
 
 function finiteNonNegative(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
@@ -132,6 +153,10 @@ function safeImportRejectReason(value: string | undefined): string {
   return value && IMPORT_REJECT_REASONS.has(value) ? value : 'unknown'
 }
 
+function safeMigrationEvent(value: string | undefined): string {
+  return value && MIGRATION_EVENTS.has(value) ? value : 'unknown'
+}
+
 function safeTimestamp(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : Date.now()
 }
@@ -152,6 +177,7 @@ function cloneCounters(counters: SkillRuntimeMetricCounters): SkillRuntimeMetric
     importRejects: { ...counters.importRejects },
     runsByStatus: { ...counters.runsByStatus },
     capabilityErrors: { ...counters.capabilityErrors },
+    migrationEvents: { ...counters.migrationEvents },
   }
 }
 
@@ -162,6 +188,7 @@ type MetricEvent = {
     runStatus?: string
     capabilityError?: string
     artifactOperation?: string
+    migrationEvent?: string
   }
 }
 
@@ -313,6 +340,21 @@ export class SkillRuntimeMetrics {
     })
   }
 
+  recordMigration(event: MigrationMetricEvent | string, correlation?: SkillRuntimeCorrelation): void
+  recordMigration(input: RecordMigrationMetricInput): void
+  recordMigration(eventOrInput: MigrationMetricEvent | string | RecordMigrationMetricInput, _correlation?: SkillRuntimeCorrelation): void {
+    const input = typeof eventOrInput === 'string'
+      ? { event: eventOrInput }
+      : eventOrInput
+    const timestamp = safeTimestamp(this.now())
+    const event = safeMigrationEvent(input.event)
+    const value = input.value === undefined ? 1 : finiteNonNegative(input.value)
+    this.push({
+      point: { timestamp, kind: 'migration', value, attributes: { event } },
+      counters: { migrationEvent: event },
+    })
+  }
+
   snapshot(): SkillRuntimeMetricSnapshot {
     this.prune()
     const counters = emptyCounters()
@@ -332,6 +374,7 @@ export class SkillRuntimeMetrics {
       if (delta.runStatus) counters.runsByStatus[delta.runStatus] = (counters.runsByStatus[delta.runStatus] ?? 0) + 1
       if (delta.capabilityError) counters.capabilityErrors[delta.capabilityError] = (counters.capabilityErrors[delta.capabilityError] ?? 0) + 1
       if (delta.artifactOperation) counters.artifactOperations[delta.artifactOperation] = (counters.artifactOperations[delta.artifactOperation] ?? 0) + 1
+      if (delta.migrationEvent) counters.migrationEvents[delta.migrationEvent] = (counters.migrationEvents[delta.migrationEvent] ?? 0) + 1
     }
     return {
       generatedAt: safeTimestamp(this.now()),
@@ -370,6 +413,7 @@ function emptyCounters(): SkillRuntimeMetricCounters {
     importRejects: {},
     runsByStatus: {},
     capabilityErrors: {},
+    migrationEvents: {},
   }
 }
 
@@ -379,6 +423,13 @@ export function recordRunMetric(input: RecordRunMetricInput): void {
 
 export function recordCapabilityMetric(input: RecordCapabilityMetricInput): void {
   try { SkillRuntimeMetrics.global().recordCapability(input) } catch { /* observability must never block runtime execution */ }
+}
+
+export function recordMigrationMetric(input: RecordMigrationMetricInput | MigrationMetricEvent | string, correlation?: SkillRuntimeCorrelation): void {
+  try {
+    if (typeof input === 'string') SkillRuntimeMetrics.global().recordMigration(input, correlation)
+    else SkillRuntimeMetrics.global().recordMigration(input)
+  } catch { /* observability must never block migration or runtime execution */ }
 }
 
 export function resetSkillRuntimeMetricsForTests(): void {

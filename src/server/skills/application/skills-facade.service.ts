@@ -18,6 +18,8 @@ export type SkillOverviewCard = {
   status: string
   supportedActions: string[]
   runtimeKind: SkillsFacadeRuntimeKind
+  lifecycle: 'read-only' | 'package'
+  readOnly: boolean
   enabled: boolean
   packageId?: string
   installationId?: string
@@ -78,8 +80,10 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
       version: skill.version ?? null,
       capabilities: skill.type ? [skill.type] : [],
       status: skill.is_installed === 1 ? 'installed' : 'available',
-      supportedActions: skill.is_installed === 1 ? ['run', 'uninstall', 'delete'] : ['install'],
+      supportedActions: ['details', 'history', 'migration-preview'],
       runtimeKind: 'legacy',
+      lifecycle: 'read-only',
+      readOnly: true,
       enabled: skill.is_installed === 1,
       capabilityProfile: getLegacyCapabilityProfile(skill.type),
     }
@@ -106,6 +110,8 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
       status,
       supportedActions: installation ? ['run', 'enable', 'disable', 'uninstall', 'versions'] : ['install', 'versions'],
       runtimeKind: 'package',
+      lifecycle: 'package',
+      readOnly: false,
       enabled: enabledValue === 1 || enabledValue === true,
       packageId: pkg.id,
       installationId: installation?.id,
@@ -152,7 +158,7 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
         if (!updated) throw new ServiceError('NOT_FOUND', 'Package installation not found')
         return packageCard(pkg)
       }
-      throw new ServiceError('VALIDATION_ERROR', 'Legacy Skills use install/uninstall semantics')
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
     disable(reference: string) {
@@ -164,7 +170,7 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
         if (!updated) throw new ServiceError('NOT_FOUND', 'Package installation not found')
         return packageCard(pkg)
       }
-      throw new ServiceError('VALIDATION_ERROR', 'Legacy Skills cannot be disabled without uninstalling')
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
     uninstall(reference: string) {
@@ -176,8 +182,7 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
       }
       const legacyId = resolveLegacySkillId(reference)
       if (!legacyId || !dependencies.legacy.get(legacyId)) throw new ServiceError('NOT_FOUND', 'Skill reference not found')
-      const result = dependencies.legacyService.remove(legacyId)
-      return { ...result, reference: toLegacySkillReference(legacyId) }
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
     async startRun(reference: string, input: Record<string, unknown>, options: { context?: Record<string, unknown>; surface?: 'skills' | 'chat' | 'image'; sessionId?: string } = {}) {
@@ -191,7 +196,7 @@ export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> 
       }
       const legacyId = resolveLegacySkillId(reference)
       if (!legacyId || !dependencies.legacy.get(legacyId)) throw new ServiceError('NOT_FOUND', 'Skill reference not found')
-      return dependencies.legacyService.run(legacyId, input)
+      throw new ServiceError('LEGACY_SKILL_RUN_DISABLED', 'Legacy Skill execution is disabled')
     },
 
     listRuns(reference: string, limit = 20) {

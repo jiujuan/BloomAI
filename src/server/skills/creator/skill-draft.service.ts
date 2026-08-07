@@ -8,6 +8,33 @@ import { resolveManifest } from '../packages/manifest-resolver'
 import type { PackageReaderLike } from '../packages/manifest-resolver'
 import { skillDraftContentSchema, type SkillDraftContent, type SkillDraftRecord, type SkillDraftValidation } from './skill-draft.schema'
 
+export type LegacyMigrationPublishOptions = {
+  legacySkillId: string
+  sourceSha256: string
+  ownerId: string
+  createdBy: string
+  decision: 'auto_convertible'
+  previewId: string
+  expectedRevision: number
+  reportArtifactId?: string | null
+}
+
+type PackagePublishInput = {
+  package: { name: string; description: string; sourceType: string; sourceUri?: string | null; sourceRef?: string | null }
+  version: { version: string; manifest: Record<string, unknown>; manifestHash: string; packagePath: string; sourceSnapshot: Record<string, unknown>; isCompatible?: boolean; immutableHash?: string; status?: string; securityStatus?: string; snapshotHash?: string; securityFindings?: Record<string, unknown> }
+  snapshot: { filesManifest: Record<string, unknown>; totalBytes: number; fileCount: number; snapshotRoot: string; snapshotHash: string }
+  installation: { status: string; enabled?: boolean }
+}
+
+type LegacyMigrationTransactionResult = {
+  package: { id: string }
+  version: { id: string; manifest_hash: string }
+  snapshot: { id: string; snapshot_hash: string }
+  installation: { id: string; enabled: number }
+  migration: { id: string; revision: number }
+  idempotent?: boolean
+}
+
 export type SkillDraftRepository = {
   createDraft(input: { ownerId: string; content: SkillDraftContent; baseVersionId?: string | null }): SkillDraftRecord
   getDraft(id: string): SkillDraftRecord | undefined
@@ -15,16 +42,16 @@ export type SkillDraftRepository = {
   saveValidation(input: { id: string; ownerId: string; validation: SkillDraftValidation }): SkillDraftRecord | undefined
   markPublished(input: { id: string; ownerId: string; versionId: string; validation: SkillDraftValidation }): SkillDraftRecord | undefined
   discardDraft(input: { id: string; ownerId: string }): SkillDraftRecord | undefined
-  publish(input: {
-    package: { name: string; description: string; sourceType: string; sourceUri?: string | null; sourceRef?: string | null }
-    version: { version: string; manifest: Record<string, unknown>; manifestHash: string; packagePath: string; sourceSnapshot: Record<string, unknown>; isCompatible?: boolean; immutableHash?: string; status?: string; securityStatus?: string; snapshotHash?: string }
-    snapshot: { filesManifest: Record<string, unknown>; totalBytes: number; fileCount: number; snapshotRoot: string; snapshotHash: string }
-    installation: { status: string; enabled?: boolean }
-  }): { package: { id: string }; version: { id: string; manifest_hash: string }; snapshot: { id: string; snapshot_hash: string }; installation: { id: string; enabled: number } }
+  publish(input: PackagePublishInput): { package: { id: string }; version: { id: string; manifest_hash: string }; snapshot: { id: string; snapshot_hash: string }; installation: { id: string; enabled: number } }
+  publishLegacyMigration?(input: PackagePublishInput & {
+    draft: { id: string; ownerId: string; validation: Record<string, unknown> }
+    migration: { id: string; ownerId: string; expectedRevision: number; sourceSha256: string; reportArtifactId?: string | null }
+    audit: { actor?: string | null; action: string; resourceType: string; resourceId?: string | null; securityDecision?: string; policyVersion?: string; sourceFingerprint?: string | null; payload?: Record<string, unknown> }
+  }): LegacyMigrationTransactionResult
 }
 
 type DraftServiceOptions = { repo?: SkillDraftRepository; packageDataRoot?: string }
-type PublishResult = { draftId: string; packageId: string; versionId: string; snapshotId: string; installationId: string; installationEnabled: boolean; manifestHash: string; snapshotHash: string }
+type PublishResult = { draftId: string; packageId: string; versionId: string; snapshotId: string; installationId: string; installationEnabled: boolean; manifestHash: string; snapshotHash: string; migrationId?: string; migrationRevision?: number; idempotent?: boolean }
 
 export function createSkillDraftService(options: DraftServiceOptions = {}) {
   const repo = options.repo ?? createDefaultRepo()
@@ -59,9 +86,12 @@ export function createSkillDraftService(options: DraftServiceOptions = {}) {
       const validation = validateContent(draft.content)
       return { draftId: draft.id, revision: draft.revision, published: false, valid: validation.valid, manifest: validation.manifest, files: validation.previewSummary.files, warnings: validation.warnings, errors: validation.errors }
     },
-    publishDraft(id: string, ownerId: string, publishOptions: { enable?: boolean } = {}): PublishResult {
+    publishDraft(id: string, ownerId: string, publishOptions: { enable?: boolean; legacyMigration?: LegacyMigrationPublishOptions } = {}): PublishResult {
       const draft = requireOwned(repo, id, ownerId)
       if (draft.status === 'discarded') throw new ServiceError('CONFLICT', 'Discarded draft cannot be published')
+      if (publishOptions.legacyMigration && publishOptions.legacyMigration.ownerId !== ownerId) {
+        throw new ServiceError('FORBIDDEN', 'Migration owner does not match draft owner')
+      }
       const validation = validateContent(draft.content)
       repo.saveValidation({ id, ownerId, validation })
       if (!validation.valid || !validation.manifest) throw new ServiceError('PACKAGE_INSTALL_ERROR', 'Draft validation failed', { errorCount: validation.errors.length })
@@ -69,19 +99,45 @@ export function createSkillDraftService(options: DraftServiceOptions = {}) {
       const snapshotHash = hashJson(files)
       const manifestHash = String(validation.manifest.canonicalHash ?? hashJson(validation.manifest))
       const finalPath = path.join(packageDataRoot, `creator-${snapshotHash}`)
-      materializeFiles(finalPath, files)
-      const immutableHash = hashJson({ manifestHash, snapshotHash })
+      const pathExisted = fs.existsSync(finalPath)
       try {
-        const result = repo.publish({
-          package: { name: draft.content.name, description: draft.content.description, sourceType: 'creator', sourceUri: `draft:${draft.id}`, sourceRef: draft.content.version },
-          version: { version: draft.content.version, manifest: validation.manifest, manifestHash, packagePath: finalPath, sourceSnapshot: { draftId: draft.id, revision: draft.revision, snapshotHash }, isCompatible: validation.errors.length === 0, immutableHash, status: 'runnable', securityStatus: 'approved', snapshotHash },
+        materializeFiles(finalPath, files)
+        const immutableHash = hashJson({ manifestHash, snapshotHash })
+        const packageInput: PackagePublishInput = {
+          package: { name: draft.content.name, description: draft.content.description, sourceType: publishOptions.legacyMigration ? 'legacy-migration' : 'creator', sourceUri: publishOptions.legacyMigration ? `legacy:${publishOptions.legacyMigration.legacySkillId}` : `draft:${draft.id}`, sourceRef: draft.content.version },
+          version: { version: draft.content.version, manifest: validation.manifest, manifestHash, packagePath: finalPath, sourceSnapshot: { draftId: draft.id, revision: draft.revision, snapshotHash, ...(publishOptions.legacyMigration ? { legacySkillId: publishOptions.legacyMigration.legacySkillId, sourceSha256: publishOptions.legacyMigration.sourceSha256 } : {}) }, isCompatible: validation.errors.length === 0, immutableHash, status: 'runnable', securityStatus: 'approved', snapshotHash },
           snapshot: { filesManifest: files, totalBytes: Object.values(files).reduce((sum, file) => sum + file.sizeBytes, 0), fileCount: Object.keys(files).length, snapshotRoot: finalPath, snapshotHash },
           installation: { status: publishOptions.enable ? 'installed' : 'disabled', enabled: publishOptions.enable === true },
-        })
+        }
+
+        if (publishOptions.legacyMigration) {
+          if (!repo.publishLegacyMigration) throw new ServiceError('PACKAGE_INSTALL_ERROR', 'Legacy migration publish transaction is unavailable')
+          const result = repo.publishLegacyMigration({
+            ...packageInput,
+            draft: { id, ownerId, validation: validation as unknown as Record<string, unknown> },
+            migration: { id: publishOptions.legacyMigration.previewId, ownerId, expectedRevision: publishOptions.legacyMigration.expectedRevision, sourceSha256: publishOptions.legacyMigration.sourceSha256, reportArtifactId: publishOptions.legacyMigration.reportArtifactId ?? null },
+            audit: {
+              actor: publishOptions.legacyMigration.createdBy,
+              action: 'legacy_migration.publish',
+              resourceType: 'legacy_skill',
+              resourceId: publishOptions.legacyMigration.legacySkillId,
+              sourceFingerprint: publishOptions.legacyMigration.sourceSha256,
+              securityDecision: 'approved',
+              policyVersion: 'legacy-migration-v1',
+              payload: { migrationId: publishOptions.legacyMigration.previewId, legacySkillId: publishOptions.legacyMigration.legacySkillId },
+            },
+          })
+          return { draftId: id, packageId: result.package.id, versionId: result.version.id, snapshotId: result.snapshot.id, installationId: result.installation.id, installationEnabled: Boolean(result.installation.enabled), manifestHash, snapshotHash, migrationId: result.migration.id, migrationRevision: Number(result.migration.revision), idempotent: result.idempotent === true }
+        }
+
+        const result = repo.publish(packageInput)
         const marked = repo.markPublished({ id, ownerId, versionId: result.version.id, validation })
         if (!marked) throw new ServiceError('NOT_FOUND', 'Draft not found')
         return { draftId: id, packageId: result.package.id, versionId: result.version.id, snapshotId: result.snapshot.id, installationId: result.installation.id, installationEnabled: Boolean(result.installation.enabled), manifestHash, snapshotHash }
       } catch (error) {
+        if (!pathExisted) {
+          try { fs.rmSync(finalPath, { recursive: true, force: true }) } catch { /* best-effort cleanup after DB rollback */ }
+        }
         if (error instanceof ServiceError) throw error
         throw new ServiceError('PACKAGE_INSTALL_ERROR', error instanceof Error ? error.message : 'Draft publish failed')
       }
@@ -101,6 +157,7 @@ function createDefaultRepo(): SkillDraftRepository {
     markPublished(input) { const row = skillPackageRepo.markDraftPublished(input); return row ? mapDraft(row) : undefined },
     discardDraft(input) { const row = skillPackageRepo.discardDraft(input); return row ? mapDraft(row) : undefined },
     publish(input) { return skillPackageRepo.createPackageVersionInstallationTransaction(input) as any },
+    publishLegacyMigration(input) { return skillPackageRepo.publishLegacyMigrationTransaction(input) as any },
   }
 }
 

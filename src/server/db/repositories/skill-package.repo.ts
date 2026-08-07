@@ -9,6 +9,7 @@ import {
   skill_installations,
   skill_installation_commands,
   skill_import_reviews,
+  skill_legacy_migrations,
   skill_version_snapshots,
   skill_run_commands,
   skill_packages,
@@ -19,6 +20,7 @@ import {
   skill_audit_events,
   skill_drafts,
 } from '../schema'
+import { ServiceError } from '../../services/errors'
 import { sanitizeSecurityPayload } from '../../skills/security/skill-security-checklist'
 import type {
   ApplyRunChangeRequest,
@@ -363,6 +365,218 @@ export const skillPackageRepo = {
       }
       tx.insert(skill_installations).values(installationRow).run()
       return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow }
+    })
+  },
+
+  /**
+   * Publishes a validated Legacy migration as one database transaction.
+   *
+   * The migration mapping is the idempotency boundary. A successful retry
+   * returns the already-created immutable Package/Version/Installation rows
+   * without creating a second package or audit event.
+   */
+  publishLegacyMigrationTransaction(data: {
+    draft: { id: string; ownerId: string; validation: Record<string, unknown> }
+    migration: { id: string; ownerId: string; expectedRevision: number; sourceSha256: string; reportArtifactId?: string | null }
+    package: {
+      name: string
+      description: string
+      sourceType: string
+      sourceUri?: string | null
+      sourceRef?: string | null
+    }
+    version: {
+      version: string
+      manifest: Record<string, unknown>
+      manifestHash: string
+      packagePath: string
+      sourceSnapshot: Record<string, unknown>
+      isCompatible?: boolean
+      immutableHash?: string
+      status?: string
+      securityStatus?: string
+      snapshotHash?: string
+      securityFindings?: Record<string, unknown>
+    }
+    snapshot: {
+      filesManifest: Record<string, unknown>
+      totalBytes: number
+      fileCount: number
+      snapshotRoot: string
+      snapshotHash: string
+    }
+    installation: { status: string; enabled?: boolean }
+    audit: {
+      actor?: string | null
+      action: string
+      resourceType: string
+      resourceId?: string | null
+      securityDecision?: string
+      policyVersion?: string
+      sourceFingerprint?: string | null
+      payload?: Record<string, unknown>
+    }
+  }) {
+    return getOrmDb().transaction((tx) => {
+      const migrationRow = tx.select().from(skill_legacy_migrations)
+        .where(eq(skill_legacy_migrations.id, data.migration.id)).get() as any
+
+      if (!migrationRow) throw new ServiceError('NOT_FOUND', 'Migration preview not found')
+      if (migrationRow.owner_id !== data.migration.ownerId) throw new ServiceError('FORBIDDEN', 'Migration owner does not match')
+      if (migrationRow.source_sha256 !== data.migration.sourceSha256) {
+        throw new ServiceError('REVISION_CONFLICT', 'Legacy source changed after preview')
+      }
+
+      if (migrationRow.status === 'migration_published') {
+        if (!migrationRow.package_id || !migrationRow.package_version_id) {
+          throw new ServiceError('INTERNAL_ERROR', 'Published migration is missing Package provenance')
+        }
+        const packageRow = tx.select().from(skill_packages).where(eq(skill_packages.id, migrationRow.package_id)).get()
+        const versionRow = tx.select().from(skill_versions).where(eq(skill_versions.id, migrationRow.package_version_id)).get()
+        if (!packageRow || !versionRow || versionRow.package_id !== packageRow.id) {
+          throw new ServiceError('INTERNAL_ERROR', 'Published migration has inconsistent Package provenance')
+        }
+        const snapshotRow = tx.select().from(skill_version_snapshots).where(eq(skill_version_snapshots.version_id, versionRow.id)).get()
+        const installationRow = tx.select().from(skill_installations).where(and(
+          eq(skill_installations.package_id, packageRow.id),
+          eq(skill_installations.current_version_id, versionRow.id),
+        )).orderBy(desc(skill_installations.updated_at)).get()
+        const draftRow = tx.select().from(skill_drafts).where(eq(skill_drafts.id, data.draft.id)).get()
+        if (!snapshotRow || !installationRow || !draftRow || draftRow.owner_id !== data.draft.ownerId) {
+          throw new ServiceError('INTERNAL_ERROR', 'Published migration is missing immutable Package records')
+        }
+        return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow, draft: draftRow, migration: migrationRow, idempotent: true as const }
+      }
+
+      if (migrationRow.revision !== data.migration.expectedRevision) {
+        throw new ServiceError('REVISION_CONFLICT', 'Migration preview revision conflict', { currentRevision: Number(migrationRow.revision) })
+      }
+      if (migrationRow.status !== 'migration_previewed' || migrationRow.decision !== 'auto_convertible' || migrationRow.package_id !== null || migrationRow.package_version_id !== null || migrationRow.published_at !== null) {
+        throw new ServiceError('INVALID_RUN_TRANSITION', 'Only an un-published auto-convertible migration preview can be published')
+      }
+
+      const draftRow = tx.select().from(skill_drafts).where(eq(skill_drafts.id, data.draft.id)).get()
+      if (!draftRow) throw new ServiceError('NOT_FOUND', 'Draft not found')
+      if (draftRow.owner_id !== data.draft.ownerId) throw new ServiceError('FORBIDDEN', 'Draft owner does not match')
+      if (draftRow.status !== 'draft') throw new ServiceError('INVALID_RUN_TRANSITION', 'Only a draft can be published')
+
+      const sourceFingerprint = data.audit.sourceFingerprint ?? null
+      if (sourceFingerprint !== null && !/^[a-f0-9]{64}$/i.test(sourceFingerprint)) {
+        throw new ServiceError('VALIDATION_ERROR', 'sourceFingerprint must be a SHA-256 hex string')
+      }
+
+      const now = Date.now()
+      const packageRow = {
+        id: uuidv4(),
+        name: data.package.name,
+        description: data.package.description,
+        source_type: data.package.sourceType,
+        source_uri: data.package.sourceUri ?? null,
+        source_ref: data.package.sourceRef ?? null,
+        created_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_packages).values(packageRow).run()
+
+      const versionRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        version: data.version.version,
+        runtime: 'instruction-agent',
+        manifest_json: stringifyJsonObject(data.version.manifest, 'manifest'),
+        manifest_hash: data.version.manifestHash,
+        package_path: data.version.packagePath,
+        source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
+        is_compatible: data.version.isCompatible === false ? 0 : 1,
+        immutable_hash: data.version.immutableHash ?? '',
+        status: data.version.status ?? 'runnable',
+        security_status: data.version.securityStatus ?? 'unreviewed',
+        snapshot_hash: data.version.snapshotHash ?? '',
+        security_findings_json: stringifySecurityFindings(data.version.securityFindings),
+        published_at: null,
+        created_at: now,
+      }
+      tx.insert(skill_versions).values(versionRow).run()
+
+      const snapshotRow = {
+        id: uuidv4(),
+        version_id: versionRow.id,
+        files_manifest_json: stringifyJsonObject(data.snapshot.filesManifest, 'filesManifest'),
+        total_bytes: data.snapshot.totalBytes,
+        file_count: data.snapshot.fileCount,
+        snapshot_root: data.snapshot.snapshotRoot,
+        snapshot_hash: data.snapshot.snapshotHash,
+        created_at: now,
+      }
+      tx.insert(skill_version_snapshots).values(snapshotRow).run()
+
+      const installationRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        current_version_id: versionRow.id,
+        status: data.installation.status,
+        enabled: data.installation.enabled === false ? 0 : 1,
+        installed_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_installations).values(installationRow).run()
+
+      const draftUpdate = tx.update(skill_drafts).set({
+        status: 'published',
+        published_version_id: versionRow.id,
+        validation_json: JSON.stringify(data.draft.validation),
+        updated_at: now,
+      }).where(and(
+        eq(skill_drafts.id, data.draft.id),
+        eq(skill_drafts.owner_id, data.draft.ownerId),
+        eq(skill_drafts.status, 'draft'),
+      )).run()
+      if (draftUpdate.changes !== 1) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+
+      const migrationUpdate = tx.update(skill_legacy_migrations).set({
+        status: 'migration_published',
+        decision: 'auto_convertible',
+        package_id: packageRow.id,
+        package_version_id: versionRow.id,
+        report_artifact_id: data.migration.reportArtifactId ?? null,
+        last_error: null,
+        revision: Number(data.migration.expectedRevision) + 1,
+        updated_at: now,
+        published_at: now,
+      }).where(and(
+        eq(skill_legacy_migrations.id, data.migration.id),
+        eq(skill_legacy_migrations.owner_id, data.migration.ownerId),
+        eq(skill_legacy_migrations.source_sha256, data.migration.sourceSha256),
+        eq(skill_legacy_migrations.revision, data.migration.expectedRevision),
+        eq(skill_legacy_migrations.status, 'migration_previewed'),
+        eq(skill_legacy_migrations.decision, 'auto_convertible'),
+        isNull(skill_legacy_migrations.package_id),
+        isNull(skill_legacy_migrations.package_version_id),
+        isNull(skill_legacy_migrations.published_at),
+      )).run()
+      if (migrationUpdate.changes !== 1) throw new ServiceError('REVISION_CONFLICT', 'Migration preview changed during publish')
+
+      tx.insert(skill_audit_events).values({
+        id: uuidv4(),
+        actor: data.audit.actor ?? null,
+        action: data.audit.action,
+        resource_type: data.audit.resourceType,
+        resource_id: data.audit.resourceId ?? null,
+        payload_json: stringifySecurityObject({
+          ...(data.audit.payload ?? {}),
+          packageId: packageRow.id,
+          packageVersionId: versionRow.id,
+        }, 'audit payload'),
+        security_decision: data.audit.securityDecision ?? 'not_evaluated',
+        policy_version: data.audit.policyVersion ?? 'legacy',
+        source_fingerprint: sourceFingerprint,
+        created_at: now,
+      }).run()
+
+      const nextMigration = tx.select().from(skill_legacy_migrations).where(eq(skill_legacy_migrations.id, data.migration.id)).get()
+      const nextDraft = tx.select().from(skill_drafts).where(eq(skill_drafts.id, data.draft.id)).get()
+      if (!nextMigration || !nextDraft) throw new ServiceError('INTERNAL_ERROR', 'Published migration rows could not be reloaded')
+      return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow, draft: nextDraft, migration: nextMigration, idempotent: false as const }
     })
   },
 

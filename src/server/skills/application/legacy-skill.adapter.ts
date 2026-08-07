@@ -2,7 +2,7 @@ import { resolveLegacySkillId } from '../../../shared/skill-references'
 import type { LegacySkillRepository, Skill } from '../../db/repositories/skill.repo'
 import { skillRepo } from '../../db/repositories/skill.repo'
 import { ServiceError } from '../../services/errors'
-import { runSkill } from '../legacy'
+import { assertLegacyReadOnly, assertLegacyRunDisabled } from '../legacy/registry'
 
 export type LegacyRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
@@ -17,14 +17,15 @@ export type LegacyCapabilityProfile = {
 
 export type LegacySkillView = Skill & {
   runtimeKind: 'legacy'
+  lifecycle: 'read-only'
+  readOnly: true
   capabilityProfile: LegacyCapabilityProfile
 }
 
-type LegacySkillRepositoryPort = Pick<LegacySkillRepository, 'dataPlane' | 'listInstalled' | 'listMarket' | 'get' | 'create' | 'update' | 'install' | 'uninstall' | 'delete' | 'listRuns'>
+type LegacySkillRepositoryPort = Pick<LegacySkillRepository, 'dataPlane' | 'listInstalled' | 'listMarket' | 'get' | 'listRuns'>
 type LegacySkillAdapterDependencies = {
   repo: LegacySkillRepositoryPort
   resolveLegacySkillId: typeof resolveLegacySkillId
-  runSkill: typeof runSkill
 }
 
 const LEGACY_PROFILE_BY_TYPE: Record<string, LegacyCapabilityProfile> = {
@@ -84,12 +85,13 @@ export function createLegacySkillAdapter(overrides: Partial<LegacySkillAdapterDe
     repo: skillRepo,
     resolveLegacySkillId,
     ...overrides,
-    runSkill: overrides.runSkill ?? runSkill,
   }
 
   const view = (skill: Skill): LegacySkillView => ({
     ...skill,
     runtimeKind: 'legacy',
+    lifecycle: 'read-only',
+    readOnly: true,
     capabilityProfile: getLegacyCapabilityProfile(skill.type),
   })
 
@@ -114,37 +116,24 @@ export function createLegacySkillAdapter(overrides: Partial<LegacySkillAdapterDe
       return view(this.getRaw(reference))
     },
 
-    install(reference: string): LegacySkillView {
-      const { id } = requireLegacySkill(dependencies.repo, dependencies.resolveLegacySkillId, reference)
-      dependencies.repo.install(id)
-      return view(dependencies.repo.get(id)!)
+    install(_reference: string): never {
+      assertLegacyReadOnly()
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
-    update(reference: string, input: Partial<Skill>): LegacySkillView {
-      const { id } = requireLegacySkill(dependencies.repo, dependencies.resolveLegacySkillId, reference)
-      const updated = dependencies.repo.update(id, input)
-      if (!updated) throw new ServiceError('NOT_FOUND', 'Skill not found')
-      return view(updated)
+    update(_reference: string, _input: Partial<Skill>): never {
+      assertLegacyReadOnly()
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
-    delete(reference: string): { kind: 'uninstalled' | 'deleted' } {
-      const { id, skill } = requireLegacySkill(dependencies.repo, dependencies.resolveLegacySkillId, reference)
-      if (skill.author === 'official') {
-        dependencies.repo.uninstall(id)
-        return { kind: 'uninstalled' }
-      }
-      dependencies.repo.delete(id)
-      return { kind: 'deleted' }
+    delete(_reference: string): never {
+      assertLegacyReadOnly()
+      throw new ServiceError('LEGACY_SKILL_FROZEN', 'Legacy Skills are frozen and read-only')
     },
 
-    async run(reference: string, input: unknown): Promise<unknown> {
-      const { id } = requireLegacySkill(dependencies.repo, dependencies.resolveLegacySkillId, reference)
-      try {
-        return await dependencies.runSkill(id, isRecord(input) ? input : {})
-      } catch (error) {
-        if (error instanceof ServiceError) throw error
-        throw new ServiceError('SKILL_ERROR', messageOf(error, 'Skill execution failed'))
-      }
+    async run(_reference: string, _input: unknown): Promise<never> {
+      assertLegacyRunDisabled()
+      throw new ServiceError('LEGACY_SKILL_RUN_DISABLED', 'Legacy Skill execution is disabled')
     },
 
     listRuns(reference: string, limit = 20): any[] {
@@ -157,15 +146,6 @@ export function createLegacySkillAdapter(overrides: Partial<LegacySkillAdapterDe
     },
   }
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function messageOf(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
-}
-
 
 export type LegacySkillAdapter = ReturnType<typeof createLegacySkillAdapter>
 

@@ -1,4 +1,5 @@
 import { ServiceError } from '../../services/errors'
+import { isLegacySkillReference, toPackageSkillReference } from '../../../shared/skill-references'
 import type { JsonObject, PackageSkillRepository, RunSnapshot } from './ports'
 
 type ChatSessionRepository = {
@@ -23,6 +24,7 @@ type ChatRuntime = {
 
 export type ChatSkillReference = {
   packageId: string
+  packageReference: string
   packageName: string
   description: string
   skillVersionId: string
@@ -85,6 +87,7 @@ export function createChatSkillLauncher(dependencies: ChatSkillLauncherDependenc
           : []
         references.push({
           packageId: packageRecord.id,
+          packageReference: toPackageSkillReference(packageRecord.id),
           packageName: packageRecord.name,
           description: packageRecord.description,
           skillVersionId: version.id,
@@ -100,6 +103,12 @@ export function createChatSkillLauncher(dependencies: ChatSkillLauncherDependenc
     if (!dependencies.sessions.get(input.sessionId)) throw new ServiceError('NOT_FOUND', 'Chat session not found')
     if (!input.skillVersionId.trim()) throw new ServiceError('VALIDATION_ERROR', 'skillVersionId is required')
     if (!input.idempotencyKey.trim()) throw new ServiceError('VALIDATION_ERROR', 'idempotencyKey is required')
+    if (isLegacySkillReference(input.skillVersionId)) {
+      throw new ServiceError('LEGACY_SKILL_RUN_DISABLED', 'Legacy Skill execution is disabled; migrate it to a Package Skill before running', {
+        legacyReference: input.skillVersionId,
+        migrationAction: 'preview-legacy-skill-migration',
+      })
+    }
 
     const existing = await dependencies.runtime.findChatRunByIdempotency?.(input.sessionId, input.idempotencyKey)
     if (existing) {

@@ -6,16 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
 
-async function loadLegacySkills() {
+async function loadLegacyRuntime() {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
 
   const client = await import('../db/client')
   await client.runMigrations()
   const { skillRepo } = await import('../db/repositories/skill.repo')
-  const { runSkill } = await import('./run-skill')
+  const { skillPackageRepo } = await import('../db/repositories/skill-package.repo')
+  const { createSkillService } = await import('../services/skill.service')
 
-  return { skillRepo, runSkill }
+  return { skillRepo, skillPackageRepo, createSkillService }
 }
 
 describe('legacy skill runtime regression', () => {
@@ -32,72 +33,65 @@ describe('legacy skill runtime regression', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('runs js-function skills and stores successful runs', async () => {
-    const { skillRepo, runSkill } = await loadLegacySkills()
+  it('blocks js-function skills through the real service before creating a legacy run', async () => {
+    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
     const skill = skillRepo.create({
       name: 'Add',
       description: 'Adds two numbers',
       type: 'js-function',
       source: 'function run(input) { console.log("adding"); return { total: input.a + input.b } }',
     })
+    const service = createSkillService({ skillRepo, skillPackageRepo })
 
-    await expect(runSkill(skill.id, { a: 2, b: 3 })).resolves.toEqual({ total: 5, _logs: ['adding'] })
+    await expect(service.run(`legacy:${skill.id}`, { a: 2, b: 3 })).rejects.toMatchObject({
+      code: 'LEGACY_SKILL_RUN_DISABLED',
+    })
 
-    const runs = skillRepo.listRuns(skill.id)
-    expect(runs[0].status).toBe('success')
-    expect(JSON.parse(runs[0].output_json)).toEqual({ total: 5, _logs: ['adding'] })
+    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 
-  it('runs http-api skills without changing template interpolation behavior', async () => {
+  it('blocks http-api skills through the real service without making a network request', async () => {
     const fetchMock = vi.fn(async (url: string) => ({
       headers: { get: () => 'application/json' },
       json: async () => ({ requestedUrl: url }),
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { skillRepo, runSkill } = await loadLegacySkills()
+    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
     const skill = skillRepo.create({
       name: 'HTTP Echo',
       description: 'Echoes URL',
       type: 'http-api',
       source: JSON.stringify({ url: 'https://example.test/search?q={{query}}', method: 'GET' }),
     })
+    const service = createSkillService({ skillRepo, skillPackageRepo })
 
-    await expect(runSkill(skill.id, { query: 'hello world' })).resolves.toEqual({
-      requestedUrl: 'https://example.test/search?q=hello%20world',
+    await expect(service.run(`legacy:${skill.id}`, { query: 'hello world' })).rejects.toMatchObject({
+      code: 'LEGACY_SKILL_RUN_DISABLED',
     })
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.test/search?q=hello%20world',
-      expect.objectContaining({ method: 'GET' })
-    )
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 
-  it('runs prompt-template skills using the legacy Anthropic request shape', async () => {
+  it('blocks prompt-template skills through the real service before contacting the legacy model endpoint', async () => {
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ content: [{ text: 'Bonjour' }] }),
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { skillRepo, runSkill } = await loadLegacySkills()
-    const { settingsRepo } = await import('../db/repositories/settings.repo')
-    settingsRepo.setMany({ anthropic_api_key: 'test-key' })
+    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
     const skill = skillRepo.create({
       name: 'Translate',
       description: 'Translates text',
       type: 'prompt-template',
       source: 'Translate {{text}} to French.',
     })
+    const service = createSkillService({ skillRepo, skillPackageRepo })
 
-    await expect(runSkill(skill.id, { text: 'Hello' })).resolves.toEqual({
-      output: 'Bonjour',
-      prompt: 'Translate Hello to French.',
+    await expect(service.run(`legacy:${skill.id}`, { text: 'Hello' })).rejects.toMatchObject({
+      code: 'LEGACY_SKILL_RUN_DISABLED',
     })
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.anthropic.com/v1/messages',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ 'x-api-key': 'test-key' }),
-      })
-    )
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 })

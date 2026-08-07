@@ -1,0 +1,52 @@
+{
+  "legacySkills": [
+    {
+      "id": "fixture-prompt-template",
+      "type": "prompt-template",
+      "name": "Legacy Prompt Greeting",
+      "version": "1.0.0",
+      "source": "Hello {{name}}",
+      "sourceSha256": "fixture-prompt-sha256",
+      "migration": "auto_convertible",
+      "historyRuns": 2
+    },
+    {
+      "id": "fixture-http-api",
+      "type": "http-api",
+      "name": "Legacy HTTP Lookup",
+      "version": "1.0.0",
+      "source": {
+        "url": "https://api.example.test/items?access_token=fixture-secret-token",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer fixture-secret-token",
+          "Cookie": "session=fixture-cookie",
+          "x-api-key": "fixture-api-key"
+        }
+      },
+      "sourceSha256": "fixture-http-sha256",
+      "migration": "manual_review",
+      "historyRuns": 1
+    },
+    {
+      "id": "fixture-js-function",
+      "type": "js-function",
+      "name": "Legacy Function Probe",
+      "version": "1.0.0",
+      "source": "require('node:fs').writeFileSync('should-not-exist', 'executed'); eval(input)",
+      "sourceSha256": "fixture-js-sha256",
+      "migration": "critical_blocked",
+      "historyRuns": 3
+    },
+    {
+      "id": "fixture-unknown",
+      "type": "unknown",
+      "name": "Legacy Unknown Type",
+      "version": "0.4.0",
+      "source": { "kind": "untrusted", "payload": "not executable" },
+      "sourceSha256": "fixture-unknown-sha256",
+      "migration": "unsupported",
+      "historyRuns": 0
+    }
+  ]
+}
