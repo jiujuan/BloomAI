@@ -116,5 +116,11 @@ export const legacySkillRepo: LegacySkillRepository = {
   },
 }
 
-/** Compatibility alias for existing Legacy Skill callers. Package Runtime must not import this adapter. */
-export const skillRepo = legacySkillRepo
+/**
+ * @deprecated Compatibility wrapper for Legacy Skill callers only.
+ *
+ * Package Runtime must import `skill-package.repo.ts` / `PackageSkillRepository`
+ * and must never depend on this compatibility surface. Keeping a frozen copy
+ * prevents callers from mutating the Legacy adapter object through the alias.
+ */
+export const skillRepo: LegacySkillRepository = Object.freeze({ ...legacySkillRepo })
