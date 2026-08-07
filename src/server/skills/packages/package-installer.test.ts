@@ -152,6 +152,63 @@ describe('PackageInstaller', () => {
     expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
+  it('normalizes local and GitHub sources through one security boundary', async () => {
+    const { normalizePackageInstallSource, PackageInstallError } = await loadInstaller()
+
+    expect(normalizePackageInstallSource({
+      kind: 'local-directory',
+      directory: fixtureDir,
+      metadata: { token: 'do-not-persist' },
+    })).toEqual({
+      kind: 'local-directory',
+      directory: path.resolve(fixtureDir),
+      metadata: { token: '[REDACTED]' },
+    })
+
+    expect(normalizePackageInstallSource({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main',
+      subdirectory: 'skills',
+    })).toEqual({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main',
+      subdirectory: 'skills',
+    })
+
+    expect(() => normalizePackageInstallSource({ kind: 'local-directory', directory: 'relative/path' }))
+      .toThrow(PackageInstallError)
+    expect(() => normalizePackageInstallSource({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: '../main',
+    })).toThrow(PackageInstallError)
+  })
+
+  it('puts unknown capabilities into warning review instead of silently treating them as safe', async () => {
+    writeFile('risky/SKILL.md', `---
+name: Risky Skill
+capabilities:
+  unknown.capability: {}
+---
+# Risky Skill
+`)
+
+    const { PackageInstaller } = await loadInstaller()
+    const { packageInstallReviewService } = await import('./package-install-review.service')
+    const installer = new PackageInstaller()
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+
+    expect(inspected.packages[0].manifest.unsupported).toContain('capability:unknown.capability')
+    expect(packageInstallReviewService.get(inspected.reviewId)).toMatchObject({ status: 'warning' })
+    await expect(installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: false,
+    })).rejects.toThrow(/confirm/i)
+  })
+
   it('rejects a source that does not contain a SKILL.md entry point', async () => {
     writeFile('references/notes.md', '# Notes\n')
     const { PackageInstaller, PackageInstallError } = await loadInstaller()

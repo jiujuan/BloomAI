@@ -2,7 +2,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import type { PackageInstallSource } from './package-installer'
 import { sanitizeSecurityPayload, validateExternalSource } from '../security/skill-security-checklist'
 
-export type PackageImportReviewStatus = 'pending' | 'approved' | 'rejected' | 'installed'
+export type PackageImportReviewStatus = 'scanning' | 'validated' | 'warning' | 'pending' | 'approved' | 'rejected' | 'installed'
 
 export type PackageImportReview = {
   id: string
@@ -34,6 +34,7 @@ export class PackageInstallReviewService {
     sourceFingerprint: string
     inspection: Record<string, unknown>
     securityFindings?: Record<string, unknown>
+    status?: Extract<PackageImportReviewStatus, 'scanning' | 'validated' | 'warning' | 'pending'>
   }): PackageImportReview {
     const source = validateExternalSource(input.source) as PackageInstallSource
     const inspection = sanitizeReviewObject(input.inspection, 'inspection')
@@ -43,7 +44,7 @@ export class PackageInstallReviewService {
       sourceRef: sourceRef(source),
       inspection,
       securityFindings: sanitizeReviewObject(input.securityFindings ?? {}, 'security findings'),
-      status: 'pending',
+      status: input.status ?? 'pending',
     })
     return mapReview(row)
   }
@@ -79,7 +80,7 @@ export class PackageInstallReviewService {
     if (!confirm) throw new PackageInstallReviewError('REVIEW_NOT_APPROVED', 'Package install requires explicit confirmation')
     if (review.sourceSha !== sourceFingerprint) throw new PackageInstallReviewError('REVIEW_FINGERPRINT_MISMATCH', 'Package source fingerprint changed since inspection')
     if (review.status === 'rejected') throw new PackageInstallReviewError('REVIEW_REJECTED', 'Package import review was rejected')
-    if (review.status !== 'pending' && review.status !== 'approved' && review.status !== 'installed') {
+    if (!['scanning', 'validated', 'warning', 'pending', 'approved', 'installed'].includes(review.status)) {
       throw new PackageInstallReviewError('REVIEW_NOT_APPROVED', 'Package import review is not installable')
     }
     return review
