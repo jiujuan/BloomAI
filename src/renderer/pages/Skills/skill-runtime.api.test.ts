@@ -90,6 +90,22 @@ afterEach(() => {
 })
 
 describe('Package Runtime renderer API', () => {
+  it('unwraps the runtime diagnostics response envelope and calls the protected endpoint', async () => {
+    const diagnostics = {
+      health: { liveness: true, readiness: true, status: 'ready', checks: [] },
+      worker: { status: 'running', workerId: 'worker-1' },
+      queue: { depth: 0, queued: 0, leased: 0, retryWait: 0, dead: 0, lagMs: 0 },
+      migration: { current: '043', applied: ['043'], pending: [] },
+      policy: { version: 'skills-policy-v1.1', configVersion: '2026-08-06' },
+      recentFailures: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: diagnostics, meta: { requestId: 'req-diagnostics-1' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.getSkillRuntimeDiagnostics()).resolves.toEqual(diagnostics)
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/skill-runtime/diagnostics`, expect.any(Object))
+  })
+
   it('provides typed package, version, installation and run pagination without exposing DB row names', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [packageRow], meta: { limit: 2, offset: 4, total: 5, hasMore: false, nextOffset: null } }))

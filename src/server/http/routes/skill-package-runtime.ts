@@ -6,7 +6,8 @@ import { ServiceError } from '../../services/errors'
 import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
 import { getSkillRuntimeCapabilities } from '../../skills/config/skill-runtime.config'
 import { errorResponse } from '../dtos/skill-runtime.error'
-import { toPageMeta } from '../dtos/skill-runtime.dto'
+import { pageSuccess, successResponse } from '../dtos/skill-runtime.response'
+import { getRequestId } from '../request-context'
 
 const jsonObjectSchema = z.record(z.unknown())
 const idSchema = z.string().min(1).max(200)
@@ -82,151 +83,151 @@ const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_inp
 export const skillPackageRuntimeRoutes = new Hono()
 
 skillPackageRuntimeRoutes.get('/skill-runtime/capabilities', (c) => {
-  return c.json({ data: getSkillRuntimeCapabilities() })
+  return successResponse(c, getSkillRuntimeCapabilities())
 })
 
 skillPackageRuntimeRoutes.post('/skill-packages/inspect', async (c) => {
-  try { return c.json({ data: await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source)) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-packages/install', async (c) => {
   try {
     const input = await readValidated(c, packageInstallSchema)
-    return c.json({ data: await skillPackageRuntimeService.installPackage(input.source, input) }, 201)
+    return successResponse(c, await skillPackageRuntimeService.installPackage(input.source, input), 201)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-import-reviews/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getImportReview(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.getImportReview(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/approve', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return c.json({ data: skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), input.reviewer) })
+    return successResponse(c, skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), input.reviewer))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/reject', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return c.json({ data: skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), input.reviewer, input.reason) })
+    return successResponse(c, skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), input.reviewer, input.reason))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   try {
     const page = paginationSchema.parse(c.req.query())
     const result = skillPackageRuntimeService.listPackages(page)
-    return c.json({ data: result.data, meta: toPageMeta(page, result.total) })
+    return pageSuccess(c, result.data, page, result.total)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-installations', (c) => {
   try {
     const page = paginationSchema.parse(c.req.query())
     const result = skillPackageRuntimeService.listInstallations(page)
-    return c.json({ data: result.data.map(toInstallationHttpDto), meta: toPageMeta(page, result.total) })
+    return pageSuccess(c, result.data.map(toInstallationHttpDto), page, result.total)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-packages/:id', async (c) => {
   try {
     const input = await readValidated(c, packageDeleteSchema)
-    return c.json({ data: skillPackageRuntimeService.deletePackage(idSchema.parse(c.req.param('id')), input) })
+    return successResponse(c, skillPackageRuntimeService.deletePackage(idSchema.parse(c.req.param('id')), input))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
-  try { return c.json({ data: toPackageDetailHttpDto(skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id')))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, toPackageDetailHttpDto(skillPackageRuntimeService.getPackageDetail(idSchema.parse(c.req.param('id'))))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages/:id/versions', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.listVersions(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.listVersions(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-versions/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getVersion(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.getVersion(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-versions/:id/diff', (c) => {
   try {
     const toVersionId = idSchema.parse(c.req.query('toVersionId'))
-    return c.json({ data: skillPackageRuntimeService.diffVersions(idSchema.parse(c.req.param('id')), toVersionId) })
+    return successResponse(c, skillPackageRuntimeService.diffVersions(idSchema.parse(c.req.param('id')), toVersionId))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-packages/:id/update/preview', async (c) => {
   try {
     const candidate = await readValidated(c, versionCandidateSchema)
-    return c.json({ data: await skillPackageRuntimeService.previewVersionUpdate(idSchema.parse(c.req.param('id')), candidate) })
+    return successResponse(c, await skillPackageRuntimeService.previewVersionUpdate(idSchema.parse(c.req.param('id')), candidate))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-packages/:id/update', async (c) => {
   try {
     const { confirm: _confirm, ...candidate } = await readValidated(c, versionUpdateSchema)
-    return c.json({ data: await skillPackageRuntimeService.updatePackageVersion(idSchema.parse(c.req.param('id')), candidate) }, 201)
+    return successResponse(c, await skillPackageRuntimeService.updatePackageVersion(idSchema.parse(c.req.param('id')), candidate), 201)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
   try {
     const input = await readValidated(c, installationUpdateSchema)
     const installation = skillPackageRuntimeService.setInstallationEnabledWithRevision(idSchema.parse(c.req.param('id')), input.enabled, input)
-    return c.json({ data: toInstallationHttpDto(installation) })
+    return successResponse(c, toInstallationHttpDto(installation))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-installations/:id/switch-version', async (c) => {
   try {
     const input = await readValidated(c, versionSwitchSchema)
-    return c.json({ data: toInstallationHttpDto(skillPackageRuntimeService.switchCurrentVersion(idSchema.parse(c.req.param('id')), input.versionId, input)) })
+    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.switchCurrentVersion(idSchema.parse(c.req.param('id')), input.versionId, input)))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/approve', async (c) => {
   try {
     const input = await readValidated(c, grantApproveSchema)
-    return c.json({ data: skillPackageRuntimeService.approveCapabilityGrant(idSchema.parse(c.req.param('id')), input) })
+    return successResponse(c, skillPackageRuntimeService.approveCapabilityGrant(idSchema.parse(c.req.param('id')), input))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/reject', async (c) => {
   try {
     const input = await readValidated(c, grantRejectSchema)
-    return c.json({ data: skillPackageRuntimeService.rejectCapabilityGrant(idSchema.parse(c.req.param('id')), input) })
+    return successResponse(c, skillPackageRuntimeService.rejectCapabilityGrant(idSchema.parse(c.req.param('id')), input))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/revoke', async (c) => {
   try {
     const input = await readValidated(c, grantRevokeSchema)
-    return c.json({ data: skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), input) })
+    return successResponse(c, skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), input))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-installations/:id/rollback', async (c) => {
   try {
     const input = await readValidated(c, installationRollbackSchema)
-    return c.json({ data: toInstallationHttpDto(skillPackageRuntimeService.rollbackInstallation(idSchema.parse(c.req.param('id')), input)) })
+    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.rollbackInstallation(idSchema.parse(c.req.param('id')), input)))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-installations/:id', async (c) => {
   try {
     const input = await readValidated(c, installationUninstallSchema)
-    return c.json({ data: { uninstalled: true, installation: toInstallationHttpDto(skillPackageRuntimeService.uninstallInstallation(idSchema.parse(c.req.param('id')), input)) } })
+    return successResponse(c, { uninstalled: true, installation: toInstallationHttpDto(skillPackageRuntimeService.uninstallInstallation(idSchema.parse(c.req.param('id')), input)) })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs', async (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.startRun(await readValidated(c, createRunSchema)) }, 201) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.startRun(await readValidated(c, createRunSchema)), 201) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
   try {
     const page = paginationSchema.extend({ status: runStatusSchema.optional(), skillVersionId: idSchema.optional() }).parse(c.req.query())
     const result = skillPackageRuntimeService.listRuns(page)
-    return c.json({ data: result.data, meta: toPageMeta(page, result.total) })
+    return pageSuccess(c, result.data, page, result.total)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/next-action', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getRunNextAction(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.getRunNextAction(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getRun(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.getRun(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/capabilities', (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.getRunCapabilities(idSchema.parse(c.req.param('id'))) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.getRunCapabilities(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/events', (c) => {
   try {
     const id = idSchema.parse(c.req.param('id'))
     const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(c.req.query())
     const events = skillPackageRuntimeService.listRunEvents(id, afterSeq)
-    return c.json({ data: events, meta: { afterSeq } })
+    return successResponse(c, events, 200, { afterSeq })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/stream', (c) => {
@@ -246,31 +247,33 @@ skillPackageRuntimeRoutes.get('/skill-runs/:id/stream', (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs/:id/commands', async (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.executeRunCommand(idSchema.parse(c.req.param('id')), await readValidated(c, commandSchema)) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.executeRunCommand(idSchema.parse(c.req.param('id')), await readValidated(c, commandSchema))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs/:id/cancel', async (c) => {
-  try { return c.json({ data: skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), await readValidated(c, cancelSchema)) }) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), await readValidated(c, cancelSchema))) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/artifacts', (c) => {
   try {
     const runId = idSchema.parse(c.req.param('id'))
     const rawQuery = c.req.query()
-    if (Object.keys(rawQuery).length === 0) return c.json({ data: skillPackageRuntimeService.listRunArtifacts(runId) })
+    if (Object.keys(rawQuery).length === 0) return successResponse(c, skillPackageRuntimeService.listRunArtifacts(runId))
     const query = artifactListQuerySchema.parse(rawQuery)
     const page = skillPackageRuntimeService.listRunArtifacts(runId, query)
-    return c.json({ data: page.data, meta: { total: page.total, limit: page.limit, offset: page.offset, nextOffset: page.nextOffset } })
+    return pageSuccess(c, page.data, { limit: page.limit, offset: page.offset }, page.total)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
   try {
     const content = skillPackageRuntimeService.readArtifactContent(idSchema.parse(c.req.param('id')), artifactContentQuerySchema.parse(c.req.query()).runId)
-    return new Response(Uint8Array.from(content.content), { headers: { 'Content-Type': content.mimeType } })
+    const response = new Response(Uint8Array.from(content.content), { headers: { 'Content-Type': content.mimeType } })
+     response.headers.set('x-request-id', getRequestId(c))
+     return response
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-artifacts/:id/export', async (c) => {
   try {
     const body = await readValidated(c, artifactExportSchema)
-    return c.json({ data: { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir, body) } })
+    return successResponse(c, { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir, body) })
   } catch (error) { return errorResponse(c, error) }
 })
 

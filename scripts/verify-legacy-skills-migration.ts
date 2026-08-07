@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     const responseBodies: any[] = []
     const requestJson = async (route: string, init: RequestInit = {}): Promise<JsonResponse> => {
       const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
-        headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+        headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init.headers ?? {}) },
         ...init,
       })
       let body: any = null

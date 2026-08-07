@@ -389,6 +389,12 @@ export type DraftPreview = {
 }
 
 export type SkillRuntimeCapabilities = {
+  operationalStatus: 'ready' | 'degraded' | 'disabled'
+  statusReason: 'runtime_ready' | 'package_execution_disabled' | 'runtime_disabled' | string
+  canManage: boolean
+  canExecute: boolean
+  sourcePolicy: { allowedKinds: string[] }
+  capabilityPolicy: { allowedCapabilities: string[] }
   protocolVersion: string
   configVersion: string
   runtimeEnabled: boolean
@@ -399,6 +405,53 @@ export type SkillRuntimeCapabilities = {
   creatorEnabled: boolean
   creatorPublishEnabled: boolean
   limits: Record<string, number>
+}
+
+export type SkillRuntimeDiagnosticsHealth = {
+  liveness: boolean
+  readiness: boolean
+  status: 'ready' | 'not_ready' | 'degraded' | string
+  checks: Array<{ name: string; status: 'ok' | 'warning' | 'failed' | string; message?: string }>
+}
+
+export type SkillRuntimeDiagnosticsSnapshot = {
+  /** Present in the HTTP contract; the UI does not render this value. */
+  generatedAt?: number
+  health: SkillRuntimeDiagnosticsHealth
+  worker: {
+    status: string
+    workerId?: string | null
+    heartbeatAt?: number | null
+    activeRuns?: number
+    concurrency?: number
+  }
+  queue: {
+    depth: number
+    queued: number
+    leased: number
+    retryWait: number
+    dead: number
+    lagMs: number
+  }
+  migration: {
+    current: string | null
+    applied: string[]
+    pending: string[]
+  }
+  policy: {
+    version: string
+    configVersion: string
+  }
+  /** The renderer intentionally receives only safe failure metadata. */
+  recentFailures: Array<{
+    runId?: string
+    status?: string
+    errorCode?: string | null
+    errorMessage?: string | null
+    updatedAt?: number
+  }>
+  /** Optional server metrics are kept out of the P0 UI surface. */
+  metrics?: Record<string, unknown>
 }
 
 export function parseJson<T>(value: string | null | undefined, fallback: T): T {

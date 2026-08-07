@@ -18,6 +18,8 @@
 | [Migration schema snapshot](./migration-schema-snapshot.md) | migration ids、表、索引、不变量 | `npm run test:skills:migration` | ☐ |
 | [Security scan](./security-scan.md) | P0 安全 negative cases 和脱敏 | `npm run test:skills:security` | ☐ |
 | [Release gate](./release-gate.md) | 完整发布门禁、浏览器 trace/video、回滚演练 | `npm run test:skills:release-gate` | ☐ |
+| [P0 baseline](./p0-baseline.md) | SKL12-P0-001 至 SKL12-P0-003：源码、Legacy 依赖、Runtime/权限/DTO 契约 | `npx tsx scripts/skills/p0-baseline-scan.ts --root .` | ✅ captured |
+| [P0 DB inventory](./p0-db-inventory.json) | SKL12-P0-004：schema、行数、外键、孤儿、migration、备份和删除决策 | `npx tsx scripts/skills/p0-db-inventory.ts --database <real-db> --backup` | ✅ captured |
 
 ## 证据最小字段
 

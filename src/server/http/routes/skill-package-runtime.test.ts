@@ -33,8 +33,8 @@ function writeFixture(relativePath: string, content: string) {
 
 async function requestJson(app: { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }, route: string, init?: RequestInit) {
   const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init?.headers ?? {}) },
   })
   return { response, body: await response.json() as any }
 }
@@ -110,7 +110,15 @@ describe('Skill Package Runtime HTTP API', () => {
     })
 
     expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' } })
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request body must be valid JSON',
+        details: {},
+        retryable: false,
+        requestId: expect.any(String),
+      },
+    })
   })
 
   it('inspects without persistence and installs packages', async () => {
@@ -243,7 +251,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const revoked = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })
     expect(revoked.response.status).toBe(200)
-    expect(revoked.body).toEqual({ data: { revoked: true } })
+    expect(revoked.body).toMatchObject({ data: { revoked: true }, meta: { requestId: expect.any(String) } })
     expect((await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })).response.status).toBe(404)
 
     const after = await requestJson(app, '/skill-packages/' + pkg.id)
@@ -313,7 +321,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const events = await requestJson(app, `/skill-runs/${runId}/events?afterSeq=1`)
     expect(events.response.status).toBe(200)
-    expect(events.body.meta).toEqual({ afterSeq: 1 })
+    expect(events.body.meta).toMatchObject({ afterSeq: 1, requestId: expect.any(String) })
     expect(events.body.data).toHaveLength(1)
     expect(events.body.data[0]).toMatchObject({ seq: 2, type: 'run.status_changed' })
 
@@ -579,8 +587,10 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(legacyPackageRun.response.status).toBe(409)
     expect(legacyPackageRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
     expect(legacyPackageRun.body.error).toMatchObject({
-      legacyReference: `legacy:${legacy.id}`,
-      migrationAction: 'preview-legacy-skill-migration',
+      details: {
+        legacyReference: `legacy:${legacy.id}`,
+        migrationAction: 'preview-legacy-skill-migration',
+      },
     })
 
     const counts = () => ({

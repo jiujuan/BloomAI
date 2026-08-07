@@ -1,4 +1,7 @@
 import { Hono } from 'hono'
+import { errorResponse } from '../dtos/skill-runtime.error'
+import { successResponse } from '../dtos/skill-runtime.response'
+import { ServiceError } from '../../services/errors'
 import type { Context } from 'hono'
 import {
   getRuntimeDiagnostics,
@@ -31,14 +34,22 @@ export function createSkillRuntimeObservabilityRoutes(
   const isAdmin = options.isAdmin ?? defaultIsAdmin
 
   routes.get('/skill-runtime/health', async (context) => {
-    return context.json({ data: await health(context) })
+    try {
+      return successResponse(context, await health(context))
+    } catch (error) {
+      return errorResponse(context, error)
+    }
   })
 
   routes.get('/skill-runtime/diagnostics', async (context) => {
     if (!(await isAdmin(context))) {
-      return context.json({ error: { code: 'FORBIDDEN', message: 'Administrator access required' } }, 403)
+      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator access required'))
     }
-    return context.json({ data: await diagnostics(context) })
+    try {
+      return successResponse(context, await diagnostics(context))
+    } catch (error) {
+      return errorResponse(context, error)
+    }
   })
 
   return routes

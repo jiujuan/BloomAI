@@ -5,7 +5,7 @@ export type HttpErrorStatus = 400 | 403 | 404 | 409 | 422 | 429 | 500 | 502
 
 export type HttpErrorResponse = {
   status: HttpErrorStatus
-  body: { error: { code: ServiceErrorCode; message: string } & ServiceErrorDetails }
+  body: { error: { code: ServiceErrorCode; message: string; details?: ServiceErrorDetails; retryable?: boolean; requestId?: string } }
 }
 
 type HttpErrorLogger = (
@@ -61,21 +61,46 @@ const STATUS_BY_SERVICE_ERROR: Record<ServiceErrorCode, HttpErrorStatus> = {
   INTERNAL_ERROR: 500,
 }
 
+const RETRYABLE_SERVICE_ERRORS = new Set<ServiceErrorCode>([
+  'EXTERNAL_SERVICE_ERROR',
+  'RATE_LIMITED',
+])
+
+function stableErrorBody(
+  code: ServiceErrorCode,
+  message: string,
+  details: ServiceErrorDetails | undefined,
+  requestId: string | undefined,
+) {
+  if (!requestId) {
+    return { error: { code, message, ...(details ?? {}) } }
+  }
+  return {
+    error: {
+      code,
+      message,
+      details: details ?? {},
+      retryable: RETRYABLE_SERVICE_ERRORS.has(code),
+      requestId,
+    },
+  }
+}
+
 /**
  * Converts application failures into the stable HTTP error envelope without
  * coupling services to Hono or HTTP status codes.
  */
-export function mapErrorToHttpResponse(error: unknown): HttpErrorResponse {
+export function mapErrorToHttpResponse(error: unknown, requestId?: string): HttpErrorResponse {
   if (isServiceError(error)) {
     return {
       status: STATUS_BY_SERVICE_ERROR[error.code],
-      body: { error: { code: error.code, message: error.message, ...error.details } },
+      body: stableErrorBody(error.code, error.message, error.details, requestId),
     }
   }
 
   return {
     status: 500,
-    body: { error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } },
+    body: stableErrorBody('INTERNAL_ERROR', 'Internal server error', undefined, requestId),
   }
 }
 
@@ -86,7 +111,9 @@ export function mapErrorToHttpResponse(error: unknown): HttpErrorResponse {
 export function createHttpErrorHandler(logError: HttpErrorLogger) {
   return (error: Error, context: Context) => {
     logError('http.error', error, { method: context.req.method, path: context.req.path })
-    const response = mapErrorToHttpResponse(error)
+    const requestId = context.get('requestId' as never) as string | undefined
+    const response = mapErrorToHttpResponse(error, requestId)
+    if (requestId) context.header('x-request-id', requestId)
     return context.json(response.body, response.status)
   }
 }

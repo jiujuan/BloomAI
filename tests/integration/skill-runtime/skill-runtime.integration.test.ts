@@ -33,8 +33,8 @@ async function loadRuntimeApi() {
 
 async function requestJson(app: { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }, route: string, init?: RequestInit) {
   const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init?.headers ?? {}) },
   })
   return { response, body: await response.json() as any }
 }

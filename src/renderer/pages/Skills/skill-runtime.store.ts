@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform, SkillRuntimeApiError } from '@renderer/api'
-import type { CapabilityDto, DraftDto, InspectedPackage, PackageDetail, PackageInstallInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillVersion, VersionCandidate } from './skill-runtime.types'
+import type { CapabilityDto, DraftDto, InspectedPackage, PackageDetail, PackageInstallInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillVersion, VersionCandidate } from './skill-runtime.types'
 
 function makeIdempotencyKey(operation: string) {
   return `${operation}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -107,6 +107,9 @@ type RuntimeState = {
   drafts: Record<string, DraftDto>
   pendingMutations: Record<string, boolean>
   capabilities: SkillRuntimeCapabilities | null
+  diagnostics: SkillRuntimeDiagnosticsSnapshot | null
+  diagnosticsLoading: boolean
+  diagnosticsError: string | null
   loading: boolean
   error: string | null
   errorDetails: RuntimeError | null
@@ -119,6 +122,7 @@ type RuntimeState = {
 type RuntimeActions = {
   clearError: () => void
   loadCapabilities: () => Promise<SkillRuntimeCapabilities>
+  loadDiagnostics: () => Promise<SkillRuntimeDiagnosticsSnapshot>
   loadPackages: (input?: PaginationInput) => Promise<Page<SkillPackage>>
   loadPackage: (id: string) => Promise<PackageDetail>
   loadVersions: (packageId: string) => Promise<SkillVersion[]>
@@ -190,7 +194,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
 
   return {
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [], runs: [], runPage: null, selectedRun: null,
-    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, pendingMutations: {}, capabilities: null, loading: false, error: null, errorDetails: null,
+    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, pendingMutations: {}, capabilities: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
     runEvents: [], runArtifacts: [],
     clearError: () => set({ error: null, errorDetails: null }),
     loadCapabilities: async () => {
@@ -201,6 +205,18 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         set({ error: details.message, errorDetails: details })
+        throw error
+      }
+    },
+    loadDiagnostics: async () => {
+      set({ diagnosticsLoading: true, diagnosticsError: null })
+      try {
+        const diagnostics = await platform.getSkillRuntimeDiagnostics()
+        set({ diagnostics, diagnosticsLoading: false, diagnosticsError: null })
+        return diagnostics
+      } catch (error) {
+        const details = asRuntimeError(error)
+        set({ diagnosticsLoading: false, diagnosticsError: details.message, error: details.message, errorDetails: details })
         throw error
       }
     },

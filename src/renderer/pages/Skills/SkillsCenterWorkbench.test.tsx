@@ -2,9 +2,9 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import './skills-center.e2e'
-import type { SkillPackage, SkillRun, SkillInstallation } from './skill-runtime.types'
+import type { SkillPackage, SkillRun, SkillInstallation, SkillRuntimeCapabilities } from './skill-runtime.types'
 import type { Skill } from './skills.store'
-import { SkillsCenterWorkbench, buildSkillRows, filterSkillRows, encodeSkillsCenterState, decodeSkillsCenterState } from './SkillsCenterWorkbench'
+import { SkillsCenterWorkbench, buildSkillRows, filterSkillRows, encodeSkillsCenterState, decodeSkillsCenterState, getRuntimeStatusLabel, hasRuntimeManagementCapability } from './SkillsCenterWorkbench'
 
 const packageItem: SkillPackage = {
   id: 'pkg-1', name: 'Research Package', description: 'Package description', sourceType: 'github', sourceUri: 'https://github.com/acme/research', sourceRef: 'abc123',
@@ -43,6 +43,15 @@ describe('Skills Center workbench contract', () => {
     expect(filterSkillRows(rows, { query: '', source: 'legacy', runtime: 'all', status: 'all' }).map((row) => row.id)).toEqual(['legacy-1'])
     expect(filterSkillRows(rows, { query: '', source: 'all', runtime: 'legacy', status: 'all' }).map((row) => row.id)).toEqual(['legacy-1'])
     expect(filterSkillRows(rows, { query: '', source: 'all', runtime: 'all', status: 'disabled' })).toEqual([])
+  })
+
+  it('projects runtime state and gates diagnostics on the management capability', () => {
+    expect(getRuntimeStatusLabel(null)).toBe('Runtime Checking')
+    expect(getRuntimeStatusLabel({ operationalStatus: 'disabled' })).toBe('Runtime Disabled')
+    expect(getRuntimeStatusLabel({ operationalStatus: 'degraded' })).toBe('Runtime Degraded')
+    expect(getRuntimeStatusLabel({ operationalStatus: 'ready' })).toBe('Runtime Ready')
+    expect(hasRuntimeManagementCapability({ canManage: false })).toBe(false)
+    expect(hasRuntimeManagementCapability({ canManage: true })).toBe(true)
   })
 
   it('serializes only non-secret selected resource state for refresh recovery', () => {

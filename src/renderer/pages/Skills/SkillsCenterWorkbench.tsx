@@ -3,7 +3,7 @@ import { AlertTriangle, Filter, Github, Plus, Puzzle, Search, SlidersHorizontal 
 import { useSkillsStore } from './skills.store'
 import type { Skill } from './skills.store'
 import { useSkillRuntimeStore } from './skill-runtime.store'
-import type { InspectedPackage, PackageManifest, SkillInstallation, SkillPackage, SkillRun, SkillRuntimeFilterStatus, SkillRuntimeSourceFilter, SkillVersion } from './skill-runtime.types'
+import type { InspectedPackage, PackageManifest, SkillInstallation, SkillPackage, SkillRun, SkillRuntimeCapabilities, SkillRuntimeFilterStatus, SkillRuntimeSourceFilter, SkillVersion } from './skill-runtime.types'
 import { PackageDetailDrawer } from './PackageDetailDrawer'
 import { PackageInstallDialog } from './PackageInstallDialog'
 import { RunDetailDrawer, RunSkillDialog } from './RunDetailDrawer'
@@ -13,6 +13,7 @@ import { SkillOverviewPanel } from './SkillOverviewPanel'
 import { SkillVersionPanel } from './SkillVersionPanel'
 import { SkillsSidebar } from './SkillsSidebar'
 import { SkillCreatorWorkbench } from './SkillCreatorWorkbench'
+import { SkillRuntimeDiagnostics } from './SkillRuntimeDiagnostics'
 import { cn } from '@renderer/utils'
 
 export type SkillsCenterTab = 'installed' | 'available' | 'runs' | 'drafts' | 'creator'
@@ -87,6 +88,17 @@ export function decodeSkillsCenterState(hash: string): SkillsCenterRouteState {
   return { tab, selectedPackageId: values.get('package') || undefined, selectedRunId: values.get('run') || undefined, draftId: values.get('draft') || undefined }
 }
 
+export function getRuntimeStatusLabel(capabilities: Pick<SkillRuntimeCapabilities, 'operationalStatus'> | null) {
+  if (!capabilities) return 'Runtime Checking'
+  if (capabilities.operationalStatus === 'ready') return 'Runtime Ready'
+  if (capabilities.operationalStatus === 'disabled') return 'Runtime Disabled'
+  return 'Runtime Degraded'
+}
+
+export function hasRuntimeManagementCapability(capabilities: Pick<SkillRuntimeCapabilities, 'canManage'> | null) {
+  return capabilities?.canManage === true
+}
+
 export function SkillsCenterWorkbench() {
   const legacy = useSkillsStore()
   const runtime = useSkillRuntimeStore()
@@ -96,9 +108,15 @@ export function SkillsCenterWorkbench() {
   const [runVersion, setRunVersion] = useState<SkillVersion | null>(null)
 
   const tab = route.tab || 'installed'
+  const canManageRuntime = hasRuntimeManagementCapability(runtime.capabilities)
+  const runtimeStatus = runtime.capabilities?.operationalStatus ?? 'degraded'
+  const runtimeStatusLabel = getRuntimeStatusLabel(runtime.capabilities)
   useEffect(() => {
     void Promise.allSettled([legacy.loadInstalled(), legacy.loadMarket(), runtime.loadPackages(), runtime.loadRuns()])
   }, [])
+  useEffect(() => {
+    if (canManageRuntime) void runtime.loadDiagnostics().catch(() => undefined)
+  }, [canManageRuntime])
   useEffect(() => {
     if (typeof window !== 'undefined') window.history.replaceState(null, '', encodeSkillsCenterState(route))
   }, [route])
@@ -165,7 +183,8 @@ export function SkillsCenterWorkbench() {
   }
 
   return <div className="skills-center" data-testid="skills-center-workbench">
-    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">安装、运行、权限与 Artifact 的统一控制台</span></div></div><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-tbtn" onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
+    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">安装、运行、权限与 Artifact 的统一控制台</span></div></div><div className="skills-center-topbar-tools"><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="搜索名称、来源、运行状态…" /></div></div><button type="button" className="skills-tbtn" onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
+    {canManageRuntime && <SkillRuntimeDiagnostics diagnostics={runtime.diagnostics} loading={runtime.diagnosticsLoading} error={runtime.diagnosticsError} onRefresh={() => void runtime.loadDiagnostics().catch(() => undefined)} />}
     <div className="skills-center-layout"><SkillsSidebar tab={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main"><div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>Runtime<select value={filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>{runtime.error && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{runtime.error}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}
       {tab === 'drafts' && <DraftsPanel drafts={runtime.drafts} onCreate={createDraft} onOpenDraft={(id) => setRoute({ tab: 'creator', draftId: id })} onOpenCreator={openCreator} />}
       {tab === 'creator' && <SkillCreatorWorkbench draftId={route.draftId || null} onCreated={createDraft} />}

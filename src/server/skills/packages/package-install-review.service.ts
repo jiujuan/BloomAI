@@ -86,7 +86,7 @@ export class PackageInstallReviewService {
   }
 
   markInstalled(id: string, result: Record<string, unknown>): PackageImportReview {
-    const decision = sanitizeReviewObject({ action: 'install', result }, 'decision')
+    const decision = sanitizeReviewDecision({ action: 'install', result }, 'decision')
     const row = skillPackageRepo.updateImportReview(id, { status: 'installed', decision: JSON.stringify(decision) })
     if (!row) throw new PackageInstallReviewError('REVIEW_NOT_FOUND', `Import review not found: ${id}`)
     return mapReview(row)
@@ -105,7 +105,7 @@ function mapReview(row: any): PackageImportReview {
     securityFindings: parseJsonObject(row.security_findings_json ?? '{}'),
     status: row.status as PackageImportReviewStatus,
     reviewer: row.reviewer ?? null,
-    decision: row.decision ? parseJsonObject(row.decision) : null,
+    decision: row.decision ? parseJsonObject(row.decision, 'decision') : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -121,10 +121,20 @@ function parseJsonObject(value: string, fieldName = 'stored review payload'): Re
   try {
     const parsed = JSON.parse(value)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return sanitizeReviewObject(parsed as Record<string, unknown>, fieldName)
+    return fieldName === 'decision'
+      ? sanitizeReviewDecision(parsed as Record<string, unknown>, fieldName)
+      : sanitizeReviewObject(parsed as Record<string, unknown>, fieldName)
   } catch {
     return {}
   }
+}
+
+function sanitizeReviewDecision(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {
+  const { result, ...metadata } = value
+  const sanitizedMetadata = sanitizeReviewObject(metadata, fieldName)
+  if (result === undefined) return sanitizedMetadata
+  const sanitizedResult = sanitizeReviewObject(result as Record<string, unknown>, `${fieldName}.result`)
+  return { ...sanitizedMetadata, result: sanitizedResult }
 }
 
 function sanitizeReviewObject(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {

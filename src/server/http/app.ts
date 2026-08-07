@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logError, serverLogger } from '../logger/logger'
 import { createHttpErrorHandler } from './error-mapper'
+import { requestIdMiddleware } from './request-context'
+import { skillAuthorizationMiddleware } from './skills-policy'
 import { getTracer, SpanStatusCode } from '../telemetry/tracer'
 import { getMeter } from '../telemetry/metrics'
 import { chatRoutes } from './routes/chat'
@@ -35,6 +37,7 @@ export type HonoAppOptions = {
 
 export function createHonoApp(options: HonoAppOptions = {}): Hono {
   const app = new Hono()
+  app.use('*', requestIdMiddleware)
   const httpTracer = getTracer('bloomai.http')
   // Lazily created on first request 鈥?after initMetrics() has registered the global MeterProvider.
   let _httpDuration: ReturnType<ReturnType<typeof getMeter>['createHistogram']> | null = null
@@ -47,6 +50,10 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono {
     await next()
   })
   app.use('*', cors({ origin: (origin) => isAllowedBrowserOrigin(origin) ? origin : undefined }))
+  // Skills authorization is deliberately scoped to the v1 API. Unknown paths
+  // are left to their owning route module, while Package Runtime operations
+  // fail closed to the user role when no role header is present.
+  app.use('/api/v1/*', skillAuthorizationMiddleware())
 
   // HTTP trace span 鈥?must come before the access-log middleware so the span wraps the full request.
   app.use('*', async (c, next) => {

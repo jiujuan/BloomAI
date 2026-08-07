@@ -47,8 +47,8 @@ function writeFixture(relativePath: string, content: string) {
 
 async function requestJson(app: { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }, route: string, init?: RequestInit) {
   const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init?.headers ?? {}) },
   })
   return { response, body: await response.json() as any }
 }
@@ -66,11 +66,12 @@ async function waitForJob(app: { request: (input: RequestInfo | URL, init?: Requ
 
 describe('article illustration end-to-end acceptance', () => {
   beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-article-e2e-data-'))
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-article-e2e-data-'))
     fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-article-e2e-fixture-'))
     uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-article-e2e-upload-'))
     exportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bloomai-article-e2e-export-'))
     originalEnv = { ...process.env }
+    process.env.SKILL_EXPORT_ROOT = exportDir
     generationAttempt = 0
     generateForSessionMock.mockClear()
   })
@@ -106,15 +107,23 @@ Create an editable illustration plan before generating images.
 
     const { app, client, skillPackageRepo, imageStudioService } = await loadApi()
     vi.spyOn(imageStudioService, 'generateForSession').mockImplementation(generateForSessionMock)
-    const installed = await requestJson(app, '/skill-packages/install', {
+    const inspected = await requestJson(app, '/skill-packages/inspect', {
       method: 'POST',
       body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }),
+    })
+    expect(inspected.response.status).toBe(200)
+    const installed = await requestJson(app, '/skill-packages/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: { kind: 'local-directory', directory: fixtureDir },
+        reviewId: inspected.body.data.reviewId,
+        sourceFingerprint: inspected.body.data.sourceFingerprint,
+        confirm: true,
+      }),
     })
     expect(installed.response.status).toBe(201)
     expect(installed.body.data).toMatchObject({ status: 'awaiting_permission_review', packages: [expect.objectContaining({ relativeSkillPath: 'article-illustrator' })] })
 
-    // The Vitest setup closes SQLite when temporary Package staging paths are removed; reopen the same test database before simulating approval.
-    await client.runMigrations()
 
     const fixture = installed.body.data.packages[0]
     skillPackageRepo.createInstallation({ packageId: fixture.packageId, currentVersionId: fixture.versionId, status: 'installed', enabled: true })
@@ -129,7 +138,7 @@ Create an editable illustration plan before generating images.
     expect(eligible.response.status).toBe(200)
     expect(eligible.body.data).toContainEqual(expect.objectContaining({
       skillVersionId: fixture.versionId,
-      packageName: 'article-illustrator',
+      packageName: 'Article E2E Illustrator',
       activeImageGrant: expect.objectContaining({ maxCalls: 7, allowedModels: ['agnes-image-2.1-flash'] }),
     }))
 
@@ -184,7 +193,8 @@ Create an editable illustration plan before generating images.
     const artifactContent = await app.request(new URL(`/api/v1/skill-artifacts/${manifest.id}/content?runId=${encodeURIComponent(runId)}`, 'http://localhost'))
     expect(artifactContent.status).toBe(200)
     await expect(artifactContent.text()).resolves.toContain('# Illustrations')
-    const exported = await requestJson(app, `/skill-artifacts/${manifest.id}/export`, { method: 'POST', body: JSON.stringify({ runId, destinationDir: exportDir }) })
+    const exported = await requestJson(app, `/skill-artifacts/${manifest.id}/export`, { method: 'POST', body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, auditReason: 'article illustration E2E export' }) })
+
     expect(exported.response.status).toBe(200)
     expect(fs.readFileSync(exported.body.data.path, 'utf8')).toContain('# Illustrations')
 

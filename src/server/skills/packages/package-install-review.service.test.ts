@@ -52,4 +52,29 @@ describe('PackageInstallReviewService security boundary', () => {
     expect(rejected.decision).toMatchObject({ action: 'reject', reason: expect.stringContaining('[REDACTED]') })
     expect(JSON.stringify(rejected.decision)).not.toContain('do-not-persist')
   })
+
+  it('persists an install decision when the result reaches the payload depth limit', async () => {
+    const { PackageInstallReviewService } = await loadReviewService()
+    const service = new PackageInstallReviewService()
+    const review = service.create({
+      source: { kind: 'local-directory', directory: dataDir },
+      sourceFingerprint: 'b'.repeat(64),
+      inspection: { summary: 'safe' },
+    })
+    const result = {
+      status: 'awaiting_permission_review',
+      packages: [{
+        manifest: {
+          requestedCapabilities: [{
+            scope: { allowedModels: ['agnes-image-2.1-flash'] },
+          }],
+        },
+      }],
+    }
+
+    const installed = service.markInstalled(review.id, result)
+
+    expect(installed.decision).toEqual({ action: 'install', result })
+    expect(service.get(review.id).decision).toEqual({ action: 'install', result })
+  })
 })

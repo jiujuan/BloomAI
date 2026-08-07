@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { getDataDir, getDbPath } from '../../db/paths'
+import { skillCapabilitySchema } from '../policy/capability-policy'
 
 export const SKILL_RUNTIME_PROTOCOL_VERSION = '1.1'
 export const SKILL_RUNTIME_CONFIG_VERSION = '2026-08-05'
@@ -18,6 +19,19 @@ export const LEGACY_SKILL_LIFECYCLES = [
 ] as const
 
 export type LegacySkillLifecycle = (typeof LEGACY_SKILL_LIFECYCLES)[number]
+
+export type SkillRuntimeOperationalStatus = 'ready' | 'degraded' | 'disabled'
+
+export type SkillRuntimeOperationalSnapshot = {
+  status: SkillRuntimeOperationalStatus
+  reason: 'runtime_ready' | 'package_execution_disabled' | 'runtime_disabled'
+  canManage: boolean
+  canExecute: boolean
+}
+
+export const SKILL_RUNTIME_SOURCE_KINDS = ['local-directory', 'zip', 'github-archive'] as const
+
+export type SkillRuntimeSourceKind = (typeof SKILL_RUNTIME_SOURCE_KINDS)[number]
 
 export type SkillRuntimeConfig = {
   protocolVersion: string
@@ -57,6 +71,16 @@ export type SkillRuntimeFsAdapter = {
 }
 
 export type SkillRuntimeCapabilities = {
+  operationalStatus: SkillRuntimeOperationalStatus
+  statusReason: SkillRuntimeOperationalSnapshot['reason']
+  canManage: boolean
+  canExecute: boolean
+  sourcePolicy: {
+    allowedKinds: SkillRuntimeSourceKind[]
+  }
+  capabilityPolicy: {
+    allowedCapabilities: string[]
+  }
   protocolVersion: string
   configVersion: string
   runtimeEnabled: boolean
@@ -319,8 +343,46 @@ export function setSkillRuntimeConfigForTests(config: SkillRuntimeConfig | undef
   cachedEnvFingerprint = config ? runtimeEnvFingerprint() : undefined
 }
 
-export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): SkillRuntimeCapabilities {
+export function getSkillRuntimeOperationalStatus(config = getSkillRuntimeConfig()): SkillRuntimeOperationalSnapshot {
+  if (!config.runtimeEnabled) {
+    return {
+      status: 'disabled',
+      reason: 'runtime_disabled',
+      canManage: false,
+      canExecute: false,
+    }
+  }
+
+  if (!config.packageExecutionEnabled) {
+    return {
+      status: 'degraded',
+      reason: 'package_execution_disabled',
+      canManage: true,
+      canExecute: false,
+    }
+  }
+
   return {
+    status: 'ready',
+    reason: 'runtime_ready',
+    canManage: true,
+    canExecute: true,
+  }
+}
+
+export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): SkillRuntimeCapabilities {
+  const operational = getSkillRuntimeOperationalStatus(config)
+  return {
+    operationalStatus: operational.status,
+    statusReason: operational.reason,
+    canManage: operational.canManage,
+    canExecute: operational.canExecute,
+    sourcePolicy: {
+      allowedKinds: [...SKILL_RUNTIME_SOURCE_KINDS],
+    },
+    capabilityPolicy: {
+      allowedCapabilities: [...skillCapabilitySchema.options],
+    },
     protocolVersion: config.protocolVersion,
     configVersion: config.configVersion,
     runtimeEnabled: config.runtimeEnabled,

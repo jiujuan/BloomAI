@@ -19,7 +19,7 @@ beforeEach(() => {
   useSkillRuntimeStore.setState({
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [],
     runs: [], runPage: null, selectedRun: null, eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, drafts: {},
-    pendingMutations: {}, capabilities: null, loading: false, error: null,
+    pendingMutations: {}, capabilities: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
   })
 })
 
@@ -29,6 +29,26 @@ afterEach(() => {
 })
 
 describe('Package Runtime Zustand store', () => {
+  it('loads runtime diagnostics and tracks a failed refresh without losing the last snapshot', async () => {
+    const diagnostics = {
+      health: { liveness: true, readiness: true, status: 'ready', checks: [] },
+      worker: { status: 'running', workerId: 'worker-1' },
+      queue: { depth: 0, queued: 0, leased: 0, retryWait: 0, dead: 0, lagMs: 0 },
+      migration: { current: '043', applied: ['043'], pending: [] },
+      policy: { version: 'skills-policy-v1.1', configVersion: '2026-08-06' },
+      recentFailures: [],
+    }
+    const diagnosticsMock = vi.spyOn(platform, 'getSkillRuntimeDiagnostics').mockResolvedValue(diagnostics)
+
+    await expect(useSkillRuntimeStore.getState().loadDiagnostics()).resolves.toEqual(diagnostics)
+    expect(diagnosticsMock).toHaveBeenCalledTimes(1)
+    expect(useSkillRuntimeStore.getState()).toMatchObject({ diagnostics, diagnosticsLoading: false, diagnosticsError: null })
+
+    diagnosticsMock.mockRejectedValueOnce({ code: 'FORBIDDEN', message: 'administrator-only detail', status: 403, retryable: false })
+    await expect(useSkillRuntimeStore.getState().loadDiagnostics()).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 })
+    expect(useSkillRuntimeStore.getState()).toMatchObject({ diagnostics, diagnosticsLoading: false, diagnosticsError: 'administrator-only detail' })
+  })
+
   it('loads and deduplicates events while advancing the per-run cursor', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [event(1), event(2)], meta: { afterSeq: 0 } }))
