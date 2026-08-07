@@ -1,7 +1,9 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { skill_artifacts, skill_run_queue, skill_runs_v2 } from '../../db/schema'
 
 let dataDir: string
 let fixtureDir: string
@@ -260,7 +262,7 @@ describe('Skill Package Runtime HTTP API', () => {
     })
     skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
 
-    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: version.id, input: {} }) })
+    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: `package:${version.id}`, input: {} }) })
     expect(created.response.status).toBe(201)
     const runId = created.body.data.runId as string
 
@@ -294,7 +296,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const created = await requestJson(app, '/skill-runs', {
       method: 'POST',
-      body: JSON.stringify({ skillId: pkg.id, input: { article: 'Hello' }, context: { locale: 'zh-CN' } }),
+      body: JSON.stringify({ skillId: `package:${pkg.id}`, input: { article: 'Hello' }, context: { locale: 'zh-CN' } }),
     })
     expect(created.response.status).toBe(201)
     expect(created.body.data).toMatchObject({ status: 'validating', revision: 1 })
@@ -345,7 +347,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const response = await requestJson(app, '/skill-runs', {
       method: 'POST',
-      body: JSON.stringify({ skillVersionId: version.id, input: {} }),
+      body: JSON.stringify({ skillVersionId: `package:${version.id}`, input: {} }),
     })
     expect(response.response.status).toBe(404)
     expect(response.body.error.code).toBe('NOT_FOUND')
@@ -421,7 +423,7 @@ describe('Skill Package Runtime HTTP API', () => {
   it('disables new runs while preserving an existing run, then supports enable and rollback', async () => {
     const { app, skillPackageRepo } = await loadApi()
     const { pkg, version: current, installation } = createRunnableFixture(skillPackageRepo)
-    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: current.id, input: { beforeDisable: true } }) })
+    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: `package:${current.id}`, input: { beforeDisable: true } }) })
     expect(started.response.status).toBe(201)
     const runId = started.body.data.runId as string
 
@@ -433,7 +435,7 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(disabled.body.data).toMatchObject({ status: 'disabled', enabled: 0, revision: 1 })
     expect((await requestJson(app, `/skill-runs/${runId}`)).response.status).toBe(200)
 
-    const rejectedRun = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: current.id, input: { afterDisable: true } }) })
+    const rejectedRun = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: `package:${current.id}`, input: { afterDisable: true } }) })
     expect(rejectedRun.response.status).toBe(404)
 
     const enabled = await requestJson(app, `/skill-installations/${installation.id}`, {
@@ -489,7 +491,7 @@ describe('Skill Package Runtime HTTP API', () => {
   it('blocks package deletion while a Run is still active after uninstall', async () => {
     const { app, skillPackageRepo } = await loadApi()
     const { pkg, version, installation } = createRunnableFixture(skillPackageRepo)
-    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: version.id, input: {} }) })
+    const started = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: `package:${version.id}`, input: {} }) })
     expect(started.response.status).toBe(201)
     const uninstalled = await requestJson(app, `/skill-installations/${installation.id}`, {
       method: 'DELETE',
@@ -507,7 +509,7 @@ describe('Skill Package Runtime HTTP API', () => {
   it('lists, reads, and exports artifacts for a run', async () => {
     const { app, skillPackageRepo, ArtifactStore } = await loadApi()
     const { pkg } = createRunnableFixture(skillPackageRepo)
-    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: pkg.id, input: {} }) })
+    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: `package:${pkg.id}`, input: {} }) })
     const runId = created.body.data.runId as string
     const artifact = new ArtifactStore().writeText({ runId, kind: 'markdown', fileName: 'summary.md', content: '# Done' })
 
@@ -533,8 +535,8 @@ describe('Skill Package Runtime HTTP API', () => {
   it('rejects artifact reads and exports when a valid artifact id is requested through another run id', async () => {
     const { app, skillPackageRepo, ArtifactStore } = await loadApi()
     const { pkg } = createRunnableFixture(skillPackageRepo)
-    const first = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: pkg.id, input: { article: 'first' } }) })
-    const second = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: pkg.id, input: { article: 'second' } }) })
+    const first = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: `package:${pkg.id}`, input: { article: 'first' } }) })
+    const second = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillId: `package:${pkg.id}`, input: { article: 'second' } }) })
     const firstRunId = first.body.data.runId as string
     const secondRunId = second.body.data.runId as string
     const artifact = new ArtifactStore().writeText({ runId: firstRunId, kind: 'markdown', fileName: 'summary.md', content: '# Done' })
@@ -553,27 +555,49 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(otherRunExport.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('keeps Legacy Skills synchronous while blocking Package references from the old API', async () => {
-    const { app, skillPackageRepo, skillRepo } = await loadApi()
+  it('blocks Legacy execution before creating any run, queue, worker, grant, or artifact record', async () => {
+    const { app, client, skillPackageRepo, skillRepo } = await loadApi()
     const legacy = skillRepo.create({
       name: 'Legacy adder',
       description: '',
       type: 'js-function',
       source: 'function run(input) { return { total: input.a + input.b } }',
     })
+
     const legacyRun = await requestJson(app, `/skills/${legacy.id}/run`, {
       method: 'POST',
       body: JSON.stringify({ input: { a: 2, b: 3 } }),
     })
-    expect(legacyRun.response.status).toBe(200)
-    expect(legacyRun.body.data).toMatchObject({ total: 5 })
+    expect(legacyRun.response.status).toBe(409)
+    expect(legacyRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
+    expect(skillRepo.listRuns(legacy.id)).toHaveLength(0)
+
+    const legacyPackageRun = await requestJson(app, '/skill-runs', {
+      method: 'POST',
+      body: JSON.stringify({ skillId: `legacy:${legacy.id}`, input: { a: 2, b: 3 } }),
+    })
+    expect(legacyPackageRun.response.status).toBe(409)
+    expect(legacyPackageRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
+    expect(legacyPackageRun.body.error).toMatchObject({
+      legacyReference: `legacy:${legacy.id}`,
+      migrationAction: 'preview-legacy-skill-migration',
+    })
+
+    const counts = () => ({
+      packageRuns: Number(client.getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_runs_v2).get()?.count ?? 0),
+      queueItems: Number(client.getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_run_queue).get()?.count ?? 0),
+      artifacts: Number(client.getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_artifacts).get()?.count ?? 0),
+      activeWorkers: Number(client.getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_runs_v2).where(sql`${skill_runs_v2.worker_id} is not null`).get()?.count ?? 0),
+    })
+    expect(counts()).toEqual({ packageRuns: 0, queueItems: 0, artifacts: 0, activeWorkers: 0 })
 
     const { pkg } = createRunnableFixture(skillPackageRepo)
-    const packageRun = await requestJson(app, `/skills/${pkg.id}/run`, {
+    const packageRun = await requestJson(app, `/skills/package:${pkg.id}/run`, {
       method: 'POST',
       body: JSON.stringify({ input: {} }),
     })
     expect(packageRun.response.status).toBe(409)
     expect(packageRun.body.error.code).toBe('PACKAGE_SKILL_ASYNC_ONLY')
+    expect(counts()).toEqual({ packageRuns: 0, queueItems: 0, artifacts: 0, activeWorkers: 0 })
   })
 })

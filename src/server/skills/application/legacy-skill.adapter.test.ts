@@ -24,26 +24,21 @@ function dependencies() {
       listInstalled: vi.fn(() => [promptSkill]),
       listMarket: vi.fn(() => [promptSkill]),
       get: vi.fn((id: string) => id === promptSkill.id ? promptSkill : undefined),
-      create: vi.fn(() => promptSkill),
-      update: vi.fn(() => promptSkill),
-      install: vi.fn(),
-      uninstall: vi.fn(),
-      delete: vi.fn(),
       listRuns: vi.fn(() => [{ id: 'legacy-run' }]),
     },
-    resolveLegacySkillId: (reference: string) => reference.startsWith('legacy:') ? reference.slice(7) : reference,
-    runSkill: vi.fn(async () => ({ output: 'ok' })),
   }
 }
 
 describe('LegacySkillAdapter', () => {
-  it('adds an explicit capability profile without changing the legacy data plane', () => {
+  it('adds explicit archive metadata without changing the legacy data plane', () => {
     const adapter = createLegacySkillAdapter(dependencies())
     const result = adapter.list()
 
     expect(result[0]).toMatchObject({
       id: promptSkill.id,
       runtimeKind: 'legacy',
+      lifecycle: 'read-only',
+      readOnly: true,
       capabilityProfile: {
         capabilities: ['legacy.prompt-template', 'llm.generate'],
         riskLevel: 'medium',
@@ -60,16 +55,25 @@ describe('LegacySkillAdapter', () => {
     expect(profile.blockers).toContain('arbitrary JavaScript requires manual capability review')
   })
 
-  it('maps legacy CRUD and run operations while preserving old run behavior', async () => {
+  it.each(['install', 'update', 'delete'] as const)('blocks Legacy %s without touching the repository', (operation) => {
+    const deps = dependencies()
+    const adapter = createLegacySkillAdapter(deps)
+    const invoke = operation === 'install'
+      ? () => adapter.install(promptSkill.id)
+      : operation === 'update'
+        ? () => adapter.update(promptSkill.id, { description: 'updated' })
+        : () => adapter.delete(promptSkill.id)
+    expect(invoke).toThrowError(expect.objectContaining({ code: 'LEGACY_SKILL_FROZEN' }))
+    expect(deps.repo.get).not.toHaveBeenCalled()
+    expect(deps.repo.listRuns).not.toHaveBeenCalled()
+  })
+
+  it('blocks Legacy run before any runner or run-history side effect', async () => {
     const deps = dependencies()
     const adapter = createLegacySkillAdapter(deps)
 
-    expect(adapter.get('legacy:legacy-prompt')).toMatchObject({ id: promptSkill.id, runtimeKind: 'legacy' })
-    expect(adapter.install(promptSkill.id)).toMatchObject({ id: promptSkill.id })
-    expect(adapter.update(promptSkill.id, { description: 'updated' })).toMatchObject({ id: promptSkill.id })
-    expect(adapter.delete(promptSkill.id)).toEqual({ kind: 'deleted' })
-    await expect(adapter.run('legacy:legacy-prompt', { title: 'x' })).resolves.toEqual({ output: 'ok' })
-    expect(deps.runSkill).toHaveBeenCalledWith(promptSkill.id, { title: 'x' })
+    await expect(adapter.run('legacy:legacy-prompt', { title: 'x' })).rejects.toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
+    expect(deps.repo.listRuns).not.toHaveBeenCalled()
   })
 })
 
@@ -89,9 +93,6 @@ describe('legacy-to-draft service', () => {
     })
     expect(preview.draft!.skillMd).toContain('Summarize {{title}}')
     expect(preview.templateVariables).toEqual(['title'])
-    expect(deps.repo.create).not.toHaveBeenCalled()
-    expect(deps.repo.update).not.toHaveBeenCalled()
-    expect(deps.repo.install).not.toHaveBeenCalled()
   })
 
   it('returns a blocked preview for js-function instead of manufacturing a package draft', () => {
@@ -104,6 +105,6 @@ describe('legacy-to-draft service', () => {
     const preview = service.preview(skill.id)
     expect(preview.readOnly).toBe(true)
     expect(preview.draft).toBeNull()
-    expect(preview.blockers).toContain('arbitrary JavaScript requires manual capability review')
+    expect(preview.blockers).toContain('arbitrary JavaScript source is not automatically translated')
   })
 })

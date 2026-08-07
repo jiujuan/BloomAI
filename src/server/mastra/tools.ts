@@ -1,10 +1,6 @@
 import { createTool } from '@mastra/core/tools'
-import { z } from 'zod'
 import { toolRepo } from '../db/repositories/tool.repo'
-import { skillRepo } from '../db/repositories/skill.repo'
 import { executeLegacyToolCapability, needsInteractiveApprovalForTool } from '../skills/policy/capability-broker'
-import { runSkill } from '../skills/legacy'
-import { toLegacySkillToolId } from '../skills/legacy/mastra-tool-id'
 import { jsonSchemaToZodObject, parseParamsSchema } from './json-schema'
 import { isToolAvailable } from '../tools/availability'
 import { getToolContract } from '../tools/contracts'
@@ -16,9 +12,24 @@ type MastraTool = ReturnType<typeof createTool>
 // sandbox (mutating or code-exec) require a granted tool_permissions row.
 const GATED_PERMISSION_LEVELS = new Set(['write', 'shell', 'sandbox'])
 
-// Skill-backed tools live in a distinct namespace so they never collide with built-in tool ids.
-/** @deprecated Use toLegacySkillToolId to make the runtime boundary explicit. */
-export const toSkillToolId = toLegacySkillToolId
+export type LegacySkillMigrationHint = {
+  runtimeKind: 'legacy'
+  readOnly: true
+  migrationAction: 'preview'
+  reference: string
+  message: string
+}
+
+/** Structured response for a model that asks to use a Legacy reference. */
+export function getLegacySkillMigrationHint(reference: string): LegacySkillMigrationHint {
+  return {
+    runtimeKind: 'legacy',
+    readOnly: true,
+    migrationAction: 'preview',
+    reference,
+    message: 'Legacy Skills are read-only. Inspect the migration preview or historical runs instead of executing the Legacy Skill.',
+  }
+}
 
 /**
  * Builds the Mastra tool surface for the chat agent from BloomAI's own registries �?
@@ -30,7 +41,7 @@ export const toSkillToolId = toLegacySkillToolId
  * authorization, approval and timeout policy at call time.
  */
 export function buildAgentTools(sessionId?: string): Record<string, MastraTool> {
-  return { ...buildBuiltinTools(sessionId), ...buildLegacySkillTools(sessionId) }
+  return buildBuiltinTools(sessionId)
 }
 
 // Curated built-in tool sets per specialist agent (P6d). `null` = all enabled tools.
@@ -90,26 +101,14 @@ export function buildBuiltinTools(sessionId?: string, options: BuildToolsOptions
   return tools
 }
 
-export function buildLegacySkillTools(sessionId?: string): Record<string, MastraTool> {
-  const tools: Record<string, MastraTool> = {}
-  // Package Skills intentionally do not enter this synchronous Mastra Tool surface.
-  for (const skill of skillRepo.listInstalled()) {
-    const inputSchema = jsonSchemaToZodObject(parseParamsSchema(skill.params_schema))
-    tools[toSkillToolId(skill.id)] = createTool({
-      id: toSkillToolId(skill.id),
-      description: skill.description || `Run BloomAI skill ${skill.name}`,
-      inputSchema,
-      outputSchema: z.record(z.unknown()),
-      execute: async (input) => {
-        // Re-check install state at call time: installed skills can change between turns.
-        const installed = skillRepo.get(skill.id)
-        if (!installed || installed.is_installed !== 1) throw new Error(`Skill is not installed: ${skill.id}`)
-        return z.record(z.unknown()).parse(await runSkill(skill.id, inputSchema.parse(input ?? {})))
-      },
-    })
-  }
-  return tools
+/**
+ * Legacy Skills intentionally expose no synchronous Mastra tools. Keep this
+ * compatibility function as an empty surface for callers that have not yet
+ * removed the old optional hook; callers should use getLegacySkillMigrationHint.
+ */
+export function buildLegacySkillTools(_sessionId?: string): Record<string, MastraTool> {
+  return {}
 }
 
-/** Backward-compatible name for the Legacy Skill-only synchronous surface. */
+/** Backward-compatible empty alias; no Legacy Skill tools are registered. */
 export const buildSkillTools = buildLegacySkillTools

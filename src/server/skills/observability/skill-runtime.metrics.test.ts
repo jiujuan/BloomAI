@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   SkillRuntimeMetrics,
+  migrationEvents,
   recordCapabilityMetric,
+  recordMigrationMetric,
   recordRunMetric,
   resetSkillRuntimeMetricsForTests,
 } from './skill-runtime.metrics'
@@ -81,4 +83,57 @@ describe('Skill Runtime metrics', () => {
     expect(SkillRuntimeMetrics.global().snapshot().counters.runsByStatus.failed).toBe(1)
     expect(SkillRuntimeMetrics.global().snapshot().counters.capabilityCalls).toBe(1)
   })
+
+
+  it('records every migration event with fixed low-cardinality labels and an unknown bucket for invalid input', () => {
+    const metrics = new SkillRuntimeMetrics({ now: () => 20_000 })
+
+    for (const event of migrationEvents) {
+      metrics.recordMigration({
+        event,
+        correlation: {
+          requestId: 'request-secret',
+          runId: 'run-secret',
+          skillVersionId: 'version-secret',
+          packageId: 'package-secret',
+        },
+      })
+    }
+    metrics.recordMigration({
+      event: 'migration-event-injected-with-source-url',
+      value: 99,
+      correlation: { requestId: 'request-id', runId: 'run-id' },
+    })
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters.migrationEvents).toEqual({
+      legacy_run_blocked: 1,
+      migration_previewed: 1,
+      migration_manual_review: 1,
+      migration_critical_blocked: 1,
+      migration_published: 1,
+      package_run_started: 1,
+      migration_secret_redaction_failed: 1,
+      migration_transaction_rolled_back: 1,
+      unknown: 1,
+    })
+    const migrationPoints = snapshot.points.filter((point) => point.kind === 'migration')
+    expect(migrationPoints).toHaveLength(migrationEvents.length + 1)
+    expect(migrationPoints.every((point) => Object.keys(point.attributes).length === 1 && 'event' in point.attributes)).toBe(true)
+    expect(JSON.stringify(migrationPoints)).not.toContain('request-secret')
+    expect(JSON.stringify(migrationPoints)).not.toContain('run-secret')
+    expect(JSON.stringify(migrationPoints)).not.toContain('source-url')
+    expect(JSON.stringify(migrationPoints)).not.toContain('package-secret')
+    expect(Object.values(snapshot.counters.migrationEvents).reduce((sum, count) => sum + count, 0)).toBe(migrationPoints.length)
+  })
+
+  it('keeps the migration metric wrapper non-blocking when the observability sink fails', () => {
+    const recordMigration = vi.spyOn(SkillRuntimeMetrics.prototype, 'recordMigration').mockImplementation(() => {
+      throw new Error('metrics sink unavailable')
+    })
+
+    expect(() => recordMigrationMetric({ event: 'legacy_run_blocked' })).not.toThrow()
+    recordMigration.mockRestore()
+  })
+
 })

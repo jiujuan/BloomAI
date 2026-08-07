@@ -139,12 +139,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(43)
+    expect(migrationVersions()).toHaveLength(44)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(43)
+    expect(migrationVersions()).toHaveLength(44)
   })
 
   it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
@@ -385,6 +385,7 @@ describe('database migrations', () => {
         'research_coverage_assessments',
         'scheduled_task_runs',
         'projects',
+        'skill_legacy_migrations',
       ])
     )
     expect(migrationVersions()).toEqual([
@@ -431,9 +432,54 @@ describe('database migrations', () => {
       '041-skill-artifact-policy',
       '042-image-studio-skill-links',
       '043-skill-security-audit-fields',
+      '044-legacy-skill-migration-records',
     ])
     const emptyDb = openRawDb()
     try {
+      expect(emptyDb.prepare("SELECT name FROM pragma_table_info('skill_legacy_migrations') ORDER BY cid").all()).toEqual([
+        { name: 'id' },
+        { name: 'legacy_skill_id' },
+        { name: 'legacy_type' },
+        { name: 'source_sha256' },
+        { name: 'decision' },
+        { name: 'status' },
+        { name: 'package_id' },
+        { name: 'package_version_id' },
+        { name: 'report_artifact_id' },
+        { name: 'owner_id' },
+        { name: 'created_by' },
+        { name: 'preview_json' },
+        { name: 'warnings_json' },
+        { name: 'side_effects_json' },
+        { name: 'last_error' },
+        { name: 'revision' },
+        { name: 'created_at' },
+        { name: 'updated_at' },
+        { name: 'published_at' },
+      ])
+      expect(uniqueIndexColumnSets('skill_legacy_migrations')).toContainEqual(['legacy_skill_id', 'source_sha256'])
+      expect(indexNames('skill_legacy_migrations')).toEqual(expect.arrayContaining([
+        'idx_skill_legacy_migrations_source',
+        'idx_skill_legacy_migrations_legacy_status',
+        'idx_skill_legacy_migrations_package',
+      ]))
+      expect(foreignKeyActions('skill_legacy_migrations')).toEqual(expect.arrayContaining([
+        { from: 'package_id', table: 'skill_packages', onDelete: 'NO ACTION' },
+        { from: 'package_version_id', table: 'skill_versions', onDelete: 'NO ACTION' },
+        { from: 'report_artifact_id', table: 'skill_artifacts', onDelete: 'NO ACTION' },
+      ]))
+      emptyDb.prepare(`
+        INSERT INTO skill_legacy_migrations (
+          id, legacy_skill_id, legacy_type, source_sha256, decision, status,
+          owner_id, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('legacy-migration-1', 'legacy-1', 'prompt-template', 'hash-1', 'auto_convertible', 'migration_previewed', 'owner-1', 'actor-1', 1, 1)
+      expect(() => emptyDb.prepare(`
+        INSERT INTO skill_legacy_migrations (
+          id, legacy_skill_id, legacy_type, source_sha256, decision, status,
+          owner_id, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('legacy-migration-2', 'legacy-1', 'prompt-template', 'hash-1', 'auto_convertible', 'migration_previewed', 'owner-1', 'actor-1', 2, 2)).toThrow()
       expect(emptyDb.prepare(`
         SELECT
           (SELECT COUNT(*) FROM research_runs) AS runs,

@@ -6,11 +6,27 @@ import { getDataDir, getDbPath } from '../../db/paths'
 export const SKILL_RUNTIME_PROTOCOL_VERSION = '1.1'
 export const SKILL_RUNTIME_CONFIG_VERSION = '2026-08-05'
 
+export const LEGACY_SKILL_LIFECYCLES = [
+  'active',
+  'frozen',
+  'read-only',
+  'migrated',
+  'manual_review',
+  'blocked',
+  'archived',
+  'runner_removed',
+] as const
+
+export type LegacySkillLifecycle = (typeof LEGACY_SKILL_LIFECYCLES)[number]
+
 export type SkillRuntimeConfig = {
   protocolVersion: string
   configVersion: string
   runtimeEnabled: boolean
   packageExecutionEnabled: boolean
+  legacyLifecycle: LegacySkillLifecycle
+  legacyReadOnly: boolean
+  legacyExecutionEnabled: boolean
   importEnabled: boolean
   githubImportEnabled: boolean
   npxImportEnabled: boolean
@@ -45,6 +61,9 @@ export type SkillRuntimeCapabilities = {
   configVersion: string
   runtimeEnabled: boolean
   packageExecutionEnabled: boolean
+  legacyLifecycle: LegacySkillLifecycle
+  legacyReadOnly: boolean
+  legacyExecutionEnabled: boolean
   importEnabled: boolean
   githubImportEnabled: boolean
   npxImportEnabled: boolean
@@ -108,6 +127,14 @@ function envBool(env: SkillRuntimeConfigEnv, key: string, fallback: boolean): bo
   if (BOOL_TRUE.has(normalized)) return true
   if (BOOL_FALSE.has(normalized)) return false
   throw new SkillRuntimeConfigError(`${key} must be a boolean`)
+}
+
+function envEnum<T extends string>(env: SkillRuntimeConfigEnv, key: string, fallback: T, allowed: readonly T[]): T {
+  const raw = env[key]
+  if (raw === undefined || raw.trim() === '') return fallback
+  const value = raw.trim() as T
+  if (!allowed.includes(value)) throw new SkillRuntimeConfigError(`${key} must be one of: ${allowed.join(', ')}`)
+  return value
 }
 
 function envList(env: SkillRuntimeConfigEnv, key: string, fallback: string[]): string[] {
@@ -210,6 +237,12 @@ export function assertSkillRuntimeConfig(config: SkillRuntimeConfig, fsAdapter: 
   if (config.packageExecutionEnabled && !config.runtimeEnabled) {
     throw new SkillRuntimeConfigError('packageExecutionEnabled requires runtimeEnabled')
   }
+  if (!LEGACY_SKILL_LIFECYCLES.includes(config.legacyLifecycle)) {
+    throw new SkillRuntimeConfigError('legacyLifecycle is invalid')
+  }
+  if (config.legacyExecutionEnabled && (config.legacyReadOnly || config.legacyLifecycle !== 'active')) {
+    throw new SkillRuntimeConfigError('legacyExecutionEnabled requires an active, writable Legacy lifecycle')
+  }
   return config
 }
 
@@ -227,6 +260,9 @@ export function loadSkillRuntimeConfig(
     configVersion: SKILL_RUNTIME_CONFIG_VERSION,
     runtimeEnabled: envBool(env, 'SKILL_RUNTIME_ENABLED', legacyEnabled ?? true),
     packageExecutionEnabled: envBool(env, 'SKILL_PACKAGE_EXECUTION_ENABLED', legacyEnabled ?? false),
+    legacyLifecycle: envEnum(env, 'SKILL_LEGACY_LIFECYCLE', 'frozen', LEGACY_SKILL_LIFECYCLES),
+    legacyReadOnly: envBool(env, 'SKILL_LEGACY_READ_ONLY', true),
+    legacyExecutionEnabled: envBool(env, 'SKILL_LEGACY_EXECUTION_ENABLED', false),
     importEnabled: envBool(env, 'SKILL_PACKAGE_IMPORT_ENABLED', legacyEnabled ?? false),
     githubImportEnabled: envBool(env, 'SKILL_GITHUB_IMPORT_ENABLED', legacyEnabled ?? false),
     npxImportEnabled: envBool(env, 'SKILL_NPX_IMPORT_ENABLED', legacyEnabled ?? false),
@@ -257,6 +293,7 @@ let cachedEnvFingerprint: string | undefined
 function runtimeEnvFingerprint(): string {
   const keys = [
     'SKILL_RUNTIME_ENABLED', 'SKILL_PACKAGE_RUNTIME_ENABLED', 'SKILL_PACKAGE_EXECUTION_ENABLED',
+    'SKILL_LEGACY_LIFECYCLE', 'SKILL_LEGACY_READ_ONLY', 'SKILL_LEGACY_EXECUTION_ENABLED',
     'SKILL_PACKAGE_IMPORT_ENABLED', 'SKILL_GITHUB_IMPORT_ENABLED', 'SKILL_NPX_IMPORT_ENABLED',
     'SKILL_CREATOR_ENABLED', 'SKILL_CREATOR_PUBLISH_ENABLED', 'SKILL_WORKER_CONCURRENCY',
     'SKILL_LEASE_TIMEOUT_MS', 'SKILL_MAX_ATTEMPTS', 'SKILL_EVENT_RETENTION_DAYS',
@@ -288,6 +325,9 @@ export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): S
     configVersion: config.configVersion,
     runtimeEnabled: config.runtimeEnabled,
     packageExecutionEnabled: config.packageExecutionEnabled,
+    legacyLifecycle: config.legacyLifecycle,
+    legacyReadOnly: config.legacyReadOnly,
+    legacyExecutionEnabled: config.legacyExecutionEnabled,
     importEnabled: config.importEnabled,
     githubImportEnabled: config.githubImportEnabled,
     npxImportEnabled: config.npxImportEnabled,

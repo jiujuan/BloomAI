@@ -16,7 +16,8 @@ async function loadApi() {
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
   const { sessionRepo } = await import('../../db/repositories/session.repo')
   const { messageRepo } = await import('../../db/repositories/message.repo')
-  return { app: createHonoApp(), client, skillPackageRepo, sessionRepo, messageRepo }
+  const { skillRepo } = await import('../../db/repositories/skill.repo')
+  return { app: createHonoApp(), client, skillPackageRepo, sessionRepo, messageRepo, skillRepo }
 }
 
 describe('Chat Package Skill routes', () => {
@@ -50,7 +51,7 @@ describe('Chat Package Skill routes', () => {
 
     const response = await app.request(`/api/v1/chat/sessions/${session.id}/skills`)
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ data: [{ skillVersionId: version.id, requiredCapabilities: ['image.generate'] }] })
+    await expect(response.json()).resolves.toMatchObject({ data: [{ packageReference: `package:${pkg.id}`, skillVersionId: version.id, requiredCapabilities: ['image.generate'] }] })
   })
 
   it('creates a durable chat run and returns the same run for duplicate idempotency submits', async () => {
@@ -67,7 +68,7 @@ describe('Chat Package Skill routes', () => {
       isCompatible: true,
     })
     skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
-    const body = JSON.stringify({ skillVersionId: version.id, input: { prompt: 'hello' }, idempotencyKey: 'chat-submit-1', userMessage: { content: 'hello' } })
+    const body = JSON.stringify({ skillVersionId: `package:${version.id}`, input: { prompt: 'hello' }, idempotencyKey: 'chat-submit-1', userMessage: { content: 'hello' } })
     const first = await app.request(`/api/v1/chat/sessions/${session.id}/skill-runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     const firstBody = await first.json() as any
     const second = await app.request(`/api/v1/chat/sessions/${session.id}/skill-runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
@@ -78,6 +79,40 @@ describe('Chat Package Skill routes', () => {
     expect(secondBody.data).toMatchObject({ runId: firstBody.data.runId, created: false, skillVersionId: version.id })
     expect(messageRepo.list(session.id)).toHaveLength(2)
     expect(JSON.parse(messageRepo.list(session.id)[1].parts!)).toEqual([expect.objectContaining({ type: 'data-skill-run', data: expect.objectContaining({ runId: firstBody.data.runId }) })])
+  })
+
+  it('blocks a Legacy chat reference before idempotency, Run, or message side effects', async () => {
+    const { app, skillRepo, sessionRepo, messageRepo, skillPackageRepo } = await loadApi()
+    const session = sessionRepo.create({ title: 'Legacy Chat' })
+    const legacy = skillRepo.create({
+      name: 'Legacy Prompt',
+      description: 'archive only',
+      type: 'prompt-template',
+      source: 'Translate {{text}}',
+    })
+    const beforeRuns = skillPackageRepo.listRuns({ limit: 100, offset: 0 }).data
+    const beforeMessages = messageRepo.list(session.id)
+
+    const response = await app.request(`/api/v1/chat/sessions/${session.id}/skill-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        skillVersionId: `legacy:${legacy.id}`,
+        input: { text: 'hello' },
+        idempotencyKey: 'legacy-chat-1',
+        userMessage: { content: 'hello' },
+      }),
+    })
+    const body = await response.json() as any
+
+    expect(response.status).toBe(409)
+    expect(body.error).toMatchObject({
+      code: 'LEGACY_SKILL_RUN_DISABLED',
+      legacyReference: `legacy:${legacy.id}`,
+      migrationAction: 'preview-legacy-skill-migration',
+    })
+    expect(skillPackageRepo.listRuns({ limit: 100, offset: 0 }).data).toEqual(beforeRuns)
+    expect(messageRepo.list(session.id)).toEqual(beforeMessages)
   })
 
   it('returns a stable validation error for malformed skill-run payloads', async () => {

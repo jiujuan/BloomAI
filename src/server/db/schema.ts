@@ -377,6 +377,32 @@ export const skill_import_reviews = sqliteTable('skill_import_reviews', {
   statusIdx: index('idx_skill_import_reviews_status').on(table.status, table.updated_at),
 }))
 
+export const skill_legacy_migrations = sqliteTable('skill_legacy_migrations', {
+  id: text('id').primaryKey(),
+  legacy_skill_id: text('legacy_skill_id').notNull(),
+  legacy_type: text('legacy_type').notNull(),
+  source_sha256: text('source_sha256').notNull(),
+  decision: text('decision').notNull(),
+  status: text('status').notNull(),
+  package_id: text('package_id'),
+  package_version_id: text('package_version_id'),
+  report_artifact_id: text('report_artifact_id'),
+  owner_id: text('owner_id').notNull(),
+  created_by: text('created_by').notNull(),
+  preview_json: text('preview_json').notNull().default('{}'),
+  warnings_json: text('warnings_json').notNull().default('[]'),
+  side_effects_json: text('side_effects_json').notNull().default('{}'),
+  last_error: text('last_error'),
+  revision: integer('revision').notNull().default(1),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+  published_at: integer('published_at'),
+}, (table) => ({
+  sourceUniqueIdx: uniqueIndex('idx_skill_legacy_migrations_source').on(table.legacy_skill_id, table.source_sha256),
+  legacyStatusIdx: index('idx_skill_legacy_migrations_legacy_status').on(table.legacy_skill_id, table.status, table.updated_at),
+  packageIdx: index('idx_skill_legacy_migrations_package').on(table.package_id, table.package_version_id),
+}))
+
 export const skill_audit_events = sqliteTable('skill_audit_events', {
   id: text('id').primaryKey(),
   actor: text('actor'),

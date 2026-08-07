@@ -57,7 +57,7 @@ describe('Package Runtime v1 resource contract', () => {
     const pkg = skillPackageRepo.createPackage({ name: 'Stream package', description: '', sourceType: 'local-directory' })
     const version = skillPackageRepo.createVersion({ packageId: pkg.id, version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: path.join(dataDir, 'package'), securityStatus: 'verified' })
     skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
-    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: version.id, input: {}, surface: 'skills' }) })
+    const created = await requestJson(app, '/skill-runs', { method: 'POST', body: JSON.stringify({ skillVersionId: `package:${version.id}`, input: {}, surface: 'skills' }) })
     const stream = await app.request(new URL(`/api/v1/skill-runs/${created.body.data.runId}/stream?afterSeq=0`, 'http://localhost'))
     expect(stream.status).toBe(200)
     expect(stream.headers.get('content-type')).toContain('text/event-stream')

@@ -123,7 +123,7 @@ describe('skill runtime offline integration vertical slice', () => {
 
     const created = await requestJson(app, '/skill-runs', {
       method: 'POST',
-      body: JSON.stringify({ skillVersionId: version!.id, input: { message: 'hello' } }),
+      body: JSON.stringify({ skillVersionId: `package:${version!.id}`, input: { message: 'hello' } }),
     })
     expect(created.response.status).toBe(201)
     const runId = created.body.data.runId as string
