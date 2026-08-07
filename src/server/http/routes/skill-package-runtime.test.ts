@@ -139,7 +139,7 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(review.body.data).toMatchObject({
       id: inspected.body.data.reviewId,
       sourceSha: inspected.body.data.sourceFingerprint,
-      status: 'pending',
+      status: 'validated',
     })
 
     const installed = await requestJson(app, '/skill-packages/install', {

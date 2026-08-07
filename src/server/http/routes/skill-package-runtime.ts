@@ -43,6 +43,7 @@ const versionCandidateSchema = z.object({
   isCompatible: z.boolean().optional(),
   status: z.string().trim().min(1).max(40).optional(),
   securityStatus: z.string().trim().min(1).max(40).optional(),
+  securityFindings: jsonObjectSchema.optional(),
   snapshotHash: z.string().trim().max(200).optional(),
 }).strict()
 const versionUpdateSchema = versionCandidateSchema.extend({ confirm: z.literal(true) }).strict()

@@ -244,7 +244,7 @@ export interface PackageSkillRepository {
     sourceRef?: string | null
   }): PackageSnapshot
   getPackage(id: string): PackageSnapshot | undefined
-  listPackages(options: { limit: number; offset: number }): Page<PackageSnapshot>
+  listPackages(options: { limit: number; offset: number; includeArchived?: boolean }): Page<PackageSnapshot>
   createVersion(data: {
     packageId: string
     version: string

@@ -4,7 +4,7 @@ import { createSkillVersionService } from './skill-version.service'
 
 const v1 = {
   id: 'v1', packageId: 'pkg-1', version: '1.0.0', runtime: 'instruction-agent',
-  manifest: { name: 'demo', requestedCapabilities: [] }, manifestHash: 'hash-1', packagePath: '/packages/one',
+  manifest: { name: 'demo', requestedCapabilities: ['web.search'] }, manifestHash: 'hash-1', packagePath: '/packages/one',
   sourceSnapshot: { sourceSha256: 'source-1' }, isCompatible: true, createdAt: 1,
   status: 'runnable', securityStatus: 'verified', immutableHash: 'immutable-1', snapshotHash: 'snapshot-1',
 }
@@ -43,6 +43,51 @@ describe('skill version service', () => {
     expect(preview).toMatchObject({ packageId: 'pkg-1', currentVersionId: 'v1', duplicate: false, diff: { sourceShaChanged: true } })
     expect(installation.currentVersionId).toBe('v1')
     expect(packages.createVersion).not.toHaveBeenCalled()
+  })
+
+  it('exposes manifest, capability, source provenance, and security risk changes before update', async () => {
+    const { packages } = makeDeps()
+    const service = createSkillVersionService({
+      packages,
+      runs: { listRuns: vi.fn(() => ({ data: [{ id: 'run-1', status: 'running' }], total: 1 })) },
+      grants: { listCapabilityGrants: vi.fn(() => [{ id: 'grant-1', status: 'approved', revokedAt: null }]) },
+    } as any)
+
+    const preview = await service.previewUpdate('pkg-1', {
+      version: '3.0.0',
+      manifest: { name: 'demo', requestedCapabilities: ['web.search', 'image.generate'] },
+      manifestHash: 'hash-3',
+      packagePath: '/packages/three',
+      sourceSnapshot: { sourceSha256: 'source-3', resolvedCommit: 'commit-3' },
+      securityStatus: 'unreviewed',
+      securityFindings: { warnings: ['new executable'] },
+    } as any)
+
+    expect(preview.candidate).toMatchObject({
+      sourceSnapshot: { sourceSha256: 'source-3', resolvedCommit: 'commit-3' },
+      securityStatus: 'unreviewed',
+      securityFindings: { warnings: ['new executable'] },
+    })
+    expect(preview.diff).toMatchObject({
+      capabilities: { added: ['image.generate'] },
+      source: { fromSha: 'source-1', toSha: 'source-3', toCommit: 'commit-3' },
+      security: { statusChanged: true, findingsChanged: true },
+    })
+    expect(preview.diff?.riskSummary.warnings).toEqual(expect.arrayContaining([
+      'capability expansion: image.generate',
+      'security findings changed',
+    ]))
+    expect(preview.checks).toMatchObject({ runningRuns: 1, activeGrants: 1 })
+  })
+
+  it('rejects preview and update against an archived package', async () => {
+    const { packages } = makeDeps()
+    packages.getPackage.mockReturnValue({ id: 'pkg-1', deletedAt: 123, deleteReason: 'retired' })
+    const service = createSkillVersionService({ packages } as any)
+    const candidate = { version: '3.0.0', manifest: {}, manifestHash: 'hash-3', packagePath: '/packages/three' }
+
+    await expect(service.previewUpdate('pkg-1', candidate)).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.updatePackage('pkg-1', candidate)).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
   it('deduplicates identical immutable content and does not switch current automatically', async () => {

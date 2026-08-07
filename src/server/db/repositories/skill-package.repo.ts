@@ -124,10 +124,14 @@ export const skillPackageRepo = {
     return result.changes === 1 ? this.getDraft(data.id) : undefined
   },
 
-  listPackages(options: { limit: number; offset: number }) {
-    const data = getOrmDb().select().from(skill_packages).orderBy(desc(skill_packages.updated_at))
+  listPackages(options: { limit: number; offset: number; includeArchived?: boolean }) {
+    const where = options.includeArchived ? undefined : isNull(skill_packages.deleted_at)
+    const query = getOrmDb().select().from(skill_packages)
+    const data = (where === undefined ? query : query.where(where))
+      .orderBy(desc(skill_packages.updated_at), asc(skill_packages.id))
       .limit(options.limit).offset(options.offset).all()
-    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages).get()?.count ?? 0
+    const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages)
+    const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0
     return { data, total: Number(total) }
   },
 

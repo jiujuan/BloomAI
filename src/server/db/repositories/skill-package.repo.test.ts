@@ -260,4 +260,36 @@ describe('skillPackageRepo', () => {
     expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: second.id, expectedRevision: 0, idempotencyKey: 'switch-v2' })).toMatchObject({ current_version_id: second.id, revision: 1 })
   })
 
+  it('hides archived packages from the catalog while retaining package, version, run, and audit history', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const active = skillPackageRepo.createPackage({ name: 'Active', description: '', sourceType: 'local-directory' })
+    const archived = skillPackageRepo.createPackage({ name: 'Archived', description: '', sourceType: 'local-directory' })
+    const version = skillPackageRepo.createVersion({
+      packageId: archived.id,
+      version: '1.0.0',
+      manifest: { name: 'Archived' },
+      manifestHash: 'archived-manifest',
+      packagePath: '/packages/archived',
+    })
+    const run = skillPackageRepo.createRun({ skillVersionId: version.id, status: 'completed', input: {}, context: {} })
+    skillPackageRepo.appendAudit({ action: 'skill.package.imported', resourceType: 'skill_package', resourceId: archived.id, payload: { reason: 'test' } })
+
+    const deletedAt = 123
+    const deleted = skillPackageRepo.softDeletePackage({ packageId: archived.id, idempotencyKey: 'archive-1', reason: 'retired' })
+
+    expect(deleted).toMatchObject({ id: archived.id, deleted_at: expect.any(Number), delete_reason: 'retired' })
+    expect(skillPackageRepo.listPackages({ limit: 20, offset: 0 })).toMatchObject({ total: 1, data: [{ id: active.id }] })
+    expect(skillPackageRepo.getPackage(archived.id)).toMatchObject({ deleted_at: expect.any(Number), delete_reason: 'retired' })
+    expect(skillPackageRepo.getVersion(version.id)).toMatchObject({ id: version.id })
+    expect(skillPackageRepo.getRun(run.id)).toMatchObject({ id: run.id, skill_version_id: version.id })
+
+    const db = new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+    try {
+      expect(db.prepare("SELECT COUNT(*) AS count FROM skill_audit_events WHERE resource_id = ?").get(archived.id)).toEqual({ count: 1 })
+      expect(deleted?.deleted_at).toBeGreaterThanOrEqual(deletedAt)
+    } finally {
+      db.close()
+    }
+  })
+
 })

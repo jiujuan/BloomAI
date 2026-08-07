@@ -5,6 +5,8 @@ export type SkillVersionDiffInput = {
   manifestHash?: string | null
   manifest?: Record<string, unknown> | null
   sourceSnapshot?: Record<string, unknown> | null
+  securityStatus?: string | null
+  securityFindings?: Record<string, unknown> | null
 }
 
 export type SkillVersionDiff = {
@@ -14,7 +16,9 @@ export type SkillVersionDiff = {
   files: { added: string[]; changed: string[]; removed: string[] }
   capabilities: { added: string[]; removed: string[] }
   sourceShaChanged: boolean
-  source: { fromSha: string | null; toSha: string | null }
+  sourceCommitChanged: boolean
+  source: { fromSha: string | null; toSha: string | null; fromCommit: string | null; toCommit: string | null }
+  security: { statusChanged: boolean; fromStatus: string | null; toStatus: string | null; findingsChanged: boolean }
   riskSummary: { level: 'low' | 'medium' | 'high'; warnings: string[] }
 }
 
@@ -35,9 +39,23 @@ export function diffSkillVersions(from: SkillVersionDiffInput, to: SkillVersionD
   const capabilitiesRemoved = [...fromCapabilities].filter((capability) => !toCapabilities.has(capability)).sort()
   const fromSha = sourceSha(from.sourceSnapshot)
   const toSha = sourceSha(to.sourceSnapshot)
+  const fromCommit = sourceCommit(from.sourceSnapshot)
+  const toCommit = sourceCommit(to.sourceSnapshot)
+  const fromStatus = from.securityStatus ?? null
+  const toStatus = to.securityStatus ?? null
+  const securityStatusChanged = fromStatus !== toStatus
+  const securityFindingsChanged = stableJson(from.securityFindings ?? {}) !== stableJson(to.securityFindings ?? {})
+  const sourceCommitChanged = fromCommit !== toCommit
   const warnings = capabilitiesAdded.map((capability) => `capability expansion: ${capability}`)
   if (changed.length > 0) warnings.push(`${changed.length} file(s) changed`)
-  const level = capabilitiesAdded.length > 0 ? 'high' : changed.length > 0 || manifestChanges.length > 0 ? 'medium' : 'low'
+  if (sourceCommitChanged) warnings.push('source commit changed')
+  if (securityStatusChanged) warnings.push(`security status changed: ${fromStatus ?? 'unknown'} -> ${toStatus ?? 'unknown'}`)
+  if (securityFindingsChanged) warnings.push('security findings changed')
+  const level = capabilitiesAdded.length > 0 || ['rejected', 'quarantined', 'blocked'].includes(toStatus ?? '')
+    ? 'high'
+    : changed.length > 0 || manifestChanges.length > 0 || sourceCommitChanged || securityStatusChanged || securityFindingsChanged
+      ? 'medium'
+      : 'low'
 
   return {
     fromVersionId: from.id ?? null,
@@ -46,7 +64,9 @@ export function diffSkillVersions(from: SkillVersionDiffInput, to: SkillVersionD
     files: { added, changed, removed },
     capabilities: { added: capabilitiesAdded, removed: capabilitiesRemoved },
     sourceShaChanged: fromSha !== toSha,
-    source: { fromSha, toSha },
+    sourceCommitChanged,
+    source: { fromSha, toSha, fromCommit, toCommit },
+    security: { statusChanged: securityStatusChanged, fromStatus, toStatus, findingsChanged: securityFindingsChanged },
     riskSummary: { level, warnings: [...new Set(warnings)].sort((a, b) => a.localeCompare(b)) },
   }
 }
@@ -123,6 +143,14 @@ function capabilitySet(manifest: Record<string, unknown>): Set<string> {
 function sourceSha(snapshot?: Record<string, unknown> | null): string | null {
   if (!snapshot) return null
   for (const key of ['sourceSha256', 'source_sha256', 'snapshotHash', 'snapshot_hash']) {
+    if (typeof snapshot[key] === 'string') return snapshot[key]
+  }
+  return null
+}
+
+function sourceCommit(snapshot?: Record<string, unknown> | null): string | null {
+  if (!snapshot) return null
+  for (const key of ['resolvedCommit', 'resolved_commit', 'commitSha', 'commit_sha', 'gitCommit', 'git_commit', 'commit']) {
     if (typeof snapshot[key] === 'string') return snapshot[key]
   }
   return null
