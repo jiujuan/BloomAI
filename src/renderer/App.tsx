@@ -7,7 +7,7 @@ import { PersonasPage } from '@renderer/pages/Personas'
 import { Onboarding } from '@renderer/pages/Onboarding'
 import { ToolManagePage } from '@renderer/pages/Tools'
 import { ToolDetailPage } from '@renderer/pages/Tools/ToolDetailPage'
-import { SkillsCenterWorkbench } from '@renderer/pages/Skills'
+import { SkillsAdminShell } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
 import { SchedulesPage } from '@renderer/pages/Schedules'
@@ -108,7 +108,7 @@ export function App() {
         )}
         {activePage === 'skills' && (
           <div className="page-full">
-            <SkillsCenterWorkbench />
+            <SkillsAdminShell />
           </div>
         )}
         {activePage === 'schedules' && <SchedulesPage />}

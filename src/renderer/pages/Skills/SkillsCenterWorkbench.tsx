@@ -11,12 +11,13 @@ import { SkillArtifactPanel } from './SkillArtifactPanel'
 import { SkillCapabilityPanel } from './SkillCapabilityPanel'
 import { SkillOverviewPanel } from './SkillOverviewPanel'
 import { SkillVersionPanel } from './SkillVersionPanel'
-import { SkillsSidebar } from './SkillsSidebar'
+import { getSkillsBreadcrumb, normalizeSkillsView, SkillsSidebar } from './SkillsSidebar'
+import type { SkillsCenterTab as SkillsRouteTab, SkillsRuntimeView } from './SkillsSidebar'
 import { SkillCreatorWorkbench } from './SkillCreatorWorkbench'
 import { SkillRuntimeDiagnostics } from './SkillRuntimeDiagnostics'
 import { cn } from '@renderer/utils'
 
-export type SkillsCenterTab = 'installed' | 'available' | 'runs' | 'drafts' | 'creator'
+export type SkillsCenterTab = SkillsRouteTab
 export type SkillsCenterFilters = { query: string; source: SkillRuntimeSourceFilter; runtime: SkillRuntimeSourceFilter | 'all'; status: SkillRuntimeFilterStatus }
 export type SkillListRow = {
   id: string
@@ -84,7 +85,7 @@ export function decodeSkillsCenterState(hash: string): SkillsCenterRouteState {
   if (!hash.startsWith('#skills/')) return {}
   const values = new URLSearchParams(hash.slice('#skills/'.length))
   const rawTab = values.get('tab')
-  const tab: SkillsCenterTab | undefined = rawTab === 'installed' || rawTab === 'available' || rawTab === 'runs' || rawTab === 'drafts' || rawTab === 'creator' ? rawTab : undefined
+  const tab = rawTab === 'installed' || rawTab === 'available' || rawTab === 'runs' || rawTab === 'drafts' || rawTab === 'creator' || rawTab === 'center' || rawTab === 'import' || rawTab === 'detail' || rawTab === 'permissions' || rawTab === 'run-detail' || rawTab === 'artifacts' || rawTab === 'settings' ? rawTab as SkillsCenterTab : undefined
   return { tab, selectedPackageId: values.get('package') || undefined, selectedRunId: values.get('run') || undefined, draftId: values.get('draft') || undefined }
 }
 
@@ -106,13 +107,14 @@ export function SkillsCenterWorkbench() {
   const [filters, setFilters] = useState<SkillsCenterFilters>({ query: '', source: 'all', runtime: 'all', status: 'all' })
   const [showInstaller, setShowInstaller] = useState(false)
   const [runVersion, setRunVersion] = useState<SkillVersion | null>(null)
+  const creatorEnabled = runtime.featureFlags?.creatorEnabled ?? runtime.featureFlags?.creator_enabled ?? true
 
-  const tab = route.tab || 'installed'
+  const tab = normalizeSkillsView(route.tab || 'center')
   const canManageRuntime = hasRuntimeManagementCapability(runtime.capabilities)
   const runtimeStatus = runtime.capabilities?.operationalStatus ?? 'degraded'
   const runtimeStatusLabel = getRuntimeStatusLabel(runtime.capabilities)
   useEffect(() => {
-    void Promise.allSettled([legacy.loadInstalled(), legacy.loadMarket(), runtime.loadPackages(), runtime.loadRuns()])
+    void Promise.allSettled([legacy.loadInstalled(), legacy.loadMarket(), runtime.loadPackages(), runtime.loadRuns(), runtime.loadFeatureFlags()])
   }, [])
   useEffect(() => {
     if (canManageRuntime) void runtime.loadDiagnostics().catch(() => undefined)
@@ -123,18 +125,16 @@ export function SkillsCenterWorkbench() {
 
   const allRows = useMemo(() => buildSkillRows(runtime.packages, legacy.installed, runtime.installations, runtime.runs), [runtime.packages, legacy.installed, runtime.installations, runtime.runs])
   const packageRows = useMemo(() => buildSkillRows(runtime.packages, [], runtime.installations, runtime.runs), [runtime.packages, runtime.installations, runtime.runs])
-  const legacyRows = useMemo(() => buildSkillRows([], tab === 'available' ? legacy.market : legacy.installed, [], []), [legacy.installed, legacy.market, tab])
-  const rows = useMemo(() => filterSkillRows(tab === 'available' ? [...packageRows, ...legacyRows] : tab === 'runs' ? allRows.filter((row) => row.run) : allRows, filters), [allRows, packageRows, legacyRows, tab, filters])
-  const counts = { installed: allRows.length, available: legacy.market.length, runs: runtime.runs.length, drafts: Object.keys(runtime.drafts).length, creator: 0 }
-
-  const selectTab = (next: SkillsCenterTab) => setRoute({ tab: next, selectedPackageId: next === 'runs' ? route.selectedPackageId : undefined, selectedRunId: next === 'runs' ? route.selectedRunId : undefined, draftId: next === 'creator' ? route.draftId : undefined })
+  const legacyRows = useMemo(() => buildSkillRows([], tab === 'import' ? legacy.market : legacy.installed, [], []), [legacy.installed, legacy.market, tab])
+  const rows = useMemo(() => filterSkillRows(tab === 'import' ? [...packageRows, ...legacyRows] : tab === 'runs' ? allRows.filter((row) => row.run) : allRows, filters), [allRows, packageRows, legacyRows, tab, filters])
+  const selectTab = (next: SkillsCenterTab) => setRoute({ tab: normalizeSkillsView(next), selectedPackageId: ['detail', 'permissions', 'artifacts'].includes(next) ? route.selectedPackageId : undefined, selectedRunId: ['runs', 'run-detail', 'artifacts'].includes(next) ? route.selectedRunId : undefined, draftId: next === 'creator' ? route.draftId : undefined })
   const openPackage = async (packageId: string) => {
-    setRoute((current) => ({ ...current, tab: 'installed', selectedPackageId: packageId }))
+    setRoute((current) => ({ ...current, tab: 'detail', selectedPackageId: packageId }))
     try { await runtime.loadPackage(packageId) } catch { /* store exposes the actionable error */ }
   }
-  const openRun = (runId: string) => setRoute((current) => ({ ...current, tab: 'runs', selectedRunId: runId }))
+  const openRun = (runId: string) => setRoute((current) => ({ ...current, tab: 'run-detail', selectedRunId: runId }))
   const startRun = (version: SkillVersion) => setRunVersion(version)
-  const openCreator = () => setRoute((current) => ({ ...current, tab: 'creator', selectedPackageId: undefined, selectedRunId: undefined }))
+  const openCreator = () => { if (!creatorEnabled) return; setRoute((current) => ({ ...current, tab: 'creator', selectedPackageId: undefined, selectedRunId: undefined })) }
   const createDraft = async () => {
     try {
       const draft = await runtime.createDraft({ content: { name: 'New Skill', slug: 'new-skill', description: '', skillMd: '# New Skill\n', references: {}, assets: [], capabilities: [], visibility: 'private' } })
@@ -162,11 +162,20 @@ export function SkillsCenterWorkbench() {
     } catch { /* store exposes the actionable error */ }
   }
 
+  const refreshRuntime = async () => {
+    await Promise.allSettled([runtime.loadPackages(), runtime.loadRuns(), runtime.loadFeatureFlags(), canManageRuntime ? runtime.loadDiagnostics() : Promise.resolve(null)])
+  }
+  const handleGlobalSearch = (query: string) => {
+    setFilters((current) => ({ ...current, query }))
+    if (tab !== 'center') setRoute((current) => ({ ...current, tab: 'center' }))
+  }
+
   const selectedRun = runtime.selectedRun?.id === route.selectedRunId ? runtime.selectedRun : route.selectedRunId ? runtime.runs.find((run) => run.id === route.selectedRunId) : null
   const selectedPackage = runtime.selectedPackage?.package.id === route.selectedPackageId ? runtime.selectedPackage : null
   const selectedVersion = (runtime.selectedVersion && selectedPackage?.versions.some((version) => version.id === runtime.selectedVersion?.id) ? runtime.selectedVersion : undefined) || selectedPackage?.versions.find((version) => version.id === (selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id)) || selectedPackage?.versions[0]
   const manifest = selectedVersion?.manifest as PackageManifest | undefined
   const selectedArtifacts = selectedRun ? runtime.artifactsByRun[selectedRun.id] || [] : []
+  const counts = { center: allRows.length, import: legacy.market.length, creator: Object.keys(runtime.drafts).length, detail: selectedPackage ? 1 : 0, permissions: selectedPackage?.capabilityGrants.length ?? 0, runs: runtime.runs.length, 'run-detail': route.selectedRunId ? 1 : 0, artifacts: selectedArtifacts.length, settings: runtime.diagnostics ? 1 : 0 }
 
   const approveGrant = async (grant: NonNullable<typeof selectedPackage>['capabilityGrants'][number]) => {
     if (typeof window !== 'undefined' && !window.confirm(`批准 ${grant.capability} 将允许当前 Package 使用以下 scope：${JSON.stringify(grant.scope)}。是否继续？`)) return
@@ -182,13 +191,13 @@ export function SkillsCenterWorkbench() {
     await runtime.exportArtifact(artifact.id, { runId: selectedRun.id, destinationDir, confirmed: true, auditReason: 'Exported from Skills Center' })
   }
 
-  return <div className="skills-center" data-testid="skills-center-workbench">
-    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">安装、运行、权限与 Artifact 的统一控制台</span></div></div><div className="skills-center-topbar-tools"><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} placeholder="搜索名称、来源、运行状态…" /></div></div><button type="button" className="skills-tbtn" onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
+  const breadcrumb = getSkillsBreadcrumb(tab)
+  return <div className="skills-center skills-admin-shell" data-testid="skills-admin-shell" data-testid-secondary="skills-center-workbench">
+    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><span className="skills-runtime-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy · Worker</span><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
     {canManageRuntime && <SkillRuntimeDiagnostics diagnostics={runtime.diagnostics} loading={runtime.diagnosticsLoading} error={runtime.diagnosticsError} onRefresh={() => void runtime.loadDiagnostics().catch(() => undefined)} />}
-    <div className="skills-center-layout"><SkillsSidebar tab={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main"><div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>Runtime<select value={filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>{runtime.error && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{runtime.error}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}
-      {tab === 'drafts' && <DraftsPanel drafts={runtime.drafts} onCreate={createDraft} onOpenDraft={(id) => setRoute({ tab: 'creator', draftId: id })} onOpenCreator={openCreator} />}
+    <div className="skills-center-layout"><SkillsSidebar view={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main"><div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>Runtime<select value={filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option><option value="legacy">Legacy</option></select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>{runtime.error && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{runtime.error}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}
       {tab === 'creator' && <SkillCreatorWorkbench draftId={route.draftId || null} onCreated={createDraft} />}
-      {(tab === 'installed' || tab === 'available' || tab === 'runs') && <SkillOverviewPanel rows={rows} tab={tab} loading={runtime.loading || legacy.loading} onOpenPackage={openPackage} onOpenRun={openRun} onInstall={() => setShowInstaller(true)} />}
+      {(tab === 'center' || tab === 'import' || tab === 'runs') && <SkillOverviewPanel rows={rows} tab={tab === 'center' ? 'installed' : tab === 'import' ? 'available' : 'runs'} loading={runtime.loading || legacy.loading} onOpenPackage={openPackage} onOpenRun={openRun} onInstall={() => setShowInstaller(true)} />}
       {selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} /><SkillCapabilityPanel manifest={manifest} grants={selectedPackage.capabilityGrants} onApprove={approveGrant} onReject={rejectGrant} /></div>}
       {selectedRun && <SkillArtifactPanel runId={selectedRun.id} artifacts={selectedArtifacts} onExport={exportArtifact} />}
     </main></div>
@@ -197,6 +206,10 @@ export function SkillsCenterWorkbench() {
     {route.selectedRunId && <RunDetailDrawer runId={route.selectedRunId} onClose={() => setRoute((current) => ({ ...current, selectedRunId: undefined }))} />}
     {runVersion && <RunSkillDialog version={runVersion} onClose={() => setRunVersion(null)} onStarted={openRun} />}
   </div>
+}
+
+function RuntimeViewNotice({ title, body, selected }: { title: string; body: string; selected: boolean }) {
+  return <section className="skills-center-panel skills-runtime-view-notice" aria-labelledby={`skills-view-${title}` }><div className="skills-center-panel-head"><div><div className="skills-eyebrow">Package Runtime</div><h2 id={`skills-view-${title}`}>{title}</h2><p>{body}</p></div></div><div className={cn('skills-center-state', selected ? 'success' : 'info')} role="status"><strong>{selected ? '上下文已就绪' : '等待选择资源'}</strong><p>{selected ? '当前上下文会在刷新与视图切换时保留。' : '从 Skills Center、运行记录或导入流程进入该视图。'}</p></div></section>
 }
 
 function DraftsPanel({ drafts, onCreate, onOpenDraft, onOpenCreator }: { drafts: Record<string, import('./skill-runtime.types').DraftDto>; onCreate: () => void; onOpenDraft: (id: string) => void; onOpenCreator: () => void }) {
