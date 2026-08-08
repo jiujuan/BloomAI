@@ -99,9 +99,30 @@ describe('skill runtime offline integration vertical slice', () => {
     const version = skillPackageRepo.getVersion(installedPackage.versionId)
     expect(packageRecord).toBeTruthy()
     expect(version).toBeTruthy()
+    expect(installed.body.data.status).toBe('awaiting_permission_review')
+
+    // Imported versions stay non-runnable until the security/permission review gate is completed.
+    // Keep that boundary explicit, then create the reviewed fixture used by the runtime slice.
+    const pendingRun = await requestJson(app, '/skill-runs', {
+      method: 'POST',
+      body: JSON.stringify({ skillVersionId: `package:${version!.id}`, input: { message: 'blocked-before-review' } }),
+    })
+    expect(pendingRun.response.status).toBe(404)
+    expect(pendingRun.body.error).toMatchObject({ code: 'NOT_FOUND' })
+
+    const runnableVersion = skillPackageRepo.createVersion({
+      packageId: packageRecord!.id,
+      version: `${version!.version}-verified`,
+      manifest: JSON.parse(version!.manifest_json),
+      manifestHash: `${version!.manifest_hash}-verified`,
+      packagePath: version!.package_path,
+      sourceSnapshot: JSON.parse(version!.source_snapshot_json),
+      status: 'runnable',
+      securityStatus: 'verified',
+    })
     const installation = skillPackageRepo.createInstallation({
-      packageId: installedPackage.packageId,
-      currentVersionId: installedPackage.versionId,
+      packageId: packageRecord!.id,
+      currentVersionId: runnableVersion.id,
       status: 'installed',
       enabled: true,
     })
@@ -123,7 +144,7 @@ describe('skill runtime offline integration vertical slice', () => {
 
     const created = await requestJson(app, '/skill-runs', {
       method: 'POST',
-      body: JSON.stringify({ skillVersionId: `package:${version!.id}`, input: { message: 'hello' } }),
+      body: JSON.stringify({ skillVersionId: `package:${runnableVersion.id}`, input: { message: 'hello' } }),
     })
     expect(created.response.status).toBe(201)
     const runId = created.body.data.runId as string
@@ -145,6 +166,7 @@ describe('skill runtime offline integration vertical slice', () => {
 
     const exported = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
+      headers: { 'x-bloom-actor': 'integration-operator' },
       body: JSON.stringify({ runId, destinationDir: exportRoot, confirmed: true, auditReason: 'offline integration acceptance' }),
     })
     expect(exported.response.status).toBe(200)

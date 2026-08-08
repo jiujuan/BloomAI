@@ -28,7 +28,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Legacy Skills migration security boundary', () => {
+describe('offline one-time read-only Legacy migration security boundary', () => {
   it.each([
     ['http://localhost/internal', 'LOOPBACK_HOST'],
     ['http://service.localhost/internal', 'LOOPBACK_HOST'],
@@ -158,7 +158,7 @@ describe('Legacy Skills migration security boundary', () => {
     expect(vmRun).not.toHaveBeenCalled()
   })
 
-  it('does not fetch, connect, or execute any network request during HTTP preview', () => {
+  it('does not fetch, connect, or execute any network request during offline migration preview', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const requestSpy = vi.spyOn(process, 'emitWarning')
     const service = createMigrationPreviewService()

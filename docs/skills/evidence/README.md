@@ -1,10 +1,10 @@
-# Skills Runtime 证据目录
+# Skills Runtime / Skills Admin 证据目录
 
-本目录保存 Skills Runtime v1.1 的可复核验收证据。证据文件只记录脱敏后的摘要、命令、快照引用和审核结论；不得写入 API key、token、cookie、个人绝对路径或真实用户数据。
+本目录保存 Skills Runtime v1.1、Skills Admin v1.2 和 Legacy 边界收紧的可复核验收证据。证据文件只记录脱敏后的摘要、命令、快照引用和审核结论；不得写入 API key、token、cookie、个人绝对路径或真实用户数据。
 
 ## 使用规则
 
-1. 每个 P0/P1 任务至少绑定一个 `Task ID`、一个 commit SHA 和一个可重复的验证命令。
+1. 每个 P0/P1/P2/P3/P4 任务至少绑定一个 `Task ID`、一个 commit SHA 和一个可重复的验证命令。
 2. 运行证据必须来自干净的临时 DB/data root，并注明 Node、npm、OS 和当前分支。
 3. API、migration、security、browser、release 证据分别填入对应模板；不要用“本地已验证”替代命令输出或快照。
 4. 失败证据也要保留：记录失败命令、最小复现、根因、修复 commit 和重跑结果。
@@ -20,6 +20,10 @@
 | [Release gate](./release-gate.md) | 完整发布门禁、浏览器 trace/video、回滚演练 | `npm run test:skills:release-gate` | ☐ |
 | [P0 baseline](./p0-baseline.md) | SKL12-P0-001 至 SKL12-P0-003：源码、Legacy 依赖、Runtime/权限/DTO 契约 | `npx tsx scripts/skills/p0-baseline-scan.ts --root .` | ✅ captured |
 | [P0 DB inventory](./p0-db-inventory.json) | SKL12-P0-004：schema、行数、外键、孤儿、migration、备份和删除决策 | `npx tsx scripts/skills/p0-db-inventory.ts --database <real-db> --backup` | ✅ captured |
+| [P4-001 frontend Legacy removal](./p4-001-frontend-legacy-removal.md) | 删除 Renderer Legacy 管理入口 | `npx vitest run src/renderer/pages/Skills/SkillsLegacyBoundaryP4.test.tsx --pool=forks --maxWorkers=1 --minWorkers=1` | ✅ |
+| [P4-002 backend Legacy boundary](./p4-002-backend-legacy-boundary.md) | 注销旧后端用户路由并隔离 Legacy Repository 边界 | `npx vitest run src/server/http/p4-002-legacy-boundary.test.ts --pool=forks --maxWorkers=1 --minWorkers=1` | ✅ |
+| [P4-003 Legacy migration gates](./p4-003-legacy-migration-gates.md) | 归档、备份、对账、manual review、rollback 和旧表 drop gate | `npm run verify:legacy-skills-migration` | ✅ |
+| [P4-004 Legacy test/fixture/doc cleanup](./p4-004-legacy-test-fixture-doc-cleanup.md) | 删除 Legacy 管理测试和 fixture；保留一次性、离线、只读迁移验证 | `npm run test:skills:migration:offline` | ✅ |
 
 ## 证据最小字段
 

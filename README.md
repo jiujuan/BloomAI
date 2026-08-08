@@ -99,15 +99,16 @@ BloomAI 通过统一的 LLM 抽象管理文本、图像和视频模型。当前�
 
 请不要把 BloomAI 的工具权限授予不可信的 Prompt，也不要在未审查输入的情况下运行删除数据、发布内容或其他高风险自动化操作。
 
-### 7. Skills 技能市场
+### 7. Skills 技能管理
 
-Skills 用于封装可复用的 Prompt 或程序化能力，支持：
+Skills Admin 当前面向 **Package Runtime**，用于管理可安装、可版本化、可授权和可观察的技能包：
 
-- 官方和社区技能浏览、搜索、安装、卸载。
-- 自定义技能创建和编辑。
-- prompt-template、js-function、http-api 等技能类型。
-- 技能运行状态、事件和历史记录查看。
-- 技能能力策略和运行时隔离。
+- 技能包目录、导入、版本、安装和生命周期管理。
+- 自定义技能 Draft 的校验、预览和发布。
+- 技能运行状态、事件、Artifacts 和审计记录查看。
+- 能力授权、运行时隔离和失败恢复。
+
+Legacy Skills 不再作为用户可管理的市场、安装或运行功能。仍需处理的旧数据只能通过开发/发布流程中的一次性、离线、只读迁移验证脚本处理，不能作为应用用户功能调用。
 
 ### 8. 定时任务
 
@@ -237,6 +238,7 @@ API Key 也可以通过应用 Settings 保存到本地设置中。请勿将包�
 | npm run test:architecture | 检查后端 Route → Service → Repository/Runtime 依赖边界 |
 | npm run start:server | 仅启动本地 API 服务 |
 | npm run db:migrate | 执行数据库迁移 |
+| npm run verify:skills-legacy-migration-offline | 执行一次性、离线、只读 Legacy 数据迁移验证（不是用户功能） |
 | npm run lint | 运行项目当前的 lint 占位命令 |
 
 ## Windows 打包
@@ -360,7 +362,8 @@ http://127.0.0.1:11434
 - docs/BloomAI-architecture-analysis-v1.md：整体架构分析
 - docs/services/：Service 层与后端依赖边界
 - docs/tools/：Tools 平台、浏览器工具和发布证据
-- docs/skills/：Skills Runtime、技能包和能力策略
+- docs/skills/：Skills Runtime、技能包和能力策略；Legacy 迁移验证仅限一次性、离线、只读流程
+- docs/skills/evidence/README.md：Skills Runtime 与 Skills Admin 验收证据索引
 - docs/research/：Deep Research 设计与实现记录
 - docs/schedule/：定时任务设计与实现计划
 - docs/memory/：Memory 系统说明

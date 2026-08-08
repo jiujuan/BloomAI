@@ -24,8 +24,10 @@
     "test:skills:security": "vitest run tests/security --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:skills:migration": "vitest run src/server/db --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:skills:release-gate": "npm run lint && npm run typecheck:skills && npm run test:skills:unit && npm run test:skills:integration && npm run test:skills:security && npm run test:skills:migration && npm run test:skills:e2e && npm run test:skills:migration:smoke",
-    "verify:legacy-skills-migration": "tsx scripts/verify-legacy-skills-migration.ts",
-    "test:skills:migration:smoke": "npm run typecheck:skills && npm run verify:legacy-skills-migration"
+    "verify:skills-legacy-migration-offline": "tsx scripts/verify-legacy-skills-migration.ts",
+    "verify:legacy-skills-migration": "npm run verify:skills-legacy-migration-offline",
+    "test:skills:migration:offline": "npm run typecheck:skills && npm run verify:skills-legacy-migration-offline",
+    "test:skills:migration:smoke": "npm run test:skills:migration:offline"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.91",
