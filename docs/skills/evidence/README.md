@@ -27,6 +27,7 @@
 | [P5-001 unit/domain tests](./p5-001-unit-domain-tests.md) | Manifest、policy、runtime、artifact、creator 和 repository invariants 单元/领域门禁 | `npm run test:skills:unit` | ✅ |
 | [P5-002 HTTP/DB integration tests](./p5-002-http-db-integration-tests.md) | HTTP resource contracts、SSE、observability、DB invariants 和 migration schema contract 集成门禁 | `npm run test:skills:integration` | ✅ |
 | [P5-003 security tests](./p5-003-security-tests.md) | path/source/package、capability、artifact、audit/redaction 和 Legacy bypass negative cases | `npm run test:skills:security` | ✅ |
+| [P5-004 Renderer/browser E2E](./p5-004-renderer-browser-e2e.md) | Skills Center、Creator、Detail/Run/Artifact、responsive/a11y、Legacy boundary 和 offline browser flow | `npm run test:skills:e2e` | ✅ |
 
 ## 证据最小字段
 
