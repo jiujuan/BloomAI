@@ -13,16 +13,21 @@ type LifecycleDependencies = {
   capabilityGrantService?: CapabilityVersionRevalidator
 }
 
+type AuditContext = {
+  actor?: string | null
+  requestId?: string
+}
+
 type InstallationCommandOptions = {
   expectedRevision: number
   idempotencyKey: string
-}
+} & AuditContext
 
 type DeletePackageOptions = {
   confirm: boolean
   idempotencyKey: string
   reason: string
-}
+} & AuditContext
 
 const ACTIVE_RUN_STATUSES = new Set(['created', 'validating', 'running', 'waiting_input', 'waiting_approval'])
 
@@ -57,8 +62,14 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     }
   }
 
-  function audit(action: string, resourceType: string, resourceId: string, payload: Record<string, unknown>) {
-    dependencies.audit?.append({ actor: null, action, resourceType, resourceId, payload })
+  function audit(action: string, resourceType: string, resourceId: string, payload: Record<string, unknown>, context?: AuditContext) {
+    dependencies.audit?.append({
+      actor: context?.actor ?? null,
+      action,
+      resourceType,
+      resourceId,
+      payload: { ...payload, ...(context?.requestId ? { requestId: context.requestId } : {}) },
+    })
   }
 
   function mutateInstallation(
@@ -94,7 +105,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       newRevision: updated.revision ?? options.expectedRevision,
       previousVersionId: installation.currentVersionId,
       currentVersionId: updated.currentVersionId,
-    })
+    }, options)
     return updated
   }
 
@@ -118,7 +129,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       expectedRevision: options.expectedRevision,
       newRevision: updated.revision ?? options.expectedRevision,
       currentVersionId: installation.currentVersionId,
-    })
+    }, options)
     return updated
   }
 
@@ -158,7 +169,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       previousVersionId: installation.currentVersionId,
       currentVersionId: updated.currentVersionId,
       reason,
-    })
+    }, input)
     return updated
   }
 
@@ -187,7 +198,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     }
     const deleted = dependencies.packages.softDeletePackage({ packageId, idempotencyKey: input.idempotencyKey, reason })
     if (!deleted) throw new ServiceError('CONFLICT', 'Skill package could not be deleted')
-    audit('skill.package.soft_deleted', 'skill_package', packageId, { reason })
+    audit('skill.package.soft_deleted', 'skill_package', packageId, { reason }, input)
     return deleted
   }
 

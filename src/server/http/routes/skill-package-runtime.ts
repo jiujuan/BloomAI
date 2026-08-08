@@ -8,6 +8,7 @@ import { getSkillRuntimeCapabilities } from '../../skills/config/skill-runtime.c
 import { errorResponse } from '../dtos/skill-runtime.error'
 import { pageSuccess, successResponse } from '../dtos/skill-runtime.response'
 import { getRequestId } from '../request-context'
+import { getSkillActor } from '../skills-policy'
 
 const jsonObjectSchema = z.record(z.unknown())
 const idSchema = z.string().min(1).max(200)
@@ -15,20 +16,27 @@ const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 })
+const packageListQuerySchema = paginationSchema.extend({
+  search: z.string().trim().min(1).max(200).optional(),
+  sourceType: z.string().trim().min(1).max(100).optional(),
+  includeArchived: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
+  sort: z.enum(['updatedAt', 'createdAt', 'name', 'sourceType']).default('updatedAt'),
+  direction: z.enum(['asc', 'desc']).default('desc'),
+}).strict()
 const staticSourceMetadataSchema = z.object({ origin: z.enum(['local', 'npx-artifact']).optional() }).strict()
 const packageSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('local-directory'), directory: z.string().min(1), subdirectory: z.string().min(1).optional(), metadata: staticSourceMetadataSchema.optional() }).strict(),
   z.object({ kind: z.literal('zip'), zipPath: z.string().min(1), subdirectory: z.string().min(1).optional(), metadata: staticSourceMetadataSchema.optional() }).strict(),
   z.object({ kind: z.literal('github-archive'), repositoryUrl: z.string().url(), ref: z.string().min(1), subdirectory: z.string().min(1).optional() }).strict(),
 ])
-const packageMutationSchema = z.object({ source: packageSourceSchema })
+const packageMutationSchema = z.object({ source: packageSourceSchema }).strict()
 const packageInstallSchema = z.object({
   source: packageSourceSchema,
   reviewId: idSchema,
   sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
   confirm: z.literal(true),
-})
-const importReviewDecisionSchema = z.object({ reviewer: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
+}).strict()
+const importReviewDecisionSchema = z.object({ reason: z.string().trim().min(1).max(500).optional() }).strict()
 
 const installationUpdateSchema = z.object({ enabled: z.boolean(), expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.string().trim().min(1).max(200) }).strict()
 const installationUninstallSchema = z.object({ expectedRevision: z.number().int().nonnegative(), idempotencyKey: z.string().trim().min(1).max(200) }).strict()
@@ -76,24 +84,30 @@ const commandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
 ])
 const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() })
-const artifactContentQuerySchema = z.object({ runId: idSchema })
+const artifactContentQuerySchema = z.object({ runId: idSchema }).strict()
 const artifactListQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), offset: z.coerce.number().int().min(0).optional(), sort: z.enum(['createdAt', 'size', 'kind']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict()
 const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1), confirmed: z.literal(true), actor: idSchema.optional(), auditReason: z.string().trim().min(1).max(500) }).strict()
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
 
+function requireSkillActor(c: Context): string {
+  const actor = getSkillActor(c)
+  if (!actor) throw new ServiceError('FORBIDDEN', 'Authenticated Skills actor is required')
+  return actor
+}
+
 skillPackageRuntimeRoutes.get('/skill-runtime/capabilities', (c) => {
   return successResponse(c, getSkillRuntimeCapabilities())
 })
 
 skillPackageRuntimeRoutes.post('/skill-packages/inspect', async (c) => {
-  try { return successResponse(c, await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source)) } catch (error) { return errorResponse(c, error) }
+  try { return successResponse(c, await skillPackageRuntimeService.inspectPackage((await readValidated(c, packageMutationSchema)).source, { actor: getSkillActor(c), requestId: getRequestId(c) })) } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-packages/install', async (c) => {
   try {
     const input = await readValidated(c, packageInstallSchema)
-    return successResponse(c, await skillPackageRuntimeService.installPackage(input.source, input), 201)
+    return successResponse(c, await skillPackageRuntimeService.installPackage(input.source, input, { actor: getSkillActor(c), requestId: getRequestId(c) }), 201)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-import-reviews/:id', (c) => {
@@ -102,18 +116,18 @@ skillPackageRuntimeRoutes.get('/skill-import-reviews/:id', (c) => {
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/approve', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return successResponse(c, skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), input.reviewer))
+    return successResponse(c, skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), requireSkillActor(c), { actor: getSkillActor(c), requestId: getRequestId(c) }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/reject', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return successResponse(c, skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), input.reviewer, input.reason))
+    return successResponse(c, skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), requireSkillActor(c), input.reason, { actor: getSkillActor(c), requestId: getRequestId(c) }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages', (c) => {
   try {
-    const page = paginationSchema.parse(c.req.query())
+    const page = packageListQuerySchema.parse(c.req.query())
     const result = skillPackageRuntimeService.listPackages(page)
     return pageSuccess(c, result.data, page, result.total)
   } catch (error) { return errorResponse(c, error) }
@@ -128,7 +142,7 @@ skillPackageRuntimeRoutes.get('/skill-installations', (c) => {
 skillPackageRuntimeRoutes.delete('/skill-packages/:id', async (c) => {
   try {
     const input = await readValidated(c, packageDeleteSchema)
-    return successResponse(c, skillPackageRuntimeService.deletePackage(idSchema.parse(c.req.param('id')), input))
+    return successResponse(c, skillPackageRuntimeService.deletePackage(idSchema.parse(c.req.param('id')), { ...input, actor: getSkillActor(c), requestId: getRequestId(c) }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages/:id', (c) => {
@@ -155,20 +169,20 @@ skillPackageRuntimeRoutes.post('/skill-packages/:id/update/preview', async (c) =
 skillPackageRuntimeRoutes.post('/skill-packages/:id/update', async (c) => {
   try {
     const { confirm: _confirm, ...candidate } = await readValidated(c, versionUpdateSchema)
-    return successResponse(c, await skillPackageRuntimeService.updatePackageVersion(idSchema.parse(c.req.param('id')), candidate), 201)
+    return successResponse(c, await skillPackageRuntimeService.updatePackageVersion(idSchema.parse(c.req.param('id')), candidate, { actor: getSkillActor(c), requestId: getRequestId(c) }), 201)
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.patch('/skill-installations/:id', async (c) => {
   try {
     const input = await readValidated(c, installationUpdateSchema)
-    const installation = skillPackageRuntimeService.setInstallationEnabledWithRevision(idSchema.parse(c.req.param('id')), input.enabled, input)
+    const installation = skillPackageRuntimeService.setInstallationEnabledWithRevision(idSchema.parse(c.req.param('id')), input.enabled, { ...input, actor: getSkillActor(c), requestId: getRequestId(c) })
     return successResponse(c, toInstallationHttpDto(installation))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-installations/:id/switch-version', async (c) => {
   try {
     const input = await readValidated(c, versionSwitchSchema)
-    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.switchCurrentVersion(idSchema.parse(c.req.param('id')), input.versionId, input)))
+    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.switchCurrentVersion(idSchema.parse(c.req.param('id')), input.versionId, { ...input, actor: getSkillActor(c), requestId: getRequestId(c) })))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
@@ -195,13 +209,13 @@ skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/revoke', async (c) 
 skillPackageRuntimeRoutes.post('/skill-installations/:id/rollback', async (c) => {
   try {
     const input = await readValidated(c, installationRollbackSchema)
-    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.rollbackInstallation(idSchema.parse(c.req.param('id')), input)))
+    return successResponse(c, toInstallationHttpDto(skillPackageRuntimeService.rollbackInstallation(idSchema.parse(c.req.param('id')), { ...input, actor: getSkillActor(c), requestId: getRequestId(c) })))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-installations/:id', async (c) => {
   try {
     const input = await readValidated(c, installationUninstallSchema)
-    return successResponse(c, { uninstalled: true, installation: toInstallationHttpDto(skillPackageRuntimeService.uninstallInstallation(idSchema.parse(c.req.param('id')), input)) })
+    return successResponse(c, { uninstalled: true, installation: toInstallationHttpDto(skillPackageRuntimeService.uninstallInstallation(idSchema.parse(c.req.param('id')), { ...input, actor: getSkillActor(c), requestId: getRequestId(c) })) })
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs', async (c) => {

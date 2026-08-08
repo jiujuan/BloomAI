@@ -168,7 +168,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const approved = await requestJson(app, `/skill-import-reviews/${reviewId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ reviewer: 'operator-1' }),
+      headers: { 'x-bloom-actor': 'operator-1' },
+      body: JSON.stringify({}),
     })
     expect(approved.response.status).toBe(200)
     expect(approved.body.data).toMatchObject({ id: reviewId, status: 'approved', reviewer: 'operator-1' })
@@ -184,7 +185,8 @@ describe('Skill Package Runtime HTTP API', () => {
     })
     const rejected = await requestJson(app, `/skill-import-reviews/${rejectedInspection.body.data.reviewId}/reject`, {
       method: 'POST',
-      body: JSON.stringify({ reviewer: 'operator-2', reason: 'Policy review failed' }),
+      headers: { 'x-bloom-actor': 'operator-2' },
+      body: JSON.stringify({ reason: 'Policy review failed' }),
     })
     expect(rejected.response.status).toBe(200)
     expect(rejected.body.data).toMatchObject({ status: 'rejected', reviewer: 'operator-2' })
@@ -267,6 +269,7 @@ describe('Skill Package Runtime HTTP API', () => {
       manifest: { requestedCapabilities: [{ capability: 'web.search', scope: { allowedDomains: ['example.com'], maxCalls: 2 } }] },
       manifestHash: 'approval-package-hash',
       packagePath: path.join(dataDir, 'packages', 'approval-package-hash'),
+      securityStatus: 'verified',
     })
     skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
 
@@ -376,6 +379,7 @@ describe('Skill Package Runtime HTTP API', () => {
       manifestHash: 'runnable-package-v2-hash',
       packagePath: path.join(dataDir, 'packages', 'runnable-package-v2-hash'),
       sourceSnapshot: { sourceSha256: 'runnable-package-v2-source', files: [{ path: 'SKILL.md', sha256: 'new-file-sha' }] },
+      securityStatus: 'verified',
     }
 
     const listed = await requestJson(app, `/skill-packages/${pkg.id}/versions`)

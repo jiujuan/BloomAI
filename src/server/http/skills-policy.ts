@@ -28,7 +28,6 @@ export type SkillOperation =
 const USER_OPERATIONS = new Set<SkillOperation>([
   'runtime.read',
   'package.read',
-  'package.inspect',
   'installation.read',
   'import.read',
   'grant.read',
@@ -48,6 +47,18 @@ export function getSkillRole(rawRole: string | null | undefined): SkillRole {
   return normalized === 'admin' || normalized === 'owner' ? normalized : 'user'
 }
 
+/**
+ * Resolve the authenticated actor from transport-level identity headers.
+ * Request bodies must not be used as an identity source for administrative
+ * decisions. The headers are a temporary adapter until the application auth
+ * context is wired into Hono.
+ */
+export function getSkillActor(context: Pick<Context, 'req'>): string | undefined {
+  const raw = context.req.header('x-bloom-actor') ?? context.req.header('x-bloom-owner')
+  const actor = raw?.trim()
+  if (!actor || actor.length > 200 || /[\r\n]/.test(actor)) return undefined
+  return actor
+}
 export function isSkillOperationAllowed(role: SkillRole, operation: SkillOperation): boolean {
   if (role === 'admin' || role === 'owner') return true
   return USER_OPERATIONS.has(operation)

@@ -269,7 +269,15 @@ export interface PackageSkillRepository {
     sourceRef?: string | null
   }): PackageSnapshot
   getPackage(id: string): PackageSnapshot | undefined
-  listPackages(options: { limit: number; offset: number; includeArchived?: boolean }): Page<PackageSnapshot>
+  listPackages(options: {
+    limit: number
+    offset: number
+    includeArchived?: boolean
+    search?: string
+    sourceType?: string
+    sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'
+    direction?: 'asc' | 'desc'
+  }): Page<PackageSnapshot>
   createVersion(data: {
     packageId: string
     version: string

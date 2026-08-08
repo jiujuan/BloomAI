@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lte, max, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lte, like, max, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { resolvePackageSkillId } from '../../../shared/skill-references'
@@ -126,11 +126,35 @@ export const skillPackageRepo = {
     return result.changes === 1 ? this.getDraft(data.id) : undefined
   },
 
-  listPackages(options: { limit: number; offset: number; includeArchived?: boolean }) {
-    const where = options.includeArchived ? undefined : isNull(skill_packages.deleted_at)
+  listPackages(options: {
+    limit: number
+    offset: number
+    includeArchived?: boolean
+    search?: string
+    sourceType?: string
+    sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'
+    direction?: 'asc' | 'desc'
+  }) {
+    const conditions = [
+      options.includeArchived ? undefined : isNull(skill_packages.deleted_at),
+      options.sourceType ? eq(skill_packages.source_type, options.sourceType) : undefined,
+      options.search ? or(
+        like(skill_packages.name, `%${options.search}%`),
+        like(skill_packages.description, `%${options.search}%`),
+      ) : undefined,
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const sortColumn = options.sort === 'createdAt'
+      ? skill_packages.created_at
+      : options.sort === 'name'
+        ? skill_packages.name
+        : options.sort === 'sourceType'
+          ? skill_packages.source_type
+          : skill_packages.updated_at
+    const primaryOrder = options.direction === 'asc' ? asc(sortColumn) : desc(sortColumn)
     const query = getOrmDb().select().from(skill_packages)
     const data = (where === undefined ? query : query.where(where))
-      .orderBy(desc(skill_packages.updated_at), asc(skill_packages.id))
+      .orderBy(primaryOrder, asc(skill_packages.id))
       .limit(options.limit).offset(options.offset).all()
     const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages)
     const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0

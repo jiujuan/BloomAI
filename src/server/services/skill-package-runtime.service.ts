@@ -21,7 +21,7 @@ import {
   SkillRunTransitionError,
   SkillRunWaitingActionExpiredError,
 } from '../skills/runtime/skill-run-coordinator'
-import type { ArtifactRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunQueueRepository, SkillRunRepository } from '../skills/application/ports'
+import type { ArtifactRepository, AuditRepository, CapabilityGrantRepository, PackageSkillRepository, SkillRunQueueRepository, SkillRunRepository } from '../skills/application/ports'
 import { ServiceError } from './errors'
 import { isLegacySkillReference } from '../../shared/skill-references'
 import { SkillRuntimeMetrics, recordMigrationMetric } from '../skills/observability/skill-runtime.metrics'
@@ -38,6 +38,7 @@ export type SkillPackageRuntimeDependencies = {
   artifactStore: ArtifactStore
   capabilityGrantService: CapabilityGrantService
   metrics: SkillRuntimeMetrics
+  audit?: AuditRepository
   /** @deprecated Compatibility seam for callers still assembling the old adapter. */
   repo?: Record<string, any>
 }
@@ -46,6 +47,8 @@ type RuntimeServiceOverrides = Partial<SkillPackageRuntimeDependencies> & {
   /** @deprecated Use packageRepository/runRepository/grantRepository/artifactRepository. */
   repo?: Record<string, any>
 }
+
+type SkillAuditContext = { actor?: string | null; requestId?: string }
 
 export type StartSkillRunInput = {
   skillId?: string
@@ -66,6 +69,7 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
   const queueRepository = overrides.queueRepository ?? createSqliteQueueRepository()
   const metrics = overrides.metrics ?? SkillRuntimeMetrics.global()
   const eventRepository = createSqliteEventRepository()
+  const auditRepository = overrides.audit ?? createSqliteAuditRepository()
   const clock = { now: () => Date.now() }
   const capabilityGrantService = overrides.capabilityGrantService ?? new CapabilityGrantService({
     packages: packageRepository,
@@ -77,7 +81,7 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
   const skillLifecycleService = createSkillLifecycleService({
     packages: packageRepository,
     runs: runRepository,
-    audit: createSqliteAuditRepository(),
+    audit: auditRepository,
     clock,
     capabilityGrantService,
   })
@@ -109,28 +113,70 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
 
   const mapRuntime = <T>(operation: () => T, operationName = 'unknown'): T => mapRuntimeError(operation, operationName, dependencies.metrics)
 
+  const appendAudit = (
+    action: string,
+    resourceType: string,
+    resourceId: string | null | undefined,
+    context: SkillAuditContext | undefined,
+    payload: Record<string, unknown> = {},
+    sourceFingerprint?: string | null,
+  ) => {
+    auditRepository.append({
+      actor: context?.actor ?? null,
+      action,
+      resourceType,
+      resourceId: resourceId ?? null,
+      securityDecision: 'allowed',
+      policyVersion: 'skills-admin-v1.2',
+      sourceFingerprint: sourceFingerprint ?? null,
+      payload: { ...payload, ...(context?.requestId ? { requestId: context.requestId } : {}) },
+    })
+  }
+
   return {
-    async inspectPackage(source: PackageInstallSource) {
-      return mapRuntime(() => dependencies.createInstaller().inspect(source), 'inspect')
+    async inspectPackage(source: PackageInstallSource, context?: SkillAuditContext) {
+      const result = await mapRuntime(() => dependencies.createInstaller().inspect(source), 'inspect')
+      appendAudit('skill.package.inspect', 'skill_import_review', result.reviewId, context, {
+        packageCount: result.packages.length,
+        sourceType: result.packages[0]?.sourceType ?? source.kind,
+      }, result.sourceFingerprint)
+      return result
     },
 
-    async installPackage(source: PackageInstallSource, options: PackageInstallOptions) {
-      return mapRuntime(() => dependencies.createInstaller().install(source, options), 'install')
+    async installPackage(source: PackageInstallSource, options: PackageInstallOptions, context?: SkillAuditContext) {
+      let reviewWasInstalled = false
+      try { reviewWasInstalled = packageInstallReviewService.get(options.reviewId).status === 'installed' } catch { /* installer maps the authoritative review error */ }
+      const result = await mapRuntime(() => dependencies.createInstaller().install(source, options), 'install')
+      if (!reviewWasInstalled) {
+        for (const installed of result.packages) {
+          appendAudit('skill.package.imported', 'skill_package', installed.packageId, context, {
+            reviewId: options.reviewId,
+            versionId: installed.versionId,
+            installationId: installed.installationId,
+            status: result.status,
+          }, options.sourceFingerprint)
+        }
+      }
+      return result
     },
 
     getImportReview(id: string) {
       return mapRuntime(() => packageInstallReviewService.get(id), 'inspect')
     },
 
-    approveImportReview(id: string, reviewer: string) {
-      return recordApprovalMetricSafely('approve', dependencies.metrics, () => mapRuntime(() => packageInstallReviewService.approve(id, reviewer), 'approve'))
+    approveImportReview(id: string, reviewer: string, context?: SkillAuditContext) {
+      const result = recordApprovalMetricSafely('approve', dependencies.metrics, () => mapRuntime(() => packageInstallReviewService.approve(id, reviewer), 'approve'))
+      appendAudit('skill.import.review.approved', 'skill_import_review', id, context, { reviewer })
+      return result
     },
 
-    rejectImportReview(id: string, reviewer: string, reason?: string) {
-      return recordApprovalMetricSafely('reject', dependencies.metrics, () => mapRuntime(() => packageInstallReviewService.reject(id, reviewer, reason), 'reject'))
+    rejectImportReview(id: string, reviewer: string, reason?: string, context?: SkillAuditContext) {
+      const result = recordApprovalMetricSafely('reject', dependencies.metrics, () => mapRuntime(() => packageInstallReviewService.reject(id, reviewer, reason), 'reject'))
+      appendAudit('skill.import.review.rejected', 'skill_import_review', id, context, { reviewer, reason: reason ?? null })
+      return result
     },
 
-    listPackages(page: { limit: number, offset: number }) {
+    listPackages(page: { limit: number, offset: number; includeArchived?: boolean; search?: string; sourceType?: string; sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'; direction?: 'asc' | 'desc' }) {
       return mapRuntime(() => dependencies.packageRepository.listPackages(page))
     },
 
@@ -157,12 +203,30 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntime(() => skillVersionService.previewUpdate(packageId, candidate))
     },
 
-    updatePackageVersion(packageId: string, candidate: SkillVersionCandidate) {
-      return mapRuntime(() => skillVersionService.updatePackage(packageId, candidate))
+    async updatePackageVersion(packageId: string, candidate: SkillVersionCandidate, context?: SkillAuditContext) {
+      const result = await mapRuntime(() => skillVersionService.updatePackage(packageId, candidate))
+      if (!result.duplicate) {
+        appendAudit('skill.package.version.created', 'skill_version', result.version.id, context, {
+          packageId,
+          version: result.version.version,
+          currentVersionId: result.currentVersionId,
+        })
+      }
+      return result
     },
 
-    switchCurrentVersion(installationId: string, versionId: string, options: { expectedRevision: number; idempotencyKey: string }) {
-      return mapRuntime(() => skillVersionService.switchCurrent(installationId, versionId, options))
+    switchCurrentVersion(installationId: string, versionId: string, options: { expectedRevision: number; idempotencyKey: string; actor?: string; requestId?: string }) {
+      const duplicate = dependencies.packageRepository.getInstallationCommandResult?.(installationId, options.idempotencyKey)
+      const result = mapRuntime(() => skillVersionService.switchCurrent(installationId, versionId, options))
+      if (!duplicate) {
+        appendAudit('skill.installation.version_switched', 'skill_installation', installationId, options, {
+          expectedRevision: options.expectedRevision,
+          newRevision: result.revision ?? options.expectedRevision,
+          currentVersionId: result.currentVersionId,
+          previousVersionId: result.previousVersionId ?? null,
+        })
+      }
+      return result
     },
 
     getPackageDetail(id: string) {
@@ -204,21 +268,21 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       })
     },
 
-    setInstallationEnabledWithRevision(id: string, enabled: boolean, options: { expectedRevision: number; idempotencyKey: string }) {
+    setInstallationEnabledWithRevision(id: string, enabled: boolean, options: { expectedRevision: number; idempotencyKey: string; actor?: string; requestId?: string }) {
       return mapRuntime(() => enabled
         ? skillLifecycleService.enableInstallation(id, options)
         : skillLifecycleService.disableInstallation(id, options))
     },
 
-    uninstallInstallation(id: string, options: { expectedRevision: number; idempotencyKey: string }) {
+    uninstallInstallation(id: string, options: { expectedRevision: number; idempotencyKey: string; actor?: string; requestId?: string }) {
       return mapRuntime(() => skillLifecycleService.uninstallInstallation(id, options))
     },
 
-    rollbackInstallation(id: string, input: { versionId?: string; expectedRevision: number; idempotencyKey: string; reason: string }) {
+    rollbackInstallation(id: string, input: { versionId?: string; expectedRevision: number; idempotencyKey: string; reason: string; actor?: string; requestId?: string }) {
       return mapRuntime(() => skillLifecycleService.rollbackInstallation(id, input))
     },
 
-    deletePackage(id: string, input: { confirm: boolean; idempotencyKey: string; reason: string }) {
+    deletePackage(id: string, input: { confirm: boolean; idempotencyKey: string; reason: string; actor?: string; requestId?: string }) {
       return mapRuntime(() => skillLifecycleService.requestDeletePackage(id, input))
     },
 
