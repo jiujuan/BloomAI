@@ -93,6 +93,16 @@ export type CapabilityGrant = CapabilityDto & {
 
 export type RequestedCapability = { capability: string; scope: CapabilityScope }
 
+export type PackageImportDiagnostic = {
+  code?: string
+  severity: 'info' | 'warning' | 'error' | 'critical' | string
+  message: string
+  path?: string
+  line?: number
+  column?: number
+  details?: Record<string, unknown>
+}
+
 export type PackageManifest = {
   name: string
   description: string
@@ -216,10 +226,29 @@ export type PackageInstallInput = {
   confirm: true
 }
 
+export type PackageImportReviewStatus = 'scanning' | 'validated' | 'warning' | 'pending' | 'approved' | 'rejected' | 'installed' | string
+
+export type PackageImportReview = {
+  id: string
+  source: string
+  sourceSha: string
+  sourceRef: string | null
+  inspection: Record<string, unknown>
+  securityFindings: Record<string, unknown>
+  status: PackageImportReviewStatus
+  reviewer: string | null
+  decision: Record<string, unknown> | null
+  createdAt: number
+  updatedAt: number
+}
+
 export type InspectedPackage = {
   sourceType: string
   relativeSkillPath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: PackageImportDiagnostic[]
+  importReviewRequired: boolean
   manifest: PackageManifest
   sourceSnapshot: {
     sourceSha256: string
@@ -227,6 +256,13 @@ export type InspectedPackage = {
     sourceRef?: string
     files: Array<{ path: string; sha256: string; sizeBytes: number }>
   }
+}
+
+export type PackageInspectionResult = {
+  reviewId: string
+  sourceFingerprint: string
+  resolvedCommitSha?: string
+  packages: InspectedPackage[]
 }
 
 export type VersionCandidate = {

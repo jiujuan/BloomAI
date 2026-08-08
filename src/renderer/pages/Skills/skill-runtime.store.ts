@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform, SkillRuntimeApiError } from '@renderer/api'
-import type { CapabilityDto, DraftDto, DraftListInput, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RuntimeMutationState, RuntimeToast, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate } from './skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftListInput, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RuntimeMutationState, RuntimeToast, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate } from './skill-runtime.types'
 
 function makeIdempotencyKey(operation: string) {
   return `${operation}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -146,8 +146,11 @@ type RuntimeActions = {
   loadPackage: (id: string) => Promise<PackageDetail>
   loadVersions: (packageId: string) => Promise<SkillVersion[]>
   selectVersion: (version: SkillVersion | null) => void
-  inspectPackage: (source: PackageSource) => Promise<InspectedPackage[]>
-  installPackage: (input: PackageSource | PackageInstallInput) => Promise<PackageDetail | Record<string, unknown>>
+  inspectPackage: (source: PackageSource) => Promise<PackageInspectionResult>
+  getImportReview: (reviewId: string) => Promise<PackageImportReview>
+  approveImportReview: (reviewId: string, reviewer?: string) => Promise<PackageImportReview>
+  rejectImportReview: (reviewId: string, reviewer?: string, reason?: string) => Promise<PackageImportReview>
+  installPackage: (input: PackageInstallInput) => Promise<PackageDetail | Record<string, unknown>>
   setInstallationEnabled: (id: string, enabled: boolean, expectedRevision: number) => Promise<SkillInstallation>
   enableInstallation: (id: string, input: { expectedRevision: number; idempotencyKey: string }) => Promise<SkillInstallation>
   disableInstallation: (id: string, input: { expectedRevision: number; idempotencyKey: string }) => Promise<SkillInstallation>
@@ -415,16 +418,16 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     },
     selectVersion: (version) => set({ selectedVersion: version }),
     inspectPackage: (source) => withMutation('inspect', () => platform.inspectSkillPackage(source)),
+    getImportReview: (reviewId) => platform.getImportReview(reviewId),
+    approveImportReview: (reviewId, reviewer = 'local-user') => withMutation(`import-review:${reviewId}`, () => platform.approveImportReview(reviewId, reviewer), { successTitle: 'Import Review 已批准', successMessage: '现在可以提交明确的安装确认。' }),
+    rejectImportReview: (reviewId, reviewer = 'local-user', reason) => withMutation(`import-review:${reviewId}`, () => platform.rejectImportReview(reviewId, reviewer, reason), { successTitle: 'Import Review 已拒绝', successMessage: 'Rejected review 保持不可安装。' }),
     installPackage: async (input) => {
-      if ('reviewId' in input) {
-        const result = await withMutation('install', async () => platform.installSkillPackage(input), { successTitle: 'Skill 已安装', successMessage: 'Package Runtime 已完成安装并保留审计记录。' })
-        if (result && typeof result === 'object' && 'package' in result) {
-          set({ selectedPackage: toLegacyPackageDetail(result as PackageDetail) })
-        }
-        await get().loadPackages()
-        return result
+      const result = await withMutation('install', async () => platform.installSkillPackage(input), { successTitle: 'Skill 已安装', successMessage: 'Package Runtime 已完成安装并保留审计记录。' })
+      if (result && typeof result === 'object' && 'package' in result) {
+        set({ selectedPackage: toLegacyPackageDetail(result as PackageDetail) })
       }
-      throw new SkillRuntimeApiError({ code: 'VALIDATION_ERROR', message: 'Package installation requires an approved inspection review', status: 400, retryable: false })
+      await get().loadPackages()
+      return result
     },
     enableInstallation: (id, input) => {
       const snapshot = snapshotInstallationState()

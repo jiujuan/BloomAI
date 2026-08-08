@@ -6,7 +6,7 @@ import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
 import type { CreateProjectInput, ProjectSummary, Session, SessionPage } from '@shared/schemas'
 import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
-import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, DraftListInput, InspectedPackage, PackageDetail, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, DraftListInput, InspectedPackage, PackageDetail, PackageImportDiagnostic, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!window.bloomai
@@ -106,6 +106,18 @@ function toPackageManifest(value: unknown): InspectedPackage['manifest'] {
     files: asArray(row.files).map((item) => { const file = asRecord(item); return { path: String(file.path ?? ''), sha256: String(file.sha256 ?? ''), sizeBytes: asNumber(readValue(file, 'sizeBytes', 'size_bytes', 0)) } }),
   }
 }
+function toPackageImportDiagnostic(value: unknown): PackageImportDiagnostic {
+  const row = asRecord(value)
+  return {
+    code: typeof row.code === 'string' ? row.code : undefined,
+    severity: String(row.severity ?? row.level ?? 'info'),
+    message: String(row.message ?? row.detail ?? ''),
+    path: typeof row.path === 'string' ? row.path : undefined,
+    line: typeof row.line === 'number' ? row.line : undefined,
+    column: typeof row.column === 'number' ? row.column : undefined,
+    details: row.details && typeof row.details === 'object' ? asObject(row.details) : undefined,
+  }
+}
 function toInspectedPackage(value: unknown): InspectedPackage {
   const row = asRecord(value)
   const snapshot = asObject(readValue(row, 'sourceSnapshot', 'source_snapshot', {}))
@@ -113,6 +125,9 @@ function toInspectedPackage(value: unknown): InspectedPackage {
     sourceType: String(readValue(row, 'sourceType', 'source_type', '')),
     relativeSkillPath: String(readValue(row, 'relativeSkillPath', 'relative_skill_path', '')),
     manifestHash: String(readValue(row, 'manifestHash', 'manifest_hash', '')),
+    sourceFingerprint: String(readValue(row, 'sourceFingerprint', 'source_fingerprint', readValue(snapshot, 'sourceSha256', 'source_sha256', ''))),
+    diagnostics: asArray(readValue(row, 'diagnostics', 'diagnostics', [])).map(toPackageImportDiagnostic),
+    importReviewRequired: asBoolean(readValue(row, 'importReviewRequired', 'import_review_required', false)),
     manifest: toPackageManifest(row.manifest),
     sourceSnapshot: {
       sourceSha256: String(readValue(snapshot, 'sourceSha256', 'source_sha256', '')),
@@ -120,6 +135,36 @@ function toInspectedPackage(value: unknown): InspectedPackage {
       sourceRef: readValue(snapshot, 'sourceRef', 'source_ref', undefined),
       files: asArray(snapshot.files).map((item) => { const file = asRecord(item); return { path: String(file.path ?? ''), sha256: String(file.sha256 ?? ''), sizeBytes: asNumber(readValue(file, 'sizeBytes', 'size_bytes', 0)) } }),
     },
+  }
+}
+function toPackageInspectionResult(value: unknown): PackageInspectionResult {
+  if (Array.isArray(value)) {
+    const packages = value.map(toInspectedPackage)
+    return { reviewId: '', sourceFingerprint: packages[0]?.sourceFingerprint || packages[0]?.sourceSnapshot.sourceSha256 || '', packages }
+  }
+  const row = asRecord(value)
+  const packages = asArray(row.packages).map(toInspectedPackage)
+  return {
+    reviewId: String(readValue(row, 'reviewId', 'review_id', '')),
+    sourceFingerprint: String(readValue(row, 'sourceFingerprint', 'source_fingerprint', packages[0]?.sourceFingerprint || packages[0]?.sourceSnapshot.sourceSha256 || '')),
+    resolvedCommitSha: readValue(row, 'resolvedCommitSha', 'resolved_commit_sha', undefined),
+    packages,
+  }
+}
+function toPackageImportReview(value: unknown): PackageImportReview {
+  const row = asRecord(value)
+  return {
+    id: String(row.id ?? ''),
+    source: String(row.source ?? row.source_type ?? ''),
+    sourceSha: String(readValue(row, 'sourceSha', 'source_sha', '')),
+    sourceRef: (readValue(row, 'sourceRef', 'source_ref', null) as string | null) ?? null,
+    inspection: asObject(row.inspection),
+    securityFindings: asObject(readValue(row, 'securityFindings', 'security_findings', {})),
+    status: String(row.status ?? 'scanning'),
+    reviewer: (row.reviewer as string | null | undefined) ?? null,
+    decision: row.decision && typeof row.decision === 'object' ? asObject(row.decision) : null,
+    createdAt: asNumber(readValue(row, 'createdAt', 'created_at', 0)),
+    updatedAt: asNumber(readValue(row, 'updatedAt', 'updated_at', 0)),
   }
 }
 function toSkillRuntimeCapabilities(value: unknown): SkillRuntimeCapabilities {
@@ -467,9 +512,9 @@ export const platform = {
     const { data } = await apiFetch(`/skill-versions/${encodeURIComponent(fromVersionId)}/diff?toVersionId=${encodeURIComponent(toVersionId)}`)
     return asObject(data)
   },
-  async inspectSkillPackage(source: PackageSource): Promise<InspectedPackage[]> {
+  async inspectSkillPackage(source: PackageSource): Promise<PackageInspectionResult> {
     const { data } = await apiFetch('/skill-packages/inspect', { method: 'POST', body: JSON.stringify({ source }) })
-    return asArray(data).map(toInspectedPackage)
+    return toPackageInspectionResult(data)
   },
   async installSkillPackage(input: PackageInstallInput): Promise<PackageDetail | Record<string, unknown>> {
     const { data } = await apiFetch('/skill-packages/install', { method: 'POST', body: JSON.stringify(input) })
@@ -593,17 +638,17 @@ export const platform = {
     const { data } = await apiFetch(`/skill-capability-grants/${encodeURIComponent(grantId)}/revoke`, { method: 'POST', body: JSON.stringify(input ?? { actor: 'local-user' }) })
     return data && typeof data === 'object' ? toCapability(data) : asObject(data)
   },
-  async getImportReview(reviewId: string): Promise<Record<string, unknown>> {
+  async getImportReview(reviewId: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}`)
-    return asObject(data)
+    return toPackageImportReview(data)
   },
-  async approveImportReview(reviewId: string, reviewer: string): Promise<Record<string, unknown>> {
+  async approveImportReview(reviewId: string, reviewer: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/approve`, { method: 'POST', body: JSON.stringify({ reviewer }) })
-    return asObject(data)
+    return toPackageImportReview(data)
   },
-  async rejectImportReview(reviewId: string, reviewer: string, reason?: string): Promise<Record<string, unknown>> {
+  async rejectImportReview(reviewId: string, reviewer: string, reason?: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/reject`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) })
-    return asObject(data)
+    return toPackageImportReview(data)
   },
   async createSkillDraft(input: { content: SkillDraftContent; baseVersionId?: string }): Promise<DraftDto> {
     const { data } = await apiFetch('/skill-drafts', { method: 'POST', body: JSON.stringify(input) })
