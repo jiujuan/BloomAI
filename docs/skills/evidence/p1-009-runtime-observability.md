@@ -5,9 +5,9 @@
 - **责任人:** Codex
 - **验收日期:** 2026-08-08
 - **证据生成时间:** 2026-08-08T03:13:17Z
-- **验收状态:** **PASS（待提交 SHA 补录）**
+- **验收状态:** **PASS**
 - **实施计划:** `docs/skills/006-skills-admin-v1.2-implementation-plan.md` §6.2 / SKL12-P1-009
-- **提交:** 实现提交与本证据更新提交将在本文件完成后生成，并在提交后补录 SHA。
+- **实现提交:** `f4b796d` (`feat(skills): complete runtime observability`)。本证据文件在实现提交后补录了实现 SHA。
 
 ## Red 阶段证据
 
@@ -125,6 +125,6 @@ git diff --check
 
 ## 提交与推送
 
-- **实现提交 SHA:** 待提交后补录。
-- **证据更新提交 SHA:** 待提交后补录。
+- **实现提交 SHA:** `f4b796d`。
+- **证据更新提交:** 本文档由后续 evidence-only commit 更新；最终 SHA 以 `git log` 为准，且不改变实现提交 SHA。
 - **推送目标:** `origin/feat/skills-admin-system`。
