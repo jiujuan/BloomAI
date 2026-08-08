@@ -24,6 +24,7 @@
 | [P4-002 backend Legacy boundary](./p4-002-backend-legacy-boundary.md) | 注销旧后端用户路由并隔离 Legacy Repository 边界 | `npx vitest run src/server/http/p4-002-legacy-boundary.test.ts --pool=forks --maxWorkers=1 --minWorkers=1` | ✅ |
 | [P4-003 Legacy migration gates](./p4-003-legacy-migration-gates.md) | 归档、备份、对账、manual review、rollback 和旧表 drop gate | `npm run verify:legacy-skills-migration` | ✅ |
 | [P4-004 Legacy test/fixture/doc cleanup](./p4-004-legacy-test-fixture-doc-cleanup.md) | 删除 Legacy 管理测试和 fixture；保留一次性、离线、只读迁移验证 | `npm run test:skills:migration:offline` | ✅ |
+| [P5-001 unit/domain tests](./p5-001-unit-domain-tests.md) | Manifest、policy、runtime、artifact、creator 和 repository invariants 单元/领域门禁 | `npm run test:skills:unit` | ✅ |
 
 ## 证据最小字段
 

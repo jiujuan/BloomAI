@@ -18,7 +18,7 @@
     "baseline:web-tools-browser": "tsx scripts/measure-web-tools-baseline.ts",
     "verify:web-tools-release": "npm run typecheck && npm test && npm run build && npm run verify:web-tools-browser && npm run baseline:web-tools-browser",
     "typecheck:skills": "tsc --noEmit -p tsconfig.skills.json",
-    "test:skills:unit": "vitest run src/server/skills --pool=forks --maxWorkers=1 --minWorkers=1",
+    "test:skills:unit": "vitest run src/server/skills src/server/db/repositories/skill-package.repo.test.ts src/server/db/skill-runtime-invariants.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:skills:integration": "vitest run src/server/http/routes/skill-package-runtime.test.ts tests/integration/skill-runtime --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:skills:e2e": "vitest run tests/e2e/skills --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:skills:security": "vitest run tests/security --pool=forks --maxWorkers=1 --minWorkers=1",
