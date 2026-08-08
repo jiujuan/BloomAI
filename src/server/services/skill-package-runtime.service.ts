@@ -76,11 +76,13 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     runs: runRepository,
     audit: createSqliteAuditRepository(),
     clock,
+    capabilityGrantService,
   })
   const skillVersionService = createSkillVersionService({
     packages: packageRepository,
     runs: { listRuns: (options) => runRepository.listRuns(options) },
     grants: { listCapabilityGrants: (skillVersionId, options) => grantRepository.listCapabilityGrants(skillVersionId, options as any) },
+    capabilityGrantService,
   })
 
   const dependencies: SkillPackageRuntimeDependencies = {

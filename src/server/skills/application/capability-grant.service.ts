@@ -55,6 +55,14 @@ export type CapabilityRequestResult = {
   readonly expiresAt?: number | null
 }
 
+export type CapabilityVersionRevalidation = {
+  readonly versionId: string
+  readonly requested: readonly { capability: string; scope: CapabilityScope }[]
+  readonly findings: readonly { capability: string; reason: string }[]
+  readonly approvalRequired: readonly string[]
+  readonly safe: boolean
+}
+
 export type CapabilityGrantServiceErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
@@ -123,6 +131,35 @@ export class CapabilityGrantService {
 
     const requested = this.parseRequestedCapabilities(requestedOverride ?? this.readManifestCapabilities(version.manifest))
     return requested.map((request) => this.ensureRequestedGrant(run.id, run.skillVersionId, run.sessionId, request))
+  }
+
+  /**
+   * Re-evaluates immutable manifest capability declarations before a version is
+   * selected as the current runtime target. This does not approve grants: a
+   * valid capability may still require approval when a Run requests it.
+   */
+  revalidateVersion(versionId: string): CapabilityVersionRevalidation {
+    const version = this.dependencies.packages.getVersion(versionId)
+    if (!version) throw this.error('NOT_FOUND', `Skill version not found: ${versionId}`)
+    const requested = this.parseRequestedCapabilities(this.readManifestCapabilities(version.manifest))
+    const findings: Array<{ capability: string; reason: string }> = []
+    const approvalRequired: string[] = []
+
+    for (const request of requested) {
+      if (isForbiddenPackageCapability(request.capability) || !skillCapabilitySchema.safeParse(request.capability).success) {
+        findings.push({ capability: request.capability, reason: 'Capability is not allowed for package runtime' })
+        continue
+      }
+      approvalRequired.push(request.capability)
+    }
+
+    return {
+      versionId,
+      requested: requested.map((request) => ({ capability: request.capability, scope: request.scope })),
+      findings,
+      approvalRequired: [...new Set(approvalRequired)],
+      safe: findings.length === 0,
+    }
   }
 
   /** Creates a pending grant for an explicit request without approving it. */

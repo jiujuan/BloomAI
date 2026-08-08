@@ -36,9 +36,17 @@ describe('skillPackageRuntimeService', () => {
     })
   })
 
-  it('rejects starting a run for a non-runnable package reference', () => {
-    const service = createSkillPackageRuntimeService({ repo: { resolveRunnableVersion: vi.fn(() => undefined) } as any })
+  it('rejects starting a run for a disabled installation before coordinator creation', () => {
+    const resolveRunnableVersion = vi.fn(() => undefined)
+    const startRun = vi.fn()
+    const service = createSkillPackageRuntimeService({
+      repo: { resolveRunnableVersion } as any,
+      coordinator: { startRun } as any,
+    })
+
     expect(() => service.startRun({ skillId: 'pkg-1', input: {} })).toThrowError('Installed and enabled Package Skill was not found')
+    expect(resolveRunnableVersion).toHaveBeenCalledWith('pkg-1')
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   it('preserves command conflicts, invalid transitions, and cancel command shape', () => {

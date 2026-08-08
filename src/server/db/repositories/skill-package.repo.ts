@@ -200,7 +200,7 @@ export const skillPackageRepo = {
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       if (!installation || installation.revision !== data.expectedRevision) return undefined
       const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
-      if (!target || target.package_id !== installation.package_id) return undefined
+      if (!isVerifiedRunnableVersion(target, installation.package_id)) return undefined
 
       const now = Date.now()
       const result = tx.update(skill_installations).set({
@@ -635,6 +635,10 @@ export const skillPackageRepo = {
 
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       if (!installation || installation.revision !== data.expectedRevision) return undefined
+      if (data.enabled) {
+        const currentVersion = tx.select().from(skill_versions).where(eq(skill_versions.id, installation.current_version_id)).get()
+        if (!isVerifiedRunnableVersion(currentVersion, installation.package_id)) return undefined
+      }
       const now = Date.now()
       const updatedResult = tx.update(skill_installations).set({
         enabled: data.enabled ? 1 : 0,
@@ -707,7 +711,7 @@ export const skillPackageRepo = {
 
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
-      if (!installation || installation.revision !== data.expectedRevision || !target || target.package_id !== installation.package_id) return undefined
+      if (!installation || installation.revision !== data.expectedRevision || !isVerifiedRunnableVersion(target, installation.package_id)) return undefined
       const now = Date.now()
       const updatedResult = tx.update(skill_installations).set({
         previous_version_id: installation.current_version_id,
@@ -1045,14 +1049,18 @@ export const skillPackageRepo = {
       const installation = this.listInstallations(directVersion.package_id).find((entry) =>
         entry.current_version_id === directVersion.id && entry.enabled === 1 && entry.status === 'installed'
       )
-      return installation ? directVersion : undefined
+      return installation && isVerifiedRunnableVersion(directVersion, directVersion.package_id) ? directVersion : undefined
     }
     const installation = this.getInstallation(packageReferenceId)
-    if (installation?.enabled === 1 && installation.status === 'installed') return this.getVersion(installation.current_version_id)
+    if (installation?.enabled === 1 && installation.status === 'installed') {
+      const version = this.getVersion(installation.current_version_id)
+      return version && isVerifiedRunnableVersion(version, installation.package_id) ? version : undefined
+    }
     const packageRecord = this.getPackage(packageReferenceId)
     if (!packageRecord) return undefined
     const activeInstallation = this.listInstallations(packageRecord.id).find((entry) => entry.enabled === 1 && entry.status === 'installed')
-    return activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
+    const version = activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
+    return version && isVerifiedRunnableVersion(version, packageRecord.id) ? version : undefined
   },
 
   isPackageReference(referenceId: string) {
@@ -1770,6 +1778,14 @@ function stringifySecurityObject(value: unknown, fieldName: string): string {
 
 function stringifySecurityFindings(value: unknown): string {
   return stringifySecurityObject(value ?? {}, 'security findings')
+}
+
+function isVerifiedRunnableVersion(version: any, packageId: string): boolean {
+  return Boolean(version
+    && version.package_id === packageId
+    && version.is_compatible === 1
+    && version.status === 'runnable'
+    && ['verified', 'approved'].includes(version.security_status ?? ''))
 }
 
 function mapPackage(row: any): PackageSnapshot {

@@ -59,6 +59,32 @@ describe('skill lifecycle service', () => {
     expect(dependencies.audit.append).toHaveBeenCalledWith(expect.objectContaining({ action: 'skill.installation.enabled', resourceId: 'installation-1' }))
   })
 
+  it('refuses to enable an installation whose current version is unreviewed or not runnable', () => {
+    const dependencies = makeDependencies()
+    dependencies.packages.getVersion.mockImplementation((id: string) => id === version2.id
+      ? { ...version2, status: 'awaiting_permission_review', securityStatus: 'unreviewed' }
+      : id === version1.id ? version1 : undefined)
+    const service = createSkillLifecycleService({ ...dependencies, clock: { now: () => 10 } } as any)
+
+    expect(() => service.enableInstallation('installation-1', { expectedRevision: 4, idempotencyKey: 'enable-unreviewed' }))
+      .toThrowError(new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can be enabled'))
+    expect(dependencies.packages.setInstallationEnabledCas).not.toHaveBeenCalled()
+  })
+
+  it('revalidates capabilities before a rollback becomes current', () => {
+    const dependencies = makeDependencies()
+    const revalidateVersion = vi.fn(() => ({ safe: true, findings: [] }))
+    const service = createSkillLifecycleService({
+      ...dependencies,
+      capabilityGrantService: { revalidateVersion },
+      clock: { now: () => 10 },
+    } as any)
+
+    service.rollbackInstallation('installation-1', { versionId: 'version-1', expectedRevision: 4, idempotencyKey: 'rollback-capability', reason: 'restore verified snapshot' })
+
+    expect(revalidateVersion).toHaveBeenCalledWith('version-1')
+  })
+
   it('uninstalls without deleting the installation or its historical references', () => {
     const dependencies = makeDependencies()
     const service = createSkillLifecycleService({ ...dependencies, clock: { now: () => 10 } } as any)

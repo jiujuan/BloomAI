@@ -18,10 +18,15 @@ export type SkillVersionCandidate = {
 
 type ExtendedPackageRepository = PackageSkillRepository
 
+type CapabilityVersionRevalidator = {
+  revalidateVersion(versionId: string): { safe: boolean; findings?: readonly { capability: string; reason: string }[] }
+}
+
 type VersionServiceDependencies = {
   packages: ExtendedPackageRepository
   runs?: { listRuns?: (options: { limit: number; offset: number; status?: string; skillVersionId?: string }) => { data: readonly any[]; total: number } }
   grants?: { listCapabilityGrants?: (skillVersionId: string, options?: Record<string, unknown>) => readonly any[] }
+  capabilityGrantService?: CapabilityVersionRevalidator
 }
 
 export type VersionUpdatePreview = {
@@ -128,12 +133,22 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
     },
 
     switchCurrent(installationId: string, versionId: string, options: { expectedRevision: number; idempotencyKey: string }) {
+      const duplicate = packages.getInstallationCommandResult?.(installationId, options.idempotencyKey)
+      if (duplicate) return duplicate
       const installation = packages.getInstallation?.(installationId)
       if (!installation) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
+      if (installation.status === 'uninstalled' || installation.deletedAt !== null && installation.deletedAt !== undefined) {
+        throw new ServiceError('CONFLICT', 'Uninstalled skill installation cannot switch versions')
+      }
       const version = this.getVersion(versionId)
       if (version.packageId !== installation.packageId) throw new ServiceError('VALIDATION_ERROR', 'Version does not belong to installation package')
-      if (!version.isCompatible || !['runnable', 'verified', undefined].includes((version as any).status)) {
-        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only compatible runnable versions can become current')
+      if (!version.isCompatible || version.status !== 'runnable' || !['verified', 'approved'].includes(version.securityStatus ?? '')) {
+        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can become current')
+      }
+      const revalidation = dependencies.capabilityGrantService?.revalidateVersion(version.id)
+      if (revalidation && !revalidation.safe) {
+        const firstFinding = revalidation.findings?.[0]
+        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', firstFinding?.reason ?? 'Version capability declarations are not allowed')
       }
       if (!packages.switchCurrentVersion) throw new ServiceError('INTERNAL_ERROR', 'Current version switching is unavailable')
       const switched = packages.switchCurrentVersion({ installationId, versionId, ...options })

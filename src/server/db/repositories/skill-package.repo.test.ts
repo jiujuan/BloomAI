@@ -260,6 +260,82 @@ describe('skillPackageRepo', () => {
     expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: second.id, expectedRevision: 0, idempotencyKey: 'switch-v2' })).toMatchObject({ current_version_id: second.id, revision: 1 })
   })
 
+  it('rejects unreviewed version switches, protects enable CAS, and resolves no version after disable', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const pkg = skillPackageRepo.createPackage({ name: 'Lifecycle Pkg', description: '', sourceType: 'local-directory' })
+    const verified = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '1.0.0',
+      manifest: { name: 'verified' },
+      manifestHash: 'lifecycle-v1',
+      packagePath: '/packages/lifecycle-v1',
+      status: 'runnable',
+      securityStatus: 'verified',
+    })
+    const unreviewed = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '2.0.0',
+      manifest: { name: 'unreviewed' },
+      manifestHash: 'lifecycle-v2',
+      packagePath: '/packages/lifecycle-v2',
+      status: 'runnable',
+      securityStatus: 'unreviewed',
+    })
+    const otherPackage = skillPackageRepo.createPackage({ name: 'Other Lifecycle Pkg', description: '', sourceType: 'local-directory' })
+    const otherVersion = skillPackageRepo.createVersion({
+      packageId: otherPackage.id,
+      version: '1.0.0',
+      manifest: { name: 'other' },
+      manifestHash: 'lifecycle-other',
+      packagePath: '/packages/lifecycle-other',
+      status: 'runnable',
+      securityStatus: 'verified',
+    })
+    const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: verified.id, status: 'installed' })
+
+    expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: unreviewed.id, expectedRevision: 0, idempotencyKey: 'switch-unreviewed' })).toBeUndefined()
+    expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: otherVersion.id, expectedRevision: 0, idempotencyKey: 'switch-cross-package' })).toBeUndefined()
+    expect(skillPackageRepo.setInstallationEnabledCas({ installationId: installation.id, enabled: true, expectedRevision: 0, idempotencyKey: 'enable-valid' })).toMatchObject({ revision: 1, enabled: 1 })
+
+    const disabled = skillPackageRepo.setInstallationEnabledCas({ installationId: installation.id, enabled: false, expectedRevision: 1, idempotencyKey: 'disable-valid' })
+    expect(disabled).toMatchObject({ revision: 2, enabled: 0, status: 'disabled' })
+    expect(skillPackageRepo.resolveRunnableVersion(installation.id)).toBeUndefined()
+    expect(skillPackageRepo.resolveRunnableVersion(pkg.id)).toBeUndefined()
+  })
+
+  it('uninstalls idempotently while preserving installation, run, event, and audit history', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const pkg = skillPackageRepo.createPackage({ name: 'Uninstall Pkg', description: '', sourceType: 'local-directory' })
+    const version = skillPackageRepo.createVersion({
+      packageId: pkg.id,
+      version: '1.0.0',
+      manifest: { name: 'uninstall' },
+      manifestHash: 'uninstall-v1',
+      packagePath: '/packages/uninstall-v1',
+      status: 'runnable',
+      securityStatus: 'verified',
+    })
+    const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed' })
+    const run = skillPackageRepo.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
+    skillPackageRepo.appendEvent({ runId: run.id, seq: 1, schemaVersion: 1, type: 'run.created', payload: {} })
+    skillPackageRepo.appendAudit({ action: 'skill.installation.created', resourceType: 'skill_installation', resourceId: installation.id, payload: { reason: 'test' } })
+
+    const first = skillPackageRepo.uninstallInstallation({ installationId: installation.id, expectedRevision: 0, idempotencyKey: 'uninstall-once' })
+    const second = skillPackageRepo.uninstallInstallation({ installationId: installation.id, expectedRevision: 0, idempotencyKey: 'uninstall-once' })
+
+    expect(second).toEqual(first)
+    expect(skillPackageRepo.getInstallation(installation.id)).toMatchObject({ status: 'uninstalled', enabled: 0, revision: 1 })
+    expect(skillPackageRepo.getRun(run.id)).toMatchObject({ id: run.id, skill_version_id: version.id })
+    expect(skillPackageRepo.listEvents(run.id, { afterSeq: 0 })).toHaveLength(1)
+    const db = new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+    try {
+      expect(db.prepare('SELECT COUNT(*) AS count FROM skill_installation_commands WHERE installation_id = ?').get(installation.id)).toEqual({ count: 1 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM skill_audit_events WHERE resource_id = ?').get(installation.id)).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('hides archived packages from the catalog while retaining package, version, run, and audit history', async () => {
     const { skillPackageRepo } = await loadRepo()
     const active = skillPackageRepo.createPackage({ name: 'Active', description: '', sourceType: 'local-directory' })

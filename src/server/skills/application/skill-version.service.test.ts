@@ -100,6 +100,26 @@ describe('skill version service', () => {
     expect(packages.switchCurrentVersion).not.toHaveBeenCalled()
   })
 
+  it('rejects switching to an unreviewed or non-runnable version', () => {
+    const { packages } = makeDeps()
+    packages.getVersion.mockReturnValue({ ...v2, status: 'awaiting_permission_review', securityStatus: 'unreviewed' })
+    const service = createSkillVersionService({ packages } as any)
+
+    expect(() => service.switchCurrent('install-1', 'v2', { expectedRevision: 3, idempotencyKey: 'switch-unreviewed' }))
+      .toThrowError(new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can become current'))
+    expect(packages.switchCurrentVersion).not.toHaveBeenCalled()
+  })
+
+  it('revalidates the target version capabilities before switching current', () => {
+    const { packages } = makeDeps()
+    const revalidateVersion = vi.fn(() => ({ safe: true, findings: [] }))
+    const service = createSkillVersionService({ packages, capabilityGrantService: { revalidateVersion } } as any)
+
+    service.switchCurrent('install-1', 'v2', { expectedRevision: 3, idempotencyKey: 'switch-capability' })
+
+    expect(revalidateVersion).toHaveBeenCalledWith('v2')
+  })
+
   it('uses CAS/idempotency when switching current version', () => {
     const { packages } = makeDeps()
     const service = createSkillVersionService({ packages } as any)
