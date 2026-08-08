@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
-import type { SkillRun } from './skill-runtime.types'
+import type { SkillInstallation, SkillRun, SkillRunEvent } from './skill-runtime.types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -15,15 +15,26 @@ const run = {
 }
 const event = (seq: number) => ({ id: `event-${seq}`, run_id: 'run-1', seq, schema_version: 1, producer: 'worker', type: 'progress', payload: { seq }, occurred_at: seq, created_at: seq })
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   useSkillRuntimeStore.setState({
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [],
     runs: [], runPage: null, selectedRun: null, eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, drafts: {},
-    pendingMutations: {}, capabilities: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
+    pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
   })
 })
 
 afterEach(() => {
+  useSkillRuntimeStore.getState().stopRunEvents('run-1')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -62,6 +73,79 @@ describe('Package Runtime Zustand store', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-runs/run-1/events?afterSeq=2`, expect.any(Object))
     expect(useSkillRuntimeStore.getState().eventsByRun['run-1'].map((item) => item.seq)).toEqual([1, 2, 3])
     expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(3)
+  })
+
+  it('does not let an older package request overwrite a newer response', async () => {
+    const first = deferred<Awaited<ReturnType<typeof platform.getSkillPackages>>>()
+    const second = deferred<Awaited<ReturnType<typeof platform.getSkillPackages>>>()
+    const packagesMock = vi.spyOn(platform, 'getSkillPackages')
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const olderRequest = useSkillRuntimeStore.getState().loadPackages({ search: 'older' })
+    const newerRequest = useSkillRuntimeStore.getState().loadPackages({ search: 'newer' })
+    second.resolve({ data: [{ id: 'newer', name: 'Newer', description: '', sourceType: 'github', sourceUri: null, sourceRef: null, createdAt: 2, updatedAt: 2, deletedAt: null, deleteReason: null }], meta: { limit: 20, offset: 0, total: 1, hasMore: false, nextOffset: null } })
+    await newerRequest
+    first.resolve({ data: [{ id: 'older', name: 'Older', description: '', sourceType: 'local', sourceUri: null, sourceRef: null, createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null }], meta: { limit: 20, offset: 0, total: 1, hasMore: false, nextOffset: null } })
+    await olderRequest
+
+    expect(packagesMock).toHaveBeenNthCalledWith(1, { search: 'older' })
+    expect(packagesMock).toHaveBeenNthCalledWith(2, { search: 'newer' })
+    expect(useSkillRuntimeStore.getState().packages).toEqual([expect.objectContaining({ id: 'newer', name: 'Newer' })])
+    expect(useSkillRuntimeStore.getState().packagePage?.data).toEqual([expect.objectContaining({ id: 'newer' })])
+    expect(useSkillRuntimeStore.getState().loadingByResource.packages).toBe(false)
+  })
+
+  it('optimistically toggles an installation and restores the snapshot with an error toast on failure', async () => {
+    const installation: SkillInstallation = { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'enabled', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null }
+    useSkillRuntimeStore.setState({ installations: [installation] })
+    const failure = { code: 'NETWORK_ERROR', message: 'worker unavailable', status: 503, retryable: true }
+    vi.spyOn(platform, 'disableSkillInstallation').mockRejectedValue(failure)
+
+    const request = useSkillRuntimeStore.getState().disableInstallation('install-1', { expectedRevision: 1, idempotencyKey: 'disable-1' })
+    expect(useSkillRuntimeStore.getState().installations[0]).toMatchObject({ enabled: false, status: 'disabled' })
+    await expect(request).rejects.toMatchObject(failure)
+    expect(useSkillRuntimeStore.getState().installations).toEqual([installation])
+    expect(useSkillRuntimeStore.getState().mutationStates['installation:install-1']).toMatchObject({ status: 'error', error: failure })
+    expect(useSkillRuntimeStore.getState().toasts).toEqual([expect.objectContaining({ tone: 'error', message: 'worker unavailable' })])
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+  })
+
+  it('records a successful mutation and emits a success toast', async () => {
+    const installation: SkillInstallation = { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'disabled', enabled: false, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null }
+    useSkillRuntimeStore.setState({ installations: [installation] })
+    const enabled = { ...installation, enabled: true, status: 'enabled', updatedAt: 2 }
+    vi.spyOn(platform, 'enableSkillInstallation').mockResolvedValue(enabled)
+
+    await expect(useSkillRuntimeStore.getState().enableInstallation('install-1', { expectedRevision: 2, idempotencyKey: 'enable-1' })).resolves.toEqual(enabled)
+    expect(useSkillRuntimeStore.getState().mutationStates['installation:install-1']).toMatchObject({ status: 'success' })
+    expect(useSkillRuntimeStore.getState().toasts).toEqual([expect.objectContaining({ tone: 'success', title: 'Installation 已启用' })])
+  })
+
+  it('reconnects a run stream from the last cursor without duplicating events', async () => {
+    const streamHandlers: Array<Parameters<typeof platform.subscribeSkillRunEvents>[2]> = []
+    vi.spyOn(platform, 'subscribeSkillRunEvents').mockImplementation((_runId, _afterSeq, handlers) => {
+      streamHandlers.push(handlers)
+      return { close: vi.fn() }
+    })
+    const listEventsMock = vi.spyOn(platform, 'listSkillRunEvents').mockResolvedValue([])
+
+    const unsubscribe = useSkillRuntimeStore.getState().subscribeRunEvents('run-1')
+    const initialStream = streamHandlers[0]
+    if (!initialStream) throw new Error('initial stream was not created')
+    initialStream.onEvent?.({ ...event(1), runId: 'run-1', schemaVersion: 1, occurredAt: 1, createdAt: 1 } as SkillRunEvent)
+    expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(1)
+    await useSkillRuntimeStore.getState().reconnectRunEvents('run-1')
+    expect(listEventsMock).toHaveBeenCalledWith('run-1', 1)
+
+    useSkillRuntimeStore.getState().subscribeRunEvents('run-1')
+    const reconnect = streamHandlers[1]
+    if (!reconnect) throw new Error('reconnect stream was not created')
+    reconnect.onEvent?.({ ...event(1), runId: 'run-1', schemaVersion: 1, occurredAt: 1, createdAt: 1 } as SkillRunEvent)
+    reconnect.onEvent?.({ ...event(2), runId: 'run-1', schemaVersion: 1, occurredAt: 2, createdAt: 2 } as SkillRunEvent)
+    expect(useSkillRuntimeStore.getState().eventsByRun['run-1'].map((item) => item.seq)).toEqual([1, 2])
+    expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(2)
+    unsubscribe()
   })
 
   it('uses afterSeq compensation after a failed stream/list refresh and preserves server truth on mutation conflict', async () => {

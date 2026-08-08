@@ -1,6 +1,14 @@
 import { API_BASE } from '@shared/constants'
 
 export type PaginationInput = { limit?: number; offset?: number }
+export type PackageListInput = PaginationInput & {
+  search?: string
+  sourceType?: string
+  includeArchived?: boolean
+  sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'
+  direction?: 'asc' | 'desc'
+}
+export type DraftListInput = PaginationInput & { status?: 'draft' | 'published' | 'discarded' | string }
 export type SkillRuntimeSourceFilter = 'all' | 'legacy' | 'package'
 export type SkillRuntimeFilterStatus = 'all' | 'enabled' | 'disabled' | 'attention'
 
@@ -17,6 +25,22 @@ export type RuntimeErrorCode =
   | 'NOT_FOUND'
   | 'NETWORK_ERROR'
   | string
+
+export type RuntimeToastTone = 'success' | 'info' | 'warning' | 'error'
+export type RuntimeToast = {
+  id: string
+  tone: RuntimeToastTone
+  title: string
+  message?: string
+  createdAt: number
+}
+export type RuntimeMutationStatus = 'pending' | 'success' | 'error'
+export type RuntimeMutationState = {
+  status: RuntimeMutationStatus
+  startedAt: number
+  finishedAt?: number
+  error?: RuntimeError
+}
 
 export type RuntimeError = {
   code: RuntimeErrorCode
@@ -386,6 +410,26 @@ export type DraftPreview = {
   validation: DraftValidation
   immutableVersion?: { id: string; version: string; sourceHash: string }
   capabilityRisks?: Array<{ capability: string; scope: CapabilityScope; severity: string }>
+}
+
+export type SkillRuntimeSettings = {
+  import: Record<string, unknown>
+  security: Record<string, unknown>
+  artifacts: Record<string, unknown>
+  runtime: Record<string, unknown>
+  updatedAt?: number
+  revision?: number
+  [key: string]: unknown
+}
+
+export type SkillRuntimeFeatureFlags = Record<string, boolean> & {
+  runtimeEnabled?: boolean
+  packageExecutionEnabled?: boolean
+  importEnabled?: boolean
+  githubImportEnabled?: boolean
+  npxImportEnabled?: boolean
+  creatorEnabled?: boolean
+  creatorPublishEnabled?: boolean
 }
 
 export type SkillRuntimeCapabilities = {

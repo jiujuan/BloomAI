@@ -163,6 +163,31 @@ describe('Package Runtime renderer API', () => {
     expect(source.closed).toBe(true)
   })
 
+  it('encodes package filters and normalizes runtime settings and feature flag DTOs', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [packageRow], meta: { limit: 5, offset: 0, total: 1, hasMore: false, nextOffset: null } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { import: { allowedKinds: ['github'] }, security: {}, artifacts: {}, runtime: {}, revision: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { runtime_enabled: true, creator_enabled: false } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await platform.getSkillPackages({ limit: 5, search: 'a/b & c', sourceType: 'github/archive', includeArchived: true, sort: 'updatedAt', direction: 'desc' })
+    await expect(platform.getSkillRuntimeSettings()).resolves.toMatchObject({ import: { allowedKinds: ['github'] }, revision: 3 })
+    await expect(platform.getSkillRuntimeFeatureFlags()).resolves.toEqual({ runtime_enabled: true, creator_enabled: false })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-packages?limit=5&offset=0&search=a%2Fb+%26+c&sourceType=github%2Farchive&includeArchived=true&sort=updatedAt&direction=desc`, expect.any(Object))
+  })
+
+  it('encodes dynamic package and draft ids and converts snake_case inspection DTOs', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ source_type: 'github', relative_skill_path: 'skills/demo', manifest_hash: 'sha', manifest: { name: 'Demo', runtime: 'package-runtime', requested_capabilities: [] }, source_snapshot: { source_sha256: 'source-sha', files: [] } }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'draft/1', content: { name: 'Demo', slug: 'demo', skillMd: '# Demo' }, revision: 2, status: 'draft' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.inspectSkillPackage({ kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })).resolves.toEqual([expect.objectContaining({ sourceType: 'github', manifestHash: 'sha', sourceSnapshot: { sourceSha256: 'source-sha', files: [] } })])
+    await platform.getSkillDraft('draft/1')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-drafts/draft%2F1`, expect.any(Object))
+  })
+
   it('sends typed commands, drafts and artifact exports and normalizes structured errors', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: runRow }))
