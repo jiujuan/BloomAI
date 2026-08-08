@@ -372,6 +372,124 @@ export const skillPackageRepo = {
     })
   },
 
+  publishDraftTransaction(data: {
+    package: {
+      name: string
+      description: string
+      sourceType: string
+      sourceUri?: string | null
+      sourceRef?: string | null
+    }
+    version: {
+      version: string
+      manifest: Record<string, unknown>
+      manifestHash: string
+      packagePath: string
+      sourceSnapshot: Record<string, unknown>
+      isCompatible?: boolean
+      immutableHash?: string
+      status?: string
+      securityStatus?: string
+      snapshotHash?: string
+      securityFindings?: Record<string, unknown>
+    }
+    snapshot: {
+      filesManifest: Record<string, unknown>
+      totalBytes: number
+      fileCount: number
+      snapshotRoot: string
+      snapshotHash: string
+    }
+    installation: { status: string; enabled?: boolean }
+    draft: {
+      id: string
+      ownerId: string
+      expectedRevision: number
+      validation: Record<string, unknown>
+    }
+  }) {
+    return getOrmDb().transaction((tx) => {
+      const currentDraft = tx.select().from(skill_drafts).where(and(
+        eq(skill_drafts.id, data.draft.id),
+        eq(skill_drafts.owner_id, data.draft.ownerId),
+        eq(skill_drafts.revision, data.draft.expectedRevision),
+        eq(skill_drafts.status, 'draft'),
+      )).get()
+      if (!currentDraft) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+
+      const now = Date.now()
+      const packageRow = {
+        id: uuidv4(),
+        name: data.package.name,
+        description: data.package.description,
+        source_type: data.package.sourceType,
+        source_uri: data.package.sourceUri ?? null,
+        source_ref: data.package.sourceRef ?? null,
+        created_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_packages).values(packageRow).run()
+
+      const versionRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        version: data.version.version,
+        runtime: 'instruction-agent',
+        manifest_json: stringifyJsonObject(data.version.manifest, 'manifest'),
+        manifest_hash: data.version.manifestHash,
+        package_path: data.version.packagePath,
+        source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
+        is_compatible: data.version.isCompatible === false ? 0 : 1,
+        immutable_hash: data.version.immutableHash ?? '',
+        status: data.version.status ?? 'runnable',
+        security_status: data.version.securityStatus ?? 'unreviewed',
+        snapshot_hash: data.version.snapshotHash ?? '',
+        security_findings_json: stringifySecurityFindings(data.version.securityFindings),
+        published_at: null,
+        created_at: now,
+      }
+      tx.insert(skill_versions).values(versionRow).run()
+
+      const snapshotRow = {
+        id: uuidv4(),
+        version_id: versionRow.id,
+        files_manifest_json: stringifyJsonObject(data.snapshot.filesManifest, 'filesManifest'),
+        total_bytes: data.snapshot.totalBytes,
+        file_count: data.snapshot.fileCount,
+        snapshot_root: data.snapshot.snapshotRoot,
+        snapshot_hash: data.snapshot.snapshotHash,
+        created_at: now,
+      }
+      tx.insert(skill_version_snapshots).values(snapshotRow).run()
+
+      const installationRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        current_version_id: versionRow.id,
+        status: data.installation.status,
+        enabled: data.installation.enabled === false ? 0 : 1,
+        installed_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_installations).values(installationRow).run()
+
+      const draftUpdate = tx.update(skill_drafts).set({
+        status: 'published',
+        published_version_id: versionRow.id,
+        validation_json: JSON.stringify(data.draft.validation),
+        updated_at: now,
+      }).where(and(
+        eq(skill_drafts.id, data.draft.id),
+        eq(skill_drafts.owner_id, data.draft.ownerId),
+        eq(skill_drafts.revision, data.draft.expectedRevision),
+        eq(skill_drafts.status, 'draft'),
+      )).run()
+      if (draftUpdate.changes !== 1) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+
+      return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow }
+    })
+  },
+
   /**
    * Publishes a validated Legacy migration as one database transaction.
    *

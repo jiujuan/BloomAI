@@ -368,4 +368,40 @@ describe('skillPackageRepo', () => {
     }
   })
 
+
+  it('publishes Creator drafts atomically with owner and revision CAS', async () => {
+    const { skillPackageRepo } = await loadRepo()
+    const draft = skillPackageRepo.createDraft({ ownerId: 'alice', content: { runtimeKind: 'package', name: 'Atomic', slug: 'atomic', version: '1.0.0', skillMd: '# Atomic' } })
+    const input = {
+      package: { name: 'Atomic', description: '', sourceType: 'creator', sourceUri: `draft:${draft.id}`, sourceRef: '1.0.0' },
+      version: { version: '1.0.0', manifest: { name: 'Atomic', runtime: 'instruction-agent' }, manifestHash: 'atomic-manifest', packagePath: '/packages/atomic', sourceSnapshot: { draftId: draft.id, revision: 1 }, immutableHash: 'atomic-immutable', status: 'runnable', securityStatus: 'approved', snapshotHash: 'atomic-snapshot' },
+      snapshot: { filesManifest: { 'SKILL.md': { content: '# Atomic', sizeBytes: 8, sha256: 'sha' } }, totalBytes: 8, fileCount: 1, snapshotRoot: '/packages/atomic', snapshotHash: 'atomic-snapshot' },
+      installation: { status: 'installed', enabled: true },
+      draft: { id: draft.id, ownerId: 'alice', expectedRevision: 1, validation: { valid: true, errors: [], warnings: [] } },
+    }
+    const repo = skillPackageRepo as any
+    expect(() => repo.publishDraftTransaction({ ...input, draft: { ...input.draft, expectedRevision: 99 } })).toThrow(/REVISION_CONFLICT|Draft changed/)
+    const db = new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+    try {
+      expect(db.prepare('SELECT COUNT(*) AS count FROM skill_packages').get()).toEqual({ count: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM skill_versions').get()).toEqual({ count: 0 })
+      expect(db.prepare('SELECT COUNT(*) AS count FROM skill_installations').get()).toEqual({ count: 0 })
+    } finally {
+      db.close()
+    }
+
+    const result = repo.publishDraftTransaction(input)
+    expect(result.installation.enabled).toBe(1)
+    expect(skillPackageRepo.getDraft(draft.id)).toMatchObject({ status: 'published', published_version_id: result.version.id, revision: 1 })
+    expect(() => repo.publishDraftTransaction(input)).toThrow(/REVISION_CONFLICT|Draft changed/)
+    const dbAfter = new DatabaseSync(path.join(dataDir, 'bloomai.db'))
+    try {
+      expect(dbAfter.prepare('SELECT COUNT(*) AS count FROM skill_packages').get()).toEqual({ count: 1 })
+      expect(dbAfter.prepare('SELECT COUNT(*) AS count FROM skill_versions').get()).toEqual({ count: 1 })
+      expect(dbAfter.prepare('SELECT COUNT(*) AS count FROM skill_installations').get()).toEqual({ count: 1 })
+    } finally {
+      dbAfter.close()
+    }
+  })
+
 })
