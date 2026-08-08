@@ -104,11 +104,13 @@ type ApproveGrantInput = {
   scope?: unknown
   expiresAt?: number | null
   reason?: string
+  requestId?: string
 }
 
 type ActorInput = {
   actor: string
   reason?: string
+  requestId?: string
 }
 
 type ConsumeGrantInput = {
@@ -230,7 +232,11 @@ export class CapabilityGrantService {
     })
     if (!updated) throw this.error('NOT_FOUND', `Capability grant not found: ${grantId}`)
     const reason = input.reason?.trim()
-    this.audit('capability.approved', actor, updated, { scope: grantedScope, ...(reason ? { reason } : {}) })
+    this.audit('capability.approved', actor, updated, {
+      scope: grantedScope,
+      ...(reason ? { reason } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    })
     return this.withGrantId(updated)
   }
 
@@ -245,7 +251,10 @@ export class CapabilityGrantService {
       revokeReason: input.reason?.trim() || 'Rejected by approver',
     })
     if (!updated) throw this.error('NOT_FOUND', `Capability grant not found: ${grantId}`)
-    this.audit('capability.rejected', actor, updated, { reason: input.reason?.trim() || 'Rejected by approver' })
+    this.audit('capability.rejected', actor, updated, {
+      reason: input.reason?.trim() || 'Rejected by approver',
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    })
     this.appendEventForGrant(updated, 'capability.failed', { errorCode: 'CAPABILITY_REJECTED', reason: input.reason?.trim() || 'Rejected by approver' })
     return this.withGrantId(updated)
   }
@@ -264,7 +273,10 @@ export class CapabilityGrantService {
       : Boolean(this.dependencies.grants.updateCapabilityGrant({ id: grant.id, status: 'revoked', revokeReason: reason, revokedAt: now }))
     if (!revoked) throw this.error('INVALID_GRANT_STATE', `Grant could not be revoked: ${grantId}`)
     const updated = this.requireGrant(grantId)
-    this.audit('capability.revoked', actor, updated, { reason })
+    this.audit('capability.revoked', actor, updated, {
+      reason,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    })
     return this.withGrantId(updated)
   }
 
@@ -459,6 +471,8 @@ export class CapabilityGrantService {
       action,
       resourceType: 'skill_capability_grant',
       resourceId: grant.id,
+      securityDecision: 'allowed',
+      policyVersion: 'skills-admin-v1.2',
       payload: { capability: grant.capability, skillVersionId: grant.skillVersionId, status: grant.status, at: this.dependencies.clock.now(), ...payload },
     })
   }

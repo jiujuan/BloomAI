@@ -251,10 +251,12 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(disabled.response.status).toBe(200)
     expect(disabled.body.data).toMatchObject({ id: installation.id, enabled: 0 })
 
-    const revoked = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })
+    const revoked = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE', headers: { 'x-bloom-actor': 'admin-1' } })
     expect(revoked.response.status).toBe(200)
     expect(revoked.body).toMatchObject({ data: { revoked: true }, meta: { requestId: expect.any(String) } })
-    expect((await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })).response.status).toBe(404)
+    const duplicateRevoke = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE', headers: { 'x-bloom-actor': 'admin-1' } })
+    expect(duplicateRevoke.response.status).toBe(200)
+    expect(duplicateRevoke.body.data).toMatchObject({ revoked: true, grant: { status: 'revoked' } })
 
     const after = await requestJson(app, '/skill-packages/' + pkg.id)
     expect(after.body.data.capabilityGrants[0].revoked_at).toEqual(expect.any(Number))
@@ -284,7 +286,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const approved = await requestJson(app, `/skill-capability-grants/${grantId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ actor: 'admin-1', scope: { allowedDomains: ['example.com'], maxCalls: 1 } }),
+      headers: { 'x-bloom-actor': 'admin-1' },
+      body: JSON.stringify({ scope: { allowedDomains: ['example.com'], maxCalls: 1 } }),
     })
     expect(approved.response.status).toBe(200)
     expect(approved.body.data).toMatchObject({ grantId, status: 'approved', approvedBy: 'admin-1', grantedScope: { allowedDomains: ['example.com'], maxCalls: 1 } })
@@ -292,11 +295,11 @@ describe('Skill Package Runtime HTTP API', () => {
     const granted = await requestJson(app, `/skill-runs/${runId}/capabilities`)
     expect(granted.body.data[0]).toMatchObject({ state: 'granted', grantStatus: 'approved' })
 
-    const invalidActor = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: '' }) })
+    const invalidActor = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', headers: { 'x-bloom-actor': 'admin-1' }, body: JSON.stringify({ actor: '' }) })
     expect(invalidActor.response.status).toBe(400)
     expect(invalidActor.body.error.code).toBe('VALIDATION_ERROR')
 
-    const revoked = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: 'admin-1', reason: 'test cleanup' }) })
+    const revoked = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', headers: { 'x-bloom-actor': 'admin-1' }, body: JSON.stringify({ reason: 'test cleanup' }) })
     expect(revoked.response.status).toBe(200)
     expect(revoked.body.data).toMatchObject({ grantId, status: 'revoked', revokeReason: 'test cleanup' })
   })
@@ -537,7 +540,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const exported = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Export generated artifact for verification' }),
+      headers: { 'x-bloom-actor': 'http-test-user' },
+      body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, auditReason: 'Export generated artifact for verification' }),
     })
     expect(exported.response.status).toBe(200)
     expect(exported.body.data.path).toBe(path.join(exportDir, 'summary.md'))
@@ -561,7 +565,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const otherRunExport = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Verify artifact ownership enforcement' }),
+      headers: { 'x-bloom-actor': 'http-test-user' },
+      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir, confirmed: true, auditReason: 'Verify artifact ownership enforcement' }),
     })
     expect(otherRunExport.response.status).toBe(404)
     expect(otherRunExport.body.error.code).toBe('NOT_FOUND')

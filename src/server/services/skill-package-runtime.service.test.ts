@@ -61,7 +61,11 @@ describe('skillPackageRuntimeService', () => {
       coordinator: { dispatchCommand: vi.fn(() => { throw new SkillRunTransitionError('running', 'created') }) } as any,
     })
     const dispatchCommand = vi.fn(() => ({ id: 'run-1', cancelRequested: true }))
-    const cancelling = createSkillPackageRuntimeService({ coordinator: { dispatchCommand } as any })
+    const cancelling = createSkillPackageRuntimeService({
+      runRepository: { getCommandResult: vi.fn(() => undefined) } as any,
+      audit: { append: vi.fn() } as any,
+      coordinator: { dispatchCommand } as any,
+    })
 
     expect(() => conflicting.executeRunCommand('run-1', { type: 'cancel' })).toThrowError('Skill run revision conflict')
     try { conflicting.executeRunCommand('run-1', { type: 'cancel' }) } catch (error) { expect(error).toMatchObject({ code: 'REVISION_CONFLICT' }) }
@@ -98,7 +102,10 @@ describe('skillPackageRuntimeService', () => {
     const reject = vi.spyOn(packageInstallReviewService, 'reject').mockImplementation(() => {
       throw new PackageInstallReviewError('REVIEW_REJECTED', 'review rejected: secret-token')
     })
-    const service = createSkillPackageRuntimeService({ metrics: metrics as any })
+    const service = createSkillPackageRuntimeService({
+      metrics: metrics as any,
+      audit: { append: vi.fn() } as any,
+    })
 
     const approved = withSkillCorrelation({ requestId: 'req-approval', packageId: 'pkg-1', skillVersionId: 'version-1' }, () => service.approveImportReview('review-1', 'admin'))
     expect(approved).toEqual({ id: 'review-1', status: 'approved' })

@@ -59,6 +59,8 @@ export type StartSkillRunInput = {
   sessionId?: string
   imageSessionId?: string
   target?: { kind: 'chat' | 'image_session' | 'artifact_only', id?: string }
+  actor?: string | null
+  requestId?: string
 }
 
 export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverrides = {}) {
@@ -77,6 +79,7 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     grants: grantRepository,
     clock,
     events: eventRepository,
+    audit: auditRepository,
   })
   const skillLifecycleService = createSkillLifecycleService({
     packages: packageRepository,
@@ -286,22 +289,19 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       return mapRuntime(() => skillLifecycleService.requestDeletePackage(id, input))
     },
 
-    revokeCapabilityGrant(id: string) {
-      return mapRuntime(() => {
-        if (!dependencies.grantRepository.revokeCapabilityGrant(id)) throw new ServiceError('NOT_FOUND', 'Active capability grant not found')
-        return { revoked: true }
-      })
+    revokeCapabilityGrant(id: string, input: { actor: string; reason?: string; requestId?: string }) {
+      return mapRuntime(() => dependencies.capabilityGrantService.revokeGrant(id, input), 'capability')
     },
 
-    approveCapabilityGrant(id: string, input: { actor: string; scope?: unknown; expiresAt?: number | null }) {
+    approveCapabilityGrant(id: string, input: { actor: string; scope?: unknown; expiresAt?: number | null; reason?: string; requestId?: string }) {
       return mapRuntime(() => dependencies.capabilityGrantService.approveGrant(id, input), 'capability')
     },
 
-    rejectCapabilityGrant(id: string, input: { actor: string; reason?: string }) {
+    rejectCapabilityGrant(id: string, input: { actor: string; reason?: string; requestId?: string }) {
       return mapRuntime(() => dependencies.capabilityGrantService.rejectGrant(id, input), 'capability')
     },
 
-    revokeCapabilityGrantByActor(id: string, input: { actor: string; reason?: string }) {
+    revokeCapabilityGrantByActor(id: string, input: { actor: string; reason?: string; requestId?: string }) {
       return mapRuntime(() => dependencies.capabilityGrantService.revokeGrant(id, input), 'capability')
     },
 
@@ -343,6 +343,11 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
         recordMigrationMetric('package_run_started')
         const run = dependencies.coordinator.getRun(started.runId)
         dependencies.capabilityGrantService.requestCapabilities(run.id)
+        appendAudit('skill.run.created', 'skill_run', run.id, input, {
+          skillVersionId: run.skillVersionId,
+          surface: run.surface,
+          trigger: input.target?.kind ?? input.surface ?? 'skills',
+        })
         return { runId: run.id, status: run.status, revision: run.revision }
       })
     },
@@ -369,19 +374,36 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
     listRunEvents(id: string, afterSeq: number) {
       return mapRuntime(() => {
         dependencies.coordinator.getRun(id)
-        return dependencies.coordinator.subscribeEvents(id, afterSeq)
+        return dependencies.coordinator.subscribeEvents(id, afterSeq).sort((left, right) => left.seq - right.seq)
       })
     },
 
-    executeRunCommand(id: string, command: any) {
-      return mapRuntime(() => dependencies.coordinator.dispatchCommand(id, command), 'run')
+    executeRunCommand(id: string, command: any, context?: SkillAuditContext) {
+      const idempotencyKey = typeof command?.idempotencyKey === 'string' ? command.idempotencyKey : undefined
+      const duplicate = idempotencyKey ? dependencies.runRepository.getCommandResult(id, idempotencyKey) : undefined
+      const result = mapRuntime(() => dependencies.coordinator.dispatchCommand(id, command), 'run')
+      if (!duplicate) {
+        appendAudit('skill.run.command', 'skill_run', id, context, {
+          type: command?.type ?? null,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        })
+      }
+      return result
     },
 
-    cancelRun(id: string, command: { idempotencyKey: string, expectedRevision: number, reason?: string }) {
-      return mapRuntime(() => {
+    cancelRun(id: string, command: { idempotencyKey: string, expectedRevision: number, reason?: string }, context?: SkillAuditContext) {
+      const duplicate = dependencies.runRepository.getCommandResult(id, command.idempotencyKey)
+      const result = mapRuntime(() => {
         if (typeof (dependencies.coordinator as any).requestCancel === 'function') return (dependencies.coordinator as any).requestCancel(id, command)
         return dependencies.coordinator.dispatchCommand(id, { type: 'cancel', ...command })
-      })
+      }, 'run')
+      if (!duplicate) {
+        appendAudit('skill.run.cancel_requested', 'skill_run', id, context, {
+          reason: command.reason ?? null,
+          idempotencyKey: command.idempotencyKey,
+        })
+      }
+      return result
     },
 
     listRunArtifacts(runId: string, options?: ArtifactListOptions) {
@@ -399,10 +421,10 @@ export function createSkillPackageRuntimeService(overrides: RuntimeServiceOverri
       }, 'artifact')
     },
 
-    exportArtifact(artifactId: string, runId: string, destinationDir: string, options: { confirmed: true; actor?: string; auditReason: string }) {
+    exportArtifact(artifactId: string, runId: string, destinationDir: string, options: { confirmed: true; actor?: string; auditReason: string; requestId?: string }) {
       return mapRuntime(() => {
         dependencies.coordinator.getRun(runId)
-        return dependencies.artifactStore.exportArtifact({ artifactId, runId, destinationDir, confirmed: options.confirmed, actor: options.actor, auditReason: options.auditReason })
+        return dependencies.artifactStore.exportArtifact({ artifactId, runId, destinationDir, confirmed: options.confirmed, actor: options.actor, auditReason: options.auditReason, requestId: options.requestId })
       }, 'artifact')
     },
   }

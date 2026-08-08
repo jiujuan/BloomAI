@@ -60,9 +60,9 @@ const versionSwitchSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   idempotencyKey: z.string().trim().min(1).max(200),
 }).strict()
-const grantApproveSchema = z.object({ actor: idSchema, scope: jsonObjectSchema.optional(), expiresAt: z.number().int().positive().nullable().optional() }).strict()
-const grantRejectSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
-const grantRevokeSchema = z.object({ actor: idSchema, reason: z.string().trim().min(1).max(500).optional() }).strict()
+const grantApproveSchema = z.object({ scope: jsonObjectSchema.optional(), expiresAt: z.number().int().positive().nullable().optional(), reason: z.string().trim().min(1).max(500).optional() }).strict()
+const grantRejectSchema = z.object({ reason: z.string().trim().min(1).max(500).optional() }).strict()
+const grantRevokeSchema = z.object({ reason: z.string().trim().min(1).max(500).optional() }).strict()
 const createRunSchema = z.object({
   skillId: idSchema.optional(),
   skillVersionId: idSchema.optional(),
@@ -71,22 +71,22 @@ const createRunSchema = z.object({
   surface: z.enum(['skills', 'chat', 'image']).optional(),
   sessionId: idSchema.optional(),
   imageSessionId: idSchema.optional(),
-  target: z.object({ kind: z.enum(['chat', 'image_session', 'artifact_only']), id: idSchema.optional() }).optional(),
-}).refine((body) => Boolean(body.skillId || body.skillVersionId), { message: 'skillId or skillVersionId is required' })
+  target: z.object({ kind: z.enum(['chat', 'image_session', 'artifact_only']), id: idSchema.optional() }).strict().optional(),
+}).strict().refine((body) => Boolean(body.skillId || body.skillVersionId), { message: 'skillId or skillVersionId is required' })
 const commandSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('confirm'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
-  z.object({ type: z.literal('approve'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
-  z.object({ type: z.literal('reject'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(500).optional() }),
-  z.object({ type: z.literal('resume'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
-  z.object({ type: z.literal('retry'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
-  z.object({ type: z.literal('submit_input'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), input: jsonObjectSchema }),
-  z.object({ type: z.literal('modify'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), patchInput: jsonObjectSchema }),
-  z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }),
+  z.object({ type: z.literal('confirm'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal('approve'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal('reject'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(500).optional() }).strict(),
+  z.object({ type: z.literal('resume'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal('retry'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ type: z.literal('submit_input'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), input: jsonObjectSchema }).strict(),
+  z.object({ type: z.literal('modify'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), patchInput: jsonObjectSchema }).strict(),
+  z.object({ type: z.literal('cancel'), idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative() }).strict(),
 ])
-const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() })
+const cancelSchema = z.object({ idempotencyKey: z.string().min(1).max(200), expectedRevision: z.number().int().nonnegative(), reason: z.string().trim().min(1).max(200).optional() }).strict()
 const artifactContentQuerySchema = z.object({ runId: idSchema }).strict()
 const artifactListQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), offset: z.coerce.number().int().min(0).optional(), sort: z.enum(['createdAt', 'size', 'kind']).optional(), direction: z.enum(['asc', 'desc']).optional() }).strict()
-const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1), confirmed: z.literal(true), actor: idSchema.optional(), auditReason: z.string().trim().min(1).max(500) }).strict()
+const artifactExportSchema = z.object({ runId: idSchema, destinationDir: z.string().min(1), confirmed: z.literal(true), auditReason: z.string().trim().min(1).max(500) }).strict()
 const runStatusSchema = z.enum(['created', 'validating', 'running', 'waiting_input', 'waiting_approval', 'completed', 'completed_with_errors', 'failed', 'cancelled', 'interrupted'])
 
 export const skillPackageRuntimeRoutes = new Hono()
@@ -186,24 +186,43 @@ skillPackageRuntimeRoutes.post('/skill-installations/:id/switch-version', async 
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.delete('/skill-capability-grants/:id', (c) => {
-  try { return successResponse(c, skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id')))) } catch (error) { return errorResponse(c, error) }
+  try {
+    const grant = skillPackageRuntimeService.revokeCapabilityGrant(idSchema.parse(c.req.param('id')), {
+      actor: requireSkillActor(c),
+      requestId: getRequestId(c),
+      reason: 'Revoked through the capability grant DELETE endpoint',
+    })
+    return successResponse(c, { revoked: true, grant })
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/approve', async (c) => {
   try {
     const input = await readValidated(c, grantApproveSchema)
-    return successResponse(c, skillPackageRuntimeService.approveCapabilityGrant(idSchema.parse(c.req.param('id')), input))
+    return successResponse(c, skillPackageRuntimeService.approveCapabilityGrant(idSchema.parse(c.req.param('id')), {
+      ...input,
+      actor: requireSkillActor(c),
+      requestId: getRequestId(c),
+    }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/reject', async (c) => {
   try {
     const input = await readValidated(c, grantRejectSchema)
-    return successResponse(c, skillPackageRuntimeService.rejectCapabilityGrant(idSchema.parse(c.req.param('id')), input))
+    return successResponse(c, skillPackageRuntimeService.rejectCapabilityGrant(idSchema.parse(c.req.param('id')), {
+      ...input,
+      actor: requireSkillActor(c),
+      requestId: getRequestId(c),
+    }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-capability-grants/:id/revoke', async (c) => {
   try {
     const input = await readValidated(c, grantRevokeSchema)
-    return successResponse(c, skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), input))
+    return successResponse(c, skillPackageRuntimeService.revokeCapabilityGrantByActor(idSchema.parse(c.req.param('id')), {
+      ...input,
+      actor: requireSkillActor(c),
+      requestId: getRequestId(c),
+    }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-installations/:id/rollback', async (c) => {
@@ -219,7 +238,10 @@ skillPackageRuntimeRoutes.delete('/skill-installations/:id', async (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs', async (c) => {
-  try { return successResponse(c, skillPackageRuntimeService.startRun(await readValidated(c, createRunSchema)), 201) } catch (error) { return errorResponse(c, error) }
+  try {
+    const input = await readValidated(c, createRunSchema)
+    return successResponse(c, skillPackageRuntimeService.startRun({ ...input, actor: getSkillActor(c), requestId: getRequestId(c) }), 201)
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs', (c) => {
   try {
@@ -262,10 +284,22 @@ skillPackageRuntimeRoutes.get('/skill-runs/:id/stream', (c) => {
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs/:id/commands', async (c) => {
-  try { return successResponse(c, skillPackageRuntimeService.executeRunCommand(idSchema.parse(c.req.param('id')), await readValidated(c, commandSchema))) } catch (error) { return errorResponse(c, error) }
+  try {
+    const command = await readValidated(c, commandSchema)
+    return successResponse(c, skillPackageRuntimeService.executeRunCommand(idSchema.parse(c.req.param('id')), command, {
+      actor: getSkillActor(c),
+      requestId: getRequestId(c),
+    }))
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-runs/:id/cancel', async (c) => {
-  try { return successResponse(c, skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), await readValidated(c, cancelSchema))) } catch (error) { return errorResponse(c, error) }
+  try {
+    const command = await readValidated(c, cancelSchema)
+    return successResponse(c, skillPackageRuntimeService.cancelRun(idSchema.parse(c.req.param('id')), command, {
+      actor: getSkillActor(c),
+      requestId: getRequestId(c),
+    }))
+  } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-runs/:id/artifacts', (c) => {
   try {
@@ -288,7 +322,11 @@ skillPackageRuntimeRoutes.get('/skill-artifacts/:id/content', (c) => {
 skillPackageRuntimeRoutes.post('/skill-artifacts/:id/export', async (c) => {
   try {
     const body = await readValidated(c, artifactExportSchema)
-    return successResponse(c, { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir, body) })
+    return successResponse(c, { path: skillPackageRuntimeService.exportArtifact(idSchema.parse(c.req.param('id')), body.runId, body.destinationDir, {
+      ...body,
+      actor: requireSkillActor(c),
+      requestId: getRequestId(c),
+    }) })
   } catch (error) { return errorResponse(c, error) }
 })
 

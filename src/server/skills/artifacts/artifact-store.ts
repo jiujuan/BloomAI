@@ -143,6 +143,7 @@ export class ArtifactStore {
     confirmed?: boolean
     actor?: string | null
     auditReason?: string
+    requestId?: string
   }): string {
     let artifact: ArtifactSnapshot | undefined
     try {
@@ -189,7 +190,14 @@ export class ArtifactStore {
         action: 'artifact.exported',
         resourceType: 'skill_artifact',
         resourceId: artifact.id,
-        payload: { runId: input.runId, destinationDir, auditReason: input.auditReason.trim() },
+        securityDecision: 'allowed',
+        policyVersion: 'skills-admin-v1.2',
+        payload: {
+          runId: input.runId,
+          destinationDir,
+          auditReason: input.auditReason.trim(),
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+        },
       })
       this.recordArtifactMetric({ operation: 'export', outcome: 'success', bytes: artifact.sizeBytes, correlation: this.correlation(input.runId, artifact.id) })
       return targetPath
