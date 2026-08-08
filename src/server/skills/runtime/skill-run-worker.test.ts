@@ -102,6 +102,33 @@ describe('SkillRunWorker', () => {
     expect(coordinator.getRun(runId).status).toBe('cancelled')
   })
 
+  it('uses the injected clock for terminal run duration metrics', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 20_000 })
+    const metrics = new SkillRuntimeMetrics({ now: () => ports.clock.now() })
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+    const queue = new PersistentSkillRunQueue(ports.queue, { clock: ports.clock })
+    const worker = new SkillRunWorker({
+      queue,
+      coordinator,
+      workerId: 'worker-clock',
+      clock: ports.clock,
+      metrics,
+      executor: async () => {
+        ports.clock.advance(275)
+        return { status: 'completed' }
+      },
+    })
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-clock', input: {}, context: {} })
+
+    expect(await worker.runOne()).toBe(true)
+
+    expect(coordinator.getRun(runId).status).toBe('completed')
+    expect(metrics.snapshot().counters.runDurationMs).toBe(275)
+    expect(metrics.snapshot().points).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'run', timestamp: 20_275, value: 275 }),
+    ]))
+  })
+
   it('propagates run/worker correlation and records terminal run metrics', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 50_000 })
     const metrics = new SkillRuntimeMetrics({ now: ports.clock.now })
