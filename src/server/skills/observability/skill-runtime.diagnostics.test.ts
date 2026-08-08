@@ -41,6 +41,28 @@ describe('Skill Runtime diagnostics', () => {
     expect(getRuntimeHealth({
       config: { runtimeEnabled: false, packageExecutionEnabled: false },
       migrations: { current: null, applied: [], pending: ['001-bootstrap'] },
-    })).toMatchObject({ liveness: true, readiness: false, status: 'not_ready' })
+    })).toMatchObject({
+      liveness: true,
+      readiness: false,
+      status: 'disabled',
+      availability: 'disabled',
+      legacyStatus: 'not_ready',
+    })
+  })
+
+  it('exposes canonical healthy, degraded, and disabled availability states', () => {
+    expect(getRuntimeHealth({
+      config: { runtimeEnabled: true, packageExecutionEnabled: true },
+      worker: { status: 'running' },
+    })).toMatchObject({ status: 'healthy', availability: 'healthy', readiness: true })
+
+    expect(getRuntimeHealth({
+      config: { runtimeEnabled: true, packageExecutionEnabled: true },
+      worker: { status: 'crashed', lastError: 'worker failed' },
+    })).toMatchObject({ status: 'degraded', availability: 'degraded' })
+
+    expect(getRuntimeHealth({
+      config: { runtimeEnabled: false, packageExecutionEnabled: true },
+    })).toMatchObject({ status: 'disabled', availability: 'disabled', readiness: false })
   })
 })

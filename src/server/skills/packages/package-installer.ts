@@ -93,8 +93,11 @@ export class PackageInstallError extends Error {
   }
 }
 
+type PackageInstallerMetrics = Pick<SkillRuntimeMetrics, 'recordImportReject'> &
+  Partial<Pick<SkillRuntimeMetrics, 'recordInstall'>>
+
 export type PackageInstallerDependencies = {
-  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+  readonly metrics?: PackageInstallerMetrics
 }
 
 type ZipEntry = {
@@ -108,7 +111,7 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
-  private readonly metrics: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+  private readonly metrics: PackageInstallerMetrics
 
   constructor(dependencies: PackageInstallerDependencies = {}) {
     this.metrics = dependencies.metrics ?? SkillRuntimeMetrics.global()
@@ -185,9 +188,24 @@ export class PackageInstaller {
   }
 
   async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
+    const startedAt = Date.now()
     const correlation = getSkillCorrelation()
     return withSkillCorrelation(correlation, async () => {
       let stage: string | undefined
+      let installMetricRecorded = false
+      const recordInstall = (outcome: 'success' | 'partial_failure' | 'error') => {
+        if (installMetricRecorded) return
+        installMetricRecorded = true
+        try {
+          this.metrics.recordInstall?.({
+            outcome,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            correlation: getSkillCorrelation(),
+          })
+        } catch {
+          // Install telemetry must never change package installation behavior.
+        }
+      }
       try {
         assertPackageImportEnabled()
         const securedSource = normalizePackageInstallSource(source)
@@ -205,7 +223,9 @@ export class PackageInstaller {
       }
       const review = packageInstallReviewService.assertInstallable(options.reviewId, options.sourceFingerprint, options.confirm)
       if (review.status === 'installed' && review.decision?.result) {
-        return review.decision.result as unknown as PackageInstallResult
+        const result = review.decision.result as unknown as PackageInstallResult
+        recordInstall(result.status === 'partial_failure' ? 'partial_failure' : 'success')
+        return result
       }
 
       const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
@@ -230,8 +250,10 @@ export class PackageInstaller {
         ? { status: 'partial_failure', packages, partialFailures }
         : { status: 'awaiting_permission_review', packages }
       packageInstallReviewService.markInstalled(options.reviewId, result as unknown as Record<string, unknown>)
+      recordInstall(partialFailures.length > 0 ? 'partial_failure' : 'success')
       return result
       } catch (error) {
+        recordInstall('error')
         this.recordImportReject(error, correlation)
         if (error instanceof PackageInstallError) throw error
         throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')

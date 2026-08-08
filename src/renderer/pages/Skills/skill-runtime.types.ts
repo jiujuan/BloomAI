@@ -410,8 +410,27 @@ export type SkillRuntimeCapabilities = {
 export type SkillRuntimeDiagnosticsHealth = {
   liveness: boolean
   readiness: boolean
-  status: 'ready' | 'not_ready' | 'degraded' | string
+  /** Canonical v1.2 status plus pre-v1.2 compatibility values. */
+  status: 'healthy' | 'degraded' | 'disabled' | 'ready' | 'not_ready' | string
+  /** Canonical availability is preferred by the renderer when present. */
+  availability?: 'healthy' | 'degraded' | 'disabled' | string
+  /** Compatibility value for legacy consumers. */
+  legacyStatus?: string
   checks: Array<{ name: string; status: 'ok' | 'warning' | 'failed' | string; message?: string }>
+}
+
+export type SkillRuntimeDiagnosticsMetrics = {
+  generatedAt?: number
+  retentionMs?: number
+  counters?: {
+    installCount?: number
+    approvalCount?: number
+    queueDepth?: number
+    runsByStatus?: Record<string, number>
+    artifactOperations?: Record<string, number>
+    errorCount?: number
+    legacyRejectCount?: number
+  }
 }
 
 export type SkillRuntimeDiagnosticsSnapshot = {
@@ -450,8 +469,8 @@ export type SkillRuntimeDiagnosticsSnapshot = {
     errorMessage?: string | null
     updatedAt?: number
   }>
-  /** Optional server metrics are kept out of the P0 UI surface. */
-  metrics?: Record<string, unknown>
+  /** Safe aggregate metrics used by the Runtime settings view. */
+  metrics?: SkillRuntimeDiagnosticsMetrics
 }
 
 export function parseJson<T>(value: string | null | undefined, fallback: T): T {

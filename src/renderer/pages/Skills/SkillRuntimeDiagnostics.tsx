@@ -10,19 +10,27 @@ type Props = {
   onRefresh: () => void
 }
 
-type RuntimeStatus = 'ready' | 'degraded' | 'disabled'
+type RuntimeStatus = 'healthy' | 'ready' | 'degraded' | 'disabled'
 
 const statusMeta: Record<RuntimeStatus, { label: string; tone: string; Icon: typeof CheckCircle2 }> = {
+  healthy: { label: 'Healthy', tone: 'success', Icon: CheckCircle2 },
   ready: { label: 'Ready', tone: 'success', Icon: CheckCircle2 },
   degraded: { label: 'Degraded', tone: 'warning', Icon: AlertTriangle },
   disabled: { label: 'Disabled', tone: 'muted', Icon: CircleOff },
 }
 
 function deriveRuntimeStatus(diagnostics: SkillRuntimeDiagnosticsSnapshot): RuntimeStatus {
-  if (diagnostics.health.status === 'disabled') return 'disabled'
-  if (diagnostics.health.status === 'ready' && diagnostics.health.readiness) return 'ready'
   const runtimeCheck = diagnostics.health.checks.find((check) => check.name === 'runtime')
-  return runtimeCheck?.status === 'failed' ? 'disabled' : 'degraded'
+  if (runtimeCheck?.status === 'failed') return 'disabled'
+
+  const preferred = diagnostics.health.availability ?? diagnostics.health.status
+  if (preferred === 'healthy') return 'healthy'
+  if (preferred === 'disabled') return 'disabled'
+  if (preferred === 'ready' && diagnostics.health.readiness) return 'ready'
+  if (preferred === 'degraded' || preferred === 'not_ready') return 'degraded'
+
+  if (diagnostics.health.legacyStatus === 'ready' && diagnostics.health.readiness) return 'ready'
+  return diagnostics.health.readiness ? 'degraded' : 'disabled'
 }
 
 function displayValue(value: string | number | null | undefined, fallback = '—') {
@@ -45,6 +53,15 @@ function StatusBadge({ status }: { status: RuntimeStatus }) {
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return <div className="skills-runtime-metric"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function sumMetricValues(values: Record<string, number> | undefined): number {
+  if (!values) return 0
+  return Object.values(values).reduce((total, value) => total + (Number.isFinite(value) ? Math.max(0, value) : 0), 0)
+}
+
+function metricCounter(value: number | undefined, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
 }
 
 export function SkillRuntimeDiagnostics({ diagnostics, loading, error, onRefresh }: Props) {
@@ -77,6 +94,19 @@ export function SkillRuntimeDiagnostics({ diagnostics, loading, error, onRefresh
         <ul className="skills-runtime-check-list">
           {diagnostics.health.checks.map((check) => <li key={check.name}><span>{check.name}</span><span className={cn('skills-runtime-check', checkTone(check.status))}>{check.status}</span></li>)}
         </ul>
+      </section>
+
+      <section className="skills-runtime-diagnostics-card" aria-labelledby="runtime-metrics-title">
+        <div className="skills-runtime-card-title"><Activity size={15} aria-hidden="true" /><h3 id="runtime-metrics-title">Runtime Metrics</h3></div>
+        <div className="skills-runtime-metrics">
+          <Metric label="Installs" value={metricCounter(diagnostics.metrics?.counters?.installCount)} />
+          <Metric label="Approvals" value={metricCounter(diagnostics.metrics?.counters?.approvalCount)} />
+          <Metric label="Queue" value={metricCounter(diagnostics.metrics?.counters?.queueDepth, diagnostics.queue.depth)} />
+          <Metric label="Runs" value={sumMetricValues(diagnostics.metrics?.counters?.runsByStatus)} />
+          <Metric label="Artifacts" value={sumMetricValues(diagnostics.metrics?.counters?.artifactOperations)} />
+          <Metric label="Errors" value={metricCounter(diagnostics.metrics?.counters?.errorCount)} />
+          <Metric label="Legacy rejects" value={metricCounter(diagnostics.metrics?.counters?.legacyRejectCount)} />
+        </div>
       </section>
 
       <section className="skills-runtime-diagnostics-card" aria-labelledby="runtime-worker-title">

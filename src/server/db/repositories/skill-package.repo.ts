@@ -25,6 +25,8 @@ import { sanitizeSecurityPayload } from '../../skills/security/skill-security-ch
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
+  AuditEventSnapshot,
+  AuditQuery,
   AuditRepository,
   ArtifactSnapshot,
   CapabilityGrantRepository,
@@ -1337,6 +1339,22 @@ export const skillPackageRepo = {
     }).run()
   },
 
+  listAuditEvents(options: AuditQuery): Page<AuditEventSnapshot> {
+    const conditions = [
+      options.action === undefined ? undefined : eq(skill_audit_events.action, options.action),
+      options.resourceType === undefined ? undefined : eq(skill_audit_events.resource_type, options.resourceType),
+      options.resourceId === undefined ? undefined : eq(skill_audit_events.resource_id, options.resourceId),
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_audit_events)
+    const rows = where === undefined
+      ? query.orderBy(desc(skill_audit_events.created_at), desc(skill_audit_events.id)).limit(options.limit).offset(options.offset).all()
+      : query.where(where).orderBy(desc(skill_audit_events.created_at), desc(skill_audit_events.id)).limit(options.limit).offset(options.offset).all()
+    const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_audit_events)
+    const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0
+    return { data: rows.map(mapAuditEvent), total: Number(total) }
+  },
+
   createCapabilityGrant(data: {
     skillVersionId: string
     capability: string
@@ -1897,6 +1915,9 @@ export function createSqliteAuditRepository(): AuditRepository {
     append(event) {
       skillPackageRepo.appendAudit(event)
     },
+    list(options) {
+      return skillPackageRepo.listAuditEvents(options)
+    },
   }
 }
 
@@ -1904,6 +1925,34 @@ function parseObject(value: string, fieldName: string): JsonObject {
   const parsed = jsonObjectSchema.safeParse(JSON.parse(value))
   if (!parsed.success) throw new Error(`Invalid ${fieldName}`)
   return parsed.data
+}
+
+function mapAuditEvent(row: any): AuditEventSnapshot {
+  return {
+    id: String(row.id),
+    actor: row.actor ?? null,
+    action: String(row.action),
+    resourceType: String(row.resource_type),
+    resourceId: row.resource_id ?? null,
+    securityDecision: String(row.security_decision ?? 'not_evaluated'),
+    policyVersion: String(row.policy_version ?? 'legacy'),
+    sourceFingerprint: row.source_fingerprint ?? null,
+    payload: parseAuditPayload(row.payload_json),
+    createdAt: Number(row.created_at),
+  }
+}
+
+function parseAuditPayload(value: unknown): JsonObject {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const sanitized = sanitizeSecurityPayload(parsed)
+    return sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+      ? sanitized as JsonObject
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 function stringifySecurityObject(value: unknown, fieldName: string): string {

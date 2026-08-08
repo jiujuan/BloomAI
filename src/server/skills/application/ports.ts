@@ -239,6 +239,27 @@ export type AuditEvent = {
   readonly payload?: JsonObject
 }
 
+export type AuditEventSnapshot = {
+  readonly id: string
+  readonly actor: string | null
+  readonly action: string
+  readonly resourceType: string
+  readonly resourceId: string | null
+  readonly securityDecision: string
+  readonly policyVersion: string
+  readonly sourceFingerprint: string | null
+  readonly payload: JsonObject
+  readonly createdAt: number
+}
+
+export type AuditQuery = {
+  readonly limit: number
+  readonly offset: number
+  readonly action?: string
+  readonly resourceType?: string
+  readonly resourceId?: string
+}
+
 export interface PackageSkillRepository {
   createPackage(data: {
     name: string
@@ -423,6 +444,7 @@ export interface ArtifactRepository {
 
 export interface AuditRepository {
   append(event: AuditEvent): void
+  list?(options: AuditQuery): Page<AuditEventSnapshot>
 }
 
 export interface Clock {

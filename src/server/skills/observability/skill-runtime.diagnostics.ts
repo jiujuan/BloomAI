@@ -32,10 +32,16 @@ export type RuntimeHealthCheck = {
   message?: string
 }
 
+export type RuntimeAvailability = 'healthy' | 'degraded' | 'disabled'
+export type RuntimeLegacyHealthStatus = 'ready' | 'not_ready' | 'degraded'
+
 export type RuntimeHealth = {
   liveness: boolean
   readiness: boolean
-  status: 'ready' | 'not_ready' | 'degraded'
+  status: RuntimeAvailability
+  availability: RuntimeAvailability
+  /** Compatibility value for consumers that still understand the pre-v1.2 names. */
+  legacyStatus: RuntimeLegacyHealthStatus
   checks: RuntimeHealthCheck[]
 }
 
@@ -86,10 +92,6 @@ function safeVersion(value: string | undefined | null): string {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : 'unknown'
 }
 
-function safeStatus(value: string | undefined): RuntimeHealth['status'] {
-  return value === 'crashed' ? 'degraded' : 'ready'
-}
-
 function safeError(value: string | null | undefined): string | null {
   if (!value) return null
   const sanitized = sanitizeErrorMessage(value)
@@ -126,10 +128,23 @@ export function getRuntimeHealth(input: Pick<RuntimeDiagnosticsInput, 'config' |
   if (workerDegraded) checks.push({ name: 'worker', status: 'warning', message: safeError(worker?.lastError) ?? 'Worker crashed' })
   else if (worker && worker.status !== 'running' && readiness) checks.push({ name: 'worker', status: 'warning', message: `Worker status: ${worker.status}` })
 
+  const availability: RuntimeAvailability = !runtimeEnabled
+    ? 'disabled'
+    : !readiness || workerDegraded
+      ? 'degraded'
+      : 'healthy'
+  const legacyStatus: RuntimeLegacyHealthStatus = !readiness
+    ? 'not_ready'
+    : workerDegraded
+      ? 'degraded'
+      : 'ready'
+
   return {
     liveness: true,
     readiness,
-    status: !readiness ? 'not_ready' : workerDegraded ? 'degraded' : safeStatus(worker?.status),
+    status: availability,
+    availability,
+    legacyStatus,
     checks,
   }
 }

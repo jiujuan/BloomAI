@@ -58,6 +58,62 @@ describe('SkillRuntimeDiagnostics', () => {
     expect(markup).not.toContain('internal detail')
   })
 
+
+  it('prefers canonical availability and renders safe runtime metric counters', () => {
+    const markup = renderToStaticMarkup(<SkillRuntimeDiagnostics
+      loading={false}
+      error={null}
+      diagnostics={{
+        ...snapshot,
+        health: { ...snapshot.health, status: 'degraded', availability: 'healthy', legacyStatus: 'ready' },
+        metrics: {
+          generatedAt: 100,
+          retentionMs: 60_000,
+          counters: {
+            installCount: 3,
+            approvalCount: 4,
+            queueDepth: 2,
+            runsByStatus: { completed: 5 },
+            artifactOperations: { create_success: 6 },
+            errorCount: 7,
+            legacyRejectCount: 8,
+          },
+        },
+      }}
+      onRefresh={vi.fn()}
+    />)
+
+    expect(markup).toContain('Healthy')
+    expect(markup).toContain('skills-runtime-status success')
+    expect(markup).toContain('Installs')
+    expect(markup).toContain('Approvals')
+    expect(markup).toContain('Runs')
+    expect(markup).toContain('Artifacts')
+    expect(markup).toContain('Errors')
+    expect(markup).toContain('Legacy rejects')
+    expect(markup).toContain('>3<')
+    expect(markup).toContain('>4<')
+    expect(markup).toContain('>5<')
+    expect(markup).toContain('>6<')
+    expect(markup).toContain('>7<')
+    expect(markup).toContain('>8<')
+  })
+
+  it('uses disabled availability before legacy status when the runtime is unavailable', () => {
+    const markup = renderToStaticMarkup(<SkillRuntimeDiagnostics
+      loading={false}
+      error={null}
+      diagnostics={{
+        ...snapshot,
+        health: { ...snapshot.health, readiness: false, status: 'ready', availability: 'disabled', legacyStatus: 'not_ready' },
+      }}
+      onRefresh={vi.fn()}
+    />)
+
+    expect(markup).toContain('Disabled')
+    expect(markup).toContain('skills-runtime-status muted')
+  })
+
   it('shows generic loading and error states without echoing raw error text', () => {
     const markup = renderToStaticMarkup(<SkillRuntimeDiagnostics
       loading={false}
