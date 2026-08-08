@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
-import type { SkillInstallation, SkillRun, SkillRunEvent } from './skill-runtime.types'
+import type { CapabilityDto, PackageDetail, SkillInstallation, SkillRun, SkillRunEvent } from './skill-runtime.types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -215,4 +215,55 @@ describe('Package Runtime Zustand store', () => {
     expect(exportMock).toHaveBeenCalledWith('artifact-1', { runId: 'run-1', destinationDir: 'D:/exports', confirmed: true, auditReason: 'Skills Center acceptance' })
     expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
   })
+
+  it('converges capability grant state, deduplicates repeated approval and keeps package context', async () => {
+    const grant: CapabilityDto = {
+      id: 'grant-1', skillVersionId: 'version-1', capability: 'network.fetch',
+      scope: { allowedDomains: ['example.com'], maxCalls: 3 }, status: 'requested', grantMode: 'persistent',
+      grantedBy: null, grantedAt: null, expiresAt: null, revokedAt: null, consumedAt: null,
+      requestedScope: { allowedDomains: ['example.com'], maxCalls: 3 }, grantedScope: {},
+    }
+    const detail: PackageDetail = {
+      package: { id: 'package-1', name: 'Research', description: 'Research', sourceType: 'github', sourceUri: null, sourceRef: 'main', createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null },
+      versions: [{ id: 'version-1', packageId: 'package-1', version: '1.0.0', runtime: 'instruction-agent', manifest: {}, manifestHash: 'manifest-1', packagePath: '/packages/package-1', sourceSnapshot: {}, isCompatible: true, status: 'runnable', securityStatus: 'verified', createdAt: 1 }],
+      installations: [], capabilityGrants: [grant],
+    }
+    useSkillRuntimeStore.setState({ selectedPackage: detail })
+    const approval = deferred<CapabilityDto>()
+    const approveMock = vi.spyOn(platform, 'approveCapabilityGrant').mockReturnValue(approval.promise)
+
+    const first = useSkillRuntimeStore.getState().approve('grant-1', { actor: 'test-user' })
+    const second = useSkillRuntimeStore.getState().approve('grant-1', { actor: 'test-user' })
+    expect(approveMock).toHaveBeenCalledTimes(1)
+    expect(useSkillRuntimeStore.getState().pendingMutations['grant:grant-1']).toBe(true)
+
+    approval.resolve({ ...grant, status: 'approved', grantedBy: 'test-user', grantedAt: 2, grantedScope: grant.requestedScope })
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toMatchObject({ id: 'grant-1', status: 'approved', grantedBy: 'test-user' })
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+
+    const rejectMock = vi.spyOn(platform, 'rejectCapabilityGrant').mockResolvedValue({ ...grant, status: 'rejected' })
+    await useSkillRuntimeStore.getState().reject('grant-1', { actor: 'test-user', reason: 'not needed' })
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0].status).toBe('rejected')
+    expect(rejectMock).toHaveBeenCalledWith('grant-1', { actor: 'test-user', reason: 'not needed' })
+
+    const revokeMock = vi.spyOn(platform, 'revokeCapabilityGrant').mockResolvedValue({})
+    await useSkillRuntimeStore.getState().revokeCapabilityGrant('grant-1', { actor: 'test-user', reason: 'policy changed' })
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toMatchObject({ id: 'grant-1', status: 'revoked' })
+    expect(revokeMock).toHaveBeenCalledWith('grant-1', { actor: 'test-user', reason: 'policy changed' })
+  })
+
+  it('does not mutate a capability grant when the server rejects the operation', async () => {
+    const grant: CapabilityDto = { id: 'grant-2', skillVersionId: 'version-2', capability: 'filesystem.read', scope: {}, status: 'requested' }
+    useSkillRuntimeStore.setState({ selectedPackage: { package: { id: 'package-2', name: 'Files', description: '', sourceType: 'local', sourceUri: null, sourceRef: null, createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null }, versions: [], installations: [], capabilityGrants: [grant] } })
+    const error = { code: 'REVISION_CONFLICT', message: 'Grant 已被其他操作者更新', status: 409, retryable: false }
+    vi.spyOn(platform, 'approveCapabilityGrant').mockRejectedValue(error)
+
+    await expect(useSkillRuntimeStore.getState().approve('grant-2', { actor: 'test-user' })).rejects.toEqual(error)
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toEqual(grant)
+    expect(useSkillRuntimeStore.getState().errorDetails).toMatchObject({ code: 'REVISION_CONFLICT', status: 409 })
+    expect(useSkillRuntimeStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' })
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+  })
+
 })

@@ -195,6 +195,7 @@ export type SkillRuntimeStore = RuntimeState & RuntimeActions
 export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, get) => {
   type StreamEntry = { stream: { close: () => void }; timer?: ReturnType<typeof setTimeout>; closed: boolean; attempt: number }
   const eventStreams = new Map<string, StreamEntry>()
+  const capabilityMutationPromises = new Map<string, Promise<unknown>>()
   let toastSequence = 0
 
   const addToast = (tone: RuntimeToast['tone'], title: string, message?: string) => {
@@ -259,6 +260,39 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         : state.selectedPackage
       return { installations, selectedPackage }
     })
+  }
+
+  const replaceCapabilityGrant = (grant: CapabilityDto) => {
+    set((state) => {
+      const selectedPackage = state.selectedPackage
+        ? { ...state.selectedPackage, capabilityGrants: state.selectedPackage.capabilityGrants.map((item) => item.id === grant.id ? grant : item) }
+        : state.selectedPackage
+      const runCapabilitiesByRun = Object.fromEntries(Object.entries(state.runCapabilitiesByRun).map(([runId, capabilities]) => [runId, capabilities.map((item) => item.id === grant.id ? grant : item)]))
+      return { selectedPackage, runCapabilitiesByRun }
+    })
+  }
+
+  const mergeCapabilityGrant = (grantId: string, current: CapabilityDto | undefined, result: CapabilityDto | Record<string, unknown>, fallbackStatus: CapabilityDto['status']): CapabilityDto => {
+    const candidate = result && typeof result === 'object' ? result as Partial<CapabilityDto> & Record<string, unknown> : {}
+    const base: CapabilityDto = current ?? { id: grantId, skillVersionId: '', capability: '', scope: {} }
+    const merged = { ...base, ...candidate } as CapabilityDto
+    merged.id = typeof candidate.id === 'string' && candidate.id ? candidate.id : base.id || grantId
+    merged.skillVersionId = typeof candidate.skillVersionId === 'string' && candidate.skillVersionId ? candidate.skillVersionId : base.skillVersionId
+    merged.capability = typeof candidate.capability === 'string' && candidate.capability ? candidate.capability : base.capability
+    merged.scope = candidate.scope && typeof candidate.scope === 'object' ? candidate.scope as CapabilityDto['scope'] : base.scope
+    if (!merged.status) merged.status = fallbackStatus
+    if (fallbackStatus === 'revoked' && merged.status === 'revoked' && merged.revokedAt == null) merged.revokedAt = Date.now()
+    return merged
+  }
+
+  const runCapabilityMutation = <T>(key: string, action: () => Promise<T>): Promise<T> => {
+    const existing = capabilityMutationPromises.get(key)
+    if (existing) return existing as Promise<T>
+    const promise = withMutation(key, action).finally(() => {
+      if (capabilityMutationPromises.get(key) === promise) capabilityMutationPromises.delete(key)
+    })
+    capabilityMutationPromises.set(key, promise)
+    return promise
   }
 
   const snapshotInstallationState = () => ({
@@ -477,9 +511,35 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       await get().loadPackages()
       return result
     }, { successTitle: 'Package 已删除' }),
-    approve: (id, input) => withMutation(`grant:${id}`, async () => platform.approveCapabilityGrant(id, input)),
-    reject: (id, input) => withMutation(`grant:${id}`, async () => platform.rejectCapabilityGrant(id, input)),
-    revokeCapabilityGrant: (id, input) => withMutation(`grant:${id}`, async () => platform.revokeCapabilityGrant(id, input)),
+    approve: (id, input) => {
+      const current = get().selectedPackage?.capabilityGrants.find((grant) => grant.id === id)
+      return runCapabilityMutation(`grant:${id}`, async () => {
+        const result = await platform.approveCapabilityGrant(id, input)
+        const grant = mergeCapabilityGrant(id, current, result, 'approved')
+        replaceCapabilityGrant(grant)
+        return grant
+      })
+    },
+    reject: (id, input) => {
+      const current = get().selectedPackage?.capabilityGrants.find((grant) => grant.id === id)
+      return runCapabilityMutation(`grant:${id}`, async () => {
+        const result = await platform.rejectCapabilityGrant(id, input)
+        const grant = mergeCapabilityGrant(id, current, result, 'rejected')
+        replaceCapabilityGrant(grant)
+        return grant
+      })
+    },
+    revokeCapabilityGrant: (id, input) => {
+      const current = get().selectedPackage?.capabilityGrants.find((grant) => grant.id === id)
+      return runCapabilityMutation(`grant:${id}`, async () => {
+        const result = await platform.revokeCapabilityGrant(id, input)
+        const grant = mergeCapabilityGrant(id, current, result, 'revoked')
+        grant.status = 'revoked'
+        if (grant.revokedAt == null) grant.revokedAt = Date.now()
+        replaceCapabilityGrant(grant)
+        return grant
+      })
+    },
     loadRuns: async (input = {}) => {
       const requestKey = 'runs'
       const requestRevision = beginRequest(requestKey)
