@@ -97,6 +97,7 @@ type RuntimeState = {
   selectedPackage: PackageDetail | null
   selectedVersion: SkillVersion | null
   installations: SkillInstallation[]
+  installationPage: Page<SkillInstallation> | null
   runs: SkillRun[]
   runPage: Page<SkillRun> | null
   selectedRun: SkillRun | null
@@ -141,6 +142,7 @@ type RuntimeActions = {
   loadFeatureFlags: () => Promise<SkillRuntimeFeatureFlags>
   updateFeatureFlags: (patch: Record<string, boolean>) => Promise<SkillRuntimeFeatureFlags>
   loadPackages: (input?: PackageListInput) => Promise<Page<SkillPackage>>
+  loadInstallations: (input?: PaginationInput) => Promise<Page<SkillInstallation>>
   loadPackage: (id: string) => Promise<PackageDetail>
   loadVersions: (packageId: string) => Promise<SkillVersion[]>
   selectVersion: (version: SkillVersion | null) => void
@@ -274,7 +276,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
 
 
   return {
-    packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [], runs: [], runPage: null, selectedRun: null,
+    packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [], installationPage: null, runs: [], runPage: null, selectedRun: null,
     eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, draftPage: null, pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
     runEvents: [], runArtifacts: [],
     clearError: () => set({ error: null, errorDetails: null }),
@@ -341,6 +343,27 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
           setResourceLoading(requestKey, false)
         }
         return legacyPage
+      } catch (error) {
+        const details = asRuntimeError(error)
+        if (isCurrentRequest(requestKey, requestRevision)) {
+          set({ loading: false, error: details.message, errorDetails: details })
+          setResourceLoading(requestKey, false)
+        }
+        throw error
+      }
+    },
+    loadInstallations: async (input = {}) => {
+      const requestKey = 'installations'
+      const requestRevision = beginRequest(requestKey)
+      set({ loading: true, error: null, errorDetails: null })
+      setResourceLoading(requestKey, true)
+      try {
+        const result = await platform.getSkillInstallations(input)
+        if (isCurrentRequest(requestKey, requestRevision)) {
+          set({ installations: result.data, installationPage: result, loading: false })
+          setResourceLoading(requestKey, false)
+        }
+        return result
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {

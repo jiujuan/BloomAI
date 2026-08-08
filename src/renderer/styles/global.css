@@ -1854,6 +1854,10 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .skills-center-kind-icon.legacy { background: var(--bg-secondary); color: var(--text-tertiary); }
 .skills-center-source-label { color: var(--text-primary); font-size: 11px; }
 .skills-center-mono { font-family: var(--font-mono); font-size: 10px; }
+.skills-catalog-action-button { position: relative; width: 30px; height: 30px; padding: 0; }
+.skills-catalog-action-button:focus-visible { outline: 2px solid var(--border-info); outline-offset: 2px; background: var(--bg-info); color: var(--text-info); }
+.skills-catalog-action-button:hover::after, .skills-catalog-action-button:focus-visible::after { content: attr(data-tooltip); position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 3; padding: 4px 7px; border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); box-shadow: var(--shadow-sm); white-space: nowrap; pointer-events: none; }
+.skills-catalog-action-button.danger:hover:not(:disabled), .skills-catalog-action-button.danger:focus-visible:not(:disabled) { background: var(--bg-danger); color: var(--text-danger); }
 .skills-center-actions { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .skills-center-legacy-note { color: var(--text-tertiary); font-size: 10px; }
 .skills-center-state { display: flex; align-items: flex-start; gap: 9px; padding: 30px 18px; color: var(--text-tertiary); font-size: 12px; }

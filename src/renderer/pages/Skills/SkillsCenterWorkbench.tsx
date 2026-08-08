@@ -9,7 +9,7 @@ import { PackageInstallDialog } from './PackageInstallDialog'
 import { RunDetailDrawer, RunSkillDialog } from './RunDetailDrawer'
 import { SkillArtifactPanel } from './SkillArtifactPanel'
 import { SkillCapabilityPanel } from './SkillCapabilityPanel'
-import { paginateCatalogRows, SkillOverviewPanel } from './SkillOverviewPanel'
+import { paginateCatalogRows, shouldConfirmCatalogUninstall, SkillOverviewPanel } from './SkillOverviewPanel'
 import { SkillVersionPanel } from './SkillVersionPanel'
 import { getSkillsBreadcrumb, normalizeSkillsView, SkillsSidebar } from './SkillsSidebar'
 import type { SkillsCenterTab as SkillsRouteTab, SkillsRuntimeView } from './SkillsSidebar'
@@ -37,6 +37,8 @@ export type SkillListRow = {
   capabilities: string[]
   lastRunAt: number | null
   run?: SkillRun
+  installationId?: string
+  installationRevision?: number
 }
 
 type SkillsCenterRouteState = { tab?: SkillsCenterTab; selectedPackageId?: string; selectedRunId?: string; draftId?: string }
@@ -54,6 +56,7 @@ export function buildSkillRows(packages: SkillPackage[], legacySkills: Skill[], 
       statusTone: retired ? 'warning' as const : installation ? (enabled ? 'success' as const : 'muted' as const) : 'info' as const,
       riskLabel: retired ? '历史记录保留' : '来源已固定', riskTone: retired ? 'warning' as const : 'success' as const,
       capabilities: [], lastRunAt: currentRun?.updatedAt ?? null, run: currentRun,
+      installationId: installation?.id, installationRevision: installation?.revision ?? 0,
     }
   })
   const legacyRows = legacySkills.map((skill) => ({
@@ -117,7 +120,7 @@ export function SkillsCenterWorkbench() {
   const runtimeStatus = runtime.capabilities?.operationalStatus ?? 'degraded'
   const runtimeStatusLabel = getRuntimeStatusLabel(runtime.capabilities)
   useEffect(() => {
-    void Promise.allSettled([legacy.loadInstalled(), legacy.loadMarket(), runtime.loadPackages(), runtime.loadRuns(), runtime.loadFeatureFlags()])
+    void Promise.allSettled([legacy.loadInstalled(), legacy.loadMarket(), runtime.loadPackages(), runtime.loadInstallations(), runtime.loadRuns(), runtime.loadFeatureFlags()])
   }, [])
   useEffect(() => {
     if (canManageRuntime) void runtime.loadDiagnostics().catch(() => undefined)
@@ -183,7 +186,30 @@ export function SkillsCenterWorkbench() {
   }
 
   const refreshRuntime = async () => {
-    await Promise.allSettled([runtime.loadPackages(), runtime.loadRuns(), runtime.loadFeatureFlags(), canManageRuntime ? runtime.loadDiagnostics() : Promise.resolve(null)])
+    await Promise.allSettled([runtime.loadPackages(), runtime.loadInstallations(), runtime.loadRuns(), runtime.loadFeatureFlags(), canManageRuntime ? runtime.loadDiagnostics() : Promise.resolve(null)])
+  }
+  const toggleInstallation = async (row: SkillListRow) => {
+    if (!row.installationId) return
+    try {
+      await runtime.setInstallationEnabled(row.installationId, !row.enabled, row.installationRevision ?? 0)
+      await Promise.allSettled([runtime.loadInstallations(), runtime.loadPackages()])
+    } catch {
+      // Runtime Store owns optimistic rollback and the actionable error toast.
+    }
+  }
+  const createVersion = async (packageId: string) => {
+    await openPackage(packageId)
+  }
+  const uninstallInstallation = async (row: SkillListRow) => {
+    if (!row.installationId) return
+    const accepted = typeof window === 'undefined' ? true : shouldConfirmCatalogUninstall(row, (message) => window.confirm(message))
+    if (!accepted) return
+    try {
+      await runtime.uninstallPackage(row.installationId, row.installationRevision ?? 0)
+      await Promise.allSettled([runtime.loadInstallations(), runtime.loadPackages()])
+    } catch {
+      // Runtime Store owns optimistic rollback and the actionable error toast.
+    }
   }
   const handleGlobalSearch = (query: string) => {
     setFilters((current) => ({ ...current, query }))
@@ -217,7 +243,7 @@ export function SkillsCenterWorkbench() {
     {canManageRuntime && <SkillRuntimeDiagnostics diagnostics={runtime.diagnostics} loading={runtime.diagnosticsLoading} error={runtime.diagnosticsError} onRefresh={() => void runtime.loadDiagnostics().catch(() => undefined)} />}
     <div className="skills-center-layout"><SkillsSidebar view={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main"><div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={tab === 'center' ? 'package' : filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option>{tab !== 'center' && <option value="legacy">Legacy</option>}</select></label><label>Runtime<select value={tab === 'center' ? 'package' : filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option>{tab !== 'center' && <option value="legacy">Legacy</option>}</select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>{runtime.error && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{runtime.error}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}
       {tab === 'creator' && <SkillCreatorWorkbench draftId={route.draftId || null} onCreated={createDraft} />}
-      {(tab === 'center' || tab === 'import' || tab === 'runs') && <SkillOverviewPanel rows={rows} tab={tab === 'center' ? 'installed' : tab === 'import' ? 'available' : 'runs'} loading={runtime.loading || (tab !== 'center' && legacy.loading)} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onInstall={() => setShowInstaller(true)} />}
+      {(tab === 'center' || tab === 'import' || tab === 'runs') && <SkillOverviewPanel rows={rows} tab={tab === 'center' ? 'installed' : tab === 'import' ? 'available' : 'runs'} loading={runtime.loading || (tab !== 'center' && legacy.loading)} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} />}
       {selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} /><SkillCapabilityPanel manifest={manifest} grants={selectedPackage.capabilityGrants} onApprove={approveGrant} onReject={rejectGrant} /></div>}
       {selectedRun && <SkillArtifactPanel runId={selectedRun.id} artifacts={selectedArtifacts} onExport={exportArtifact} />}
     </main></div>
