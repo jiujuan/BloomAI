@@ -202,6 +202,28 @@ export function SkillsCenterWorkbench() {
   const createVersion = async (packageId: string) => {
     await openPackage(packageId)
   }
+  const createVersionFromVersion = async (version: SkillVersion) => {
+    const manifest = (version.manifest || {}) as PackageManifest
+    const name = String(manifest.name || selectedPackage?.package.name || 'Updated Skill')
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'updated-skill'
+    const currentVersionNumber = version.version.split('.').map((part) => Number.parseInt(part, 10))
+    const nextVersion = currentVersionNumber.length === 3 && currentVersionNumber.every((part) => Number.isFinite(part)) ? `${currentVersionNumber[0]}.${currentVersionNumber[1]}.${currentVersionNumber[2] + 1}` : '0.1.0'
+    try {
+      const draft = await runtime.createDraft({
+        baseVersionId: version.id,
+        content: {
+          runtimeKind: 'package', name, slug, version: nextVersion, description: String(manifest.description || selectedPackage?.package.description || ''),
+          skillMd: `# ${name}\n\n${String(manifest.description || '')}\n`,
+          references: Object.fromEntries((manifest.references || []).map((reference) => [reference, ''])),
+          assets: (manifest.assets || []).map((path) => ({ path })),
+          capabilities: manifest.requestedCapabilities || [], visibility: 'private',
+        },
+      })
+      setRoute({ tab: 'creator', draftId: draft.id })
+    } catch {
+      // Runtime Store exposes the actionable error and toast.
+    }
+  }
   const uninstallInstallation = async (row: SkillListRow) => {
     if (!row.installationId) return
     const accepted = typeof window === 'undefined' ? true : shouldConfirmCatalogUninstall(row, (message) => window.confirm(message))
@@ -222,6 +244,7 @@ export function SkillsCenterWorkbench() {
   const selectedPackage = runtime.selectedPackage?.package.id === route.selectedPackageId ? runtime.selectedPackage : null
   const selectedVersion = (runtime.selectedVersion && selectedPackage?.versions.some((version) => version.id === runtime.selectedVersion?.id) ? runtime.selectedVersion : undefined) || selectedPackage?.versions.find((version) => version.id === (selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id)) || selectedPackage?.versions[0]
   const manifest = selectedVersion?.manifest as PackageManifest | undefined
+  const selectedVersionGrants = selectedPackage?.capabilityGrants.filter((grant) => (grant.skillVersionId || grant.skill_version_id) === selectedVersion?.id) ?? []
   const selectedArtifacts = selectedRun ? runtime.artifactsByRun[selectedRun.id] || [] : []
   const counts = { center: catalogRows.length, import: packageRows.length, creator: Object.keys(runtime.drafts).length, detail: selectedPackage ? 1 : 0, permissions: selectedPackage?.capabilityGrants.length ?? 0, runs: runtime.runs.length, 'run-detail': route.selectedRunId ? 1 : 0, artifacts: selectedArtifacts.length, settings: runtime.diagnostics ? 1 : 0 }
 
@@ -253,11 +276,11 @@ export function SkillsCenterWorkbench() {
         }
       }} />}
       {(tab === 'center' || tab === 'import' || tab === 'runs') && <SkillOverviewPanel rows={rows} tab={tab === 'center' ? 'installed' : tab === 'import' ? 'available' : 'runs'} loading={runtime.loading || (tab !== 'center' && legacy.loading)} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} />}
-      {selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} /><SkillCapabilityPanel manifest={manifest} grants={selectedPackage.capabilityGrants} onApprove={approveGrant} onReject={rejectGrant} /></div>}
+      {selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id} selectedVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} onPreviewUpdate={createVersionFromVersion} /><SkillCapabilityPanel manifest={manifest} grants={selectedVersionGrants} versionId={selectedVersion?.id} versionLabel={`v${selectedVersion?.version || '—'} · ${selectedVersion?.id === (selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id) ? '当前版本' : '历史版本'}`} onApprove={approveGrant} onReject={rejectGrant} /></div>}
       {selectedRun && <SkillArtifactPanel runId={selectedRun.id} artifacts={selectedArtifacts} onExport={exportArtifact} />}
     </main></div>
     {showInstaller && <PackageInstallDialog onClose={() => setShowInstaller(false)} onOpenCreator={openCreatorFromInspection} onInstalled={(context) => { if (context.packageId) void openPackage(context.packageId) }} />}
-    {selectedPackage && <PackageDetailDrawer detail={selectedPackage} runs={runtime.runs} onClose={() => setRoute((current) => ({ ...current, selectedPackageId: undefined }))} onRun={startRun} onOpenRun={openRun} />}
+    {selectedPackage && <PackageDetailDrawer detail={selectedPackage} runs={runtime.runs} selectedVersionId={selectedVersion?.id} onSelectVersion={runtime.selectVersion} onCreateVersion={createVersionFromVersion} onClose={() => setRoute((current) => ({ ...current, selectedPackageId: undefined }))} onRun={startRun} onOpenRun={openRun} />}
     {route.selectedRunId && <RunDetailDrawer runId={route.selectedRunId} onClose={() => setRoute((current) => ({ ...current, selectedRunId: undefined }))} />}
     {runVersion && <RunSkillDialog version={runVersion} onClose={() => setRunVersion(null)} onStarted={openRun} />}
   </div>

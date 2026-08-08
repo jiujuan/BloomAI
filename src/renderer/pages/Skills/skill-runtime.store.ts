@@ -383,7 +383,8 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       try {
         const detail = toLegacyPackageDetail(await platform.getSkillPackage(id))
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ selectedPackage: detail, selectedVersion: detail.versions[0] ?? null, installations: detail.installations })
+          const currentVersionId = detail.installations[0]?.currentVersionId || detail.installations[0]?.current_version_id
+          set({ selectedPackage: detail, selectedVersion: detail.versions.find((version) => version.id === currentVersionId) ?? detail.versions[0] ?? null, installations: detail.installations })
           setResourceLoading(requestKey, false)
         }
         return detail
@@ -403,7 +404,9 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       try {
         const versions = await platform.getSkillVersions(packageId)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ selectedVersion: versions[0] ?? null })
+          const selectedPackage = get().selectedPackage
+          const currentVersionId = selectedPackage?.installations[0]?.currentVersionId || selectedPackage?.installations[0]?.current_version_id
+          set({ selectedVersion: versions.find((version) => version.id === currentVersionId) ?? versions[0] ?? null })
           setResourceLoading(requestKey, false)
         }
         return versions
