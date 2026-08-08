@@ -103,6 +103,7 @@ type ApproveGrantInput = {
   actor: string
   scope?: unknown
   expiresAt?: number | null
+  reason?: string
 }
 
 type ActorInput = {
@@ -228,7 +229,8 @@ export class CapabilityGrantService {
       maxCalls: grantedScope.maxCalls ?? null,
     })
     if (!updated) throw this.error('NOT_FOUND', `Capability grant not found: ${grantId}`)
-    this.audit('capability.approved', actor, updated, { scope: grantedScope })
+    const reason = input.reason?.trim()
+    this.audit('capability.approved', actor, updated, { scope: grantedScope, ...(reason ? { reason } : {}) })
     return this.withGrantId(updated)
   }
 

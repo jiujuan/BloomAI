@@ -192,6 +192,40 @@ describe('InstructionAgentAdapter', () => {
     expect(coordinator.getRun(tokenRunId).status).toBe('failed')
   })
 
+  it('moves a run to waiting_approval when the Broker reports a pending grant', async () => {
+    const { runId, coordinator, version } = await createFixture()
+    const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
+    skillPackageRepo.createCapabilityGrant({
+      skillVersionId: version.id,
+      capability: 'web.search',
+      grantMode: 'persistent',
+      requestedScope: {},
+      grantedScope: null,
+      status: 'pending',
+      runId,
+    })
+    const { InstructionAgentAdapter } = await import('./instruction-agent-adapter')
+    const adapter = new InstructionAgentAdapter({
+      executor: {
+        async execute(context) {
+          await context.executeCapability('web.search', { query: 'approval-gated' })
+          return { status: 'completed', output: { unreachable: true } }
+        },
+      },
+    })
+
+    const result = await adapter.run(runId)
+
+    expect(result).toMatchObject({
+      status: 'waiting_approval',
+      requiredAction: expect.objectContaining({ type: 'approval', grantId: expect.any(String) }),
+    })
+    expect(coordinator.subscribeEvents(runId).at(-1)).toMatchObject({
+      type: 'approval.required',
+      payload: { capabilities: [], reason: expect.stringContaining('Capability approval required') },
+    })
+  })
+
   it('persists user-input and approval waits with normalized approval capabilities', async () => {
     const { runId: inputRunId, coordinator, version } = await createFixture()
     const { InstructionAgentAdapter } = await import('./instruction-agent-adapter')
