@@ -388,6 +388,8 @@ export function getExpectedSchemaContract(): SchemaContract {
           validation_json: required,
           base_version_id: optional,
           published_version_id: optional,
+          publish_idempotency_key: optional,
+          publish_result_json: required,
           created_at: required,
           updated_at: required,
         },

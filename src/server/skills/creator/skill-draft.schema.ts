@@ -24,11 +24,15 @@ export const createSkillDraftSchema = z.object({
 }).strict()
 
 export const updateSkillDraftSchema = z.object({
-  expectedRevision: z.number().int().positive(),
+  expectedRevision: z.number().int().nonnegative(),
   patch: skillDraftContentSchema.partial(),
 }).strict()
 
-export const publishSkillDraftSchema = z.object({ enable: z.boolean().default(false) }).strict()
+export const publishSkillDraftSchema = z.object({
+  enable: z.boolean().default(false),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  idempotencyKey: z.string().trim().min(1).max(200).optional(),
+}).strict()
 
 export type SkillDraftContent = z.infer<typeof skillDraftContentSchema>
 export type SkillDraftCapability = z.infer<typeof skillDraftCapabilitySchema>

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { getOrmDb } from '../client'
 import { settings } from '../schema'
 
@@ -36,5 +36,14 @@ export const settingsRepo = {
     }
 
     return entries.length
+  },
+
+  deleteMany(keys: string[]): number {
+    const uniqueKeys = [...new Set(keys)]
+    if (uniqueKeys.length === 0) return 0
+    const result = getOrmDb().delete(settings)
+      .where(inArray(settings.key, uniqueKeys))
+      .run()
+    return Number(result.changes ?? 0)
   },
 }

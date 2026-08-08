@@ -29,13 +29,14 @@ export type SkillRuntimeObservabilityRouteOptions = {
 }
 
 function defaultIsAdmin(context: Context): boolean {
-  return context.req.header('x-bloom-role')?.trim().toLowerCase() === 'admin'
+  const role = context.req.header('x-bloom-role')?.trim().toLowerCase()
+  return role === 'admin' || role === 'owner'
 }
 
 /**
  * Health is intentionally public so process/load balancers can use it for
  * liveness and readiness checks. Diagnostics and audit records expose
- * operational state, therefore they require an administrator role.
+ * operational state, therefore they require an administrator or owner role.
  */
 export function createSkillRuntimeObservabilityRoutes(
   options: SkillRuntimeObservabilityRouteOptions = {},
@@ -57,7 +58,7 @@ export function createSkillRuntimeObservabilityRoutes(
 
   routes.get('/skill-runtime/diagnostics', async (context) => {
     if (!(await isAdmin(context))) {
-      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator access required'))
+      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator or owner access required'))
     }
     try {
       return successResponse(context, await diagnostics(context))
@@ -68,7 +69,7 @@ export function createSkillRuntimeObservabilityRoutes(
 
   routes.get('/skill-runtime/audit', async (context) => {
     if (!(await isAdmin(context))) {
-      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator access required'))
+      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator or owner access required'))
     }
     try {
       const query = auditQuerySchema.parse(context.req.query())

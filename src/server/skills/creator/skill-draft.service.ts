@@ -34,7 +34,23 @@ type PackagePublishResult = {
 }
 
 type DraftPublishInput = PackagePublishInput & {
-  draft: { id: string; ownerId: string; expectedRevision: number; validation: Record<string, unknown> }
+  draft: {
+    id: string
+    ownerId: string
+    expectedRevision: number
+    validation: Record<string, unknown>
+    idempotencyKey?: string
+    audit?: {
+      actor?: string | null
+      requestId?: string | null
+      action?: string
+      resourceType?: string
+      resourceId?: string | null
+      securityDecision?: string
+      policyVersion?: string
+      payload?: Record<string, unknown>
+    }
+  }
 }
 
 type LegacyMigrationTransactionResult = {
@@ -49,12 +65,13 @@ type LegacyMigrationTransactionResult = {
 export type SkillDraftRepository = {
   createDraft(input: { ownerId: string; content: SkillDraftContent; baseVersionId?: string | null }): SkillDraftRecord
   getDraft(id: string): SkillDraftRecord | undefined
+  listDrafts?(input: { ownerId: string; limit: number; offset: number; status?: string }): { data: SkillDraftRecord[]; total: number }
   updateDraftCas(input: { id: string; ownerId: string; expectedRevision: number; content: SkillDraftContent }): SkillDraftRecord | undefined
   saveValidation(input: { id: string; ownerId: string; validation: SkillDraftValidation }): SkillDraftRecord | undefined
   markPublished(input: { id: string; ownerId: string; versionId: string; validation: SkillDraftValidation }): SkillDraftRecord | undefined
   discardDraft(input: { id: string; ownerId: string }): SkillDraftRecord | undefined
   publish(input: PackagePublishInput): PackagePublishResult
-  publishDraftTransaction?(input: DraftPublishInput): PackagePublishResult
+  publishDraftTransaction?(input: DraftPublishInput): PackagePublishResult & { idempotent?: boolean }
   publishLegacyMigration?(input: PackagePublishInput & {
     draft: { id: string; ownerId: string; validation: Record<string, unknown> }
     migration: { id: string; ownerId: string; expectedRevision: number; sourceSha256: string; reportArtifactId?: string | null }
@@ -63,6 +80,14 @@ export type SkillDraftRepository = {
 }
 
 type DraftServiceOptions = { repo?: SkillDraftRepository; packageDataRoot?: string }
+export type SkillDraftPublishOptions = {
+  actor?: string
+  requestId?: string
+  enable?: boolean
+  expectedRevision?: number
+  idempotencyKey?: string
+  legacyMigration?: LegacyMigrationPublishOptions
+}
 type PublishResult = { draftId: string; packageId: string; versionId: string; snapshotId: string; installationId: string; installationEnabled: boolean; manifestHash: string; snapshotHash: string; migrationId?: string; migrationRevision?: number; idempotent?: boolean }
 
 export function createSkillDraftService(options: DraftServiceOptions = {}) {
@@ -77,6 +102,11 @@ export function createSkillDraftService(options: DraftServiceOptions = {}) {
     getDraft(id: string, ownerId: string) {
       const draft = requireOwned(repo, id, ownerId)
       return { ...draft, content: parseContent(draft.content) }
+    },
+    listDrafts(ownerId: string, input: { limit: number; offset: number; status?: string }) {
+      requireOwner(ownerId)
+      const page = repo.listDrafts?.({ ownerId, ...input }) ?? { data: [], total: 0 }
+      return { data: page.data.map((draft) => ({ ...draft, content: parseContent(draft.content) })), total: page.total }
     },
     updateDraft(id: string, ownerId: string, patch: unknown, expectedRevision: number) {
       const draft = requireOwned(repo, id, ownerId)
@@ -100,10 +130,13 @@ export function createSkillDraftService(options: DraftServiceOptions = {}) {
       const validation = validateContent(parseContent(draft.content))
       return { draftId: draft.id, revision: draft.revision, published: false, valid: validation.valid, manifest: validation.manifest, files: validation.previewSummary.files, warnings: validation.warnings, errors: validation.errors }
     },
-    publishDraft(id: string, ownerId: string, publishOptions: { enable?: boolean; legacyMigration?: LegacyMigrationPublishOptions } = {}): PublishResult {
+    publishDraft(id: string, ownerId: string, publishOptions: SkillDraftPublishOptions = {}): PublishResult {
       const draft = requireOwned(repo, id, ownerId)
       if (draft.status === 'discarded') throw new ServiceError('CONFLICT', 'Discarded draft cannot be published')
-      if (draft.status === 'published') throw new ServiceError('CONFLICT', 'Published draft cannot be published again')
+      if (draft.status === 'published' && !publishOptions.idempotencyKey) throw new ServiceError('IDEMPOTENCY_CONFLICT', 'Published draft cannot be published again without the original idempotency key')
+      if (publishOptions.expectedRevision !== undefined && publishOptions.expectedRevision !== draft.revision) {
+        throw new ServiceError('REVISION_CONFLICT', 'Draft revision conflict', { currentRevision: draft.revision })
+      }
       if (publishOptions.legacyMigration && publishOptions.legacyMigration.ownerId !== ownerId) {
         throw new ServiceError('FORBIDDEN', 'Migration owner does not match draft owner')
       }
@@ -149,9 +182,35 @@ export function createSkillDraftService(options: DraftServiceOptions = {}) {
         if (!repo.publishDraftTransaction) throw new ServiceError('PACKAGE_INSTALL_ERROR', 'Creator publish transaction is unavailable')
         const result = repo.publishDraftTransaction({
           ...packageInput,
-          draft: { id, ownerId, expectedRevision: draft.revision, validation: validation as unknown as Record<string, unknown> },
+          draft: {
+            id,
+            ownerId,
+            expectedRevision: publishOptions.expectedRevision ?? draft.revision,
+            validation: validation as unknown as Record<string, unknown>,
+            ...(publishOptions.idempotencyKey ? { idempotencyKey: publishOptions.idempotencyKey } : {}),
+            audit: {
+              actor: publishOptions.actor ?? ownerId,
+              requestId: publishOptions.requestId ?? null,
+              action: 'skill.draft.published',
+              resourceType: 'skill_draft',
+              resourceId: id,
+              securityDecision: 'allowed',
+              policyVersion: 'skills-admin-v1.2',
+              payload: {
+                actor: publishOptions.actor ?? ownerId,
+                requestId: publishOptions.requestId ?? null,
+                securityDecision: 'allowed',
+                policyVersion: 'skills-admin-v1.2',
+                draftId: id,
+                revision: publishOptions.expectedRevision ?? draft.revision,
+                idempotencyKey: publishOptions.idempotencyKey ?? null,
+                manifestHash,
+                snapshotHash,
+              },
+            },
+          },
         })
-        return { draftId: id, packageId: result.package.id, versionId: result.version.id, snapshotId: result.snapshot.id, installationId: result.installation.id, installationEnabled: Boolean(result.installation.enabled), manifestHash, snapshotHash }
+        return { draftId: id, packageId: result.package.id, versionId: result.version.id, snapshotId: result.snapshot.id, installationId: result.installation.id, installationEnabled: Boolean(result.installation.enabled), manifestHash, snapshotHash, idempotent: result.idempotent === true }
       } catch (error) {
         if (!pathExisted) {
           try { fs.rmSync(finalPath, { recursive: true, force: true }) } catch { /* best-effort cleanup after DB rollback */ }
@@ -170,6 +229,7 @@ function createDefaultRepo(): SkillDraftRepository {
   return {
     createDraft(input) { return mapDraft(skillPackageRepo.createDraft(input)) },
     getDraft(id) { const row = skillPackageRepo.getDraft(id); return row ? mapDraft(row) : undefined },
+    listDrafts(input) { const page = skillPackageRepo.listDrafts(input); return { data: page.data.map(mapDraft), total: page.total } },
     updateDraftCas(input) { const row = skillPackageRepo.updateDraftCas(input); return row ? mapDraft(row) : undefined },
     saveValidation(input) { const row = skillPackageRepo.saveDraftValidation(input); return row ? mapDraft(row) : undefined },
     markPublished(input) { const row = skillPackageRepo.markDraftPublished(input); return row ? mapDraft(row) : undefined },

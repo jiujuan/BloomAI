@@ -52,6 +52,13 @@ import type {
 
 const jsonObjectSchema = z.record(z.unknown())
 
+type StoredDraftPublishResult = {
+  package: { id: string; [key: string]: unknown }
+  version: { id: string; [key: string]: unknown }
+  snapshot: { id: string; [key: string]: unknown }
+  installation: { id: string; [key: string]: unknown }
+}
+
 function stringifyJsonObject(value: unknown, fieldName: string): string {
   const parsed = jsonObjectSchema.safeParse(value)
   if (!parsed.success || Array.isArray(value)) throw new Error(`${fieldName} must be a JSON object`)
@@ -99,6 +106,23 @@ export const skillPackageRepo = {
 
   getDraft(id: string) {
     return getOrmDb().select().from(skill_drafts).where(eq(skill_drafts.id, id)).get()
+  },
+
+  listDrafts(options: {
+    ownerId: string
+    limit: number
+    offset: number
+    status?: string
+  }) {
+    const conditions = [
+      eq(skill_drafts.owner_id, options.ownerId),
+      options.status === undefined ? undefined : eq(skill_drafts.status, options.status),
+    ].filter(Boolean)
+    const where = conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_drafts).where(where)
+    const data = query.orderBy(desc(skill_drafts.updated_at), asc(skill_drafts.id)).limit(options.limit).offset(options.offset).all()
+    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_drafts).where(where).get()?.count ?? 0
+    return { data, total: Number(total) }
   },
 
   updateDraftCas(data: { id: string; ownerId: string; expectedRevision: number; content: Record<string, unknown> }) {
@@ -432,16 +456,49 @@ export const skillPackageRepo = {
       ownerId: string
       expectedRevision: number
       validation: Record<string, unknown>
+      idempotencyKey?: string
+      audit?: {
+        actor?: string | null
+        requestId?: string | null
+        action?: string
+        resourceType?: string
+        resourceId?: string | null
+        securityDecision?: string
+        policyVersion?: string
+        payload?: Record<string, unknown>
+      }
     }
   }) {
     return getOrmDb().transaction((tx) => {
+      // Read the Draft by owner first so a retry can be resolved from the
+      // persisted publish result without re-running the Package creation path.
       const currentDraft = tx.select().from(skill_drafts).where(and(
         eq(skill_drafts.id, data.draft.id),
         eq(skill_drafts.owner_id, data.draft.ownerId),
-        eq(skill_drafts.revision, data.draft.expectedRevision),
-        eq(skill_drafts.status, 'draft'),
       )).get()
-      if (!currentDraft) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+      if (!currentDraft) throw new ServiceError('NOT_FOUND', 'Skill draft not found')
+
+      if (currentDraft.status === 'published') {
+        if (data.draft.idempotencyKey && currentDraft.publish_idempotency_key === data.draft.idempotencyKey) {
+          try {
+            const stored = JSON.parse(currentDraft.publish_result_json) as StoredDraftPublishResult
+            if (stored?.package?.id && stored.version?.id && stored.snapshot?.id && stored.installation?.id) {
+              return { ...stored, idempotent: true }
+            }
+          } catch {
+            // A published Draft without a valid stored result is not safe to
+            // replay as success; fail closed below with a stable conflict.
+          }
+        }
+        if (currentDraft.publish_idempotency_key) {
+          throw new ServiceError('IDEMPOTENCY_CONFLICT', 'Published draft cannot be published with a different idempotency key')
+        }
+        throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+      }
+
+      if (currentDraft.status !== 'draft' || currentDraft.revision !== data.draft.expectedRevision) {
+        throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+      }
 
       const now = Date.now()
       const packageRow = {
@@ -499,10 +556,18 @@ export const skillPackageRepo = {
       }
       tx.insert(skill_installations).values(installationRow).run()
 
+      const result = {
+        package: packageRow,
+        version: versionRow,
+        snapshot: snapshotRow,
+        installation: installationRow,
+      }
       const draftUpdate = tx.update(skill_drafts).set({
         status: 'published',
         published_version_id: versionRow.id,
         validation_json: JSON.stringify(data.draft.validation),
+        publish_idempotency_key: data.draft.idempotencyKey ?? null,
+        publish_result_json: JSON.stringify(result),
         updated_at: now,
       }).where(and(
         eq(skill_drafts.id, data.draft.id),
@@ -512,7 +577,30 @@ export const skillPackageRepo = {
       )).run()
       if (draftUpdate.changes !== 1) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
 
-      return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow }
+      if (data.draft.audit) {
+        const audit = data.draft.audit
+        const payload = {
+          ...(audit.payload ?? {}),
+          packageId: packageRow.id,
+          versionId: versionRow.id,
+          snapshotId: snapshotRow.id,
+          installationId: installationRow.id,
+        }
+        tx.insert(skill_audit_events).values({
+          id: uuidv4(),
+          actor: audit.actor ?? null,
+          action: audit.action ?? 'skill.draft.published',
+          resource_type: audit.resourceType ?? 'skill_draft',
+          resource_id: audit.resourceId ?? data.draft.id,
+          payload_json: stringifySecurityObject(payload, 'audit payload'),
+          security_decision: audit.securityDecision ?? 'allowed',
+          policy_version: audit.policyVersion ?? 'skills-admin-v1.2',
+          source_fingerprint: null,
+          created_at: now,
+        }).run()
+      }
+
+      return { ...result, idempotent: false }
     })
   },
 

@@ -24,6 +24,7 @@ import { schedulesRoutes } from './routes/schedules'
 import { skillCreatorRoutes } from './routes/skill-creator'
 import { skillSecurityRoutes } from './routes/skill-security'
 import { createSkillRuntimeObservabilityRoutes, type SkillRuntimeObservabilityRouteOptions } from './routes/skill-runtime-observability'
+import { skillRuntimeSettingsRoutes } from './routes/skill-runtime-settings'
 import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checklist'
 
 /**
@@ -106,6 +107,7 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono {
   app.route('/api/v1/attachments', attachmentsRoutes)
   app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', skillCreatorRoutes)
+  app.route('/api/v1', skillRuntimeSettingsRoutes)
   app.route('/api/v1', skillSecurityRoutes)
   app.route('/api/v1', createSkillRuntimeObservabilityRoutes(options.skillRuntimeObservability))
   app.route('/api/v1', imageStudioRoutes)

@@ -6,6 +6,7 @@ export const SKILL_ROLES = ['user', 'admin', 'owner'] as const
 
 export type SkillOperation =
   | 'runtime.read'
+  | 'runtime.manage'
   | 'package.read'
   | 'package.inspect'
   | 'package.install'
@@ -84,7 +85,14 @@ export function getSkillOperationForRequest(method: string, rawPath: string): Sk
   const normalizedMethod = method.trim().toUpperCase()
   const route = normalizedPath(rawPath)
 
-  if (hasPrefix(route, '/skill-runtime/')) {
+  if (hasPrefix(route, '/skill-runtime')) {
+    if (route === '/skill-runtime/health' && normalizedMethod === 'GET') return undefined
+    if (
+      hasPrefix(route, '/skill-runtime/settings')
+      || hasPrefix(route, '/skill-runtime/feature-flags')
+      || hasPrefix(route, '/skill-runtime/diagnostics')
+      || hasPrefix(route, '/skill-runtime/audit')
+    ) return 'runtime.manage'
     return 'runtime.read'
   }
 

@@ -1,10 +1,11 @@
+import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import type { SkillRuntimeConfig } from '../config/skill-runtime.config'
 import type { SkillRunQueueSnapshot } from '../application/ports'
 import { SkillRuntimeMetrics, type SkillRuntimeMetricSnapshot } from './skill-runtime.metrics'
 import { sanitizeErrorMessage } from '../../logger/logger'
 
 export type RuntimeDiagnosticsConfig = Partial<Pick<SkillRuntimeConfig,
-  'protocolVersion' | 'configVersion' | 'runtimeEnabled' | 'packageExecutionEnabled' | 'eventRetentionDays' | 'artifactRetentionDays'
+  'protocolVersion' | 'configVersion' | 'runtimeEnabled' | 'packageExecutionEnabled' | 'workerConcurrency' | 'eventRetentionDays' | 'artifactRetentionDays'
 >> & {
   policyVersion?: string
   logRetentionDays?: number
@@ -69,6 +70,11 @@ export type RuntimeDiagnosticsSnapshot = {
   queue: RuntimeQueueDiagnostics
   migration: RuntimeMigrationStatus
   policy: { version: string; configVersion: string }
+  configuration: {
+    workerConcurrency: number
+    packageExecutionEnabled: boolean
+    runtimeEnabled: boolean
+  }
   metrics: SkillRuntimeMetricSnapshot
   recentFailures: RuntimeDiagnosticsFailure[]
 }
@@ -105,7 +111,7 @@ function safeError(value: string | null | undefined): string | null {
 }
 
 export function getRuntimeHealth(input: Pick<RuntimeDiagnosticsInput, 'config' | 'migrations' | 'worker'> = {}): RuntimeHealth {
-  const config = input.config ?? {}
+  const config = (input.config ?? getSkillRuntimeConfig()) as RuntimeDiagnosticsConfig
   const migrations = input.migrations ?? { current: null, applied: [], pending: [] }
   const worker = input.worker
   const checks: RuntimeHealthCheck[] = []
@@ -167,7 +173,7 @@ export function getRuntimeDiagnostics(input: RuntimeDiagnosticsInput = {}): Runt
     dead,
     lagMs: lagCandidates.length ? Math.max(...lagCandidates) : 0,
   }
-  const config = input.config ?? {}
+  const config = (input.config ?? getSkillRuntimeConfig()) as RuntimeDiagnosticsConfig
   const migrations = input.migrations ?? { current: null, applied: [], pending: [] }
   const worker = input.worker ?? { status: 'not_configured' as const }
   const metrics = input.metrics ?? SkillRuntimeMetrics.global()
@@ -202,6 +208,11 @@ export function getRuntimeDiagnostics(input: RuntimeDiagnosticsInput = {}): Runt
     policy: {
       version: safeVersion(config.policyVersion),
       configVersion: safeVersion(config.configVersion),
+    },
+    configuration: {
+      workerConcurrency: Number.isSafeInteger(config.workerConcurrency) ? config.workerConcurrency as number : 1,
+      packageExecutionEnabled: config.packageExecutionEnabled !== false,
+      runtimeEnabled: config.runtimeEnabled !== false,
     },
     metrics: metrics.snapshot(),
     recentFailures,

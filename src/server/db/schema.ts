@@ -431,6 +431,8 @@ export const skill_drafts = sqliteTable('skill_drafts', {
   validation_json: text('validation_json').notNull().default('{}'),
   base_version_id: text('base_version_id'),
   published_version_id: text('published_version_id'),
+  publish_idempotency_key: text('publish_idempotency_key'),
+  publish_result_json: text('publish_result_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({
