@@ -25,6 +25,7 @@
 | [P4-003 Legacy migration gates](./p4-003-legacy-migration-gates.md) | 归档、备份、对账、manual review、rollback 和旧表 drop gate | `npm run verify:legacy-skills-migration` | ✅ |
 | [P4-004 Legacy test/fixture/doc cleanup](./p4-004-legacy-test-fixture-doc-cleanup.md) | 删除 Legacy 管理测试和 fixture；保留一次性、离线、只读迁移验证 | `npm run test:skills:migration:offline` | ✅ |
 | [P5-001 unit/domain tests](./p5-001-unit-domain-tests.md) | Manifest、policy、runtime、artifact、creator 和 repository invariants 单元/领域门禁 | `npm run test:skills:unit` | ✅ |
+| [P5-002 HTTP/DB integration tests](./p5-002-http-db-integration-tests.md) | HTTP resource contracts、SSE、observability、DB invariants 和 migration schema contract 集成门禁 | `npm run test:skills:integration` | ✅ |
 
 ## 证据最小字段
 
