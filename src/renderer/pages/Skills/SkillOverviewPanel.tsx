@@ -197,7 +197,7 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
 
 type SkillOverviewPanelProps = {
   rows: SkillListRow[]
-  tab: 'installed' | 'available' | 'runs'
+  tab: 'center' | 'import' | 'runs'
   loading: boolean
   error?: string | null
   runs?: SkillRun[]

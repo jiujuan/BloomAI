@@ -4,37 +4,29 @@ import type { LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/utils'
 
 export type SkillsRuntimeView = 'center' | 'import' | 'creator' | 'detail' | 'permissions' | 'runs' | 'run-detail' | 'artifacts' | 'settings'
-export type SkillsCenterTab = SkillsRuntimeView | 'installed' | 'available' | 'drafts'
+export type SkillsCenterTab = SkillsRuntimeView
 
 export type SkillsRuntimeNavItem = {
   id: SkillsRuntimeView
   label: string
-  legacyLabel?: string
   icon: LucideIcon
   group: 'workspace' | 'create' | 'system'
 }
 
 export const SKILLS_RUNTIME_NAV_ITEMS: SkillsRuntimeNavItem[] = [
-  { id: 'center', label: 'Skills Center', legacyLabel: 'Installed', icon: LayoutDashboard, group: 'workspace' },
-  { id: 'import', label: '导入 Skill', legacyLabel: 'Available / Import', icon: Upload, group: 'workspace' },
-  { id: 'creator', label: 'Skills Creator', legacyLabel: 'Drafts', icon: Sparkles, group: 'create' },
+  { id: 'center', label: 'Skills Center', icon: LayoutDashboard, group: 'workspace' },
+  { id: 'import', label: '导入 Skill', icon: Upload, group: 'workspace' },
+  { id: 'creator', label: 'Skills Creator', icon: Sparkles, group: 'create' },
   { id: 'detail', label: 'Skill 详情', icon: FileSearch, group: 'workspace' },
   { id: 'permissions', label: '权限与安装', icon: LockKeyhole, group: 'workspace' },
-  { id: 'runs', label: '运行记录', legacyLabel: 'Runs', icon: PlayCircle, group: 'workspace' },
+  { id: 'runs', label: '运行记录', icon: PlayCircle, group: 'workspace' },
   { id: 'run-detail', label: 'Run 详情', icon: FilePlus2, group: 'workspace' },
   { id: 'artifacts', label: 'Artifacts', icon: PackageOpen, group: 'workspace' },
   { id: 'settings', label: '系统设置', icon: Settings2, group: 'system' },
 ]
 
-const LEGACY_VIEW_ALIASES: Record<'installed' | 'available' | 'drafts', SkillsRuntimeView> = {
-  installed: 'center',
-  available: 'import',
-  drafts: 'creator',
-}
-
 export function normalizeSkillsView(view: SkillsCenterTab | undefined): SkillsRuntimeView {
-  if (!view) return 'center'
-  return view in LEGACY_VIEW_ALIASES ? LEGACY_VIEW_ALIASES[view as keyof typeof LEGACY_VIEW_ALIASES] : view as SkillsRuntimeView
+  return view || 'center'
 }
 
 export function getSkillsBreadcrumb(view: SkillsRuntimeView): string[] {
@@ -46,15 +38,13 @@ export function getSkillsBreadcrumb(view: SkillsRuntimeView): string[] {
 }
 
 type SkillsSidebarProps = {
-  view?: SkillsCenterTab
-  /** @deprecated Use view. Kept for the current workbench while the shell migrates. */
-  tab?: SkillsCenterTab
+  view?: SkillsRuntimeView
   counts: Partial<Record<SkillsRuntimeView, number>> & Record<string, number>
   onChange: (view: SkillsRuntimeView) => void
 }
 
-export function SkillsSidebar({ view, tab, counts, onChange }: SkillsSidebarProps) {
-  const activeView = normalizeSkillsView(view ?? tab)
+export function SkillsSidebar({ view, counts, onChange }: SkillsSidebarProps) {
+  const activeView = normalizeSkillsView(view)
   return <aside className="skills-center-sidebar" aria-label="Skills Runtime 导航">
     <div className="skills-center-brand"><span className="skills-center-brand-mark" aria-hidden="true">S</span><span><strong>Skills Center</strong><small>Package Runtime control plane</small></span></div>
     <div className="skills-center-nav-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy <span>· Worker</span></div>
@@ -77,6 +67,6 @@ export function SkillsSidebar({ view, tab, counts, onChange }: SkillsSidebarProp
 function NavItem({ item, activeView, counts, onChange }: { item: SkillsRuntimeNavItem; activeView: SkillsRuntimeView; counts: Record<string, number>; onChange: (view: SkillsRuntimeView) => void }) {
   const count = counts[item.id] ?? 0
   return <button type="button" title={item.label} className={cn('skills-center-nav-item', activeView === item.id && 'active')} aria-current={activeView === item.id ? 'page' : undefined} onClick={() => onChange(item.id)}>
-    <item.icon size={16} aria-hidden="true" /><span>{item.label}</span>{item.legacyLabel && <small className="skills-center-nav-alias">{item.legacyLabel}</small>}<span className="skills-center-nav-count" aria-label={`${item.label} 数量`}>{count}</span>
+    <item.icon size={16} aria-hidden="true" /><span>{item.label}</span><span className="skills-center-nav-count" aria-label={`${item.label} 数量`}>{count}</span>
   </button>
 }

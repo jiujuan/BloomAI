@@ -9,7 +9,7 @@ export type PackageListInput = PaginationInput & {
   direction?: 'asc' | 'desc'
 }
 export type DraftListInput = PaginationInput & { status?: 'draft' | 'published' | 'discarded' | string }
-export type SkillRuntimeSourceFilter = 'all' | 'legacy' | 'package'
+export type SkillRuntimeSourceFilter = 'all' | 'package'
 export type SkillRuntimeFilterStatus = 'all' | 'enabled' | 'disabled' | 'attention'
 
 export type PaginationMeta = { limit: number; offset: number; total: number; hasMore: boolean; nextOffset: number | null }

@@ -62,6 +62,6 @@ describe('Skills Center inline catalog actions', () => {
   })
 
   it('keeps installation id and revision available to action handlers', () => {
-    expect(buildSkillRows([packageItem], [], [installation], []).find((row) => row.id === 'pkg-1')).toMatchObject({ installationId: 'installation-1', installationRevision: 7 })
+    expect(buildSkillRows([packageItem], [installation], []).find((row) => row.id === 'pkg-1')).toMatchObject({ installationId: 'installation-1', installationRevision: 7 })
   })
 })

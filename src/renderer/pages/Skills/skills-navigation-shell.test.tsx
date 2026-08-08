@@ -15,19 +15,18 @@ describe('Skills Runtime navigation shell', () => {
       'Skills Center', '导入 Skill', 'Skills Creator', 'Skill 详情', '权限与安装', '运行记录', 'Run 详情', 'Artifacts', '系统设置',
     ])
     expect(getSkillsBreadcrumb('run-detail')).toEqual(['Skills Center', '运行记录', 'Run 详情'])
-    expect(normalizeSkillsView('installed')).toBe('center')
-    expect(normalizeSkillsView('available')).toBe('import')
+    expect(normalizeSkillsView(undefined)).toBe('center')
   })
 
-  it('renders keyboard-focusable nav items without a Legacy Skills Market entry', () => {
+  it('renders keyboard-focusable Package Runtime navigation', () => {
     const markup = renderToStaticMarkup(<SkillsSidebar view="center" counts={counts} onChange={() => undefined} />)
     expect(markup).toContain('Skills Center')
     expect(markup).toContain('导入 Skill')
     expect(markup).toContain('权限与安装')
     expect(markup).toContain('系统设置')
     expect(markup).toContain('aria-current="page"')
-    expect(markup).not.toContain('LegacySkillsMarket')
-    expect(markup).not.toContain('Legacy Skills Market')
+    expect(markup).not.toContain('Installed')
+    expect(markup).not.toContain('Available / Import')
   })
 
   it('mounts the App Skills entry on the Runtime shell', () => {
