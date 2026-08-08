@@ -139,12 +139,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(46)
+    expect(migrationVersions()).toHaveLength(47)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(46)
+    expect(migrationVersions()).toHaveLength(47)
   })
 
   it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
@@ -444,6 +444,8 @@ describe('database migrations', () => {
         'scheduled_task_runs',
         'projects',
         'skill_legacy_migrations',
+        'skill_legacy_archives',
+        'skill_legacy_migration_runs',
       ])
     )
     expect(migrationVersions()).toEqual([
@@ -493,6 +495,7 @@ describe('database migrations', () => {
       '044-legacy-skill-migration-records',
       '045-skill-artifact-status',
       '046-skill-draft-publish-idempotency',
+      '047-legacy-migration-archive-and-gates',
     ])
     const emptyDb = openRawDb()
     try {

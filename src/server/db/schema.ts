@@ -406,6 +406,42 @@ export const skill_legacy_migrations = sqliteTable('skill_legacy_migrations', {
   packageIdx: index('idx_skill_legacy_migrations_package').on(table.package_id, table.package_version_id),
 }))
 
+export const skill_legacy_archives = sqliteTable('skill_legacy_archives', {
+  id: text('id').primaryKey(),
+  archive_key: text('archive_key').notNull(),
+  source_type: text('source_type').notNull(),
+  legacy_skill_id: text('legacy_skill_id'),
+  source_sha256: text('source_sha256').notNull(),
+  payload_json: text('payload_json').notNull().default('{}'),
+  redaction_json: text('redaction_json').notNull().default('{}'),
+  read_only: integer('read_only').notNull().default(1),
+  archived_at: integer('archived_at').notNull(),
+}, (table) => ({
+  archiveKeyIdx: uniqueIndex('idx_skill_legacy_archives_key').on(table.archive_key),
+  legacySkillIdx: index('idx_skill_legacy_archives_legacy_skill').on(table.legacy_skill_id, table.archived_at),
+}))
+
+export const skill_legacy_migration_runs = sqliteTable('skill_legacy_migration_runs', {
+  id: text('id').primaryKey(),
+  phase: text('phase').notNull(),
+  status: text('status').notNull(),
+  backup_manifest_path: text('backup_manifest_path').notNull(),
+  backup_manifest_sha256: text('backup_manifest_sha256').notNull(),
+  source_counts_json: text('source_counts_json').notNull().default('{}'),
+  target_counts_before_json: text('target_counts_before_json').notNull().default('{}'),
+  target_counts_after_json: text('target_counts_after_json').notNull().default('{}'),
+  reconciliation_json: text('reconciliation_json').notNull().default('{}'),
+  manual_review_count: integer('manual_review_count').notNull().default(0),
+  gate_status: text('gate_status').notNull(),
+  rollback_json: text('rollback_json').notNull().default('{}'),
+  last_error: text('last_error'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  statusIdx: index('idx_skill_legacy_migration_runs_status').on(table.status, table.updated_at),
+  phaseIdx: index('idx_skill_legacy_migration_runs_phase').on(table.phase, table.created_at),
+}))
+
 export const skill_audit_events = sqliteTable('skill_audit_events', {
   id: text('id').primaryKey(),
   actor: text('actor'),
