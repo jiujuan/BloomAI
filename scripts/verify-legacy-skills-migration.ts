@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   try {
     const client = await import('../src/server/db/client')
     const { createHonoApp } = await import('../src/server/http/app')
-    const { skillRepo } = await import('../src/server/db/repositories/skill.repo')
+    const { legacySkillRepo } = await import('../src/server/db/repositories/skill.repo')
     const { skillPackageRepo } = await import('../src/server/db/repositories/skill-package.repo')
     const { legacyMigrationRepo } = await import('../src/server/db/repositories/legacy-migration.repo')
     const { getOrmDb } = await import('../src/server/db/client')
@@ -68,14 +68,14 @@ async function main(): Promise<void> {
     await client.runMigrations()
     const app = createHonoApp()
 
-    const prompt = skillRepo.create({
+    const prompt = legacySkillRepo.create({
       name: 'Offline Prompt Template',
       description: 'Offline migration verification fixture',
       type: 'prompt-template',
       source: 'Hello {{name}}',
       version: '1.0.0',
     })
-    const http = skillRepo.create({
+    const http = legacySkillRepo.create({
       name: 'Offline HTTP API',
       description: 'Must remain manual review only',
       type: 'http-api',
@@ -88,14 +88,14 @@ async function main(): Promise<void> {
       }),
       version: '1.0.0',
     })
-    const js = skillRepo.create({
+    const js = legacySkillRepo.create({
       name: 'Offline JavaScript Function',
       description: 'Must remain critical blocked',
       type: 'js-function',
       source: 'module.exports = () => process.env.SECRET',
       version: '1.0.0',
     })
-    const unknown = skillRepo.create({
+    const unknown = legacySkillRepo.create({
       name: 'Offline Unknown Skill',
       description: 'Must fail closed',
       type: 'unknown-runtime',
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     const legacyRun = await requestJson(`/skills/${prompt.id}/run`, { method: 'POST', body: JSON.stringify({ input: { name: 'Ada' } }) })
     expectStatus(legacyRun, 409, 'Legacy run')
     assert.equal(legacyRun.body.error.code, 'LEGACY_SKILL_RUN_DISABLED')
-    assert.equal(skillRepo.listRuns(prompt.id).length, 0, 'Legacy run must not create a legacy skill_runs row')
+    assert.equal(legacySkillRepo.listRuns(prompt.id).length, 0, 'Legacy run must not create a legacy skill_runs row')
 
     const legacyCreate = await requestJson('/skills', { method: 'POST', body: JSON.stringify({ name: 'forbidden', description: 'forbidden', type: 'prompt-template', source: 'x' }) })
     expectStatus(legacyCreate, 409, 'Legacy create')

@@ -13,11 +13,11 @@ async function loadApi() {
   const client = await import('../../../src/server/db/client')
   await client.runMigrations()
   const { createHonoApp } = await import('../../../src/server/http/app')
-  const { skillRepo } = await import('../../../src/server/db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../../../src/server/db/repositories/skill.repo')
   const { skillPackageRepo } = await import('../../../src/server/db/repositories/skill-package.repo')
   const { legacyMigrationRepo } = await import('../../../src/server/db/repositories/legacy-migration.repo')
   const { skill_audit_events, skill_drafts, skill_legacy_migrations, skill_packages, skill_version_snapshots, skill_versions, skill_installations } = await import('../../../src/server/db/schema')
-  return { app: createHonoApp(), client, skillRepo, skillPackageRepo, legacyMigrationRepo, tables: { skill_audit_events, skill_drafts, skill_legacy_migrations, skill_packages, skill_version_snapshots, skill_versions, skill_installations } }
+  return { app: createHonoApp(), client, legacySkillRepo, skillPackageRepo, legacyMigrationRepo, tables: { skill_audit_events, skill_drafts, skill_legacy_migrations, skill_packages, skill_version_snapshots, skill_versions, skill_installations } }
 }
 
 async function requestJson(
@@ -32,8 +32,8 @@ async function requestJson(
   return { response, body: await response.json() as any }
 }
 
-function makeLegacy(skillRepo: any, type: string, source: string) {
-  return skillRepo.create({ name: `Integration ${type}`, description: 'real sqlite migration fixture', type, source, version: '1.0.0' })
+function makeLegacy(legacySkillRepo: any, type: string, source: string) {
+  return legacySkillRepo.create({ name: `Integration ${type}`, description: 'real sqlite migration fixture', type, source, version: '1.0.0' })
 }
 
 function rows(db: any, table: any) {
@@ -55,10 +55,10 @@ describe('Legacy migration SQLite integration', () => {
   })
 
   it('publishes prompt-template migration as one durable Package mapping and retries idempotently', async () => {
-    const { app, client, skillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
+    const { app, client, legacySkillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
     const db = client.getOrmDb()
-    const legacy = makeLegacy(skillRepo, 'prompt-template', 'Hello {{name}}')
-    const originalSource = skillRepo.get(legacy.id)?.source
+    const legacy = makeLegacy(legacySkillRepo, 'prompt-template', 'Hello {{name}}')
+    const originalSource = legacySkillRepo.get(legacy.id)?.source
 
     const preview = await requestJson(app, `/skills/${legacy.id}/migration/preview`, {
       method: 'POST',
@@ -91,7 +91,7 @@ describe('Legacy migration SQLite integration', () => {
 
     const mapping = legacyMigrationRepo.get(preview.body.data.migrationId)
     expect(mapping).toMatchObject({ status: 'migration_published', decision: 'auto_convertible', packageId: published.body.data.packageId, packageVersionId: published.body.data.skillVersionId, ownerId: 'owner-a', revision: validated.body.data.revision + 1 })
-    expect(skillRepo.get(legacy.id)?.source).toBe(originalSource)
+    expect(legacySkillRepo.get(legacy.id)?.source).toBe(originalSource)
 
     const packageRow = skillPackageRepo.getPackage(published.body.data.packageId)
     const versionRow = skillPackageRepo.getVersion(published.body.data.skillVersionId)
@@ -131,10 +131,10 @@ describe('Legacy migration SQLite integration', () => {
   })
 
   it('does not create Package records for http-api or js-function migration decisions', async () => {
-    const { app, client, skillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
+    const { app, client, legacySkillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
     const db = client.getOrmDb()
-    const http = makeLegacy(skillRepo, 'http-api', JSON.stringify({ url: 'https://example.test/items', method: 'GET' }))
-    const js = makeLegacy(skillRepo, 'js-function', 'return eval(input)')
+    const http = makeLegacy(legacySkillRepo, 'http-api', JSON.stringify({ url: 'https://example.test/items', method: 'GET' }))
+    const js = makeLegacy(legacySkillRepo, 'js-function', 'return eval(input)')
 
     const httpPreview = await requestJson(app, `/skills/${http.id}/migration/preview`, { method: 'POST', body: '{}' })
     const jsPreview = await requestJson(app, `/skills/${js.id}/migration/preview`, { method: 'POST', body: '{}' })
@@ -150,9 +150,9 @@ describe('Legacy migration SQLite integration', () => {
   })
 
   it('rolls back Package, snapshot, installation, draft, mapping, and audit writes on publish failure', async () => {
-    const { app, client, skillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
+    const { app, client, legacySkillRepo, skillPackageRepo, legacyMigrationRepo, tables } = await loadApi()
     const db = client.getOrmDb()
-    const legacy = makeLegacy(skillRepo, 'prompt-template', 'Rollback {{name}}')
+    const legacy = makeLegacy(legacySkillRepo, 'prompt-template', 'Rollback {{name}}')
     const preview = await requestJson(app, `/skills/${legacy.id}/migration/preview`, { method: 'POST', body: '{}' })
     const validated = await requestJson(app, `/skills/${legacy.id}/migration/validate`, {
       method: 'POST',

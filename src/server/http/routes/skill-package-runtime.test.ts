@@ -20,9 +20,9 @@ async function loadApi(env: Record<string, string> = {}) {
   const { createHonoApp } = await import('../app')
   const app = createHonoApp()
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
-  const { skillRepo } = await import('../../db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../../db/repositories/skill.repo')
   const { ArtifactStore } = await import('../../skills/artifacts')
-  return { app, client, skillPackageRepo, skillRepo, ArtifactStore }
+  return { app, client, skillPackageRepo, legacySkillRepo, ArtifactStore }
 }
 
 function writeFixture(relativePath: string, content: string) {
@@ -573,8 +573,8 @@ describe('Skill Package Runtime HTTP API', () => {
   })
 
   it('blocks Legacy execution before creating any run, queue, worker, grant, or artifact record', async () => {
-    const { app, client, skillPackageRepo, skillRepo } = await loadApi()
-    const legacy = skillRepo.create({
+    const { app, client, skillPackageRepo, legacySkillRepo } = await loadApi()
+    const legacy = legacySkillRepo.create({
       name: 'Legacy adder',
       description: '',
       type: 'js-function',
@@ -585,9 +585,8 @@ describe('Skill Package Runtime HTTP API', () => {
       method: 'POST',
       body: JSON.stringify({ input: { a: 2, b: 3 } }),
     })
-    expect(legacyRun.response.status).toBe(409)
-    expect(legacyRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
-    expect(skillRepo.listRuns(legacy.id)).toHaveLength(0)
+    expect(legacyRun.response.status).toBe(404)
+    expect(legacySkillRepo.listRuns(legacy.id)).toHaveLength(0)
 
     const legacyPackageRun = await requestJson(app, '/skill-runs', {
       method: 'POST',
@@ -615,8 +614,7 @@ describe('Skill Package Runtime HTTP API', () => {
       method: 'POST',
       body: JSON.stringify({ input: {} }),
     })
-    expect(packageRun.response.status).toBe(409)
-    expect(packageRun.body.error.code).toBe('PACKAGE_SKILL_ASYNC_ONLY')
+    expect(packageRun.response.status).toBe(404)
     expect(counts()).toEqual({ packageRuns: 0, queueItems: 0, artifacts: 0, activeWorkers: 0 })
   })
 })

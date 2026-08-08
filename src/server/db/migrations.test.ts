@@ -1017,9 +1017,9 @@ describe('database migrations', () => {
 
     const client = await loadClient()
     await client.runMigrations()
-    const { skillRepo } = await import('./repositories/skill.repo')
+    const { legacySkillRepo } = await import('./repositories/skill.repo')
 
-    expect(skillRepo.get('legacy-1')?.name).toBe('Legacy')
+    expect(legacySkillRepo.get('legacy-1')?.name).toBe('Legacy')
     expect(tableNames()).toContain('skill_runs_v2')
   })
 

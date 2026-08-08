@@ -115,12 +115,3 @@ export const legacySkillRepo: LegacySkillRepository = {
     return getOrmDb().select().from(skill_runs).where(eq(skill_runs.skill_id, skillId)).orderBy(desc(skill_runs.created_at)).limit(limit).all()
   },
 }
-
-/**
- * @deprecated Compatibility wrapper for Legacy Skill callers only.
- *
- * Package Runtime must import `skill-package.repo.ts` / `PackageSkillRepository`
- * and must never depend on this compatibility surface. Keeping a frozen copy
- * prevents callers from mutating the Legacy adapter object through the alias.
- */
-export const skillRepo: LegacySkillRepository = Object.freeze({ ...legacySkillRepo })

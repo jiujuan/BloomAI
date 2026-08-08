@@ -13,10 +13,10 @@ async function loadApi() {
   const client = await import('../../db/client')
   await client.runMigrations()
   const { createHonoApp } = await import('../app')
-  const { skillRepo } = await import('../../db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../../db/repositories/skill.repo')
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
   const { legacyMigrationRepo } = await import('../../db/repositories/legacy-migration.repo')
-  return { app: createHonoApp(), client, skillRepo, skillPackageRepo, legacyMigrationRepo }
+  return { app: createHonoApp(), client, legacySkillRepo, skillPackageRepo, legacyMigrationRepo }
 }
 
 async function requestJson(
@@ -31,8 +31,8 @@ async function requestJson(
   return { response, body: await response.json() as any }
 }
 
-function createLegacy(skillRepo: any, type: string, source: string) {
-  return skillRepo.create({
+function createLegacy(legacySkillRepo: any, type: string, source: string) {
+  return legacySkillRepo.create({
     name: `Legacy ${type}`,
     description: 'migration route fixture',
     type,
@@ -64,8 +64,8 @@ describe('Legacy Skill migration HTTP routes', () => {
   })
 
   it('inspects and previews from the Legacy Archive without accepting source injection', async () => {
-    const { app, skillRepo } = await loadApi()
-    const skill = createLegacy(skillRepo, 'prompt-template', 'Hello {{name}}')
+    const { app, legacySkillRepo } = await loadApi()
+    const skill = createLegacy(legacySkillRepo, 'prompt-template', 'Hello {{name}}')
 
     const inspected = await requestJson(app, `/skills/${skill.id}/migration/inspect`, { method: 'POST', body: '{}' })
     expect(inspected.response.status).toBe(200)
@@ -95,8 +95,8 @@ describe('Legacy Skill migration HTTP routes', () => {
   })
 
   it('rejects malformed, unknown, and oversized migration request bodies', async () => {
-    const { app, skillRepo } = await loadApi()
-    const skill = createLegacy(skillRepo, 'prompt-template', 'Hello')
+    const { app, legacySkillRepo } = await loadApi()
+    const skill = createLegacy(legacySkillRepo, 'prompt-template', 'Hello')
 
     const malformed = await app.request(`/api/v1/skills/${skill.id}/migration/inspect`, {
       method: 'POST',
@@ -122,8 +122,8 @@ describe('Legacy Skill migration HTTP routes', () => {
   })
 
   it('enforces owner and revision checks and requires warning acknowledgement before publish', async () => {
-    const { app, skillRepo, skillPackageRepo, legacyMigrationRepo } = await loadApi()
-    const skill = createLegacy(skillRepo, 'prompt-template', 'Fetch https://example.test/{{name}}')
+    const { app, legacySkillRepo, skillPackageRepo, legacyMigrationRepo } = await loadApi()
+    const skill = createLegacy(legacySkillRepo, 'prompt-template', 'Fetch https://example.test/{{name}}')
 
     const preview = await previewPrompt(app, skill, { 'x-bloom-owner': 'owner-a', 'x-bloom-actor': 'actor-a' })
     expect(preview.response.status).toBe(200)
@@ -177,16 +177,16 @@ describe('Legacy Skill migration HTTP routes', () => {
   })
 
   it('returns manual-review and critical-blocked reports without publishing or executing sources', async () => {
-    const { app, skillRepo, skillPackageRepo, legacyMigrationRepo } = await loadApi()
+    const { app, legacySkillRepo, skillPackageRepo, legacyMigrationRepo } = await loadApi()
     const secret = 'Bearer do-not-leak'
-    const http = createLegacy(skillRepo, 'http-api', JSON.stringify({
+    const http = createLegacy(legacySkillRepo, 'http-api', JSON.stringify({
       url: 'http://127.0.0.1:8080/items?token=secret-query',
       method: 'POST',
       headers: { Authorization: secret, 'X-Api-Key': 'api-key-value' },
       body: { prompt: 'hello' },
       followRedirects: true,
     }))
-    const js = createLegacy(skillRepo, 'js-function', 'module.exports = () => { return process.env.SECRET; }')
+    const js = createLegacy(legacySkillRepo, 'js-function', 'module.exports = () => { return process.env.SECRET; }')
 
     const httpPreview = await previewPrompt(app, http)
     expect(httpPreview.response.status).toBe(200)

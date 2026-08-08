@@ -14,8 +14,6 @@ import { settingsRoutes } from './routes/settings'
 import { llmRoutes } from './routes/llm'
 import { toolsRoutes } from './routes/tools'
 import { skillPackageRuntimeRoutes } from './routes/skill-package-runtime'
-import { skillsRoutes } from './routes/skills'
-import { skillMigrationRoutes } from './routes/skill-migration'
 import { imageStudioRoutes } from './routes/images'
 import { attachmentsRoutes } from './routes/attachments'
 import { articleIllustrationRoutes } from './routes/article-illustrations'
@@ -102,8 +100,6 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono {
   app.route('/api/v1/settings', settingsRoutes)
   app.route('/api/v1/llm', llmRoutes)
   app.route('/api/v1/tools', toolsRoutes)
-  app.route('/api/v1', skillMigrationRoutes)
-  app.route('/api/v1/skills', skillsRoutes)
   app.route('/api/v1/attachments', attachmentsRoutes)
   app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', skillCreatorRoutes)

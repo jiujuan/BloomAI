@@ -1,4 +1,4 @@
-import { skillRepo } from '../db/repositories/skill.repo'
+import { legacySkillRepo } from '../db/repositories/skill.repo'
 import { skillPackageRepo } from '../db/repositories/skill-package.repo'
 import { resolveLegacySkillId, PACKAGE_SKILL_REFERENCE_PREFIX } from '../../shared/skill-references'
 import { createLegacySkillAdapter, type LegacySkillAdapter } from '../skills/application/legacy-skill.adapter'
@@ -8,7 +8,7 @@ import { ServiceError } from './errors'
 import { recordMigrationMetric } from '../skills/observability/skill-runtime.metrics'
 
 type SkillServiceDependencies = {
-  skillRepo: typeof skillRepo
+  legacyRepo: typeof legacySkillRepo
   skillPackageRepo: typeof skillPackageRepo
   resolveLegacySkillId: typeof resolveLegacySkillId
   /** @deprecated Legacy execution is no longer called by this service. */
@@ -19,13 +19,13 @@ type SkillServiceDependencies = {
 
 export function createSkillService(overrides: Partial<SkillServiceDependencies> = {}) {
   const dependencies = {
-    skillRepo,
+    legacyRepo: legacySkillRepo,
     skillPackageRepo,
     resolveLegacySkillId,
     ...overrides,
   }
   const legacyAdapter = dependencies.legacyAdapter ?? createLegacySkillAdapter({
-    repo: dependencies.skillRepo,
+    repo: dependencies.legacyRepo,
     resolveLegacySkillId: dependencies.resolveLegacySkillId,
   })
   const legacyToDraft = dependencies.legacyToDraft ?? createLegacyToDraftService({ legacy: legacyAdapter })
@@ -65,7 +65,7 @@ export function createSkillService(overrides: Partial<SkillServiceDependencies> 
         throw new ServiceError('PACKAGE_SKILL_ASYNC_ONLY', 'Package Skills must be started through POST /skill-runs')
       }
       const legacySkillId = dependencies.resolveLegacySkillId(referenceId)
-      if (!legacySkillId || !dependencies.skillRepo.get(legacySkillId)) {
+      if (!legacySkillId || !dependencies.legacyRepo.get(legacySkillId)) {
         throw new ServiceError('NOT_FOUND', 'Skill not found')
       }
       recordMigrationMetric('legacy_run_blocked')

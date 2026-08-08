@@ -12,11 +12,11 @@ async function loadLegacyRuntime() {
 
   const client = await import('../db/client')
   await client.runMigrations()
-  const { skillRepo } = await import('../db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../db/repositories/skill.repo')
   const { skillPackageRepo } = await import('../db/repositories/skill-package.repo')
   const { createSkillService } = await import('../services/skill.service')
 
-  return { skillRepo, skillPackageRepo, createSkillService }
+  return { legacySkillRepo, skillPackageRepo, createSkillService }
 }
 
 describe('legacy skill runtime regression', () => {
@@ -34,20 +34,20 @@ describe('legacy skill runtime regression', () => {
   })
 
   it('blocks js-function skills through the real service before creating a legacy run', async () => {
-    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
-    const skill = skillRepo.create({
+    const { legacySkillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
+    const skill = legacySkillRepo.create({
       name: 'Add',
       description: 'Adds two numbers',
       type: 'js-function',
       source: 'function run(input) { console.log("adding"); return { total: input.a + input.b } }',
     })
-    const service = createSkillService({ skillRepo, skillPackageRepo })
+    const service = createSkillService({ legacyRepo: legacySkillRepo, skillPackageRepo })
 
     await expect(service.run(`legacy:${skill.id}`, { a: 2, b: 3 })).rejects.toMatchObject({
       code: 'LEGACY_SKILL_RUN_DISABLED',
     })
 
-    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
+    expect(legacySkillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 
   it('blocks http-api skills through the real service without making a network request', async () => {
@@ -57,20 +57,20 @@ describe('legacy skill runtime regression', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
-    const skill = skillRepo.create({
+    const { legacySkillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
+    const skill = legacySkillRepo.create({
       name: 'HTTP Echo',
       description: 'Echoes URL',
       type: 'http-api',
       source: JSON.stringify({ url: 'https://example.test/search?q={{query}}', method: 'GET' }),
     })
-    const service = createSkillService({ skillRepo, skillPackageRepo })
+    const service = createSkillService({ legacyRepo: legacySkillRepo, skillPackageRepo })
 
     await expect(service.run(`legacy:${skill.id}`, { query: 'hello world' })).rejects.toMatchObject({
       code: 'LEGACY_SKILL_RUN_DISABLED',
     })
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
+    expect(legacySkillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 
   it('blocks prompt-template skills through the real service before contacting the legacy model endpoint', async () => {
@@ -79,19 +79,19 @@ describe('legacy skill runtime regression', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { skillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
-    const skill = skillRepo.create({
+    const { legacySkillRepo, skillPackageRepo, createSkillService } = await loadLegacyRuntime()
+    const skill = legacySkillRepo.create({
       name: 'Translate',
       description: 'Translates text',
       type: 'prompt-template',
       source: 'Translate {{text}} to French.',
     })
-    const service = createSkillService({ skillRepo, skillPackageRepo })
+    const service = createSkillService({ legacyRepo: legacySkillRepo, skillPackageRepo })
 
     await expect(service.run(`legacy:${skill.id}`, { text: 'Hello' })).rejects.toMatchObject({
       code: 'LEGACY_SKILL_RUN_DISABLED',
     })
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(skillRepo.listRuns(skill.id)).toHaveLength(0)
+    expect(legacySkillRepo.listRuns(skill.id)).toHaveLength(0)
   })
 })

@@ -12,7 +12,7 @@ async function loadCompatibilityRuntime() {
 
   const client = await import('../../db/client')
   await client.runMigrations()
-  const { skillRepo } = await import('../../db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../../db/repositories/skill.repo')
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
   const { createSkillService } = await import('../../services/skill.service')
   const {
@@ -24,7 +24,7 @@ async function loadCompatibilityRuntime() {
   const { buildLegacySkillTools, getLegacySkillMigrationHint } = await import('../../mastra/tools')
 
   return {
-    skillRepo,
+    legacySkillRepo,
     skillPackageRepo,
     createSkillService,
     resolveLegacySkillId,
@@ -51,29 +51,29 @@ describe('Legacy and Package Skill compatibility boundaries', () => {
   })
 
   it('blocks Legacy execution through the service without creating a skill_runs row', async () => {
-    const { skillRepo, skillPackageRepo, createSkillService, toLegacySkillReference } = await loadCompatibilityRuntime()
-    const legacy = skillRepo.create({
+    const { legacySkillRepo, skillPackageRepo, createSkillService, toLegacySkillReference } = await loadCompatibilityRuntime()
+    const legacy = legacySkillRepo.create({
       name: 'Namespaced adder',
       description: 'Adds two numbers',
       type: 'js-function',
       source: 'function run(input) { return { total: input.a + input.b } }',
     })
-    const service = createSkillService({ skillRepo, skillPackageRepo })
+    const service = createSkillService({ legacyRepo: legacySkillRepo, skillPackageRepo })
 
     await expect(service.run(toLegacySkillReference(legacy.id), { a: 4, b: 5 })).rejects.toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
-    expect(skillRepo.listRuns(legacy.id)).toHaveLength(0)
+    expect(legacySkillRepo.listRuns(legacy.id)).toHaveLength(0)
   })
 
   it('uses distinct Legacy and Package reference namespaces and rejects unprefixed Package IDs', async () => {
     const {
-      skillRepo,
+      legacySkillRepo,
       skillPackageRepo,
       resolveLegacySkillId,
       resolvePackageSkillId,
       toLegacySkillReference,
       toPackageSkillReference,
     } = await loadCompatibilityRuntime()
-    const legacy = skillRepo.create({
+    const legacy = legacySkillRepo.create({
       name: 'Legacy archive',
       description: 'Legacy archive record',
       type: 'js-function',
