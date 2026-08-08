@@ -1138,11 +1138,15 @@ export const skillPackageRepo = {
     sizeBytes?: number
     metadata?: Record<string, unknown>
     retentionUntil?: number | null
+    status?: 'processing' | 'ready' | 'orphaned'
+    skillVersionId?: string | null
   }) {
-    if (!this.getRun(data.runId)) throw new Error(`Run not found: ${data.runId}`)
+    const run = this.getRun(data.runId)
+    if (!run) throw new Error(`Run not found: ${data.runId}`)
     const row = {
       id: uuidv4(),
       run_id: data.runId,
+      skill_version_id: data.skillVersionId ?? run.skill_version_id ?? null,
       kind: data.kind,
       artifact_kind: data.kind,
       mime_type: data.mimeType ?? null,
@@ -1150,6 +1154,7 @@ export const skillPackageRepo = {
       relative_path: data.path,
       size_bytes: data.sizeBytes ?? 0,
       sha256: data.sha256,
+      status: data.status ?? 'ready',
       metadata_json: stringifyJsonObject(data.metadata ?? {}, 'metadata'),
       created_at: Date.now(),
       retention_until: data.retentionUntil ?? null,
@@ -1170,6 +1175,14 @@ export const skillPackageRepo = {
       .orderBy(asc(skill_artifacts.created_at))
       .all()
   },
+  updateArtifactStatus(data: { id: string; status: 'processing' | 'ready' | 'orphaned' }) {
+    getOrmDb().update(skill_artifacts)
+      .set({ status: data.status })
+      .where(eq(skill_artifacts.id, data.id))
+      .run()
+    return this.getArtifact(data.id)
+  },
+
   markArtifactExported(data: { id: string; exportedAt: number; exportedBy?: string | null }) {
     getOrmDb().update(skill_artifacts)
       .set({ exported_at: data.exportedAt, exported_by: data.exportedBy ?? null })
@@ -1750,6 +1763,10 @@ export function createSqliteArtifactRepository(): ArtifactRepository {
     listArtifacts(runId) {
       return skillPackageRepo.listArtifacts(runId).map(mapArtifact)
     },
+    updateArtifactStatus(data) {
+      const row = skillPackageRepo.updateArtifactStatus(data)
+      return row ? mapArtifact(row) : undefined
+    },
     markArtifactExported(data) {
       const row = skillPackageRepo.markArtifactExported(data)
       return row ? mapArtifact(row) : undefined
@@ -1915,7 +1932,22 @@ function mapGrant(row: any): CapabilityGrantSnapshot {
 }
 
 function mapArtifact(row: any): ArtifactSnapshot {
-  return { id: row.id, runId: row.run_id, kind: row.artifact_kind ?? row.kind, mimeType: row.mime_type, path: row.relative_path ?? row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at, retentionUntil: row.retention_until ?? null, exportedAt: row.exported_at ?? null, exportedBy: row.exported_by ?? null }
+  return {
+    id: row.id,
+    runId: row.run_id,
+    skillVersionId: row.skill_version_id ?? null,
+    kind: row.artifact_kind ?? row.kind,
+    mimeType: row.mime_type,
+    path: row.relative_path ?? row.path,
+    sizeBytes: row.size_bytes,
+    sha256: row.sha256,
+    metadata: parseObject(row.metadata_json, 'artifact metadata'),
+    status: row.status ?? 'ready',
+    createdAt: row.created_at,
+    retentionUntil: row.retention_until ?? null,
+    exportedAt: row.exported_at ?? null,
+    exportedBy: row.exported_by ?? null,
+  }
 }
 
 function mapQueue(row: any): SkillRunQueueSnapshot {

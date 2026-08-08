@@ -19,7 +19,21 @@ async function createRunFixture() {
     version: '1.0.0', manifest: {}, manifestHash: 'artifact-fixture', packagePath: '/packages/artifact-fixture',
   })
   const run = skillPackageRepo.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
-  return { artifactRoot: getSkillRuntimeConfig().artifactRoot, exportRoot: getSkillRuntimeConfig().exportRoot, run, skillPackageRepo }
+  const clock = { now: () => Date.now() }
+  const { createSqliteRunRepository, createSqliteEventRepository, createSqliteArtifactRepository } = await import('../../db/repositories/skill-package.repo')
+  return {
+    artifactRoot: getSkillRuntimeConfig().artifactRoot,
+    exportRoot: getSkillRuntimeConfig().exportRoot,
+    run,
+    skillVersionId: version.id,
+    skillPackageRepo,
+    ports: {
+      runs: createSqliteRunRepository(),
+      events: createSqliteEventRepository(clock),
+      artifacts: createSqliteArtifactRepository(),
+      clock,
+    },
+  }
 }
 
 describe('ArtifactStore', () => {
@@ -187,6 +201,65 @@ describe('ArtifactStore', () => {
     expect(() => store.writeText({ runId: '../escape', kind: 'markdown', fileName: 'summary.md', content: '# Result' })).toThrow(ArtifactStoreError)
     expect(fs.existsSync(path.join(dataDir, 'skills', 'runs', 'missing-run'))).toBe(false)
   })
+  it('persists ready artifacts with Run/Version lineage and marks missing content orphaned', async () => {
+    const ports = createFakeSkillRuntimePorts({ now: 10 })
+    const version = ports.packages.createVersion({ packageId: 'artifact-package', version: '1.0.0', manifest: {}, manifestHash: 'artifact-fixture', packagePath: '/packages/artifact-fixture' })
+    const run = ports.runs.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {} })
+    const { ArtifactStore } = await import('./artifact-store')
+    const store = new ArtifactStore({
+      runs: ports.runs,
+      events: ports.events,
+      artifacts: ports.artifacts,
+      clock: ports.clock,
+    })
+
+    const artifact = store.writeText({ runId: run.id, kind: 'markdown', fileName: 'lineage.md', content: '# lineage' })
+
+    expect(artifact).toMatchObject({ status: 'ready', runId: run.id, skillVersionId: version.id })
+    expect(ports.artifacts.getArtifact(artifact.id)).toMatchObject({ status: 'ready', skillVersionId: version.id })
+
+    fs.rmSync(path.join(process.env.SKILL_ARTIFACT_ROOT!, run.id, 'lineage.md'))
+
+    const listed = store.listArtifacts({ runId: run.id }).data[0]
+    expect(listed).toMatchObject({ status: 'orphaned', run_id: run.id, skill_version_id: version.id })
+    expect(listed.summary.contentPreview).toBeNull()
+    expect(ports.artifacts.getArtifact(artifact.id)).toMatchObject({ status: 'orphaned' })
+    expect(() => store.readContent({ artifactId: artifact.id, runId: run.id })).toThrow(/orphaned/i)
+  })
+
+  it('does not read or export artifacts that are still processing', async () => {
+    const { artifactRoot, exportRoot, run, skillPackageRepo } = await createRunFixture()
+    const { ArtifactStore, ArtifactStoreError } = await import('./artifact-store')
+    const store = new ArtifactStore()
+    const content = Buffer.from('# processing')
+    const artifactPath = path.join(artifactRoot, run.id, 'processing.md')
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
+    fs.writeFileSync(artifactPath, content)
+    const artifact = skillPackageRepo.createArtifact({
+      runId: run.id,
+      kind: 'markdown',
+      path: 'processing.md',
+      sha256: (await import('node:crypto')).createHash('sha256').update(content).digest('hex'),
+      mimeType: 'text/markdown',
+      sizeBytes: content.length,
+      status: 'processing',
+    } as any)
+    const destinationDir = path.join(exportRoot, 'processing')
+    fs.mkdirSync(destinationDir, { recursive: true })
+
+    expect(artifact).toMatchObject({ status: 'processing' })
+    expect(() => store.readContent({ artifactId: artifact.id, runId: run.id })).toThrow(/processing/i)
+    expect(() => store.exportArtifact({
+      artifactId: artifact.id,
+      runId: run.id,
+      destinationDir,
+      confirmed: true,
+      actor: 'tester',
+      auditReason: 'processing artifact test',
+    })).toThrow(/processing/i)
+    expect(fs.readdirSync(destinationDir)).toHaveLength(0)
+  })
+
   it('emits best-effort artifact create/export metrics with run and artifact correlation only', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 10 })
     const version = ports.packages.createVersion({ packageId: 'pkg-1', version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: '/pkg' })

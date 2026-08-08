@@ -297,6 +297,7 @@ export const skill_run_commands = sqliteTable('skill_run_commands', {
 export const skill_artifacts = sqliteTable('skill_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
+  skill_version_id: text('skill_version_id'),
   kind: text('kind').notNull(),
   artifact_kind: text('artifact_kind').notNull().default('unknown'),
   mime_type: text('mime_type'),
@@ -304,6 +305,7 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   relative_path: text('relative_path').notNull().default(''),
   size_bytes: integer('size_bytes').notNull().default(0),
   sha256: text('sha256').notNull(),
+  status: text('status').notNull().default('ready'),
   metadata_json: text('metadata_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
   retention_until: integer('retention_until'),
@@ -312,6 +314,7 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
 }, (table) => ({
   runIdx: index('idx_skill_artifacts_run').on(table.run_id),
   runCreatedIdx: index('idx_skill_artifacts_run_created').on(table.run_id, table.created_at),
+  versionIdx: index('idx_skill_artifacts_version').on(table.skill_version_id),
   retentionIdx: index('idx_skill_artifacts_retention').on(table.retention_until, table.exported_at),
 }))
 

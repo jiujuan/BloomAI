@@ -139,12 +139,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(44)
+    expect(migrationVersions()).toHaveLength(45)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(44)
+    expect(migrationVersions()).toHaveLength(45)
   })
 
   it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
@@ -325,6 +325,64 @@ describe('database migrations', () => {
     }
   })
 
+  it('adds artifact status and Run/Version lineage while upgrading existing artifact rows', async () => {
+    const { loadSqlMigrations, runSqlMigrations } = await import('./migrations')
+    fs.mkdirSync(dataDir, { recursive: true })
+    const db = openRawDb()
+    try {
+      const migrations = loadSqlMigrations()
+      const lifecycleMigration = migrations.find((migration) => migration.version === '045-skill-artifact-status')
+      expect(lifecycleMigration).toBeDefined()
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New Chat',
+          persona_id TEXT, model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022',
+          status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE tool_permissions (
+          id TEXT PRIMARY KEY, tool_id TEXT NOT NULL, granted INTEGER DEFAULT 0,
+          granted_at INTEGER, scope TEXT DEFAULT 'session'
+        );
+      `)
+      runSqlMigrations(db, migrations.filter((migration) => migration.version !== lifecycleMigration!.version))
+      db.exec(`
+        INSERT INTO skill_packages (id, name, description, source_type, created_at, updated_at)
+        VALUES ('artifact-status-package', 'Artifact status package', '', 'local-directory', 1, 1);
+        INSERT INTO skill_versions (
+          id, package_id, version, runtime, manifest_json, manifest_hash, package_path,
+          source_snapshot_json, is_compatible, immutable_hash, status, security_status,
+          snapshot_hash, published_at, created_at
+        ) VALUES (
+          'artifact-status-version', 'artifact-status-package', '1.0.0', 'instruction-agent', '{}', 'manifest',
+          '/packages/artifact-status', '{}', 1, 'immutable', 'runnable', 'verified', 'snapshot', NULL, 1
+        );
+        INSERT INTO skill_runs_v2 (
+          id, skill_version_id, status, input_json, context_json, updated_at, revision
+        ) VALUES ('artifact-status-run', 'artifact-status-version', 'created', '{}', '{}', 1, 0);
+        INSERT INTO skill_artifacts (
+          id, run_id, kind, mime_type, path, size_bytes, sha256, metadata_json, created_at
+        ) VALUES ('artifact-status-legacy', 'artifact-status-run', 'markdown', 'text/markdown', 'summary.md', 2, 'hash', '{}', 2);
+      `)
+
+      runSqlMigrations(db, [lifecycleMigration!])
+      runSqlMigrations(db, [lifecycleMigration!])
+
+      expect(db.prepare("SELECT name FROM pragma_table_info('skill_artifacts') WHERE name IN ('status', 'skill_version_id') ORDER BY name").all()).toEqual([
+        { name: 'skill_version_id' },
+        { name: 'status' },
+      ])
+      expect(db.prepare("SELECT status, skill_version_id FROM skill_artifacts WHERE id = 'artifact-status-legacy'").get()).toEqual({
+        status: 'ready',
+        skill_version_id: 'artifact-status-version',
+      })
+      expect(indexNames('skill_artifacts')).toContain('idx_skill_artifacts_version')
+      expect(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '045-skill-artifact-status'").get()).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('orders SQL migration files by numeric prefix', async () => {
     const { loadSqlMigrations } = await import('./migrations')
     const migrationsPath = path.join(dataDir, 'migration-order')
@@ -433,6 +491,7 @@ describe('database migrations', () => {
       '042-image-studio-skill-links',
       '043-skill-security-audit-fields',
       '044-legacy-skill-migration-records',
+      '045-skill-artifact-status',
     ])
     const emptyDb = openRawDb()
     try {

@@ -41,6 +41,7 @@ export type ArtifactStoreRecord = ArtifactSnapshot & {
   readonly artifact_kind: string
   readonly relative_path: string
   readonly run_id: string
+  readonly skill_version_id: string | null
   readonly mime_type: string | null
   readonly size_bytes: number
   readonly created_at: number
@@ -102,11 +103,19 @@ export class ArtifactStore {
     const artifacts = [...this.dependencies.artifacts.listArtifacts(input.runId)]
       .sort((left, right) => compareArtifacts(left, right, sort, direction))
     const data = artifacts.slice(offset, offset + limit).map((artifact) => {
-      const record = toArtifactStoreRecord(artifact)
-      const content = readArtifactBytes(getSkillRuntimeConfig().artifactRoot, artifact)
+      let current = artifact
+      let content: Buffer | null = null
+      if (artifact.status === 'ready') {
+        try {
+          content = readArtifactBytes(getSkillRuntimeConfig().artifactRoot, artifact)
+        } catch {
+          current = this.markArtifactOrphaned(artifact)
+        }
+      }
+      const record = toArtifactStoreRecord(current)
       return {
         ...record,
-        summary: { contentPreview: summarizeArtifactPreview(content, artifact.mimeType ?? 'application/octet-stream') },
+        summary: { contentPreview: content === null ? null : summarizeArtifactPreview(content, current.mimeType ?? 'application/octet-stream') },
       }
     })
     const nextOffset = offset + data.length < artifacts.length ? offset + data.length : null
@@ -117,8 +126,14 @@ export class ArtifactStore {
     const artifact = this.dependencies.artifacts.getArtifact(input.artifactId)
     if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
     requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
-    const content = readArtifactBytes(getSkillRuntimeConfig().artifactRoot, artifact)
-    return { mimeType: artifact.mimeType ?? 'application/octet-stream', content }
+    this.assertArtifactReadable(artifact)
+    try {
+      const content = readArtifactBytes(getSkillRuntimeConfig().artifactRoot, artifact)
+      return { mimeType: artifact.mimeType ?? 'application/octet-stream', content }
+    } catch (error) {
+      this.markArtifactOrphaned(artifact)
+      throw orphanedArtifactError(error)
+    }
   }
 
   exportArtifact(input: {
@@ -144,7 +159,14 @@ export class ArtifactStore {
       artifact = this.dependencies.artifacts.getArtifact(input.artifactId) ?? undefined
       if (!artifact) throw new ArtifactStoreError(`Artifact not found: ${input.artifactId}`)
       requireArtifactOwnership(artifact, input.runId, this.dependencies.runs)
-      const content = readArtifactBytes(config.artifactRoot, artifact)
+      this.assertArtifactReadable(artifact)
+      let content: Buffer
+      try {
+        content = readArtifactBytes(config.artifactRoot, artifact)
+      } catch (error) {
+        artifact = this.markArtifactOrphaned(artifact)
+        throw orphanedArtifactError(error)
+      }
       const targetPath = path.join(destinationDir, path.basename(artifact.path))
       if (fs.existsSync(targetPath)) throw new ArtifactStoreError(`Export destination already contains: ${path.basename(artifact.path)}`)
 
@@ -187,6 +209,8 @@ export class ArtifactStore {
     let artifact: ArtifactSnapshot | undefined
     try {
       requireExistingRunId(input.runId, this.dependencies.runs)
+      const run = this.dependencies.runs.getRun(input.runId)
+      if (!run) throw new ArtifactStoreError(`Skill run not found: ${input.runId}`)
       const config = getSkillRuntimeConfig()
       let validated: ReturnType<typeof validateArtifactInput>
       try {
@@ -201,10 +225,9 @@ export class ArtifactStore {
       fs.mkdirSync(config.artifactRoot, { recursive: true })
       const directory = resolveArtifactRunDirectory(config.artifactRoot, input.runId)
       fs.mkdirSync(directory, { recursive: true })
-      const target = path.join(directory, validated.fileName)
-      fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
       artifact = this.dependencies.artifacts.createArtifact({
         runId: input.runId,
+        skillVersionId: run.skillVersionId ?? (run as typeof run & { skill_version_id?: string | null }).skill_version_id ?? null,
         kind: input.kind,
         path: validated.fileName,
         sha256: hashBuffer(input.content),
@@ -212,7 +235,14 @@ export class ArtifactStore {
         sizeBytes: input.content.length,
         metadata: validated.metadata,
         retentionUntil: this.dependencies.clock.now() + config.artifactRetentionDays * 24 * 60 * 60 * 1000,
+        status: 'processing',
       })
+      const target = path.join(directory, validated.fileName)
+      fs.writeFileSync(target, input.content, { mode: 0o600, flag: 'wx' })
+      readArtifactBytes(config.artifactRoot, artifact)
+      const ready = this.dependencies.artifacts.updateArtifactStatus({ id: artifact.id, status: 'ready' })
+      if (!ready) throw new ArtifactStoreError(`Artifact could not become ready: ${artifact.id}`)
+      artifact = ready
       this.dependencies.events.appendEvent({
         runId: input.runId,
         seq: this.dependencies.events.nextSequence(input.runId),
@@ -224,14 +254,37 @@ export class ArtifactStore {
             path: artifact.path,
             sha256: artifact.sha256,
             sizeBytes: artifact.sizeBytes,
+            skillVersionId: artifact.skillVersionId,
           },
         }),
       })
       this.recordArtifactMetric({ operation: 'create', outcome: 'success', bytes: artifact.sizeBytes, correlation: this.correlation(input.runId, artifact.id) })
       return toArtifactStoreRecord(artifact)
     } catch (error) {
+      if (artifact) {
+        try {
+          const orphaned = this.dependencies.artifacts.updateArtifactStatus({ id: artifact.id, status: 'orphaned' })
+          if (orphaned) artifact = orphaned
+        } catch {
+          // Keep the original artifact error when best-effort status repair fails.
+        }
+      }
       this.recordArtifactMetric({ operation: 'create', outcome: 'error', bytes: artifact?.sizeBytes ?? input.content.length, correlation: this.correlation(input.runId, artifact?.id) })
       throw error
+    }
+  }
+
+  private assertArtifactReadable(artifact: ArtifactSnapshot): void {
+    if (artifact.status !== 'ready') {
+      throw new ArtifactStoreError(`Artifact is ${artifact.status} and cannot be read or exported: ${artifact.id}`)
+    }
+  }
+
+  private markArtifactOrphaned(artifact: ArtifactSnapshot): ArtifactSnapshot {
+    try {
+      return this.dependencies.artifacts.updateArtifactStatus({ id: artifact.id, status: 'orphaned' }) ?? { ...artifact, status: 'orphaned' }
+    } catch {
+      return { ...artifact, status: 'orphaned' }
     }
   }
 
@@ -263,6 +316,11 @@ function requireArtifactOwnership(artifact: Pick<ArtifactSnapshot, 'id' | 'runId
   } catch (error) {
     throw new ArtifactStoreError(error instanceof Error ? error.message : `Artifact not found for run: ${artifact.id}`)
   }
+}
+
+function orphanedArtifactError(error: unknown): ArtifactStoreError {
+  const message = error instanceof Error ? error.message : String(error)
+  return new ArtifactStoreError(`Artifact is orphaned: ${message}`)
 }
 
 function summarizeArtifactPreview(content: Buffer, mimeType: string): string | null {
@@ -353,6 +411,7 @@ function toArtifactStoreRecord(artifact: ArtifactSnapshot): ArtifactStoreRecord 
     artifact_kind: artifact.kind,
     relative_path: artifact.path,
     run_id: artifact.runId,
+    skill_version_id: artifact.skillVersionId,
     mime_type: artifact.mimeType,
     size_bytes: artifact.sizeBytes,
     created_at: artifact.createdAt,

@@ -209,15 +209,19 @@ export type CapabilityGrantSnapshot = {
   readonly consumedAt: number | null
 }
 
+export type ArtifactStatus = 'processing' | 'ready' | 'orphaned'
+
 export type ArtifactSnapshot = {
   readonly id: string
   readonly runId: string
+  readonly skillVersionId: string | null
   readonly kind: string
   readonly mimeType: string | null
   readonly path: string
   readonly sizeBytes: number
   readonly sha256: string
   readonly metadata: JsonObject
+  readonly status: ArtifactStatus
   readonly createdAt: number
   readonly retentionUntil?: number | null
   readonly exportedAt?: number | null
@@ -408,9 +412,12 @@ export interface ArtifactRepository {
     sizeBytes?: number
     metadata?: JsonObject
     retentionUntil?: number | null
+    status?: ArtifactStatus
+    skillVersionId?: string | null
   }): ArtifactSnapshot
   getArtifact(id: string): ArtifactSnapshot | undefined
   listArtifacts(runId: string): readonly ArtifactSnapshot[]
+  updateArtifactStatus(data: { id: string; status: ArtifactStatus }): ArtifactSnapshot | undefined
   markArtifactExported?(data: { id: string; exportedAt: number; exportedBy?: string | null }): ArtifactSnapshot | undefined
 }
 
