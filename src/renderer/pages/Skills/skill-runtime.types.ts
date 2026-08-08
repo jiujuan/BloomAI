@@ -402,7 +402,11 @@ export type SkillArtifact = {
   created_at?: number
 }
 
+export type CreatorRuntimeKind = 'package'
+
 export type SkillDraftContent = {
+  /** Creator drafts are intentionally package-runtime only. */
+  runtimeKind?: CreatorRuntimeKind
   name: string
   slug: string
   version?: string
@@ -413,6 +417,66 @@ export type SkillDraftContent = {
   capabilities?: RequestedCapability[]
   visibility?: 'private' | 'workspace' | 'public'
   author?: string
+}
+
+export type CreatorPublishResult = {
+  draftId?: string
+  packageId?: string
+  versionId?: string
+  snapshotId?: string
+  installationId?: string
+  installationEnabled?: boolean
+  manifestHash?: string
+  snapshotHash?: string
+  idempotent?: boolean
+  package?: { id?: string }
+  version?: { id?: string }
+  installation?: { id?: string }
+  [key: string]: unknown
+}
+
+export type CreatorCapabilityRisk = {
+  severity: 'high' | 'medium' | 'low'
+  approvalRequired: boolean
+  label: string
+}
+
+const HIGH_RISK_CREATOR_CAPABILITIES = new Set(['command', 'workspace_write', 'shell.execute', 'file.write', 'package.install'])
+const MEDIUM_RISK_CREATOR_CAPABILITIES = new Set(['web.fetch', 'document.read_uploaded', 'package.read', 'artifact.write', 'image.generate'])
+
+export function getCreatorCapabilityRisk(capability: string): CreatorCapabilityRisk {
+  if (HIGH_RISK_CREATOR_CAPABILITIES.has(capability)) return { severity: 'high', approvalRequired: true, label: '高风险 · 需要审批' }
+  if (MEDIUM_RISK_CREATOR_CAPABILITIES.has(capability)) return { severity: 'medium', approvalRequired: true, label: '需审批确认' }
+  return { severity: 'low', approvalRequired: false, label: '低风险' }
+}
+
+export function normalizeSkillDraftContent(value: unknown): SkillDraftContent {
+  const row = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return { ...row, runtimeKind: 'package' } as SkillDraftContent
+}
+
+export function normalizeCreatorPublishResult(value: unknown): CreatorPublishResult {
+  const row = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const packageRow = row.package && typeof row.package === 'object' ? row.package as Record<string, unknown> : undefined
+  const versionRow = row.version && typeof row.version === 'object' ? row.version as Record<string, unknown> : undefined
+  const installationRow = row.installation && typeof row.installation === 'object' ? row.installation as Record<string, unknown> : undefined
+  return {
+    ...row,
+    draftId: typeof row.draftId === 'string' ? row.draftId : typeof row.draft_id === 'string' ? row.draft_id : undefined,
+    packageId: typeof row.packageId === 'string' ? row.packageId : typeof row.package_id === 'string' ? row.package_id : typeof packageRow?.id === 'string' ? packageRow.id : undefined,
+    versionId: typeof row.versionId === 'string' ? row.versionId : typeof row.version_id === 'string' ? row.version_id : typeof versionRow?.id === 'string' ? versionRow.id : undefined,
+    snapshotId: typeof row.snapshotId === 'string' ? row.snapshotId : typeof row.snapshot_id === 'string' ? row.snapshot_id : undefined,
+    installationId: typeof row.installationId === 'string' ? row.installationId : typeof row.installation_id === 'string' ? row.installation_id : typeof installationRow?.id === 'string' ? installationRow.id : undefined,
+    installationEnabled: typeof row.installationEnabled === 'boolean' ? row.installationEnabled : undefined,
+    manifestHash: typeof row.manifestHash === 'string' ? row.manifestHash : typeof row.manifest_hash === 'string' ? row.manifest_hash : undefined,
+    snapshotHash: typeof row.snapshotHash === 'string' ? row.snapshotHash : typeof row.snapshot_hash === 'string' ? row.snapshot_hash : undefined,
+    idempotent: row.idempotent === true,
+  }
+}
+
+export function getPublishedPackageId(value: unknown): string | null {
+  const result = normalizeCreatorPublishResult(value)
+  return result.packageId || null
 }
 
 export type DraftDto = {

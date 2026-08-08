@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, LockKeyhole, Plus, Trash2 } from 'lucide-react'
+import { getCreatorCapabilityRisk } from './skill-runtime.types'
 import type { RequestedCapability, SkillDraftContent } from './skill-runtime.types'
 
 const MAX_ASSET_BYTES = 10 * 1024 * 1024
@@ -56,6 +57,11 @@ export function SkillCreatorEditor({ content, onChange, disabled = false }: Skil
   }
 
   return <section className="skills-creator-editor" aria-label="Skill draft editor">
+    <section className="skills-creator-runtime" aria-labelledby="creator-runtime-title">
+      <div className="skills-section-label" id="creator-runtime-title"><LockKeyhole size={13} aria-hidden="true" /> Runtime</div>
+      <label className="skills-field"><span>执行 Runtime</span><select aria-label="Skill runtime" value="package" disabled><option value="package">Package Runtime</option></select></label>
+      <p className="skills-muted">Creator Draft 只允许由 Package Runtime 承载；发布后会生成可追踪的 Package、Version 和 Installation 关系。</p>
+    </section>
     <div className="skills-field-grid">
       <label className="skills-field"><span>名称</span><input aria-label="Skill name" value={content.name} disabled={disabled} onChange={(event) => update('name', event.target.value)} /></label>
       <label className="skills-field"><span>Slug</span><input aria-label="Skill slug" value={content.slug} disabled={disabled} onChange={(event) => update('slug', event.target.value)} /></label>
@@ -86,7 +92,10 @@ export function SkillCreatorEditor({ content, onChange, disabled = false }: Skil
         <label className="skills-field"><span>Scope JSON</span><input value={capabilityScope} disabled={disabled} onChange={(event) => setCapabilityScope(event.target.value)} placeholder='{"allowedDomains":["example.com"]}' /></label>
       </div>
       <button type="button" className="skills-button secondary" disabled={disabled} onClick={addCapability}><Plus size={14} />添加 Capability 请求</button>
-      {capabilities.length > 0 && <ul className="skills-creator-list">{capabilities.map((item, index) => <li key={`${item.capability}-${index}`}><span>{item.capability} · {JSON.stringify(item.scope)}</span><button type="button" className="skills-icon-button" aria-label={`移除 capability ${item.capability}`} disabled={disabled} onClick={() => update('capabilities', capabilities.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={14} /></button></li>)}</ul>}
+      {capabilities.length > 0 && <ul className="skills-creator-list">{capabilities.map((item, index) => {
+        const risk = getCreatorCapabilityRisk(item.capability)
+        return <li key={`${item.capability}-${index}`}><span><strong>{item.capability}</strong> · {JSON.stringify(item.scope)}{risk.approvalRequired && <small className={`skills-creator-risk ${risk.severity}`}><AlertTriangle size={11} aria-hidden="true" />{risk.label}</small>}</span><button type="button" className="skills-icon-button" aria-label={`移除 capability ${item.capability}`} disabled={disabled} onClick={() => update('capabilities', capabilities.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={14} /></button></li>
+      })}</ul>}
     </section>
   </section>
 }

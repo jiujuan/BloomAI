@@ -6,7 +6,8 @@ import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
 import type { CreateProjectInput, ProjectSummary, Session, SessionPage } from '@shared/schemas'
 import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
-import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, DraftListInput, InspectedPackage, PackageDetail, PackageImportDiagnostic, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, DraftListInput, InspectedPackage, PackageDetail, PackageImportDiagnostic, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent, CreatorPublishResult } from '@renderer/pages/Skills/skill-runtime.types'
+import { normalizeCreatorPublishResult, normalizeSkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!window.bloomai
@@ -310,7 +311,7 @@ function toDraft(value: unknown): DraftDto {
   const row = asRecord(value)
   return {
     id: String(row.id ?? ''), ownerId: typeof row.ownerId === 'string' ? row.ownerId : typeof row.owner_id === 'string' ? row.owner_id : undefined,
-    content: asObject(row.content) as DraftDto['content'], baseVersionId: readValue(row, 'baseVersionId', 'base_version_id', null), revision: asNumber(row.revision),
+    content: normalizeSkillDraftContent(row.content), baseVersionId: readValue(row, 'baseVersionId', 'base_version_id', null), revision: asNumber(row.revision),
     status: typeof row.status === 'string' ? row.status : undefined, createdAt: readValue(row, 'createdAt', 'created_at', undefined), updatedAt: readValue(row, 'updatedAt', 'updated_at', undefined),
   }
 }
@@ -679,9 +680,9 @@ export const platform = {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}/preview`, { method: 'POST', body: '{}' })
     return toDraftPreview(data)
   },
-  async publishSkillDraft(draftId: string, input: { enable?: boolean; expectedRevision?: number; idempotencyKey?: string } = {}): Promise<Record<string, unknown>> {
+  async publishSkillDraft(draftId: string, input: { enable?: boolean; expectedRevision?: number; idempotencyKey?: string } = {}): Promise<CreatorPublishResult> {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}/publish`, { method: 'POST', body: JSON.stringify(input) })
-    return asObject(data)
+    return normalizeCreatorPublishResult(data)
   },
   // Sessions
   async getSessions() {

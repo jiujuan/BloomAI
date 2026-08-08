@@ -199,6 +199,20 @@ describe('Package Runtime renderer API', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(5, `${API_BASE}/skill-import-reviews/review%2F1/reject`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewer: 'local-user', reason: 'unsafe' }) }))
   })
 
+  it('normalizes creator drafts to Package Runtime and maps publish relations from the server', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'draft-1', content: { name: 'Demo', slug: 'demo', skillMd: '# Demo' }, revision: 4, status: 'draft' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { draft_id: 'draft-1', package: { id: 'package-1' }, version: { id: 'version-1' }, installation: { id: 'installation-1' }, idempotent: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.getSkillDraft('draft-1')).resolves.toMatchObject({ content: { runtimeKind: 'package', name: 'Demo' }, revision: 4 })
+    await expect(platform.publishSkillDraft('draft-1', { enable: false, expectedRevision: 4, idempotencyKey: 'publish-1' })).resolves.toMatchObject({
+      draftId: 'draft-1', packageId: 'package-1', versionId: 'version-1', installationId: 'installation-1', idempotent: true,
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-drafts/draft-1`, expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-drafts/draft-1/publish`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ enable: false, expectedRevision: 4, idempotencyKey: 'publish-1' }) }))
+  })
+
   it('sends typed commands, drafts and artifact exports and normalizes structured errors', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: runRow }))
