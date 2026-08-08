@@ -48,7 +48,12 @@ function writeFixture(relativePath: string, content: string) {
 async function requestJson(app: { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }, route: string, init?: RequestInit) {
   const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
     ...init,
-    headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-bloom-role': 'admin',
+      'x-bloom-actor': 'article-e2e-operator',
+      ...(init?.headers ?? {}),
+    },
   })
   return { response, body: await response.json() as any }
 }
@@ -222,6 +227,5 @@ Create an editable illustration plan before generating images.
     expect(events.body.data.filter((event: any) => event.type === 'capability.call')).toHaveLength(7)
   })
 })
-
 
 

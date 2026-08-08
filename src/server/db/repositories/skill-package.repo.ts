@@ -20,8 +20,8 @@ import {
   skill_audit_events,
   skill_drafts,
 } from '../schema'
-import { ServiceError } from '../../services/errors'
-import { sanitizeSecurityPayload } from '../../skills/security/skill-security-checklist'
+import { ServiceError } from '../../domain/errors'
+import { sanitizeSecurityPayload } from '../../security/security-payload'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
@@ -48,7 +48,7 @@ import type {
   SkillRunStatus,
   SkillRuntimePorts,
   VersionSnapshot,
-} from '../../skills/application/ports'
+} from '../../domain/skill-runtime-ports'
 
 const jsonObjectSchema = z.record(z.unknown())
 

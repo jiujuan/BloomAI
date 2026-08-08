@@ -3,15 +3,17 @@ import { z } from 'zod'
 import { errorResponse } from '../dtos/skill-runtime.error'
 import { pageSuccess, successResponse } from '../dtos/skill-runtime.response'
 import { ServiceError } from '../../services/errors'
-import { createSqliteAuditRepository } from '../../db/repositories/skill-package.repo'
-import type { AuditEventSnapshot, AuditQuery, Page } from '../../skills/application/ports'
 import type { Context } from 'hono'
 import {
+  createSkillRuntimeAuditReader,
   getRuntimeDiagnostics,
   getRuntimeHealth,
+  type AuditEventSnapshot,
+  type AuditQuery,
+  type Page,
   type RuntimeDiagnosticsSnapshot,
   type RuntimeHealth,
-} from '../../skills/observability/skill-runtime.diagnostics'
+} from '../../services/skill-runtime-observability.service'
 
 const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -44,8 +46,8 @@ export function createSkillRuntimeObservabilityRoutes(
   const routes = new Hono()
   const health = options.health ?? (() => getRuntimeHealth())
   const diagnostics = options.diagnostics ?? (() => getRuntimeDiagnostics())
-  const auditRepository = createSqliteAuditRepository()
-  const audit = options.audit ?? ((_context: Context, query: AuditQuery) => auditRepository.list?.(query) ?? { data: [], total: 0 })
+  const auditReader = createSkillRuntimeAuditReader()
+  const audit = options.audit ?? ((_context: Context, query: AuditQuery) => auditReader(query))
   const isAdmin = options.isAdmin ?? defaultIsAdmin
 
   routes.get('/skill-runtime/health', async (context) => {

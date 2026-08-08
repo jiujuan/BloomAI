@@ -8,11 +8,7 @@ import {
 } from '../../services/chat.service'
 import { readJson } from '../util'
 import { z } from 'zod'
-import { sessionRepo } from '../../db/repositories/session.repo'
-import { messageRepo } from '../../db/repositories/message.repo'
-import { createSqlitePackageRepository } from '../../db/repositories/skill-package.repo'
-import { skillPackageRuntimeService } from '../../services/skill-package-runtime.service'
-import { createChatSkillLauncher } from '../../skills/application/chat-skill-launcher'
+import { chatSessionExists, chatSkillLauncher } from '../../services/chat-skill-runtime.service'
 import { mapErrorToHttpResponse } from '../error-mapper'
 
 export const chatRoutes = new Hono()
@@ -27,17 +23,6 @@ const chatSkillRunSchema = z.object({
   }).strict().optional(),
 }).strict()
 
-const chatSkillLauncher = createChatSkillLauncher({
-  packages: createSqlitePackageRepository(),
-  sessions: sessionRepo,
-  messages: messageRepo,
-  runtime: {
-    startRun: (input) => skillPackageRuntimeService.startRun(input),
-    findChatRunByIdempotency: (sessionId, idempotencyKey) =>
-      skillPackageRuntimeService.findChatRunByIdempotency(sessionId, idempotencyKey),
-  },
-})
-
 function chatSkillErrorResponse(c: Context, error: unknown) {
   if (error instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: error.issues[0]?.message ?? 'Invalid request' } }, 400)
   const response = mapErrorToHttpResponse(error)
@@ -47,7 +32,7 @@ function chatSkillErrorResponse(c: Context, error: unknown) {
 chatRoutes.get('/sessions/:id/skills', (c) => {
   try {
     const sessionId = c.req.param('id')
-    if (!sessionRepo.get(sessionId)) return c.json({ error: { code: 'NOT_FOUND', message: 'Chat session not found' } }, 404)
+    if (!chatSessionExists(sessionId)) return c.json({ error: { code: 'NOT_FOUND', message: 'Chat session not found' } }, 404)
     return c.json({ data: chatSkillLauncher.listChatEligibleSkills() })
   } catch (error) {
     return chatSkillErrorResponse(c, error)

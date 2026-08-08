@@ -1,11 +1,26 @@
 import path from 'node:path'
+import {
+  MAX_SECURITY_ARRAY_ITEMS,
+  MAX_SECURITY_DEPTH,
+  MAX_SECURITY_FIELDS,
+  MAX_SECURITY_STRING_LENGTH,
+  sanitizeSecurityPayload,
+  SkillSecurityError,
+  type SecurityPayloadOptions,
+} from '../../security/security-payload'
 
 export const SECURITY_POLICY_VERSION = 'skills-security-v1.1-2026-08-06'
-export const MAX_SECURITY_STRING_LENGTH = 4_096
-export const MAX_SECURITY_DEPTH = 8
-export const MAX_SECURITY_FIELDS = 100
-export const MAX_SECURITY_ARRAY_ITEMS = 100
 export const MAX_SECURITY_PATH_DEPTH = 32
+
+export {
+  MAX_SECURITY_ARRAY_ITEMS,
+  MAX_SECURITY_DEPTH,
+  MAX_SECURITY_FIELDS,
+  MAX_SECURITY_STRING_LENGTH,
+  sanitizeSecurityPayload,
+  SkillSecurityError,
+}
+export type { SecurityPayloadOptions }
 
 const OFFICIAL_GITHUB_HOSTS = new Set(['github.com'])
 const SAFE_CAPABILITIES = new Set([
@@ -33,8 +48,6 @@ export const FORBIDDEN_PACKAGE_CAPABILITIES = new Set([
   'home.read',
 ])
 
-const SECRET_KEY_PATTERN = /(?:authorization|api[_-]?key|access[_-]?key|token|secret|password|passphrase|credential|private[_-]?key|headers?|cookie|prompt|raw[_-]?(?:input|prompt)|client[_-]?secret)/i
-const SECRET_ASSIGNMENT_PATTERN = /((?:authorization|api[_-]?key|access[_-]?key|token|secret|password|passphrase|credential|private[_-]?key|cookie)\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)/gi
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 const SAFE_PATH_SEGMENT_PATTERN = /^[^\\/:*?"<>|]+$/
 const GITHUB_COMPONENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
@@ -43,16 +56,6 @@ export type ExternalSource =
   | { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
   | { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: Record<string, unknown> }
   | { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: Record<string, unknown> }
-
-export class SkillSecurityError extends Error {
-  readonly code: string
-
-  constructor(message: string, code = 'SECURITY_POLICY_VIOLATION') {
-    super(message)
-    this.name = 'SkillSecurityError'
-    this.code = code
-  }
-}
 
 export type PackageLimitsInput = {
   fileCount: number
@@ -63,13 +66,6 @@ export type PackageLimitsInput = {
   maxFileBytes?: number
   maxUnpackedBytes?: number
   maxArchiveBytes?: number
-}
-
-export type SecurityPayloadOptions = {
-  maxDepth?: number
-  maxFields?: number
-  maxArrayItems?: number
-  maxStringLength?: number
 }
 
 export function validateExternalSource(input: unknown): ExternalSource {
@@ -148,16 +144,6 @@ export function assertCapabilityAllowed(capability: string): string {
     throw new SkillSecurityError(`Capability is not allowed by the Skills security policy: ${normalized}`, 'CAPABILITY_DENIED')
   }
   return normalized
-}
-
-export function sanitizeSecurityPayload(value: unknown, options: SecurityPayloadOptions = {}): unknown {
-  const seen = new WeakSet<object>()
-  return sanitizeValue(value, 0, seen, {
-    maxDepth: options.maxDepth ?? MAX_SECURITY_DEPTH,
-    maxFields: options.maxFields ?? MAX_SECURITY_FIELDS,
-    maxArrayItems: options.maxArrayItems ?? MAX_SECURITY_ARRAY_ITEMS,
-    maxStringLength: options.maxStringLength ?? MAX_SECURITY_STRING_LENGTH,
-  })
 }
 
 /** Shared alias for event payloads so event and audit boundaries use one sanitizer. */
@@ -277,43 +263,6 @@ function normalizeSecurityString(value: string, label: string): string {
   if (normalized.length > MAX_SECURITY_STRING_LENGTH) throw new SkillSecurityError(`${label} exceeds the maximum length`, 'INPUT_LENGTH_LIMIT')
   if (CONTROL_CHARACTER_PATTERN.test(normalized)) throw new SkillSecurityError(`${label} contains control characters`, 'INVALID_INPUT')
   return normalized
-}
-
-function sanitizeValue(value: unknown, depth: number, seen: WeakSet<object>, options: Required<SecurityPayloadOptions>): unknown {
-  if (depth > options.maxDepth) throw new SkillSecurityError(`Security payload exceeds the maximum depth of ${options.maxDepth}`, 'PAYLOAD_DEPTH_LIMIT')
-  if (typeof value === 'string') {
-    if (value.length > options.maxStringLength) throw new SkillSecurityError(`Security payload string exceeds the maximum length of ${options.maxStringLength}`, 'PAYLOAD_STRING_LIMIT')
-    if (CONTROL_CHARACTER_PATTERN.test(value)) throw new SkillSecurityError('Security payload contains control characters', 'INVALID_INPUT')
-    return value.normalize('NFKC').replace(SECRET_ASSIGNMENT_PATTERN, '$1[REDACTED]')
-  }
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
-  if (typeof value === 'undefined') return undefined
-  if (typeof value === 'bigint' || typeof value === 'symbol' || typeof value === 'function') throw new SkillSecurityError('Security payload must be JSON serializable', 'INVALID_PAYLOAD')
-  if (typeof value !== 'object') throw new SkillSecurityError('Security payload must be JSON serializable', 'INVALID_PAYLOAD')
-  if (seen.has(value)) throw new SkillSecurityError('Security payload cannot contain circular references', 'INVALID_PAYLOAD')
-  seen.add(value)
-  try {
-    if (Array.isArray(value)) {
-      if (value.length > options.maxArrayItems) throw new SkillSecurityError(`Security payload array exceeds ${options.maxArrayItems} items`, 'PAYLOAD_ARRAY_LIMIT')
-      return value.map((item) => {
-        const sanitized = sanitizeValue(item, depth + 1, seen, options)
-        return sanitized === undefined ? null : sanitized
-      })
-    }
-    const entries = Object.entries(value)
-    if (entries.length > options.maxFields) throw new SkillSecurityError(`Security payload exceeds ${options.maxFields} fields`, 'PAYLOAD_FIELD_LIMIT')
-    const result: Record<string, unknown> = {}
-    for (const [key, child] of entries) {
-      const normalizedKey = normalizeSecurityString(key, 'payload key')
-      const sanitizedChild = SECRET_KEY_PATTERN.test(normalizedKey)
-        ? '[REDACTED]'
-        : sanitizeValue(child, depth + 1, seen, options)
-      if (sanitizedChild !== undefined) result[normalizedKey] = sanitizedChild
-    }
-    return result
-  } finally {
-    seen.delete(value)
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

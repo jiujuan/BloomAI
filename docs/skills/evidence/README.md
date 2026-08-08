@@ -28,6 +28,7 @@
 | [P5-002 HTTP/DB integration tests](./p5-002-http-db-integration-tests.md) | HTTP resource contracts、SSE、observability、DB invariants 和 migration schema contract 集成门禁 | `npm run test:skills:integration` | ✅ |
 | [P5-003 security tests](./p5-003-security-tests.md) | path/source/package、capability、artifact、audit/redaction 和 Legacy bypass negative cases | `npm run test:skills:security` | ✅ |
 | [P5-004 Renderer/browser E2E](./p5-004-renderer-browser-e2e.md) | Skills Center、Creator、Detail/Run/Artifact、responsive/a11y、Legacy boundary 和 offline browser flow | `npm run test:skills:e2e` | ✅ |
+| [P5-005 release gate and rollback](./p5-005-release-gate-rollback.md) | 完整发布门禁、迁移 verifier、rollback rehearsal 和失败重试证据 | `npm run test:skills:release-gate` | ✅ |
 
 ## 证据最小字段
 

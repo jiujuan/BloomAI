@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { getSkillSecurityStatus } from '../../skills/security/skill-security-checklist'
+import { getSkillSecurityStatus } from '../../services/skill-security.service'
 
 export const skillSecurityRoutes = new Hono()
 

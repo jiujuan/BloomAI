@@ -2,9 +2,13 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { mapErrorToHttpResponse } from '../error-mapper'
 import { ServiceError } from '../../services/errors'
-import { createSkillDraftService } from '../../skills/creator/skill-draft.service'
-import { createSkillDraftSchema, publishSkillDraftSchema, updateSkillDraftSchema } from '../../skills/creator/skill-draft.schema'
-import { assertSkillRuntimeFeature } from '../../skills/config/skill-runtime.config'
+import {
+  assertSkillRuntimeFeature,
+  createSkillDraftSchema,
+  createSkillDraftService,
+  publishSkillDraftSchema,
+  updateSkillDraftSchema,
+} from '../../services/skill-creator.service'
 import { getSkillActor } from '../skills-policy'
 import { getRequestId } from '../request-context'
 

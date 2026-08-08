@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { getOrmDb } from '../client'
 import { skill_legacy_archives, skill_legacy_migration_runs, skill_legacy_migrations } from '../schema'
-import { ServiceError } from '../../services/errors'
+import { ServiceError } from '../../domain/errors'
 
 export type LegacyMigrationDecision = 'auto_convertible' | 'manual_review' | 'critical_blocked' | 'unsupported'
 export type LegacyMigrationStatus = 'legacy_archive' | 'migration_previewed' | 'manual_review_required' | 'migration_published' | 'migration_blocked'

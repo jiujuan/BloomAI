@@ -89,3 +89,10 @@ export function createSkillService(overrides: Partial<SkillServiceDependencies> 
 }
 
 export const skillService = createSkillService()
+
+/**
+ * Legacy HTTP adapters may use the read-only overview facade, but they must
+ * still obtain it through the application service boundary rather than
+ * importing the Skills application module from a route.
+ */
+export { skillsFacade } from '../skills/application/skills-facade.service'
