@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1 已通过，Task 2 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2 已通过，Task 3 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试已完成。尚未实现生产 Adapter、Connection Manager、`/api/v1/mcp` 路由或完整 MCP 生产模块。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试已完成。Task 3 尚未开始，尚未实现生产 Repository、Adapter、Connection Manager、`/api/v1/mcp` 路由或完整 MCP 生产模块。
 
 ---
 
@@ -390,26 +390,26 @@ MCP_TOOL_CANCELLED
 
 ### 5.3 `NormalizedMcpResult`
 
-- [ ] `content` 和 `structuredContent` 分开保存；
-- [ ] `isError` 不被普通文本判断替代；
-- [ ] 只允许 JSON-safe 值；
-- [ ] 递归脱敏敏感键；
-- [ ] 结果超过 128 KiB 时截断并设置 `truncated=true`；
-- [ ] 拒绝循环对象、Buffer、函数、Symbol、BigInt 和不可序列化实例；
-- [ ] safe result 可供 Agent、API 和审计复用。
+- [x] `content` 和 `structuredContent` 分开保存；
+- [x] `isError` 不被普通文本判断替代；
+- [x] 只允许 JSON-safe 值；
+- [x] 递归脱敏敏感键；
+- [x] 结果超过 128 KiB 时截断并设置 `truncated=true`；
+- [x] 拒绝循环对象、Buffer、函数、Symbol、BigInt 和不可序列化实例；
+- [x] safe result 可供 Agent、API 和审计复用。
 
 ### 5.4 JSON Schema 支持子集
 
-- [ ] 明确一期支持的 object、array、string、number、integer、boolean、null、enum、required、properties、items；
-- [ ] 对 `$ref`、循环 Schema、任意代码、未知关键字和超深嵌套给出处理策略；
-- [ ] 不支持的 Schema 返回 `MCP_SCHEMA_UNSUPPORTED`，保留发现记录但不进入 Agent Surface；
-- [ ] Schema 规范化后生成稳定 Hash。
+- [x] 明确一期支持的 object、array、string、number、integer、boolean、null、enum、required、properties、items；
+- [x] 对 `$ref`、循环 Schema、任意代码、未知关键字和超深嵌套给出处理策略；
+- [x] 不支持的 Schema 返回 `MCP_SCHEMA_UNSUPPORTED`，保留发现记录但不进入 Agent Surface；
+- [x] Schema 规范化后生成稳定 Hash。
 
 ### 5.5 Task 2 验收
 
-- [ ] 领域类型、错误码、Result Normalizer、Schema 子集有契约测试；
-- [ ] 设计文档、本计划和未来代码使用同一状态、错误码和结果字段；
-- [ ] Task 3～Task 10 不再自行发明错误码或状态。
+- [x] 领域类型、错误码、Result Normalizer、Schema 子集有契约测试；
+- [x] 设计文档、本计划和未来代码使用同一状态、错误码和结果字段；
+- [x] Task 3～Task 10 不再自行发明错误码或状态。
 
 **Verification**：
 
@@ -938,7 +938,7 @@ pending_approval
 - [ ] Task 0 以当前锁定的 `@mastra/mcp` 精确版本验证真实 API；
 - [ ] 没有 `getTools/callTool/close` 等未验证假设；
 - [ ] Task 1 已通过 Secret、stdio、HTTP SSRF、Approval Store 和一次性 Token 测试；
-- [ ] Task 2 已锁定错误码、状态机、`NormalizedMcpResult` 和 Schema 子集；
+- [x] Task 2 已锁定错误码、状态机、`NormalizedMcpResult` 和 Schema 子集；
 - [ ] `048-mcp-client.sql`、Repository、Adapter、Catalog、Broker、Agent、API 都有实现和测试；
 - [ ] 客户端无法伪造批准、风险、信任、Role 或 Tool enablement。
 

@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1 已通过，Task 2 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2 已通过，Task 3 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试已完成；尚未实现生产 Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试已完成；Task 3 尚未开始，尚未实现生产 Repository、Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -278,6 +278,15 @@ mcp:{serverId}:{remoteName}
 ```
 
 当前版本实际返回 `serverName_toolName` 形式的 namespaced key，Tool `id` 也保留该本地名称。Adapter 必须在已知 Server 命名空间内维护 `localName` 到原始 `remoteName` 的独立映射，不能把 namespaced `id` 当成远端原始名称的唯一事实源。
+
+### 4.4 Task 2 稳定边界
+
+Task 2 已固定后续 Repository、Adapter、Broker、API 和 UI 共用的领域类型、错误协议和结果边界：
+
+- Run 状态只能使用 `pending_approval`、`running`、`success`、`error`、`denied`、`cancelled`；
+- 稳定错误码使用本文第 8 节完整列表，错误响应只返回稳定 code、通用 message 和 HTTP status，不把远端异常、Schema 或秘密原文带出边界；
+- `NormalizedMcpResult` 始终分离 `content`、`structuredContent` 和显式 `isError`，safe result 只允许 JSON-safe 值，递归脱敏敏感键，并在序列化结果超过 128 KiB 时设置 `truncated=true`；
+- 一期 JSON Schema 只接受 `object`、`array`、`string`、`number`、`integer`、`boolean`、`null`、`enum`、`required`、`properties`、`items`。`$ref`、循环 Schema、函数/非 JSON 值、未知关键字和超深嵌套统一返回 `MCP_SCHEMA_UNSUPPORTED`；规范化后的 Schema 使用稳定 SHA-256 hash。发现记录可以保留，但不支持的 Schema 不得进入 Agent Tool Surface。
 
 ---
 
@@ -750,7 +759,7 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 的 `NormalizedMcpResult`、错误码、Schema 子集仍未开始。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 尚未开始。
 
 ### Task 3～Task 6：后端核心闭环
 
@@ -797,10 +806,10 @@ Task 0 已在结果文档中关闭以下问题：
 6. disconnect、reconnect 和 timeout 后的恢复边界；
 7. `content`、`structuredContent`、`isError` 的运行时形态。
 
-Task 2 仍需定义最终 `NormalizedMcpResult` 和稳定错误码。这些证据写入：
+Task 2 的最终 `NormalizedMcpResult`、稳定错误码、Run 状态机和 JSON Schema 子集已经由实现与契约测试固定。这些证据写入：
 
 ```text
 docs/MCP/mcp-mastra-spike-result.md
 ```
 
-并同步回本文和实施计划。
+并已同步回本文和实施计划。Task 3 尚未开始。
