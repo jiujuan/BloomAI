@@ -12,3 +12,7 @@ release-t12-verify/
 coverage/
 
 .tmp/
+
+# Local installer and release verification artifacts
+installer-ranges.txt
+release-icon-verify/
