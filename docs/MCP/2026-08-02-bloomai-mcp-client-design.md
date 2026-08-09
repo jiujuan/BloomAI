@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0 已通过，Task 1 尚未开始
+- **状态**：Gate 0、Task 0、Task 1 已通过，Task 2 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 Fixture 和契约测试已完成；尚未实现生产 Adapter、Connection Manager、MCP 路由或正式 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试已完成；尚未实现生产 Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -737,7 +737,7 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- 确认当前工作区尚未有生产实现，不能把计划状态描述为已完成；
+- Gate 0/Task 0 阶段确认尚未有完整 MCP 生产实现；当前仅完成 Task 1 的安全边界契约，不能把后续计划描述为已完成；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
@@ -750,7 +750,7 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 的安全边界测试和 Task 2 的 `NormalizedMcpResult`、错误码、Schema 子集仍未开始。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 的 `NormalizedMcpResult`、错误码、Schema 子集仍未开始。
 
 ### Task 3～Task 6：后端核心闭环
 

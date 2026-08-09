@@ -28,7 +28,8 @@
     "verify:legacy-skills-migration": "npm run verify:skills-legacy-migration-offline",
     "test:skills:migration:offline": "npm run typecheck:skills && npm run verify:skills-legacy-migration-offline",
     "test:skills:migration:smoke": "npm run test:skills:migration:offline",
-    "test:mcp-spike": "vitest run src/server/mcp/mastra-adapter.contract.test.ts --pool=forks --maxWorkers=1 --minWorkers=1"
+    "test:mcp-spike": "vitest run src/server/mcp/mastra-adapter.contract.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
+    "test:mcp-security": "vitest run src/server/mcp/security --pool=forks --maxWorkers=1 --minWorkers=1"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.91",

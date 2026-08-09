@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0 已通过，Task 1 尚未开始
+- **状态**：Gate 0、Task 0、Task 1 已通过，Task 2 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture 和契约测试已完成。尚未实现生产 Adapter、Connection Manager、`/api/v1/mcp` 路由或正式 MCP 生产模块。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试已完成。尚未实现生产 Adapter、Connection Manager、`/api/v1/mcp` 路由或完整 MCP 生产模块。
 
 ---
 
@@ -272,46 +272,46 @@ npm run build
 
 ### 4.1 Secret 和 Feature Flag
 
-- [ ] 只允许 `${env:NAME}` 模板；
-- [ ] 通过 `MCP_ALLOWED_ENV_NAMES` allowlist 限制名称；
-- [ ] 解析值只存在于调用内存；
-- [ ] `MCP_CLIENT_ENABLED` 非 `true` 时 fail closed；
-- [ ] 错误和日志不包含 resolved 值；
-- [ ] 不把 Secret 引用的环境变量值写入测试快照。
+- [x] 只允许 `${env:NAME}` 模板；
+- [x] 通过 `MCP_ALLOWED_ENV_NAMES` allowlist 限制名称；
+- [x] 解析值只存在于调用内存；
+- [x] `MCP_CLIENT_ENABLED` 非 `true` 时 fail closed；
+- [x] 错误和日志不包含 resolved 值；
+- [x] 不把 Secret 引用的环境变量值写入测试快照。
 
 ### 4.2 stdio Policy
 
-- [ ] `shell: false`；
-- [ ] command/args/cwd 使用结构化字段；
-- [ ] 不继承完整 `process.env`；
-- [ ] command、args、cwd、env 引用变更后回到 `untrusted` 并禁用；
-- [ ] timeout、disconnect、应用退出清理子进程和孤儿进程；
-- [ ] 拒绝通过 URL、Registry 或 Package 自动安装可执行文件。
+- [x] `shell: false`；
+- [x] command/args/cwd 使用结构化字段；
+- [x] 不继承完整 `process.env`；
+- [x] command、args、cwd、env 引用变更后回到 `untrusted` 并禁用；
+- [x] timeout、disconnect、应用退出清理子进程和孤儿进程；
+- [x] 拒绝通过 URL、Registry 或 Package 自动安装可执行文件。
 
 ### 4.3 HTTP 和 SSRF Policy
 
-- [ ] 生产环境 HTTP endpoint 仅允许 HTTPS；
-- [ ] 开发环境允许的本地 HTTP 范围明确限制为 localhost/127.0.0.1；
-- [ ] 校验 hostname、DNS 解析结果和 redirect；
-- [ ] 拦截私网、link-local 和云 metadata 地址；
-- [ ] redirect 后重新执行完整校验；
-- [ ] Header 只接受允许的 Secret 引用；
-- [ ] 不在错误、日志、HTTP response 中返回 Header 值。
+- [x] 生产环境 HTTP endpoint 仅允许 HTTPS；
+- [x] 开发环境允许的本地 HTTP 范围明确限制为 localhost/127.0.0.1；
+- [x] 校验 hostname、DNS 解析结果和 redirect；
+- [x] 拦截私网、link-local 和云 metadata 地址；
+- [x] redirect 后重新执行完整校验；
+- [x] Header 只接受允许的 Secret 引用；
+- [x] 不在错误、日志、HTTP response 中返回 Header 值。
 
 ### 4.4 Approval Store 和 Token
 
-- [ ] Approval Store 位于服务端；
-- [ ] Token 只允许一次性消费；
-- [ ] Token 绑定 `runId`、`serverId`、`toolId`、`inputHash`、`catalogVersion`、session 和 Role；
-- [ ] 过期、重复消费、Role 变化、Catalog 变化和配置变化都会失效；
-- [ ] 客户端无法通过 `approvalGranted: boolean` 授权；
-- [ ] Approval Store 不保存原始敏感 input。
+- [x] Approval Store 位于服务端；
+- [x] Token 只允许一次性消费；
+- [x] Token 绑定 `runId`、`serverId`、`toolId`、`inputHash`、`catalogVersion`、session 和 Role；
+- [x] 过期、重复消费、Role 变化、Catalog 变化和配置变化都会失效；
+- [x] 客户端无法通过 `approvalGranted: boolean` 授权；
+- [x] Approval Store 不保存原始敏感 input。
 
 ### 4.5 Task 1 验收
 
-- [ ] Secret、stdio、HTTP、SSRF、Feature Flag 和 Approval Store 的失败测试先于实现通过；
-- [ ] 任何一个秘密泄露测试失败都阻断后续 Task；
-- [ ] 安全策略输出稳定错误码，供 Task 2 固定。
+- [x] Secret、stdio、HTTP、SSRF、Feature Flag 和 Approval Store 的失败测试先于实现通过；
+- [x] 任何一个秘密泄露测试失败都阻断后续 Task；
+- [x] 安全策略输出稳定错误码，供 Task 2 固定。
 
 **Verification**：
 
