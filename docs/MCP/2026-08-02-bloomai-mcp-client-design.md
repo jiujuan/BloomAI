@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2 已通过，Task 3 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3 已通过，Task 4 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试已完成；Task 3 尚未开始，尚未实现生产 Repository、Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试已完成；Task 4 尚未开始，尚未实现生产 Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表后续功能已经完成。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -348,7 +348,8 @@ CREATE TABLE IF NOT EXISTS mcp_server_tools (
 - 新发现 Tool 默认禁用；
 - Schema 或 description 变化时进入 review/disabled；
 - 远端删除使用软删除，保留历史 Run 可读性；
-- `remote_name` 永远保存远端原始名称。
+- `remote_name` 永远保存远端原始名称；本地 Tool ID 由 Repository 固定生成 `mcp:{serverId}:{remoteName}`，不接受远端返回的 ID 覆盖。
+- Migration 实际唯一索引名为 `idx_mcp_server_tools_server_remote`。
 
 ### 5.3 `mcp_tool_runs`
 
@@ -746,11 +747,11 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Gate 0/Task 0 阶段确认尚未有完整 MCP 生产实现；当前仅完成 Task 1 的安全边界契约，不能把后续计划描述为已完成；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Adapter、Connection Manager、MCP 路由和完整 MCP 生产闭环仍未实现；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
-### Task 0～Task 2：实现准入 Gate
+### Task 0～Task 3：实现准入 Gate
 
 Task 0 已形成：
 
@@ -759,14 +760,12 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 尚未开始。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。
 
-### Task 3～Task 6：后端核心闭环
+### Task 4～Task 6：后端核心闭环
 
 必须实现：
 
-- `048-mcp-client.sql`；
-- Repository；
 - Adapter 和 Connection Manager；
 - Catalog Preview/Confirm；
 - Broker、Approval、Run 审计。
@@ -812,4 +811,4 @@ Task 2 的最终 `NormalizedMcpResult`、稳定错误码、Run 状态机和 JSON
 docs/MCP/mcp-mastra-spike-result.md
 ```
 
-并已同步回本文和实施计划。Task 3 尚未开始。
+并已同步回本文和实施计划。Task 3 已完成并通过数据库、类型、架构、契约和安全验证。

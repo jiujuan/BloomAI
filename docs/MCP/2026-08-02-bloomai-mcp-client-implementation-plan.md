@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2 已通过，Task 3 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3 已通过，Task 4 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试已完成。Task 3 尚未开始，尚未实现生产 Repository、Adapter、Connection Manager、`/api/v1/mcp` 路由或完整 MCP 生产模块。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试已完成。Task 4 尚未开始，尚未实现生产 Adapter、Connection Manager、`/api/v1/mcp` 路由或完整 MCP 生产模块。
 
 ---
 
@@ -437,38 +437,38 @@ npm run typecheck
 
 ### 6.1 Migration
 
-- [ ] 使用 `048-mcp-client.sql`，不能覆盖当前已有 Migration；
-- [ ] 创建 `mcp_servers`；
-- [ ] 创建 `mcp_server_tools`；
-- [ ] 创建 `mcp_tool_runs`；
-- [ ] `mcp_server_tools.is_enabled INTEGER NOT NULL DEFAULT 0`；
-- [ ] `mcp_server_tools.is_removed INTEGER NOT NULL DEFAULT 0`；
-- [ ] `mcp_server_tools.requires_approval INTEGER NOT NULL DEFAULT 1`；
-- [ ] 使用 `is_removed` 和 `removed_at` 软删除；
-- [ ] `server_id + remote_name` 唯一；
-- [ ] Run 状态约束与 Task 2 一致；
-- [ ] 为 Catalog Version、Schema Hash、Run 查询建立必要索引；
-- [ ] Migration 可重复执行或符合当前项目的幂等约定。
+- [x] 使用 `048-mcp-client.sql`，不能覆盖当前已有 Migration；
+- [x] 创建 `mcp_servers`；
+- [x] 创建 `mcp_server_tools`；
+- [x] 创建 `mcp_tool_runs`；
+- [x] `mcp_server_tools.is_enabled INTEGER NOT NULL DEFAULT 0`；
+- [x] `mcp_server_tools.is_removed INTEGER NOT NULL DEFAULT 0`；
+- [x] `mcp_server_tools.requires_approval INTEGER NOT NULL DEFAULT 1`；
+- [x] 使用 `is_removed` 和 `removed_at` 软删除；
+- [x] `server_id + remote_name` 唯一；
+- [x] Run 状态约束与 Task 2 一致；
+- [x] 为 Catalog Version、Schema Hash、Run 查询建立必要索引；
+- [x] Migration 可重复执行或符合当前项目的幂等约定。
 
 ### 6.2 Repository
 
 至少提供：
 
-- Server CRUD；
-- Server enable/disable/trust；
-- Tool Catalog 查询和更新；
-- Preview Confirm 的原子版本校验；
-- Tool enable/disable；
-- Soft delete；
-- Run 创建、状态更新和 safe 查询；
-- 不返回 resolved secret。
+- [x] Server CRUD；
+- [x] Server enable/disable/trust；
+- [x] Tool Catalog 查询和更新；
+- [x] Preview Confirm 的原子版本校验；
+- [x] Tool enable/disable；
+- [x] Soft delete；
+- [x] Run 创建、状态更新和 safe 查询；
+- [x] 不返回 resolved secret。
 
 ### 6.3 Task 3 验收
 
-- [ ] Migration 顺序检查通过；
-- [ ] Schema Contract 通过；
-- [ ] Repository 测试覆盖唯一约束、软删除、版本冲突和历史 Run；
-- [ ] 数据库中没有原始 Secret、Header、Approval Token 或未经脱敏的 input/output。
+- [x] Migration 顺序检查通过；
+- [x] Schema Contract 通过；
+- [x] Repository 测试覆盖唯一约束、软删除、版本冲突和历史 Run；
+- [x] 数据库中没有原始 Secret、Header、Approval Token 或未经脱敏的 input/output。
 
 **Verification**：
 

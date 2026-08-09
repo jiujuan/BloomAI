@@ -1014,3 +1014,70 @@ export const research_artifacts = sqliteTable('research_artifacts', {
   runTypeIdx: index('idx_research_artifacts_run_type').on(table.run_id, table.type),
   runIdempotencyIdx: uniqueIndex('idx_research_artifacts_run_idempotency').on(table.run_id, table.idempotency_key),
 }))
+
+export const mcp_servers = sqliteTable('mcp_servers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  transport_kind: text('transport_kind', { enum: ['stdio', 'streamable_http'] }).notNull(),
+  config_json: text('config_json').notNull(),
+  secret_refs_json: text('secret_refs_json').notNull(),
+  is_enabled: integer('is_enabled').notNull().default(0),
+  trust_level: text('trust_level', { enum: ['untrusted', 'reviewed', 'trusted'] }).notNull().default('untrusted'),
+  connection_status: text('connection_status', { enum: ['unknown', 'healthy', 'error', 'disabled'] }).notNull().default('unknown'),
+  catalog_version: integer('catalog_version').notNull().default(0),
+  last_error_code: text('last_error_code'),
+  last_error_at: integer('last_error_at'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  catalogVersionIdx: index('idx_mcp_servers_catalog_version').on(table.catalog_version),
+}))
+
+export type McpServerRow = typeof mcp_servers.$inferSelect
+
+export const mcp_server_tools = sqliteTable('mcp_server_tools', {
+  id: text('id').primaryKey(),
+  server_id: text('server_id').notNull(),
+  remote_name: text('remote_name').notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  input_schema_json: text('input_schema_json').notNull(),
+  output_schema_json: text('output_schema_json'),
+  schema_hash: text('schema_hash').notNull(),
+  is_enabled: integer('is_enabled').notNull().default(0),
+  is_removed: integer('is_removed').notNull().default(0),
+  requires_approval: integer('requires_approval').notNull().default(1),
+  risk_level: text('risk_level', { enum: ['low', 'medium', 'high'] }).notNull().default('medium'),
+  discovered_at: integer('discovered_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+  removed_at: integer('removed_at'),
+}, (table) => ({
+  serverRemoteUniqueIdx: uniqueIndex('idx_mcp_server_tools_server_remote').on(table.server_id, table.remote_name),
+  catalogIdx: index('idx_mcp_server_tools_catalog').on(table.server_id, table.is_removed, table.is_enabled, table.updated_at),
+  schemaHashIdx: index('idx_mcp_server_tools_schema_hash').on(table.server_id, table.schema_hash),
+}))
+
+export type McpServerToolRow = typeof mcp_server_tools.$inferSelect
+
+export const mcp_tool_runs = sqliteTable('mcp_tool_runs', {
+  id: text('id').primaryKey(),
+  server_id: text('server_id').notNull(),
+  tool_id: text('tool_id').notNull(),
+  remote_name: text('remote_name').notNull(),
+  session_id: text('session_id'),
+  agent_role: text('agent_role'),
+  status: text('status', { enum: ['pending_approval', 'running', 'success', 'error', 'denied', 'cancelled'] }).notNull(),
+  input_hash: text('input_hash').notNull(),
+  safe_input_json: text('safe_input_json'),
+  safe_output_json: text('safe_output_json'),
+  error_code: text('error_code'),
+  duration_ms: integer('duration_ms'),
+  created_at: integer('created_at').notNull(),
+  completed_at: integer('completed_at'),
+}, (table) => ({
+  serverCreatedIdx: index('idx_mcp_tool_runs_server_created').on(table.server_id, table.created_at),
+  toolCreatedIdx: index('idx_mcp_tool_runs_tool_created').on(table.tool_id, table.created_at),
+  statusCreatedIdx: index('idx_mcp_tool_runs_status_created').on(table.status, table.created_at),
+}))
+
+export type McpToolRunRow = typeof mcp_tool_runs.$inferSelect
