@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { getDataDir, getDbPath } from '../../db/paths'
+import { skillCapabilitySchema } from '../policy/capability-policy'
+import { settingsRepo } from '../../db/repositories/settings.repo'
 
 export const SKILL_RUNTIME_PROTOCOL_VERSION = '1.1'
 export const SKILL_RUNTIME_CONFIG_VERSION = '2026-08-05'
@@ -18,6 +20,19 @@ export const LEGACY_SKILL_LIFECYCLES = [
 ] as const
 
 export type LegacySkillLifecycle = (typeof LEGACY_SKILL_LIFECYCLES)[number]
+
+export type SkillRuntimeOperationalStatus = 'ready' | 'degraded' | 'disabled'
+
+export type SkillRuntimeOperationalSnapshot = {
+  status: SkillRuntimeOperationalStatus
+  reason: 'runtime_ready' | 'package_execution_disabled' | 'runtime_disabled'
+  canManage: boolean
+  canExecute: boolean
+}
+
+export const SKILL_RUNTIME_SOURCE_KINDS = ['local-directory', 'zip', 'github-archive'] as const
+
+export type SkillRuntimeSourceKind = (typeof SKILL_RUNTIME_SOURCE_KINDS)[number]
 
 export type SkillRuntimeConfig = {
   protocolVersion: string
@@ -51,12 +66,51 @@ export type SkillRuntimeConfig = {
 
 export type SkillRuntimeConfigEnv = Record<string, string | undefined>
 
+/**
+ * Runtime settings that may be overridden through the v1.2 administrative
+ * API. Legacy lifecycle flags and filesystem roots deliberately do not appear
+ * here: those values remain deployment boundaries, not user-managed settings.
+ */
+export const SKILL_RUNTIME_SETTING_FIELDS = [
+  'runtimeEnabled',
+  'packageExecutionEnabled',
+  'importEnabled',
+  'githubImportEnabled',
+  'npxImportEnabled',
+  'creatorEnabled',
+  'creatorPublishEnabled',
+  'workerConcurrency',
+  'leaseTimeoutMs',
+  'maxAttempts',
+  'eventRetentionDays',
+  'artifactRetentionDays',
+  'maxPackageBytes',
+  'maxPackageFiles',
+  'maxFileBytes',
+  'maxRunDurationMs',
+  'githubRequestTimeoutMs',
+  'githubMaxArchiveBytes',
+  'githubAllowedHosts',
+] as const
+
+export type SkillRuntimeSettingField = (typeof SKILL_RUNTIME_SETTING_FIELDS)[number]
+
 export type SkillRuntimeFsAdapter = {
   existsSync: (target: string) => boolean
   mkdirSync?: (target: string, options?: { recursive?: boolean }) => void
 }
 
 export type SkillRuntimeCapabilities = {
+  operationalStatus: SkillRuntimeOperationalStatus
+  statusReason: SkillRuntimeOperationalSnapshot['reason']
+  canManage: boolean
+  canExecute: boolean
+  sourcePolicy: {
+    allowedKinds: SkillRuntimeSourceKind[]
+  }
+  capabilityPolicy: {
+    allowedCapabilities: string[]
+  }
   protocolVersion: string
   configVersion: string
   runtimeEnabled: boolean
@@ -246,9 +300,9 @@ export function assertSkillRuntimeConfig(config: SkillRuntimeConfig, fsAdapter: 
   return config
 }
 
-export function loadSkillRuntimeConfig(
-  env: SkillRuntimeConfigEnv = process.env,
-  fsAdapter: SkillRuntimeFsAdapter = fs,
+function loadSkillRuntimeConfigFromEnv(
+  env: SkillRuntimeConfigEnv,
+  fsAdapter: SkillRuntimeFsAdapter,
 ): SkillRuntimeConfig {
   const legacyRuntimeFlag = env.SKILL_PACKAGE_RUNTIME_ENABLED
   const legacyEnabled = legacyRuntimeFlag === undefined
@@ -287,6 +341,95 @@ export function loadSkillRuntimeConfig(
   return assertSkillRuntimeConfig(config, fsAdapter)
 }
 
+const FIELD_TO_ENV_KEY: Readonly<Record<SkillRuntimeSettingField, string>> = {
+  runtimeEnabled: 'SKILL_RUNTIME_ENABLED',
+  packageExecutionEnabled: 'SKILL_PACKAGE_EXECUTION_ENABLED',
+  importEnabled: 'SKILL_PACKAGE_IMPORT_ENABLED',
+  githubImportEnabled: 'SKILL_GITHUB_IMPORT_ENABLED',
+  npxImportEnabled: 'SKILL_NPX_IMPORT_ENABLED',
+  creatorEnabled: 'SKILL_CREATOR_ENABLED',
+  creatorPublishEnabled: 'SKILL_CREATOR_PUBLISH_ENABLED',
+  workerConcurrency: 'SKILL_WORKER_CONCURRENCY',
+  leaseTimeoutMs: 'SKILL_LEASE_TIMEOUT_MS',
+  maxAttempts: 'SKILL_MAX_ATTEMPTS',
+  eventRetentionDays: 'SKILL_EVENT_RETENTION_DAYS',
+  artifactRetentionDays: 'SKILL_ARTIFACT_RETENTION_DAYS',
+  maxPackageBytes: 'SKILL_MAX_PACKAGE_BYTES',
+  maxPackageFiles: 'SKILL_MAX_PACKAGE_FILES',
+  maxFileBytes: 'SKILL_MAX_FILE_BYTES',
+  maxRunDurationMs: 'SKILL_MAX_RUN_DURATION_MS',
+  githubRequestTimeoutMs: 'SKILL_GITHUB_REQUEST_TIMEOUT_MS',
+  githubMaxArchiveBytes: 'SKILL_GITHUB_MAX_ARCHIVE_BYTES',
+  githubAllowedHosts: 'SKILL_GITHUB_ALLOWED_HOSTS',
+}
+
+const NUMERIC_SETTING_LIMITS: Readonly<Partial<Record<SkillRuntimeSettingField, number>>> = {
+  workerConcurrency: HARD_LIMITS.workerConcurrency,
+  leaseTimeoutMs: HARD_LIMITS.leaseTimeoutMs,
+  maxAttempts: HARD_LIMITS.maxAttempts,
+  eventRetentionDays: HARD_LIMITS.eventRetentionDays,
+  artifactRetentionDays: HARD_LIMITS.artifactRetentionDays,
+  maxPackageBytes: HARD_LIMITS.maxPackageBytes,
+  maxPackageFiles: HARD_LIMITS.maxPackageFiles,
+  maxFileBytes: HARD_LIMITS.maxFileBytes,
+  maxRunDurationMs: HARD_LIMITS.maxRunDurationMs,
+  githubRequestTimeoutMs: HARD_LIMITS.githubRequestTimeoutMs,
+  githubMaxArchiveBytes: HARD_LIMITS.githubMaxArchiveBytes,
+}
+
+function readSkillRuntimeOverrides(): Partial<Record<SkillRuntimeSettingField, string>> {
+  try {
+    const values = settingsRepo.list()
+    const overrides: Partial<Record<SkillRuntimeSettingField, string>> = {}
+    for (const field of SKILL_RUNTIME_SETTING_FIELDS) {
+      const value = values[`skill_runtime.${field}`]
+      if (value !== undefined) overrides[field] = value
+    }
+    return overrides
+  } catch {
+    // The config module is also used during first-startup and in migration
+    // tests before the SQLite handle exists. Environment config remains the
+    // safe fallback in that state.
+    return {}
+  }
+}
+
+function applySkillRuntimeOverrides(
+  config: SkillRuntimeConfig,
+  overrides: Partial<Record<SkillRuntimeSettingField, string>>,
+  fsAdapter: SkillRuntimeFsAdapter,
+): SkillRuntimeConfig {
+  const next = { ...config }
+  for (const field of SKILL_RUNTIME_SETTING_FIELDS) {
+    const raw = overrides[field]
+    if (raw === undefined) continue
+    const envKey = FIELD_TO_ENV_KEY[field]
+    if (field === 'githubAllowedHosts') {
+      next[field] = envList({ [envKey]: raw }, envKey, next[field]) as never
+      continue
+    }
+    if (field in NUMERIC_SETTING_LIMITS) {
+      const max = NUMERIC_SETTING_LIMITS[field]
+      if (max === undefined) throw new SkillRuntimeConfigError(`No hard limit configured for ${field}`)
+      next[field] = envInt({ [envKey]: raw }, envKey, next[field] as number, max) as never
+      continue
+    }
+    next[field] = envBool({ [envKey]: raw }, envKey, next[field] as boolean) as never
+  }
+  return assertSkillRuntimeConfig(next, fsAdapter)
+}
+
+export function loadSkillRuntimeConfig(
+  env: SkillRuntimeConfigEnv = process.env,
+  fsAdapter: SkillRuntimeFsAdapter = fs,
+): SkillRuntimeConfig {
+  const base = loadSkillRuntimeConfigFromEnv(env, fsAdapter)
+  // Explicit test/config environments must be deterministic and must not be
+  // contaminated by the process application's persisted settings database.
+  if (env !== process.env) return base
+  return applySkillRuntimeOverrides(base, readSkillRuntimeOverrides(), fsAdapter)
+}
+
 let cachedConfig: SkillRuntimeConfig | undefined
 let cachedEnvFingerprint: string | undefined
 
@@ -314,13 +457,56 @@ export function getSkillRuntimeConfig(): SkillRuntimeConfig {
   return cachedConfig
 }
 
+export function invalidateSkillRuntimeConfigCache(): void {
+  cachedConfig = undefined
+  cachedEnvFingerprint = undefined
+}
+
 export function setSkillRuntimeConfigForTests(config: SkillRuntimeConfig | undefined): void {
   cachedConfig = config
   cachedEnvFingerprint = config ? runtimeEnvFingerprint() : undefined
 }
 
-export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): SkillRuntimeCapabilities {
+export function getSkillRuntimeOperationalStatus(config = getSkillRuntimeConfig()): SkillRuntimeOperationalSnapshot {
+  if (!config.runtimeEnabled) {
+    return {
+      status: 'disabled',
+      reason: 'runtime_disabled',
+      canManage: false,
+      canExecute: false,
+    }
+  }
+
+  if (!config.packageExecutionEnabled) {
+    return {
+      status: 'degraded',
+      reason: 'package_execution_disabled',
+      canManage: true,
+      canExecute: false,
+    }
+  }
+
   return {
+    status: 'ready',
+    reason: 'runtime_ready',
+    canManage: true,
+    canExecute: true,
+  }
+}
+
+export function getSkillRuntimeCapabilities(config = getSkillRuntimeConfig()): SkillRuntimeCapabilities {
+  const operational = getSkillRuntimeOperationalStatus(config)
+  return {
+    operationalStatus: operational.status,
+    statusReason: operational.reason,
+    canManage: operational.canManage,
+    canExecute: operational.canExecute,
+    sourcePolicy: {
+      allowedKinds: [...SKILL_RUNTIME_SOURCE_KINDS],
+    },
+    capabilityPolicy: {
+      allowedCapabilities: [...skillCapabilitySchema.options],
+    },
     protocolVersion: config.protocolVersion,
     configVersion: config.configVersion,
     runtimeEnabled: config.runtimeEnabled,

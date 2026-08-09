@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 describe('Legacy skill repository boundary', () => {
-  it('exposes an explicit legacy data-plane adapter', async () => {
-    const { legacySkillRepo, skillRepo } = await import('./skill.repo')
-    expect(legacySkillRepo.dataPlane).toBe('legacy')
-    expect(skillRepo).toBe(legacySkillRepo)
-    expect('createRun' in legacySkillRepo).toBe(false)
+  it('exposes only the explicit archive repository and no deprecated default alias', async () => {
+    const repositoryModule = await import('./skill.repo')
+    expect(repositoryModule.legacySkillRepo.dataPlane).toBe('legacy')
+    expect('skillRepo' in repositoryModule).toBe(false)
   })
 })

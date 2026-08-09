@@ -183,6 +183,20 @@ describe('SkillRunCoordinator', () => {
     expect(run.finishedAt).toEqual(expect.any(Number))
   })
 
+  it('uses the injected clock for event timestamps and repository cursors', () => {
+    const ports = createFakeSkillRuntimePorts({ now: 10_000 })
+    const listEvents = vi.spyOn(ports.events, 'listEvents')
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-clock', input: {}, context: {} })
+    ports.clock.advance(500)
+    coordinator.transition(runId, 'running', { expectedRevision: 1 })
+
+    expect(coordinator.subscribeEvents(runId, 1).map((event) => event.seq)).toEqual([2, 3])
+    expect(listEvents).toHaveBeenLastCalledWith(runId, { afterSeq: 1 })
+    expect(coordinator.subscribeEvents(runId).map((event) => event.occurredAt)).toEqual([10_000, 10_000, 10_500])
+  })
+
   it('records approval wait time when an approval resumes a run', async () => {
     const ports = createFakeSkillRuntimePorts({ now: 60_000 })
     const metrics = new SkillRuntimeMetrics({ now: ports.clock.now })

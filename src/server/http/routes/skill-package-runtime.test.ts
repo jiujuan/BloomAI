@@ -20,9 +20,9 @@ async function loadApi(env: Record<string, string> = {}) {
   const { createHonoApp } = await import('../app')
   const app = createHonoApp()
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
-  const { skillRepo } = await import('../../db/repositories/skill.repo')
+  const { legacySkillRepo } = await import('../../db/repositories/skill.repo')
   const { ArtifactStore } = await import('../../skills/artifacts')
-  return { app, client, skillPackageRepo, skillRepo, ArtifactStore }
+  return { app, client, skillPackageRepo, legacySkillRepo, ArtifactStore }
 }
 
 function writeFixture(relativePath: string, content: string) {
@@ -33,8 +33,8 @@ function writeFixture(relativePath: string, content: string) {
 
 async function requestJson(app: { request: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response> }, route: string, init?: RequestInit) {
   const response = await app.request(new URL(`/api/v1${route}`, 'http://localhost'), {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', 'x-bloom-role': 'admin', ...(init?.headers ?? {}) },
   })
   return { response, body: await response.json() as any }
 }
@@ -110,7 +110,15 @@ describe('Skill Package Runtime HTTP API', () => {
     })
 
     expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: { code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' } })
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request body must be valid JSON',
+        details: {},
+        retryable: false,
+        requestId: expect.any(String),
+      },
+    })
   })
 
   it('inspects without persistence and installs packages', async () => {
@@ -131,7 +139,7 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(review.body.data).toMatchObject({
       id: inspected.body.data.reviewId,
       sourceSha: inspected.body.data.sourceFingerprint,
-      status: 'pending',
+      status: 'validated',
     })
 
     const installed = await requestJson(app, '/skill-packages/install', {
@@ -160,7 +168,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const approved = await requestJson(app, `/skill-import-reviews/${reviewId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ reviewer: 'operator-1' }),
+      headers: { 'x-bloom-actor': 'operator-1' },
+      body: JSON.stringify({}),
     })
     expect(approved.response.status).toBe(200)
     expect(approved.body.data).toMatchObject({ id: reviewId, status: 'approved', reviewer: 'operator-1' })
@@ -176,7 +185,8 @@ describe('Skill Package Runtime HTTP API', () => {
     })
     const rejected = await requestJson(app, `/skill-import-reviews/${rejectedInspection.body.data.reviewId}/reject`, {
       method: 'POST',
-      body: JSON.stringify({ reviewer: 'operator-2', reason: 'Policy review failed' }),
+      headers: { 'x-bloom-actor': 'operator-2' },
+      body: JSON.stringify({ reason: 'Policy review failed' }),
     })
     expect(rejected.response.status).toBe(200)
     expect(rejected.body.data).toMatchObject({ status: 'rejected', reviewer: 'operator-2' })
@@ -241,10 +251,12 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(disabled.response.status).toBe(200)
     expect(disabled.body.data).toMatchObject({ id: installation.id, enabled: 0 })
 
-    const revoked = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })
+    const revoked = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE', headers: { 'x-bloom-actor': 'admin-1' } })
     expect(revoked.response.status).toBe(200)
-    expect(revoked.body).toEqual({ data: { revoked: true } })
-    expect((await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE' })).response.status).toBe(404)
+    expect(revoked.body).toMatchObject({ data: { revoked: true }, meta: { requestId: expect.any(String) } })
+    const duplicateRevoke = await requestJson(app, '/skill-capability-grants/' + grant.id, { method: 'DELETE', headers: { 'x-bloom-actor': 'admin-1' } })
+    expect(duplicateRevoke.response.status).toBe(200)
+    expect(duplicateRevoke.body.data).toMatchObject({ revoked: true, grant: { status: 'revoked' } })
 
     const after = await requestJson(app, '/skill-packages/' + pkg.id)
     expect(after.body.data.capabilityGrants[0].revoked_at).toEqual(expect.any(Number))
@@ -259,6 +271,7 @@ describe('Skill Package Runtime HTTP API', () => {
       manifest: { requestedCapabilities: [{ capability: 'web.search', scope: { allowedDomains: ['example.com'], maxCalls: 2 } }] },
       manifestHash: 'approval-package-hash',
       packagePath: path.join(dataDir, 'packages', 'approval-package-hash'),
+      securityStatus: 'verified',
     })
     skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
 
@@ -273,7 +286,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const approved = await requestJson(app, `/skill-capability-grants/${grantId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ actor: 'admin-1', scope: { allowedDomains: ['example.com'], maxCalls: 1 } }),
+      headers: { 'x-bloom-actor': 'admin-1' },
+      body: JSON.stringify({ scope: { allowedDomains: ['example.com'], maxCalls: 1 } }),
     })
     expect(approved.response.status).toBe(200)
     expect(approved.body.data).toMatchObject({ grantId, status: 'approved', approvedBy: 'admin-1', grantedScope: { allowedDomains: ['example.com'], maxCalls: 1 } })
@@ -281,11 +295,11 @@ describe('Skill Package Runtime HTTP API', () => {
     const granted = await requestJson(app, `/skill-runs/${runId}/capabilities`)
     expect(granted.body.data[0]).toMatchObject({ state: 'granted', grantStatus: 'approved' })
 
-    const invalidActor = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: '' }) })
+    const invalidActor = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', headers: { 'x-bloom-actor': 'admin-1' }, body: JSON.stringify({ actor: '' }) })
     expect(invalidActor.response.status).toBe(400)
     expect(invalidActor.body.error.code).toBe('VALIDATION_ERROR')
 
-    const revoked = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', body: JSON.stringify({ actor: 'admin-1', reason: 'test cleanup' }) })
+    const revoked = await requestJson(app, `/skill-capability-grants/${grantId}/revoke`, { method: 'POST', headers: { 'x-bloom-actor': 'admin-1' }, body: JSON.stringify({ reason: 'test cleanup' }) })
     expect(revoked.response.status).toBe(200)
     expect(revoked.body.data).toMatchObject({ grantId, status: 'revoked', revokeReason: 'test cleanup' })
   })
@@ -313,7 +327,7 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const events = await requestJson(app, `/skill-runs/${runId}/events?afterSeq=1`)
     expect(events.response.status).toBe(200)
-    expect(events.body.meta).toEqual({ afterSeq: 1 })
+    expect(events.body.meta).toMatchObject({ afterSeq: 1, requestId: expect.any(String) })
     expect(events.body.data).toHaveLength(1)
     expect(events.body.data[0]).toMatchObject({ seq: 2, type: 'run.status_changed' })
 
@@ -368,6 +382,7 @@ describe('Skill Package Runtime HTTP API', () => {
       manifestHash: 'runnable-package-v2-hash',
       packagePath: path.join(dataDir, 'packages', 'runnable-package-v2-hash'),
       sourceSnapshot: { sourceSha256: 'runnable-package-v2-source', files: [{ path: 'SKILL.md', sha256: 'new-file-sha' }] },
+      securityStatus: 'verified',
     }
 
     const listed = await requestJson(app, `/skill-packages/${pkg.id}/versions`)
@@ -525,7 +540,8 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const exported = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Export generated artifact for verification' }),
+      headers: { 'x-bloom-actor': 'http-test-user' },
+      body: JSON.stringify({ runId, destinationDir: exportDir, confirmed: true, auditReason: 'Export generated artifact for verification' }),
     })
     expect(exported.response.status).toBe(200)
     expect(exported.body.data.path).toBe(path.join(exportDir, 'summary.md'))
@@ -549,15 +565,16 @@ describe('Skill Package Runtime HTTP API', () => {
 
     const otherRunExport = await requestJson(app, `/skill-artifacts/${artifact.id}/export`, {
       method: 'POST',
-      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir, confirmed: true, actor: 'http-test-user', auditReason: 'Verify artifact ownership enforcement' }),
+      headers: { 'x-bloom-actor': 'http-test-user' },
+      body: JSON.stringify({ runId: secondRunId, destinationDir: exportDir, confirmed: true, auditReason: 'Verify artifact ownership enforcement' }),
     })
     expect(otherRunExport.response.status).toBe(404)
     expect(otherRunExport.body.error.code).toBe('NOT_FOUND')
   })
 
   it('blocks Legacy execution before creating any run, queue, worker, grant, or artifact record', async () => {
-    const { app, client, skillPackageRepo, skillRepo } = await loadApi()
-    const legacy = skillRepo.create({
+    const { app, client, skillPackageRepo, legacySkillRepo } = await loadApi()
+    const legacy = legacySkillRepo.create({
       name: 'Legacy adder',
       description: '',
       type: 'js-function',
@@ -568,9 +585,8 @@ describe('Skill Package Runtime HTTP API', () => {
       method: 'POST',
       body: JSON.stringify({ input: { a: 2, b: 3 } }),
     })
-    expect(legacyRun.response.status).toBe(409)
-    expect(legacyRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
-    expect(skillRepo.listRuns(legacy.id)).toHaveLength(0)
+    expect(legacyRun.response.status).toBe(404)
+    expect(legacySkillRepo.listRuns(legacy.id)).toHaveLength(0)
 
     const legacyPackageRun = await requestJson(app, '/skill-runs', {
       method: 'POST',
@@ -579,8 +595,10 @@ describe('Skill Package Runtime HTTP API', () => {
     expect(legacyPackageRun.response.status).toBe(409)
     expect(legacyPackageRun.body.error).toMatchObject({ code: 'LEGACY_SKILL_RUN_DISABLED' })
     expect(legacyPackageRun.body.error).toMatchObject({
-      legacyReference: `legacy:${legacy.id}`,
-      migrationAction: 'preview-legacy-skill-migration',
+      details: {
+        legacyReference: `legacy:${legacy.id}`,
+        migrationAction: 'preview-legacy-skill-migration',
+      },
     })
 
     const counts = () => ({
@@ -596,8 +614,7 @@ describe('Skill Package Runtime HTTP API', () => {
       method: 'POST',
       body: JSON.stringify({ input: {} }),
     })
-    expect(packageRun.response.status).toBe(409)
-    expect(packageRun.body.error.code).toBe('PACKAGE_SKILL_ASYNC_ONLY')
+    expect(packageRun.response.status).toBe(404)
     expect(counts()).toEqual({ packageRuns: 0, queueItems: 0, artifacts: 0, activeWorkers: 0 })
   })
 })

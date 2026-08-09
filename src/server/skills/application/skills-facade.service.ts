@@ -1,4 +1,4 @@
-import { skillRepo } from '../../db/repositories/skill.repo'
+import { legacySkillRepo } from '../../db/repositories/skill.repo'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import { resolveLegacySkillId, resolvePackageSkillId, toLegacySkillReference, toPackageSkillReference } from '../../../shared/skill-references'
 import { createSkillService } from '../../services/skill.service'
@@ -27,7 +27,7 @@ export type SkillOverviewCard = {
   capabilityProfile?: LegacyCapabilityProfile
 }
 
-type LegacyRepository = Pick<typeof skillRepo, 'listInstalled' | 'get' | 'listRuns'>
+type LegacyRepository = Pick<typeof legacySkillRepo, 'listInstalled' | 'get' | 'listRuns'>
 type PackageRepository = Pick<typeof skillPackageRepo, 'listPackages' | 'getPackage' | 'listVersions' | 'listInstallations' | 'getVersion' | 'setInstallationEnabled' | 'deleteInstallation' | 'isPackageReference'>
 type PackageRunStarter = (input: { skillVersionId: string; input: Record<string, unknown>; context?: Record<string, unknown>; surface?: 'skills' | 'chat' | 'image'; sessionId?: string }) => unknown
 
@@ -63,7 +63,7 @@ type SkillsFacadeDependencies = {
 
 export function createSkillsFacade(overrides: Partial<SkillsFacadeDependencies> = {}) {
   const dependencies: SkillsFacadeDependencies = {
-    legacy: skillRepo,
+    legacy: legacySkillRepo,
     packages: skillPackageRepo,
     legacyService: createSkillService(),
     startPackageRun: () => { throw new ServiceError('PACKAGE_SKILL_ASYNC_ONLY', 'Package Skills require the Package Runtime queue') },

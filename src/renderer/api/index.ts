@@ -6,7 +6,8 @@ import { API_BASE } from '@shared/constants'
 import type { Attachment } from '@shared/attachments'
 import type { CreateProjectInput, ProjectSummary, Session, SessionPage } from '@shared/schemas'
 import type { ResearchClarificationInput, ResearchEventDto, ResearchRunDetailDto, ResearchRunDto, ResearchRunFilter, StartResearchInput } from '@shared/deepresearch/contracts'
-import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageInstallInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftPreview, DraftValidation, DraftListInput, InspectedPackage, PackageDetail, PackageImportDiagnostic, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RunAction, RunCapabilityCall, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate, SkillRunStatus, SkillDraftContent, CreatorPublishResult } from '@renderer/pages/Skills/skill-runtime.types'
+import { normalizeCreatorPublishResult, normalizeSkillDraftContent } from '@renderer/pages/Skills/skill-runtime.types'
 
 const isElectron = () =>
   typeof window !== 'undefined' && !!window.bloomai
@@ -76,6 +77,134 @@ function asObject(value: unknown): Record<string, unknown> {
   }
   return asRecord(value)
 }
+function asArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+function asStringArray(value: unknown): string[] { return asArray(value).filter((item): item is string => typeof item === 'string') }
+function asNumberRecord(value: unknown): Record<string, number> {
+  const record = asObject(value)
+  return Object.fromEntries(Object.entries(record).filter(([, item]) => typeof item === 'number' && Number.isFinite(item)).map(([key, item]) => [key, item as number]))
+}
+function toPackageManifest(value: unknown): InspectedPackage['manifest'] {
+  const row = asRecord(value)
+  const requested = asArray(readValue(row, 'requestedCapabilities', 'requested_capabilities', [])).map((item) => {
+    const capability = asRecord(item)
+    return { capability: String(capability.capability ?? ''), scope: asObject(readValue(capability, 'scope', 'scope_json', {})) }
+  })
+  return {
+    name: String(row.name ?? ''), description: String(row.description ?? ''), runtime: String(row.runtime ?? ''), entryPath: String(readValue(row, 'entryPath', 'entry_path', '')),
+    compatible: asBoolean(row.compatible), requestedCapabilities: requested, recommendedSurface: readValue(row, 'recommendedSurface', 'recommended_surface', undefined),
+    outputArtifactTypes: asStringArray(readValue(row, 'outputArtifactTypes', 'output_artifact_types', [])), references: asStringArray(row.references), assets: asStringArray(row.assets), scripts: asStringArray(row.scripts), unsupported: asStringArray(row.unsupported), unknownFrontmatter: asObject(readValue(row, 'unknownFrontmatter', 'unknown_frontmatter', {})),
+    files: asArray(row.files).map((item) => { const file = asRecord(item); return { path: String(file.path ?? ''), sha256: String(file.sha256 ?? ''), sizeBytes: asNumber(readValue(file, 'sizeBytes', 'size_bytes', 0)) } }),
+  }
+}
+function toPackageImportDiagnostic(value: unknown): PackageImportDiagnostic {
+  const row = asRecord(value)
+  return {
+    code: typeof row.code === 'string' ? row.code : undefined,
+    severity: String(row.severity ?? row.level ?? 'info'),
+    message: String(row.message ?? row.detail ?? ''),
+    path: typeof row.path === 'string' ? row.path : undefined,
+    line: typeof row.line === 'number' ? row.line : undefined,
+    column: typeof row.column === 'number' ? row.column : undefined,
+    details: row.details && typeof row.details === 'object' ? asObject(row.details) : undefined,
+  }
+}
+function toInspectedPackage(value: unknown): InspectedPackage {
+  const row = asRecord(value)
+  const snapshot = asObject(readValue(row, 'sourceSnapshot', 'source_snapshot', {}))
+  return {
+    sourceType: String(readValue(row, 'sourceType', 'source_type', '')),
+    relativeSkillPath: String(readValue(row, 'relativeSkillPath', 'relative_skill_path', '')),
+    manifestHash: String(readValue(row, 'manifestHash', 'manifest_hash', '')),
+    sourceFingerprint: String(readValue(row, 'sourceFingerprint', 'source_fingerprint', readValue(snapshot, 'sourceSha256', 'source_sha256', ''))),
+    diagnostics: asArray(readValue(row, 'diagnostics', 'diagnostics', [])).map(toPackageImportDiagnostic),
+    importReviewRequired: asBoolean(readValue(row, 'importReviewRequired', 'import_review_required', false)),
+    manifest: toPackageManifest(row.manifest),
+    sourceSnapshot: {
+      sourceSha256: String(readValue(snapshot, 'sourceSha256', 'source_sha256', '')),
+      sourceCommit: readValue(snapshot, 'sourceCommit', 'source_commit', undefined),
+      sourceRef: readValue(snapshot, 'sourceRef', 'source_ref', undefined),
+      files: asArray(snapshot.files).map((item) => { const file = asRecord(item); return { path: String(file.path ?? ''), sha256: String(file.sha256 ?? ''), sizeBytes: asNumber(readValue(file, 'sizeBytes', 'size_bytes', 0)) } }),
+    },
+  }
+}
+function toPackageInspectionResult(value: unknown): PackageInspectionResult {
+  if (Array.isArray(value)) {
+    const packages = value.map(toInspectedPackage)
+    return { reviewId: '', sourceFingerprint: packages[0]?.sourceFingerprint || packages[0]?.sourceSnapshot.sourceSha256 || '', packages }
+  }
+  const row = asRecord(value)
+  const packages = asArray(row.packages).map(toInspectedPackage)
+  return {
+    reviewId: String(readValue(row, 'reviewId', 'review_id', '')),
+    sourceFingerprint: String(readValue(row, 'sourceFingerprint', 'source_fingerprint', packages[0]?.sourceFingerprint || packages[0]?.sourceSnapshot.sourceSha256 || '')),
+    resolvedCommitSha: readValue(row, 'resolvedCommitSha', 'resolved_commit_sha', undefined),
+    packages,
+  }
+}
+function toPackageImportReview(value: unknown): PackageImportReview {
+  const row = asRecord(value)
+  return {
+    id: String(row.id ?? ''),
+    source: String(row.source ?? row.source_type ?? ''),
+    sourceSha: String(readValue(row, 'sourceSha', 'source_sha', '')),
+    sourceRef: (readValue(row, 'sourceRef', 'source_ref', null) as string | null) ?? null,
+    inspection: asObject(row.inspection),
+    securityFindings: asObject(readValue(row, 'securityFindings', 'security_findings', {})),
+    status: String(row.status ?? 'scanning'),
+    reviewer: (row.reviewer as string | null | undefined) ?? null,
+    decision: row.decision && typeof row.decision === 'object' ? asObject(row.decision) : null,
+    createdAt: asNumber(readValue(row, 'createdAt', 'created_at', 0)),
+    updatedAt: asNumber(readValue(row, 'updatedAt', 'updated_at', 0)),
+  }
+}
+function toSkillRuntimeCapabilities(value: unknown): SkillRuntimeCapabilities {
+  const row = asRecord(value)
+  const sourcePolicy = asObject(readValue(row, 'sourcePolicy', 'source_policy', {}))
+  const capabilityPolicy = asObject(readValue(row, 'capabilityPolicy', 'capability_policy', {}))
+  const limits = asNumberRecord(row.limits)
+  return {
+    operationalStatus: String(readValue(row, 'operationalStatus', 'operational_status', 'disabled')) as SkillRuntimeCapabilities['operationalStatus'],
+    statusReason: String(readValue(row, 'statusReason', 'status_reason', 'runtime_disabled')),
+    canManage: asBoolean(readValue(row, 'canManage', 'can_manage', false)), canExecute: asBoolean(readValue(row, 'canExecute', 'can_execute', false)),
+    sourcePolicy: { allowedKinds: asStringArray(readValue(sourcePolicy, 'allowedKinds', 'allowed_kinds', [])) },
+    capabilityPolicy: { allowedCapabilities: asStringArray(readValue(capabilityPolicy, 'allowedCapabilities', 'allowed_capabilities', [])) },
+    protocolVersion: String(readValue(row, 'protocolVersion', 'protocol_version', '')), configVersion: String(readValue(row, 'configVersion', 'config_version', '')),
+    runtimeEnabled: asBoolean(readValue(row, 'runtimeEnabled', 'runtime_enabled', false)), packageExecutionEnabled: asBoolean(readValue(row, 'packageExecutionEnabled', 'package_execution_enabled', false)), importEnabled: asBoolean(readValue(row, 'importEnabled', 'import_enabled', false)), githubImportEnabled: asBoolean(readValue(row, 'githubImportEnabled', 'github_import_enabled', false)), npxImportEnabled: asBoolean(readValue(row, 'npxImportEnabled', 'npx_import_enabled', false)), creatorEnabled: asBoolean(readValue(row, 'creatorEnabled', 'creator_enabled', false)), creatorPublishEnabled: asBoolean(readValue(row, 'creatorPublishEnabled', 'creator_publish_enabled', false)), limits,
+  }
+}
+function toSkillRuntimeDiagnostics(value: unknown): SkillRuntimeDiagnosticsSnapshot {
+  const row = asRecord(value)
+  const health = asRecord(row.health), worker = asRecord(row.worker), queue = asRecord(row.queue), migration = asRecord(row.migration), policy = asRecord(row.policy)
+  const metrics = row.metrics && typeof row.metrics === 'object' ? asRecord(row.metrics) : undefined
+  const result = {
+    generatedAt: readValue(row, 'generatedAt', 'generated_at', undefined),
+    health: { liveness: asBoolean(health.liveness), readiness: asBoolean(health.readiness), status: String(health.status ?? 'disabled'), availability: typeof health.availability === 'string' ? health.availability : undefined, legacyStatus: typeof health.legacyStatus === 'string' ? health.legacyStatus : typeof health.legacy_status === 'string' ? health.legacy_status : undefined, checks: asArray(health.checks).map((item) => { const check = asRecord(item); return { name: String(check.name ?? ''), status: String(check.status ?? 'warning'), message: typeof check.message === 'string' ? check.message : undefined } }) },
+    worker: { status: String(worker.status ?? 'unknown'), workerId: readValue(worker, 'workerId', 'worker_id', null), heartbeatAt: readValue(worker, 'heartbeatAt', 'heartbeat_at', undefined), activeRuns: readValue(worker, 'activeRuns', 'active_runs', undefined), concurrency: readValue(worker, 'concurrency', 'concurrency', undefined) },
+    queue: { depth: asNumber(queue.depth), queued: asNumber(queue.queued), leased: asNumber(queue.leased), retryWait: asNumber(readValue(queue, 'retryWait', 'retry_wait', 0)), dead: asNumber(queue.dead), lagMs: asNumber(readValue(queue, 'lagMs', 'lag_ms', 0)) },
+    migration: { current: readValue(migration, 'current', 'current_migration', null), applied: asStringArray(migration.applied), pending: asStringArray(migration.pending) }, policy: { version: String(policy.version ?? ''), configVersion: String(readValue(policy, 'configVersion', 'config_version', '')) },
+    recentFailures: asArray(readValue(row, 'recentFailures', 'recent_failures', [])).map((item) => { const failure = asRecord(item); return { runId: readValue(failure, 'runId', 'run_id', undefined), status: readValue(failure, 'status', 'status', undefined), errorCode: readValue(failure, 'errorCode', 'error_code', null), errorMessage: readValue(failure, 'errorMessage', 'error_message', null), updatedAt: readValue(failure, 'updatedAt', 'updated_at', undefined) } }),
+    metrics: metrics ? { generatedAt: readValue(metrics, 'generatedAt', 'generated_at', undefined), retentionMs: readValue(metrics, 'retentionMs', 'retention_ms', undefined), counters: asObject(metrics.counters) as SkillRuntimeDiagnosticsSnapshot['metrics'] extends infer M ? M extends { counters?: infer C } ? C : never : never } : undefined,
+  }
+  return JSON.parse(JSON.stringify(result)) as SkillRuntimeDiagnosticsSnapshot
+}
+function toRuntimeSettings(value: unknown): SkillRuntimeSettings {
+  const row = asObject(value)
+  return { ...row, import: asObject(row.import), security: asObject(row.security), artifacts: asObject(row.artifacts), runtime: asObject(row.runtime), updatedAt: readValue(row, 'updatedAt', 'updated_at', undefined), revision: asNumber(row.revision, undefined as unknown as number) }
+}
+function toFeatureFlags(value: unknown): SkillRuntimeFeatureFlags { return { ...Object.fromEntries(Object.entries(asObject(value)).map(([key, item]) => [key, asBoolean(item)])) } as SkillRuntimeFeatureFlags }
+function toDraftValidation(value: unknown): DraftValidation { const row = asRecord(value); const map = (items: unknown) => asArray(items).map((item) => { const issue = asRecord(item); return { path: readValue(issue, 'path', 'path', undefined), file: readValue(issue, 'file', 'file', undefined), line: readValue(issue, 'line', 'line', undefined), column: readValue(issue, 'column', 'column', undefined), message: String(issue.message ?? ''), code: readValue(issue, 'code', 'code', undefined) } }); return { valid: asBoolean(row.valid), errors: map(row.errors), warnings: map(row.warnings) } }
+function toDraftPreview(value: unknown): DraftPreview { const row = asRecord(value); return { draft: toDraft(row.draft), validation: toDraftValidation(row.validation), immutableVersion: row.immutableVersion ? asObject(row.immutableVersion) as DraftPreview['immutableVersion'] : undefined, capabilityRisks: asArray(row.capabilityRisks ?? row.capability_risks).map((item) => { const risk = asRecord(item); return { capability: String(risk.capability ?? ''), scope: asObject(risk.scope), severity: String(risk.severity ?? 'unknown') } }) } }
 
 function toSkillPackage(value: unknown): SkillPackage {
   const row = asRecord(value)
@@ -138,19 +267,6 @@ const SKILL_RUN_EVENT_TYPES = [
   'run.completed_with_errors', 'run.cancel_requested', 'run.cancelled', 'run.failed', 'ready',
 ] as const
 
-function asArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
 function toSkillRun(value: unknown): SkillRun {
   const row = asRecord(value)
   const requiredActionValue = readValue(row, 'requiredAction', 'required_action_json', row.required_action)
@@ -195,7 +311,7 @@ function toDraft(value: unknown): DraftDto {
   const row = asRecord(value)
   return {
     id: String(row.id ?? ''), ownerId: typeof row.ownerId === 'string' ? row.ownerId : typeof row.owner_id === 'string' ? row.owner_id : undefined,
-    content: asObject(row.content) as DraftDto['content'], baseVersionId: readValue(row, 'baseVersionId', 'base_version_id', null), revision: asNumber(row.revision),
+    content: normalizeSkillDraftContent(row.content), baseVersionId: readValue(row, 'baseVersionId', 'base_version_id', null), revision: asNumber(row.revision),
     status: typeof row.status === 'string' ? row.status : undefined, createdAt: readValue(row, 'createdAt', 'created_at', undefined), updatedAt: readValue(row, 'updatedAt', 'updated_at', undefined),
   }
 }
@@ -312,7 +428,31 @@ export function imageMediaUrl(genId: string): string {
 export const platform = {
   async getSkillRuntimeCapabilities(): Promise<SkillRuntimeCapabilitiesDto> {
     const { data } = await apiFetch('/skill-runtime/capabilities')
-    return data
+    return toSkillRuntimeCapabilities(data)
+  },
+  async getSkillRuntimeDiagnostics(): Promise<SkillRuntimeDiagnosticsSnapshot> {
+    const { data } = await apiFetch('/skill-runtime/diagnostics')
+    return toSkillRuntimeDiagnostics(data)
+  },
+  async getSkillRuntimeSettings(): Promise<SkillRuntimeSettings> {
+    const { data } = await apiFetch('/skill-runtime/settings')
+    return toRuntimeSettings(data)
+  },
+  async updateSkillRuntimeSettings(patch: Record<string, unknown>): Promise<SkillRuntimeSettings> {
+    const { data } = await apiFetch('/skill-runtime/settings', { method: 'PATCH', body: JSON.stringify(patch) })
+    return toRuntimeSettings(data)
+  },
+  async rollbackSkillRuntimeSettings(): Promise<SkillRuntimeSettings> {
+    const { data } = await apiFetch('/skill-runtime/settings/rollback', { method: 'POST', body: '{}' })
+    return toRuntimeSettings(data)
+  },
+  async getSkillRuntimeFeatureFlags(): Promise<SkillRuntimeFeatureFlags> {
+    const { data } = await apiFetch('/skill-runtime/feature-flags')
+    return toFeatureFlags(data)
+  },
+  async updateSkillRuntimeFeatureFlags(patch: Record<string, boolean>): Promise<SkillRuntimeFeatureFlags> {
+    const { data } = await apiFetch('/skill-runtime/feature-flags', { method: 'PATCH', body: JSON.stringify(patch) })
+    return toFeatureFlags(data)
   },
   async listChatEligibleSkills(sessionId: string): Promise<ChatSkillReferenceDto[]> {
     const { data } = await apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}/skills`)
@@ -344,9 +484,14 @@ export const platform = {
     const { data } = await apiFetch(`/skill-runs/${encodeURIComponent(runId)}/events?afterSeq=${encodeURIComponent(String(afterSeq))}`)
     return Array.isArray(data) ? data.map(toSkillRunEvent) : []
   },
-  async getSkillPackages(input: PaginationInput = {}): Promise<Page<SkillPackage>> {
-    const limit = input.limit ?? 20, offset = input.offset ?? 0
-    return page(await apiFetch(`/skill-packages?limit=${limit}&offset=${offset}`), toSkillPackage)
+  async getSkillPackages(input: PackageListInput = {}): Promise<Page<SkillPackage>> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20), offset: String(input.offset ?? 0) })
+    if (input.search?.trim()) query.set('search', input.search.trim())
+    if (input.sourceType?.trim()) query.set('sourceType', input.sourceType.trim())
+    if (input.includeArchived !== undefined) query.set('includeArchived', String(input.includeArchived))
+    if (input.sort) query.set('sort', input.sort)
+    if (input.direction) query.set('direction', input.direction)
+    return page(await apiFetch(`/skill-packages?${query.toString()}`), toSkillPackage)
   },
   async getSkillInstallations(input: PaginationInput = {}): Promise<Page<SkillInstallation>> {
     const limit = input.limit ?? 20, offset = input.offset ?? 0
@@ -368,9 +513,9 @@ export const platform = {
     const { data } = await apiFetch(`/skill-versions/${encodeURIComponent(fromVersionId)}/diff?toVersionId=${encodeURIComponent(toVersionId)}`)
     return asObject(data)
   },
-  async inspectSkillPackage(source: PackageSource): Promise<InspectedPackage[]> {
+  async inspectSkillPackage(source: PackageSource): Promise<PackageInspectionResult> {
     const { data } = await apiFetch('/skill-packages/inspect', { method: 'POST', body: JSON.stringify({ source }) })
-    return Array.isArray(data) ? data as InspectedPackage[] : []
+    return toPackageInspectionResult(data)
   },
   async installSkillPackage(input: PackageInstallInput): Promise<PackageDetail | Record<string, unknown>> {
     const { data } = await apiFetch('/skill-packages/install', { method: 'POST', body: JSON.stringify(input) })
@@ -494,17 +639,17 @@ export const platform = {
     const { data } = await apiFetch(`/skill-capability-grants/${encodeURIComponent(grantId)}/revoke`, { method: 'POST', body: JSON.stringify(input ?? { actor: 'local-user' }) })
     return data && typeof data === 'object' ? toCapability(data) : asObject(data)
   },
-  async getImportReview(reviewId: string): Promise<Record<string, unknown>> {
+  async getImportReview(reviewId: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}`)
-    return asObject(data)
+    return toPackageImportReview(data)
   },
-  async approveImportReview(reviewId: string, reviewer: string): Promise<Record<string, unknown>> {
+  async approveImportReview(reviewId: string, reviewer: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/approve`, { method: 'POST', body: JSON.stringify({ reviewer }) })
-    return asObject(data)
+    return toPackageImportReview(data)
   },
-  async rejectImportReview(reviewId: string, reviewer: string, reason?: string): Promise<Record<string, unknown>> {
+  async rejectImportReview(reviewId: string, reviewer: string, reason?: string): Promise<PackageImportReview> {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/reject`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) })
-    return asObject(data)
+    return toPackageImportReview(data)
   },
   async createSkillDraft(input: { content: SkillDraftContent; baseVersionId?: string }): Promise<DraftDto> {
     const { data } = await apiFetch('/skill-drafts', { method: 'POST', body: JSON.stringify(input) })
@@ -522,17 +667,22 @@ export const platform = {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE' })
     return toDraft(data)
   },
+  async listSkillDrafts(input: DraftListInput = {}): Promise<Page<DraftDto>> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20), offset: String(input.offset ?? 0) })
+    if (input.status) query.set('status', input.status)
+    return page(await apiFetch(`/skill-drafts?${query.toString()}`), toDraft)
+  },
   async validateSkillDraft(draftId: string): Promise<DraftValidation> {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}/validate`, { method: 'POST', body: '{}' })
-    return data as DraftValidation
+    return toDraftValidation(data)
   },
   async previewSkillDraft(draftId: string): Promise<DraftPreview> {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}/preview`, { method: 'POST', body: '{}' })
-    return data as DraftPreview
+    return toDraftPreview(data)
   },
-  async publishSkillDraft(draftId: string, input: { enable?: boolean } = {}): Promise<Record<string, unknown>> {
+  async publishSkillDraft(draftId: string, input: { enable?: boolean; expectedRevision?: number; idempotencyKey?: string } = {}): Promise<CreatorPublishResult> {
     const { data } = await apiFetch(`/skill-drafts/${encodeURIComponent(draftId)}/publish`, { method: 'POST', body: JSON.stringify(input) })
-    return asObject(data)
+    return normalizeCreatorPublishResult(data)
   },
   // Sessions
   async getSessions() {

@@ -1,10 +1,11 @@
+import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import type { SkillRuntimeConfig } from '../config/skill-runtime.config'
 import type { SkillRunQueueSnapshot } from '../application/ports'
 import { SkillRuntimeMetrics, type SkillRuntimeMetricSnapshot } from './skill-runtime.metrics'
 import { sanitizeErrorMessage } from '../../logger/logger'
 
 export type RuntimeDiagnosticsConfig = Partial<Pick<SkillRuntimeConfig,
-  'protocolVersion' | 'configVersion' | 'runtimeEnabled' | 'packageExecutionEnabled' | 'eventRetentionDays' | 'artifactRetentionDays'
+  'protocolVersion' | 'configVersion' | 'runtimeEnabled' | 'packageExecutionEnabled' | 'workerConcurrency' | 'eventRetentionDays' | 'artifactRetentionDays'
 >> & {
   policyVersion?: string
   logRetentionDays?: number
@@ -32,10 +33,16 @@ export type RuntimeHealthCheck = {
   message?: string
 }
 
+export type RuntimeAvailability = 'healthy' | 'degraded' | 'disabled'
+export type RuntimeLegacyHealthStatus = 'ready' | 'not_ready' | 'degraded'
+
 export type RuntimeHealth = {
   liveness: boolean
   readiness: boolean
-  status: 'ready' | 'not_ready' | 'degraded'
+  status: RuntimeAvailability
+  availability: RuntimeAvailability
+  /** Compatibility value for consumers that still understand the pre-v1.2 names. */
+  legacyStatus: RuntimeLegacyHealthStatus
   checks: RuntimeHealthCheck[]
 }
 
@@ -63,6 +70,11 @@ export type RuntimeDiagnosticsSnapshot = {
   queue: RuntimeQueueDiagnostics
   migration: RuntimeMigrationStatus
   policy: { version: string; configVersion: string }
+  configuration: {
+    workerConcurrency: number
+    packageExecutionEnabled: boolean
+    runtimeEnabled: boolean
+  }
   metrics: SkillRuntimeMetricSnapshot
   recentFailures: RuntimeDiagnosticsFailure[]
 }
@@ -86,10 +98,6 @@ function safeVersion(value: string | undefined | null): string {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : 'unknown'
 }
 
-function safeStatus(value: string | undefined): RuntimeHealth['status'] {
-  return value === 'crashed' ? 'degraded' : 'ready'
-}
-
 function safeError(value: string | null | undefined): string | null {
   if (!value) return null
   const sanitized = sanitizeErrorMessage(value)
@@ -103,7 +111,7 @@ function safeError(value: string | null | undefined): string | null {
 }
 
 export function getRuntimeHealth(input: Pick<RuntimeDiagnosticsInput, 'config' | 'migrations' | 'worker'> = {}): RuntimeHealth {
-  const config = input.config ?? {}
+  const config = (input.config ?? getSkillRuntimeConfig()) as RuntimeDiagnosticsConfig
   const migrations = input.migrations ?? { current: null, applied: [], pending: [] }
   const worker = input.worker
   const checks: RuntimeHealthCheck[] = []
@@ -126,10 +134,23 @@ export function getRuntimeHealth(input: Pick<RuntimeDiagnosticsInput, 'config' |
   if (workerDegraded) checks.push({ name: 'worker', status: 'warning', message: safeError(worker?.lastError) ?? 'Worker crashed' })
   else if (worker && worker.status !== 'running' && readiness) checks.push({ name: 'worker', status: 'warning', message: `Worker status: ${worker.status}` })
 
+  const availability: RuntimeAvailability = !runtimeEnabled
+    ? 'disabled'
+    : !readiness || workerDegraded
+      ? 'degraded'
+      : 'healthy'
+  const legacyStatus: RuntimeLegacyHealthStatus = !readiness
+    ? 'not_ready'
+    : workerDegraded
+      ? 'degraded'
+      : 'ready'
+
   return {
     liveness: true,
     readiness,
-    status: !readiness ? 'not_ready' : workerDegraded ? 'degraded' : safeStatus(worker?.status),
+    status: availability,
+    availability,
+    legacyStatus,
     checks,
   }
 }
@@ -152,7 +173,7 @@ export function getRuntimeDiagnostics(input: RuntimeDiagnosticsInput = {}): Runt
     dead,
     lagMs: lagCandidates.length ? Math.max(...lagCandidates) : 0,
   }
-  const config = input.config ?? {}
+  const config = (input.config ?? getSkillRuntimeConfig()) as RuntimeDiagnosticsConfig
   const migrations = input.migrations ?? { current: null, applied: [], pending: [] }
   const worker = input.worker ?? { status: 'not_configured' as const }
   const metrics = input.metrics ?? SkillRuntimeMetrics.global()
@@ -187,6 +208,11 @@ export function getRuntimeDiagnostics(input: RuntimeDiagnosticsInput = {}): Runt
     policy: {
       version: safeVersion(config.policyVersion),
       configVersion: safeVersion(config.configVersion),
+    },
+    configuration: {
+      workerConcurrency: Number.isSafeInteger(config.workerConcurrency) ? config.workerConcurrency as number : 1,
+      packageExecutionEnabled: config.packageExecutionEnabled !== false,
+      runtimeEnabled: config.runtimeEnabled !== false,
     },
     metrics: metrics.snapshot(),
     recentFailures,

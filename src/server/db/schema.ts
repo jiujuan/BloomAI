@@ -297,6 +297,7 @@ export const skill_run_commands = sqliteTable('skill_run_commands', {
 export const skill_artifacts = sqliteTable('skill_artifacts', {
   id: text('id').primaryKey(),
   run_id: text('run_id').notNull(),
+  skill_version_id: text('skill_version_id'),
   kind: text('kind').notNull(),
   artifact_kind: text('artifact_kind').notNull().default('unknown'),
   mime_type: text('mime_type'),
@@ -304,6 +305,7 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
   relative_path: text('relative_path').notNull().default(''),
   size_bytes: integer('size_bytes').notNull().default(0),
   sha256: text('sha256').notNull(),
+  status: text('status').notNull().default('ready'),
   metadata_json: text('metadata_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
   retention_until: integer('retention_until'),
@@ -312,6 +314,7 @@ export const skill_artifacts = sqliteTable('skill_artifacts', {
 }, (table) => ({
   runIdx: index('idx_skill_artifacts_run').on(table.run_id),
   runCreatedIdx: index('idx_skill_artifacts_run_created').on(table.run_id, table.created_at),
+  versionIdx: index('idx_skill_artifacts_version').on(table.skill_version_id),
   retentionIdx: index('idx_skill_artifacts_retention').on(table.retention_until, table.exported_at),
 }))
 
@@ -403,6 +406,42 @@ export const skill_legacy_migrations = sqliteTable('skill_legacy_migrations', {
   packageIdx: index('idx_skill_legacy_migrations_package').on(table.package_id, table.package_version_id),
 }))
 
+export const skill_legacy_archives = sqliteTable('skill_legacy_archives', {
+  id: text('id').primaryKey(),
+  archive_key: text('archive_key').notNull(),
+  source_type: text('source_type').notNull(),
+  legacy_skill_id: text('legacy_skill_id'),
+  source_sha256: text('source_sha256').notNull(),
+  payload_json: text('payload_json').notNull().default('{}'),
+  redaction_json: text('redaction_json').notNull().default('{}'),
+  read_only: integer('read_only').notNull().default(1),
+  archived_at: integer('archived_at').notNull(),
+}, (table) => ({
+  archiveKeyIdx: uniqueIndex('idx_skill_legacy_archives_key').on(table.archive_key),
+  legacySkillIdx: index('idx_skill_legacy_archives_legacy_skill').on(table.legacy_skill_id, table.archived_at),
+}))
+
+export const skill_legacy_migration_runs = sqliteTable('skill_legacy_migration_runs', {
+  id: text('id').primaryKey(),
+  phase: text('phase').notNull(),
+  status: text('status').notNull(),
+  backup_manifest_path: text('backup_manifest_path').notNull(),
+  backup_manifest_sha256: text('backup_manifest_sha256').notNull(),
+  source_counts_json: text('source_counts_json').notNull().default('{}'),
+  target_counts_before_json: text('target_counts_before_json').notNull().default('{}'),
+  target_counts_after_json: text('target_counts_after_json').notNull().default('{}'),
+  reconciliation_json: text('reconciliation_json').notNull().default('{}'),
+  manual_review_count: integer('manual_review_count').notNull().default(0),
+  gate_status: text('gate_status').notNull(),
+  rollback_json: text('rollback_json').notNull().default('{}'),
+  last_error: text('last_error'),
+  created_at: integer('created_at').notNull(),
+  updated_at: integer('updated_at').notNull(),
+}, (table) => ({
+  statusIdx: index('idx_skill_legacy_migration_runs_status').on(table.status, table.updated_at),
+  phaseIdx: index('idx_skill_legacy_migration_runs_phase').on(table.phase, table.created_at),
+}))
+
 export const skill_audit_events = sqliteTable('skill_audit_events', {
   id: text('id').primaryKey(),
   actor: text('actor'),
@@ -428,6 +467,8 @@ export const skill_drafts = sqliteTable('skill_drafts', {
   validation_json: text('validation_json').notNull().default('{}'),
   base_version_id: text('base_version_id'),
   published_version_id: text('published_version_id'),
+  publish_idempotency_key: text('publish_idempotency_key'),
+  publish_result_json: text('publish_result_json').notNull().default('{}'),
   created_at: integer('created_at').notNull(),
   updated_at: integer('updated_at').notNull(),
 }, (table) => ({

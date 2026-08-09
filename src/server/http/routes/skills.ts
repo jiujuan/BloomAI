@@ -1,8 +1,7 @@
 import { Hono } from 'hono'
 import { mapErrorToHttpResponse } from '../error-mapper'
-import { skillService } from '../../services/skill.service'
+import { skillService, skillsFacade } from '../../services/skill.service'
 import { readJson, readIntQuery } from '../util'
-import { skillsFacade } from '../../skills/application/skills-facade.service'
 
 export const skillsRoutes = new Hono()
 

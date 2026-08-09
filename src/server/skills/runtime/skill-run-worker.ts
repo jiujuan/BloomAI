@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { JsonObject, SkillRunQueueSnapshot } from '../application/ports'
+import type { Clock, JsonObject, SkillRunQueueSnapshot } from '../application/ports'
 import type { RuntimeWorkerStatus } from '../observability/skill-runtime.diagnostics'
 import type { SkillRuntimeMetrics } from '../observability/skill-runtime.metrics'
 import { withSkillCorrelation } from '../observability/skill-runtime.logger'
@@ -33,6 +33,7 @@ export type SkillRunWorkerOptions = {
   readonly pollIntervalMs?: number
   readonly retryDelayMs?: (attempt: number) => number
   readonly metrics?: SkillRuntimeMetrics
+  readonly clock?: Clock
 }
 
 export class SkillRunWorker {
@@ -42,6 +43,7 @@ export class SkillRunWorker {
   private readonly pollIntervalMs: number
   private readonly retryDelayMs: (attempt: number) => number
   private readonly metrics?: SkillRuntimeMetrics
+  private readonly clock: Clock
   private readonly active = new Set<Promise<boolean>>()
   private activeRunCount = 0
   private running = false
@@ -60,6 +62,7 @@ export class SkillRunWorker {
     this.pollIntervalMs = options.pollIntervalMs ?? 250
     this.retryDelayMs = options.retryDelayMs ?? ((attempt) => Math.min(60_000, 100 * 2 ** Math.max(0, attempt - 1)))
     this.metrics = options.metrics
+    this.clock = options.clock ?? { now: () => Date.now() }
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) throw new Error('concurrency must be a positive integer')
     if (!Number.isInteger(this.leaseMs) || this.leaseMs < 1) throw new Error('leaseMs must be a positive integer')
     if (!options.executor && !options.adapter) throw new Error('executor or adapter is required')
@@ -84,7 +87,7 @@ export class SkillRunWorker {
     this.running = true
     this.shutdownRequested = false
     this.drainRequested = false
-    this.heartbeatAt = Date.now()
+    this.heartbeatAt = this.clock.now()
     this.operationalStatus = 'running'
     this.loopPromise = this.pump()
   }
@@ -122,13 +125,13 @@ export class SkillRunWorker {
 
     this.activeRunCount += 1
     return withSkillCorrelation({ runId: item.runId, workerId: this.workerId }, async () => {
-      const startedAt = Date.now()
+      const startedAt = this.clock.now()
       const abortController = new AbortController()
       this.controllers.add(abortController)
       let leaseLost = false
       let run: SkillRun | undefined
       const heartbeatTimer = setInterval(() => {
-        this.heartbeatAt = Date.now()
+        this.heartbeatAt = this.clock.now()
         const lease = this.options.queue.heartbeat(item.id, this.workerId, this.leaseMs)
         if (!lease) {
           leaseLost = true
@@ -221,7 +224,7 @@ export class SkillRunWorker {
     try {
       this.metrics.recordRun({
         status: run?.status ?? 'failed',
-        durationMs: Math.max(0, Date.now() - startedAt),
+        durationMs: Math.max(0, this.clock.now() - startedAt),
         ...flags,
         correlation: {
           runId: item.runId,

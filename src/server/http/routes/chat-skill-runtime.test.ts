@@ -16,8 +16,8 @@ async function loadApi() {
   const { skillPackageRepo } = await import('../../db/repositories/skill-package.repo')
   const { sessionRepo } = await import('../../db/repositories/session.repo')
   const { messageRepo } = await import('../../db/repositories/message.repo')
-  const { skillRepo } = await import('../../db/repositories/skill.repo')
-  return { app: createHonoApp(), client, skillPackageRepo, sessionRepo, messageRepo, skillRepo }
+  const { legacySkillRepo } = await import('../../db/repositories/skill.repo')
+  return { app: createHonoApp(), client, skillPackageRepo, sessionRepo, messageRepo, legacySkillRepo }
 }
 
 describe('Chat Package Skill routes', () => {
@@ -82,9 +82,9 @@ describe('Chat Package Skill routes', () => {
   })
 
   it('blocks a Legacy chat reference before idempotency, Run, or message side effects', async () => {
-    const { app, skillRepo, sessionRepo, messageRepo, skillPackageRepo } = await loadApi()
+    const { app, legacySkillRepo, sessionRepo, messageRepo, skillPackageRepo } = await loadApi()
     const session = sessionRepo.create({ title: 'Legacy Chat' })
-    const legacy = skillRepo.create({
+    const legacy = legacySkillRepo.create({
       name: 'Legacy Prompt',
       description: 'archive only',
       type: 'prompt-template',

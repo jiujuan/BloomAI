@@ -140,6 +140,7 @@ describe('CapabilityBroker injected ports', () => {
     expect(observedCorrelation).toEqual({
       runId: run.id,
       skillVersionId: version.id,
+      versionId: version.id,
       grantId: grant.id,
     })
     expect(grant.id).toEqual(expect.any(String))

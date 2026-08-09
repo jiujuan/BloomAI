@@ -148,7 +148,7 @@ export class SkillRunCoordinator {
     sessionId?: string
     imageSessionId?: string
   }): { runId: string } {
-    const initialEvent = normalizeSkillRunEvent({ type: 'input.summarized', payload: inputSummary(input.input) })
+    const initialEvent = normalizeSkillRunEvent({ type: 'input.summarized', payload: inputSummary(input.input), occurredAt: this.clock.now() })
     const created = this.runs.createRunAndEnqueue && this.queue
       ? this.runs.createRunAndEnqueue({
         skillVersionId: input.skillVersionId,
@@ -186,7 +186,7 @@ export class SkillRunCoordinator {
   }
 
   subscribeEvents(runId: string, afterSeq = 0): SkillRunEvent[] {
-    return this.events.listEvents(runId)
+    return this.events.listEvents(runId, { afterSeq })
       .filter((event) => event.seq > afterSeq)
       .map(mapEvent)
   }
@@ -246,7 +246,7 @@ export class SkillRunCoordinator {
         cancelReason: data.cancelReason ?? (targetStatus === 'cancelled' ? 'user_cancelled' : undefined),
         lastCheckpoint: data.lastCheckpoint,
       },
-      event,
+      event: { ...event, occurredAt: now },
     })
     if (!result) throw new SkillRunConflictError(runId)
     if (approvalWaitMs > 0) {
@@ -372,6 +372,7 @@ export class SkillRunCoordinator {
             reason: 'process_interrupted',
             cancelReason: 'process_crash',
           })
+          this.enqueueIfInactive(run.id)
           count += 1
         } catch (error) {
           if (!(error instanceof SkillRunConflictError)) throw error
@@ -403,14 +404,15 @@ export class SkillRunCoordinator {
         waitingSince: null,
         waitingExpiresAt: null,
         requiredAction: null,
-        startedAt: targetStatus === 'running' && current.startedAt === null ? this.clock.now() : undefined,
-        finishedAt: isTerminalStatus(targetStatus) ? this.clock.now() : null,
+        startedAt: targetStatus === 'running' && current.startedAt === null ? now : undefined,
+        finishedAt: isTerminalStatus(targetStatus) ? now : null,
         errorCode: targetStatus === 'failed' ? (changes.errorCode as string ?? 'RUN_FAILED') : targetStatus === 'cancelled' ? (changes.errorCode as string ?? 'RUN_CANCELLED') : null,
         errorMessage: targetStatus === 'failed' || targetStatus === 'cancelled' ? (changes.errorMessage as string ?? null) : null,
         cancelReason: targetStatus === 'cancelled' ? 'user_cancelled' : undefined,
       },
       event: normalizeSkillRunEvent({
         type: targetStatus === 'failed' ? 'run.failed' : targetStatus === 'cancelled' ? 'run.cancelled' : 'run.status_changed',
+        occurredAt: now,
         payload: {
           from: current.status,
           to: targetStatus,
@@ -443,7 +445,7 @@ export class SkillRunCoordinator {
       runId,
       expectedRevision,
       changes: { stepCount: usage.stepCount, tokenUsage: usage.tokenUsage, lastHeartbeatAt: usage.lastHeartbeatAt, heartbeatAt: usage.lastHeartbeatAt },
-      event: normalizeSkillRunEvent({ type: 'run.heartbeat', payload: { stepCount: usage.stepCount, tokenUsage: usage.tokenUsage } }),
+      event: normalizeSkillRunEvent({ type: 'run.heartbeat', payload: { stepCount: usage.stepCount, tokenUsage: usage.tokenUsage }, occurredAt: this.clock.now() }),
     })
     if (!result) throw new SkillRunConflictError(runId)
     return mapRun(result.run)
@@ -461,8 +463,8 @@ export class SkillRunCoordinator {
       expectedRevision: command.expectedRevision,
       changes,
       event: normalizeSkillRunEvent(eventType === 'input.summarized'
-        ? { type: eventType, payload: inputSummary(changes.input ?? {}) }
-        : { type: eventType, payload: { revision: command.expectedRevision + 1 } }),
+        ? { type: eventType, payload: inputSummary(changes.input ?? {}), occurredAt: this.clock.now() }
+        : { type: eventType, payload: { revision: command.expectedRevision + 1 }, occurredAt: this.clock.now() }),
       command: { idempotencyKey: command.idempotencyKey },
     })
     if (!result) throw new SkillRunConflictError(runId)

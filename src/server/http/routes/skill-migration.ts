@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import { z } from 'zod'
 import { mapErrorToHttpResponse } from '../error-mapper'
 import { ServiceError } from '../../services/errors'
-import { createMigrationControlService, type MigrationContext } from '../../skills/migration/migration-control.service'
+import { createMigrationControlService, type MigrationContext } from '../../services/skill-migration.service'
 
 const idSchema = z.string().trim().min(1).max(200)
 const emptyBodySchema = z.object({}).strict()

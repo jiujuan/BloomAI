@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { useSkillRuntimeStore } from './skill-runtime.store'
-import type { DraftDto, DraftPreview, DraftValidation, SkillDraftContent } from './skill-runtime.types'
+import { getPublishedPackageId, getCreatorCapabilityRisk, normalizeSkillDraftContent } from './skill-runtime.types'
+import type { CreatorPublishResult, DraftDto, DraftPreview, DraftValidation, SkillDraftContent } from './skill-runtime.types'
 import { SkillCreatorEditor } from './SkillCreatorEditor'
 import { SkillCreatorPreview } from './SkillCreatorPreview'
 import { SkillCreatorValidationPanel } from './SkillCreatorValidationPanel'
 import { SkillCreatorPublishDialog } from './SkillCreatorPublishDialog'
 
-const emptyContent: SkillDraftContent = { name: 'New Skill', slug: 'new-skill', version: '0.1.0', description: '', skillMd: '# New Skill\n', references: {}, assets: [], capabilities: [], visibility: 'private' }
+const emptyContent: SkillDraftContent = { runtimeKind: 'package', name: 'New Skill', slug: 'new-skill', version: '0.1.0', description: '', skillMd: '# New Skill\n', references: {}, assets: [], capabilities: [], visibility: 'private' }
 
-type CreatorDraftEntryProps = { draftId: string | null; onCreated: () => void | Promise<void> }
+type CreatorDraftEntryProps = { draftId: string | null; onCreated: () => void | Promise<void>; onPublished?: (result: CreatorPublishResult) => void | Promise<void> }
+
+export { getCreatorCapabilityRisk, getPublishedPackageId }
 
 export function canPublishCreatorDraft(validation: DraftValidation | null, preview: DraftPreview | null) {
   return Boolean(validation?.valid && preview?.validation.valid && preview.draft)
@@ -19,10 +22,10 @@ function isRevisionConflict(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'REVISION_CONFLICT')
 }
 
-export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryProps) {
+export function SkillCreatorWorkbench({ draftId, onCreated, onPublished }: CreatorDraftEntryProps) {
   const runtime = useSkillRuntimeStore()
   const serverDraft = draftId ? runtime.drafts[draftId] : null
-  const [content, setContent] = useState<SkillDraftContent | null>(serverDraft?.content || null)
+  const [content, setContent] = useState<SkillDraftContent | null>(serverDraft ? normalizeSkillDraftContent(serverDraft.content) : null)
   const [revision, setRevision] = useState(serverDraft?.revision || 0)
   const [validation, setValidation] = useState<DraftValidation | null>(null)
   const [preview, setPreview] = useState<DraftPreview | null>(null)
@@ -46,7 +49,7 @@ export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryP
     }
     const existing = runtime.drafts[draftId]
     if (existing) {
-      setContent(existing.content)
+      setContent(normalizeSkillDraftContent(existing.content))
       setRevision(existing.revision)
       setDirty(false)
       return () => { active = false }
@@ -54,7 +57,7 @@ export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryP
     setContent(null)
     void runtime.loadDraft(draftId).then((draft) => {
       if (!active) return
-      setContent(draft.content)
+      setContent(normalizeSkillDraftContent(draft.content))
       setRevision(draft.revision)
       setDirty(false)
     }).catch(() => undefined)
@@ -67,7 +70,7 @@ export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryP
       try {
         const saved = await runtime.updateDraft(draftId, { expectedRevision: revision, patch: content })
         setRevision(saved.revision)
-        setContent(saved.content)
+        setContent(normalizeSkillDraftContent(saved.content))
         setDirty(false)
         setConflict(false)
         setMessage('Autosave 已保存。')
@@ -86,11 +89,11 @@ export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryP
   const editorDisabled = !content || busy !== null || conflict
   const validationEvidence = useMemo(() => validation && preview ? { validation, preview } : null, [validation, preview])
 
-  if (!draftId) return <section className="skills-center-panel skills-creator-entry" aria-labelledby="skills-creator-title"><div className="skills-eyebrow"><ShieldCheck size={14} /> Skills Creator</div><h2 id="skills-creator-title">Skills Creator</h2><p>创建一个由 server 管理 revision 的 Draft，编辑 metadata、SKILL.md、references/assets 和 capability 请求。</p><div className="skills-creator-flag">Publish feature flag: <strong>{publishEnabled ? 'enabled' : 'disabled'}</strong></div><button type="button" className="skills-button primary" onClick={() => void onCreated()}>新建 Draft</button></section>
+  if (!draftId) return <section className="skills-center-panel skills-creator-entry" aria-labelledby="skills-creator-title"><div className="skills-eyebrow"><ShieldCheck size={14} /> Skills Creator</div><h2 id="skills-creator-title">Skills Creator</h2><p>创建一个由 server 管理 revision 的 Draft，编辑 metadata、SKILL.md、references/assets 和 capability 请求。</p><div className="skills-creator-runtime-summary"><strong>Package Runtime</strong><span>Creator Draft 只允许发布到当前 Package Runtime。</span></div><div className="skills-creator-flag">Publish feature flag: <strong>{publishEnabled ? 'enabled' : 'disabled'}</strong></div><button type="button" className="skills-button primary" onClick={() => void onCreated()}>新建 Draft</button></section>
   if (!content) return <section className="skills-center-panel" role="status"><LoaderCircle className="spin" size={16} />正在加载 Draft…</section>
 
   const updateContent = (next: SkillDraftContent) => {
-    setContent(next)
+    setContent(normalizeSkillDraftContent(next))
     setDirty(true)
     setValidation(null)
     setPreview(null)
@@ -111,14 +114,24 @@ export function SkillCreatorWorkbench({ draftId, onCreated }: CreatorDraftEntryP
     try { await runtime.discardDraft(draftId); await onCreated() } catch { /* store exposes error */ } finally { setBusy(null) }
   }
   const publish = async (input: { enable?: boolean }) => {
+    if (!canPublishCreatorDraft(validation, preview)) {
+      setMessage('Validation error 或 Preview evidence 未通过，不能发布。')
+      return
+    }
     setBusy('publish')
-    try { await runtime.publishDraft(draftId, input); setPublishOpen(false); setMessage('Publish 已提交，server 将记录 immutable version。') } catch { /* store exposes error */ } finally { setBusy(null) }
+    try {
+      const result = await runtime.publishDraft(draftId, input)
+      setPublishOpen(false)
+      const packageId = getPublishedPackageId(result)
+      setMessage(packageId ? `Publish 成功：Package ${packageId} · Version ${result.versionId || '—'} · Installation ${result.installationId || '—'}` : 'Publish 已提交，但 server 未返回 Package relation。')
+      await onPublished?.(result)
+    } catch { /* store exposes error */ } finally { setBusy(null) }
   }
   const refreshServerTruth = async () => {
     setBusy('refresh')
     try {
       const fresh = await runtime.loadDraft(draftId)
-      setContent(fresh.content)
+      setContent(normalizeSkillDraftContent(fresh.content))
       setRevision(fresh.revision)
       setDirty(false)
       setConflict(false)

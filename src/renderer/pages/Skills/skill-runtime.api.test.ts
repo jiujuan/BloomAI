@@ -90,6 +90,22 @@ afterEach(() => {
 })
 
 describe('Package Runtime renderer API', () => {
+  it('unwraps the runtime diagnostics response envelope and calls the protected endpoint', async () => {
+    const diagnostics = {
+      health: { liveness: true, readiness: true, status: 'ready', checks: [] },
+      worker: { status: 'running', workerId: 'worker-1' },
+      queue: { depth: 0, queued: 0, leased: 0, retryWait: 0, dead: 0, lagMs: 0 },
+      migration: { current: '043', applied: ['043'], pending: [] },
+      policy: { version: 'skills-policy-v1.1', configVersion: '2026-08-06' },
+      recentFailures: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: diagnostics, meta: { requestId: 'req-diagnostics-1' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.getSkillRuntimeDiagnostics()).resolves.toEqual(diagnostics)
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/skill-runtime/diagnostics`, expect.any(Object))
+  })
+
   it('provides typed package, version, installation and run pagination without exposing DB row names', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [packageRow], meta: { limit: 2, offset: 4, total: 5, hasMore: false, nextOffset: null } }))
@@ -145,6 +161,56 @@ describe('Package Runtime renderer API', () => {
     expect(received).toEqual([expect.objectContaining({ runId: 'run-1', seq: 8, type: 'run.status_changed' })])
     subscription.close()
     expect(source.closed).toBe(true)
+  })
+
+  it('encodes package filters and normalizes runtime settings and feature flag DTOs', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [packageRow], meta: { limit: 5, offset: 0, total: 1, hasMore: false, nextOffset: null } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { import: { allowedKinds: ['github'] }, security: {}, artifacts: {}, runtime: {}, revision: 3 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { runtime_enabled: true, creator_enabled: false } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await platform.getSkillPackages({ limit: 5, search: 'a/b & c', sourceType: 'github/archive', includeArchived: true, sort: 'updatedAt', direction: 'desc' })
+    await expect(platform.getSkillRuntimeSettings()).resolves.toMatchObject({ import: { allowedKinds: ['github'] }, revision: 3 })
+    await expect(platform.getSkillRuntimeFeatureFlags()).resolves.toEqual({ runtime_enabled: true, creator_enabled: false })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-packages?limit=5&offset=0&search=a%2Fb+%26+c&sourceType=github%2Farchive&includeArchived=true&sort=updatedAt&direction=desc`, expect.any(Object))
+  })
+
+  it('encodes dynamic ids, converts inspection DTOs and wires import review decisions', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { review_id: 'review-1', source_fingerprint: 'fingerprint-1', packages: [{ source_type: 'github', relative_skill_path: 'skills/demo', manifest_hash: 'sha', source_fingerprint: 'fingerprint-1', diagnostics: [{ severity: 'warning', message: 'Review required' }], import_review_required: true, manifest: { name: 'Demo', runtime: 'package-runtime', requested_capabilities: [] }, source_snapshot: { source_sha256: 'source-sha', files: [] } }] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'draft/1', content: { name: 'Demo', slug: 'demo', skillMd: '# Demo' }, revision: 2, status: 'draft' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'pending', reviewer: null, decision: null, created_at: 10, updated_at: 11 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'approved', reviewer: 'local-user', decision: { action: 'approve' }, created_at: 10, updated_at: 12 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'rejected', reviewer: 'local-user', decision: { action: 'reject', reason: 'unsafe' }, created_at: 10, updated_at: 13 } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.inspectSkillPackage({ kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })).resolves.toMatchObject({ reviewId: 'review-1', sourceFingerprint: 'fingerprint-1', packages: [expect.objectContaining({ sourceType: 'github', manifestHash: 'sha', sourceFingerprint: 'fingerprint-1', importReviewRequired: true, sourceSnapshot: { sourceSha256: 'source-sha', files: [] } })] })
+    await platform.getSkillDraft('draft/1')
+    await expect(platform.getImportReview('review/1')).resolves.toMatchObject({ id: 'review/1', status: 'pending' })
+    await expect(platform.approveImportReview('review/1', 'local-user')).resolves.toMatchObject({ status: 'approved', reviewer: 'local-user' })
+    await expect(platform.rejectImportReview('review/1', 'local-user', 'unsafe')).resolves.toMatchObject({ status: 'rejected', reviewer: 'local-user' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-packages/inspect`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ source: { kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' } }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-drafts/draft%2F1`, expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `${API_BASE}/skill-import-reviews/review%2F1`, expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `${API_BASE}/skill-import-reviews/review%2F1/approve`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewer: 'local-user' }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `${API_BASE}/skill-import-reviews/review%2F1/reject`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewer: 'local-user', reason: 'unsafe' }) }))
+  })
+
+  it('normalizes creator drafts to Package Runtime and maps publish relations from the server', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'draft-1', content: { name: 'Demo', slug: 'demo', skillMd: '# Demo' }, revision: 4, status: 'draft' } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { draft_id: 'draft-1', package: { id: 'package-1' }, version: { id: 'version-1' }, installation: { id: 'installation-1' }, idempotent: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(platform.getSkillDraft('draft-1')).resolves.toMatchObject({ content: { runtimeKind: 'package', name: 'Demo' }, revision: 4 })
+    await expect(platform.publishSkillDraft('draft-1', { enable: false, expectedRevision: 4, idempotencyKey: 'publish-1' })).resolves.toMatchObject({
+      draftId: 'draft-1', packageId: 'package-1', versionId: 'version-1', installationId: 'installation-1', idempotent: true,
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-drafts/draft-1`, expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-drafts/draft-1/publish`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ enable: false, expectedRevision: 4, idempotencyKey: 'publish-1' }) }))
   })
 
   it('sends typed commands, drafts and artifact exports and normalizes structured errors', async () => {

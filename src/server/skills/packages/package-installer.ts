@@ -16,9 +16,9 @@ import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGit
 import { assertPackageLimits, validateExternalSource, SkillSecurityError } from '../security/skill-security-checklist'
 
 
-type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: Record<string, unknown> }
-type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: Record<string, unknown> }
-type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
+export type LocalDirectorySource = { kind: 'local-directory'; directory: string; subdirectory?: string; metadata?: Record<string, unknown> }
+export type ZipSource = { kind: 'zip'; zipPath: string; subdirectory?: string; metadata?: Record<string, unknown> }
+export type GitHubArchiveSource = { kind: 'github-archive'; repositoryUrl: string; ref: string; subdirectory?: string }
 export type PackageInstallSource = LocalDirectorySource | ZipSource | GitHubArchiveSource
 
 export type PackageSourceSnapshot = {
@@ -31,7 +31,7 @@ export type PackageSourceSnapshot = {
   fetchedAt?: string
   etag?: string
   resolvedCommitSha?: string
-  source_origin?: 'local' | 'npx-artifact'
+  source_origin?: 'local' | 'zip' | 'github' | 'npx-artifact'
   detected_layout?: NpxArtifactLayout
   ignored_paths?: string[]
   execution_disclaimer?: string
@@ -93,8 +93,11 @@ export class PackageInstallError extends Error {
   }
 }
 
+type PackageInstallerMetrics = Pick<SkillRuntimeMetrics, 'recordImportReject'> &
+  Partial<Pick<SkillRuntimeMetrics, 'recordInstall'>>
+
 export type PackageInstallerDependencies = {
-  readonly metrics?: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+  readonly metrics?: PackageInstallerMetrics
 }
 
 type ZipEntry = {
@@ -108,7 +111,7 @@ type ZipEntry = {
 }
 
 export class PackageInstaller {
-  private readonly metrics: Pick<SkillRuntimeMetrics, 'recordImportReject'>
+  private readonly metrics: PackageInstallerMetrics
 
   constructor(dependencies: PackageInstallerDependencies = {}) {
     this.metrics = dependencies.metrics ?? SkillRuntimeMetrics.global()
@@ -125,7 +128,7 @@ export class PackageInstaller {
       let stage: string | undefined
       try {
         assertPackageImportEnabled()
-        const securedSource = validatePackageInstallSource(source)
+        const securedSource = normalizePackageInstallSource(source)
         const roots = getPackageRoots()
         fs.mkdirSync(roots.staging, { recursive: true })
         stage = fs.mkdtempSync(path.join(roots.staging, 'inspect-'))
@@ -148,6 +151,16 @@ export class PackageInstaller {
           sourceSnapshot: { ...sourceSnapshot, files },
         }
       })
+      const manifestErrors = packages.flatMap((item) => item.diagnostics.filter((diagnostic) => diagnostic.level === 'error'))
+      if (manifestErrors.length > 0) {
+        throw new PackageInstallError(
+          `Package manifest validation failed: ${manifestErrors.map((diagnostic) => diagnostic.message).join('; ')}`,
+          'MANIFEST_INVALID',
+        )
+      }
+      const reviewStatus = packages.some((item) => item.diagnostics.some((diagnostic) => diagnostic.level === 'warning') || item.manifest.unsupported.length > 0)
+        ? 'warning'
+        : 'validated'
       const review = packageInstallReviewService.create({
         source: securedSource,
         sourceFingerprint: sourceSnapshot.sourceSha256,
@@ -156,6 +169,7 @@ export class PackageInstaller {
           unsupportedCapabilities: packages.flatMap((item) => item.manifest.unsupported),
           diagnostics: packages.flatMap((item) => item.diagnostics),
         },
+        status: reviewStatus,
       })
       return {
         reviewId: review.id,
@@ -174,12 +188,27 @@ export class PackageInstaller {
   }
 
   async install(source: PackageInstallSource, options: PackageInstallOptions): Promise<PackageInstallResult> {
+    const startedAt = Date.now()
     const correlation = getSkillCorrelation()
     return withSkillCorrelation(correlation, async () => {
       let stage: string | undefined
+      let installMetricRecorded = false
+      const recordInstall = (outcome: 'success' | 'partial_failure' | 'error') => {
+        if (installMetricRecorded) return
+        installMetricRecorded = true
+        try {
+          this.metrics.recordInstall?.({
+            outcome,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            correlation: getSkillCorrelation(),
+          })
+        } catch {
+          // Install telemetry must never change package installation behavior.
+        }
+      }
       try {
         assertPackageImportEnabled()
-        const securedSource = validatePackageInstallSource(source)
+        const securedSource = normalizePackageInstallSource(source)
         if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
         if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
 
@@ -194,7 +223,9 @@ export class PackageInstaller {
       }
       const review = packageInstallReviewService.assertInstallable(options.reviewId, options.sourceFingerprint, options.confirm)
       if (review.status === 'installed' && review.decision?.result) {
-        return review.decision.result as unknown as PackageInstallResult
+        const result = review.decision.result as unknown as PackageInstallResult
+        recordInstall(result.status === 'partial_failure' ? 'partial_failure' : 'success')
+        return result
       }
 
       const selectedRoot = resolveSubdirectory(sourceRoot, securedSource.subdirectory)
@@ -219,8 +250,10 @@ export class PackageInstaller {
         ? { status: 'partial_failure', packages, partialFailures }
         : { status: 'awaiting_permission_review', packages }
       packageInstallReviewService.markInstalled(options.reviewId, result as unknown as Record<string, unknown>)
+      recordInstall(partialFailures.length > 0 ? 'partial_failure' : 'success')
       return result
       } catch (error) {
+        recordInstall('error')
         this.recordImportReject(error, correlation)
         if (error instanceof PackageInstallError) throw error
         throw new PackageInstallError(error instanceof Error ? error.message : 'Package installation failed')
@@ -239,6 +272,13 @@ export class PackageInstaller {
   }): Promise<InstalledPackage> {
     const files = collectFiles(data.skillDirectory)
     const resolvedManifest = resolveSkillManifest(data.skillDirectory)
+    const manifestErrors = (resolvedManifest.diagnostics ?? []).filter((diagnostic) => diagnostic.level === 'error')
+    if (manifestErrors.length > 0) {
+      throw new PackageInstallError(
+        `Package manifest validation failed: ${manifestErrors.map((diagnostic) => diagnostic.message).join('; ')}`,
+        'MANIFEST_INVALID',
+      )
+    }
     const manifestHash = resolvedManifest.canonicalHash ?? hashJson(files)
     const sourceFingerprint = hashJson(files)
     const finalPath = path.join(data.roots.packages, sourceFingerprint)
@@ -356,7 +396,7 @@ function classifyImportRejectReason(error: unknown): ImportRejectReason {
   return 'unknown'
 }
 
-function validatePackageInstallSource(source: PackageInstallSource): PackageInstallSource {
+export function normalizePackageInstallSource(source: unknown): PackageInstallSource {
   try {
     return validateExternalSource(source) as PackageInstallSource
   } catch (error) {
@@ -391,13 +431,13 @@ function getPackageLimits() {
 }
 
 async function materializeSource(source: PackageInstallSource, target: string): Promise<Omit<PackageSourceSnapshot, 'files'>> {
-  const securedSource = validatePackageInstallSource(source)
+  const securedSource = normalizePackageInstallSource(source)
   if (securedSource.kind === 'local-directory') {
     const directory = securedSource.directory
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
     copySafeDirectory(directory, target)
     const artifactMetadata = detectAndSanitizeNpxArtifact(target)
-    return { sourceSha256: hashDirectory(target), sourceRef: directory, ...artifactMetadata }
+    return { sourceSha256: hashDirectory(target), sourceRef: directory, source_origin: artifactMetadata.source_origin ?? 'local', ...artifactMetadata }
   }
   if (securedSource.kind === 'zip') {
     const zipPath = securedSource.zipPath
@@ -405,7 +445,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
     const archive = fs.readFileSync(zipPath)
     extractZip(archive, target)
     const artifactMetadata = detectAndSanitizeNpxArtifact(target)
-    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, ...artifactMetadata }
+    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, source_origin: artifactMetadata.source_origin ?? 'zip', ...artifactMetadata }
   }
   let parsedSource
   try {
@@ -421,6 +461,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
       allowedHosts: config.githubAllowedHosts,
     })
     extractZip(downloaded.archive, target)
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
     return {
       sourceSha256: downloaded.archiveSha256,
       sourceCommit: downloaded.resolvedCommitSha,
@@ -431,6 +472,8 @@ async function materializeSource(source: PackageInstallSource, target: string): 
       fetchedAt: downloaded.fetchedAt,
       ...(downloaded.etag ? { etag: downloaded.etag } : {}),
       resolvedCommitSha: downloaded.resolvedCommitSha,
+      source_origin: artifactMetadata.source_origin ?? 'github',
+      ...artifactMetadata,
     }
   } catch (error) {
     if (error instanceof GitHubSourceError) throw new PackageInstallError(error.message, error.code)

@@ -152,6 +152,63 @@ describe('PackageInstaller', () => {
     expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
   })
 
+  it('normalizes local and GitHub sources through one security boundary', async () => {
+    const { normalizePackageInstallSource, PackageInstallError } = await loadInstaller()
+
+    expect(normalizePackageInstallSource({
+      kind: 'local-directory',
+      directory: fixtureDir,
+      metadata: { token: 'do-not-persist' },
+    })).toEqual({
+      kind: 'local-directory',
+      directory: path.resolve(fixtureDir),
+      metadata: { token: '[REDACTED]' },
+    })
+
+    expect(normalizePackageInstallSource({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main',
+      subdirectory: 'skills',
+    })).toEqual({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: 'main',
+      subdirectory: 'skills',
+    })
+
+    expect(() => normalizePackageInstallSource({ kind: 'local-directory', directory: 'relative/path' }))
+      .toThrow(PackageInstallError)
+    expect(() => normalizePackageInstallSource({
+      kind: 'github-archive',
+      repositoryUrl: 'https://github.com/acme/skills',
+      ref: '../main',
+    })).toThrow(PackageInstallError)
+  })
+
+  it('puts unknown capabilities into warning review instead of silently treating them as safe', async () => {
+    writeFile('risky/SKILL.md', `---
+name: Risky Skill
+capabilities:
+  unknown.capability: {}
+---
+# Risky Skill
+`)
+
+    const { PackageInstaller } = await loadInstaller()
+    const { packageInstallReviewService } = await import('./package-install-review.service')
+    const installer = new PackageInstaller()
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+
+    expect(inspected.packages[0].manifest.unsupported).toContain('capability:unknown.capability')
+    expect(packageInstallReviewService.get(inspected.reviewId)).toMatchObject({ status: 'warning' })
+    await expect(installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: false,
+    })).rejects.toThrow(/confirm/i)
+  })
+
   it('rejects a source that does not contain a SKILL.md entry point', async () => {
     writeFile('references/notes.md', '# Notes\n')
     const { PackageInstaller, PackageInstallError } = await loadInstaller()
@@ -433,6 +490,70 @@ describe('PackageInstaller', () => {
     const snapshot = metrics.snapshot()
     expect(snapshot.counters.importRejects).toMatchObject({ security_policy: 1, size_limit: 1 })
     expect(snapshot.points.every((point) => point.kind === 'import' && Object.keys(point.attributes).every((key) => key === 'reason'))).toBe(true)
+  })
+
+  it('records exactly one successful install metric and isolates telemetry failures', async () => {
+    writeFile('article/SKILL.md', '# Article\n')
+    const { PackageInstaller } = await loadInstaller()
+    const recordInstall = vi.fn(() => { throw new Error('metrics unavailable') })
+    const installer = new PackageInstaller({ metrics: { recordImportReject: vi.fn(), recordInstall } })
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+
+    const result = await installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.status).toBe('awaiting_permission_review')
+    expect(recordInstall).toHaveBeenCalledTimes(1)
+    expect(recordInstall).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'success',
+      durationMs: expect.any(Number),
+      correlation: expect.any(Object),
+    }))
+  })
+
+  it('records partial_failure once when one package cannot be persisted', async () => {
+    writeFile('first/SKILL.md', '# First\n')
+    writeFile('second/SKILL.md', '# Second\n')
+    const { PackageInstaller } = await loadInstaller()
+    const recordInstall = vi.fn()
+    const installer = new PackageInstaller({ metrics: { recordImportReject: vi.fn(), recordInstall } })
+    const inspected = await installer.inspect({ kind: 'local-directory', directory: fixtureDir })
+    vi.spyOn(installer as any, 'persistSkill')
+      .mockResolvedValueOnce({ packageId: 'package-1' })
+      .mockRejectedValueOnce(new Error('simulated persistence failure'))
+
+    const result = await installer.install({ kind: 'local-directory', directory: fixtureDir }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.status).toBe('partial_failure')
+    expect(result.partialFailures).toHaveLength(1)
+    expect(recordInstall).toHaveBeenCalledTimes(1)
+    expect(recordInstall).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'partial_failure' }))
+  })
+
+  it('records one error install metric when installation throws', async () => {
+    const zipPath = path.join(fixtureDir, 'fingerprint.zip')
+    writeStoredZip(zipPath, [{ name: 'article/SKILL.md', content: '# Article\n' }])
+    const { PackageInstaller } = await loadInstaller()
+    const recordInstall = vi.fn()
+    const installer = new PackageInstaller({ metrics: { recordImportReject: vi.fn(), recordInstall } })
+    const inspected = await installer.inspect({ kind: 'zip', zipPath })
+    writeStoredZip(zipPath, [{ name: 'article/SKILL.md', content: '# Changed after review\n' }])
+
+    await expect(installer.install({ kind: 'zip', zipPath }, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })).rejects.toThrow(/fingerprint changed/i)
+
+    expect(recordInstall).toHaveBeenCalledTimes(1)
+    expect(recordInstall).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }))
   })
 
   it('records unknown rejects for partial installation failures', async () => {

@@ -6,6 +6,7 @@ import { SkillCreatorWorkbench, canPublishCreatorDraft } from './SkillCreatorWor
 import { SkillCreatorEditor } from './SkillCreatorEditor'
 import { SkillCreatorPreview, sanitizeMarkdown } from './SkillCreatorPreview'
 import { SkillCreatorValidationPanel } from './SkillCreatorValidationPanel'
+import { getCreatorCapabilityRisk, getPublishedPackageId } from './SkillCreatorWorkbench'
 import './skill-creator.e2e'
 
 const content: SkillDraftContent = {
@@ -33,6 +34,29 @@ describe('Skills Creator workbench contract', () => {
     expect(preview).not.toContain('<script>')
     expect(validation).toContain('skillMd · line 2')
     expect(sanitizeMarkdown('<script>alert(1)</script><b>unsafe</b>')).toBe('alert(1)unsafe')
+  })
+
+  it('makes Package Runtime explicit and never offers Legacy Runtime', () => {
+    const entry = renderToStaticMarkup(<SkillCreatorWorkbench draftId={null} onCreated={() => {}} />)
+    const editor = renderToStaticMarkup(<SkillCreatorEditor content={content} onChange={() => {}} />)
+    expect(entry).toContain('Package Runtime')
+    expect(entry).not.toContain('Legacy Runtime')
+    expect(editor).toContain('Package Runtime')
+    expect(editor).not.toContain('Legacy Runtime')
+  })
+
+  it('marks high-risk capability requests with an approval warning', () => {
+    const riskyContent: SkillDraftContent = { ...content, capabilities: [{ capability: 'command', scope: {} }] }
+    const editor = renderToStaticMarkup(<SkillCreatorEditor content={riskyContent} onChange={() => {}} />)
+    expect(getCreatorCapabilityRisk('command')).toMatchObject({ severity: 'high', approvalRequired: true })
+    expect(editor).toContain('高风险')
+    expect(editor).toContain('需要审批')
+  })
+
+  it('keeps publish navigation tied to the server Package relation', () => {
+    expect(getPublishedPackageId({ packageId: 'package-1', versionId: 'version-1', installationId: 'installation-1' })).toBe('package-1')
+    expect(getPublishedPackageId({ package: { id: 'package-2' }, version: { id: 'version-2' }, installation: { id: 'installation-2' } })).toBe('package-2')
+    expect(getPublishedPackageId({ draftId: 'draft-1' })).toBeNull()
   })
 
   it('requires valid validation and preview evidence before publish', () => {

@@ -22,6 +22,22 @@ describe('Skill run recovery and cancellation', () => {
     expect(coordinator.subscribeEvents(runId).map((event) => event.seq)).toEqual([1, 2, 3, 4])
   })
 
+  it('re-enqueues an interrupted run when its previous queue item is no longer active', () => {
+    const ports = createFakeSkillRuntimePorts({ now: 40_000 })
+    const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })
+    const { runId } = coordinator.startRun({ skillVersionId: 'version-1', input: {}, context: {} })
+    coordinator.transition(runId, 'running', { expectedRevision: 1 })
+
+    const item = ports.queue.claimNext({ workerId: 'crashed-worker', leaseMs: 1_000 })
+    expect(item).toBeDefined()
+    expect(ports.queue.ack({ queueId: item!.id, workerId: 'crashed-worker' })).toBe(true)
+    ports.clock.advance(1_000)
+
+    expect(coordinator.markInterruptedRuns({ staleAfterMs: 1_000 })).toBe(1)
+    expect(ports.queue.list({ runId }).filter((queueItem) => ['queued', 'leased', 'retry_wait'].includes(queueItem.status))).toHaveLength(1)
+    expect(coordinator.getRun(runId).status).toBe('interrupted')
+  })
+
   it('cancels waiting runs idempotently without creating a second execution', () => {
     const ports = createFakeSkillRuntimePorts({ now: 20_000 })
     const coordinator = new SkillRunCoordinator({ runs: ports.runs, events: ports.events, queue: ports.queue, clock: ports.clock })

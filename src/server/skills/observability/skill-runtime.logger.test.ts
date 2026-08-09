@@ -31,7 +31,7 @@ describe('Skill Runtime structured logger', () => {
     expect(serialized).not.toContain('private')
     expect(serialized).not.toContain('top-secret')
     expect((entries[0] as any).correlation).toEqual({
-      requestId: 'req-1', runId: 'run-1', skillVersionId: 'version-1', packageId: 'package-1',
+      requestId: 'req-1', runId: 'run-1', skillVersionId: 'version-1', versionId: 'version-1', packageId: 'package-1',
       workerId: 'worker-1', grantId: 'grant-1', artifactId: 'artifact-1',
     })
   })
@@ -50,5 +50,19 @@ describe('Skill Runtime structured logger', () => {
 
     expect(logger.recent()).toHaveLength(1)
     expect(logger.recent()[0]).toMatchObject({ scope: 'fresh', message: 'fresh' })
+  })
+
+  it('normalizes the legacy skillVersionId correlation into the canonical versionId field', async () => {
+    const logger = new SkillRuntimeLogger({ sink: () => undefined, sampleRate: 1, now: () => 21_000 })
+
+    await withSkillCorrelation({
+      requestId: 'req-version', runId: 'run-version', skillVersionId: 'version-canonical', packageId: 'package-version',
+    }, async () => {
+      logger.info('run.started', 'Run started')
+    })
+
+    expect(logger.recent()[0]?.correlation).toMatchObject({
+      requestId: 'req-version', runId: 'run-version', packageId: 'package-version', versionId: 'version-canonical',
+    })
   })
 })

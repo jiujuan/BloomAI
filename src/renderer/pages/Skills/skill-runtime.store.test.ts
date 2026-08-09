@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_BASE } from '@shared/constants'
 import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
-import type { SkillRun } from './skill-runtime.types'
+import type { CapabilityDto, PackageDetail, SkillInstallation, SkillRun, SkillRunEvent } from './skill-runtime.types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -15,20 +15,51 @@ const run = {
 }
 const event = (seq: number) => ({ id: `event-${seq}`, run_id: 'run-1', seq, schema_version: 1, producer: 'worker', type: 'progress', payload: { seq }, occurred_at: seq, created_at: seq })
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   useSkillRuntimeStore.setState({
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [],
     runs: [], runPage: null, selectedRun: null, eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, drafts: {},
-    pendingMutations: {}, capabilities: null, loading: false, error: null,
+    pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
   })
 })
 
 afterEach(() => {
+  useSkillRuntimeStore.getState().stopRunEvents('run-1')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe('Package Runtime Zustand store', () => {
+  it('loads runtime diagnostics and tracks a failed refresh without losing the last snapshot', async () => {
+    const diagnostics = {
+      health: { liveness: true, readiness: true, status: 'ready', checks: [] },
+      worker: { status: 'running', workerId: 'worker-1' },
+      queue: { depth: 0, queued: 0, leased: 0, retryWait: 0, dead: 0, lagMs: 0 },
+      migration: { current: '043', applied: ['043'], pending: [] },
+      policy: { version: 'skills-policy-v1.1', configVersion: '2026-08-06' },
+      recentFailures: [],
+    }
+    const diagnosticsMock = vi.spyOn(platform, 'getSkillRuntimeDiagnostics').mockResolvedValue(diagnostics)
+
+    await expect(useSkillRuntimeStore.getState().loadDiagnostics()).resolves.toEqual(diagnostics)
+    expect(diagnosticsMock).toHaveBeenCalledTimes(1)
+    expect(useSkillRuntimeStore.getState()).toMatchObject({ diagnostics, diagnosticsLoading: false, diagnosticsError: null })
+
+    diagnosticsMock.mockRejectedValueOnce({ code: 'FORBIDDEN', message: 'administrator-only detail', status: 403, retryable: false })
+    await expect(useSkillRuntimeStore.getState().loadDiagnostics()).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 })
+    expect(useSkillRuntimeStore.getState()).toMatchObject({ diagnostics, diagnosticsLoading: false, diagnosticsError: 'administrator-only detail' })
+  })
+
   it('loads and deduplicates events while advancing the per-run cursor', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ data: [event(1), event(2)], meta: { afterSeq: 0 } }))
@@ -42,6 +73,79 @@ describe('Package Runtime Zustand store', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-runs/run-1/events?afterSeq=2`, expect.any(Object))
     expect(useSkillRuntimeStore.getState().eventsByRun['run-1'].map((item) => item.seq)).toEqual([1, 2, 3])
     expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(3)
+  })
+
+  it('does not let an older package request overwrite a newer response', async () => {
+    const first = deferred<Awaited<ReturnType<typeof platform.getSkillPackages>>>()
+    const second = deferred<Awaited<ReturnType<typeof platform.getSkillPackages>>>()
+    const packagesMock = vi.spyOn(platform, 'getSkillPackages')
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const olderRequest = useSkillRuntimeStore.getState().loadPackages({ search: 'older' })
+    const newerRequest = useSkillRuntimeStore.getState().loadPackages({ search: 'newer' })
+    second.resolve({ data: [{ id: 'newer', name: 'Newer', description: '', sourceType: 'github', sourceUri: null, sourceRef: null, createdAt: 2, updatedAt: 2, deletedAt: null, deleteReason: null }], meta: { limit: 20, offset: 0, total: 1, hasMore: false, nextOffset: null } })
+    await newerRequest
+    first.resolve({ data: [{ id: 'older', name: 'Older', description: '', sourceType: 'local', sourceUri: null, sourceRef: null, createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null }], meta: { limit: 20, offset: 0, total: 1, hasMore: false, nextOffset: null } })
+    await olderRequest
+
+    expect(packagesMock).toHaveBeenNthCalledWith(1, { search: 'older' })
+    expect(packagesMock).toHaveBeenNthCalledWith(2, { search: 'newer' })
+    expect(useSkillRuntimeStore.getState().packages).toEqual([expect.objectContaining({ id: 'newer', name: 'Newer' })])
+    expect(useSkillRuntimeStore.getState().packagePage?.data).toEqual([expect.objectContaining({ id: 'newer' })])
+    expect(useSkillRuntimeStore.getState().loadingByResource.packages).toBe(false)
+  })
+
+  it('optimistically toggles an installation and restores the snapshot with an error toast on failure', async () => {
+    const installation: SkillInstallation = { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'enabled', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null }
+    useSkillRuntimeStore.setState({ installations: [installation] })
+    const failure = { code: 'NETWORK_ERROR', message: 'worker unavailable', status: 503, retryable: true }
+    vi.spyOn(platform, 'disableSkillInstallation').mockRejectedValue(failure)
+
+    const request = useSkillRuntimeStore.getState().disableInstallation('install-1', { expectedRevision: 1, idempotencyKey: 'disable-1' })
+    expect(useSkillRuntimeStore.getState().installations[0]).toMatchObject({ enabled: false, status: 'disabled' })
+    await expect(request).rejects.toMatchObject(failure)
+    expect(useSkillRuntimeStore.getState().installations).toEqual([installation])
+    expect(useSkillRuntimeStore.getState().mutationStates['installation:install-1']).toMatchObject({ status: 'error', error: failure })
+    expect(useSkillRuntimeStore.getState().toasts).toEqual([expect.objectContaining({ tone: 'error', message: 'worker unavailable' })])
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+  })
+
+  it('records a successful mutation and emits a success toast', async () => {
+    const installation: SkillInstallation = { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'disabled', enabled: false, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null }
+    useSkillRuntimeStore.setState({ installations: [installation] })
+    const enabled = { ...installation, enabled: true, status: 'enabled', updatedAt: 2 }
+    vi.spyOn(platform, 'enableSkillInstallation').mockResolvedValue(enabled)
+
+    await expect(useSkillRuntimeStore.getState().enableInstallation('install-1', { expectedRevision: 2, idempotencyKey: 'enable-1' })).resolves.toEqual(enabled)
+    expect(useSkillRuntimeStore.getState().mutationStates['installation:install-1']).toMatchObject({ status: 'success' })
+    expect(useSkillRuntimeStore.getState().toasts).toEqual([expect.objectContaining({ tone: 'success', title: 'Installation 已启用' })])
+  })
+
+  it('reconnects a run stream from the last cursor without duplicating events', async () => {
+    const streamHandlers: Array<Parameters<typeof platform.subscribeSkillRunEvents>[2]> = []
+    vi.spyOn(platform, 'subscribeSkillRunEvents').mockImplementation((_runId, _afterSeq, handlers) => {
+      streamHandlers.push(handlers)
+      return { close: vi.fn() }
+    })
+    const listEventsMock = vi.spyOn(platform, 'listSkillRunEvents').mockResolvedValue([])
+
+    const unsubscribe = useSkillRuntimeStore.getState().subscribeRunEvents('run-1')
+    const initialStream = streamHandlers[0]
+    if (!initialStream) throw new Error('initial stream was not created')
+    initialStream.onEvent?.({ ...event(1), runId: 'run-1', schemaVersion: 1, occurredAt: 1, createdAt: 1 } as SkillRunEvent)
+    expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(1)
+    await useSkillRuntimeStore.getState().reconnectRunEvents('run-1')
+    expect(listEventsMock).toHaveBeenCalledWith('run-1', 1)
+
+    useSkillRuntimeStore.getState().subscribeRunEvents('run-1')
+    const reconnect = streamHandlers[1]
+    if (!reconnect) throw new Error('reconnect stream was not created')
+    reconnect.onEvent?.({ ...event(1), runId: 'run-1', schemaVersion: 1, occurredAt: 1, createdAt: 1 } as SkillRunEvent)
+    reconnect.onEvent?.({ ...event(2), runId: 'run-1', schemaVersion: 1, occurredAt: 2, createdAt: 2 } as SkillRunEvent)
+    expect(useSkillRuntimeStore.getState().eventsByRun['run-1'].map((item) => item.seq)).toEqual([1, 2])
+    expect(useSkillRuntimeStore.getState().eventCursorByRun['run-1']).toBe(2)
+    unsubscribe()
   })
 
   it('uses afterSeq compensation after a failed stream/list refresh and preserves server truth on mutation conflict', async () => {
@@ -111,4 +215,55 @@ describe('Package Runtime Zustand store', () => {
     expect(exportMock).toHaveBeenCalledWith('artifact-1', { runId: 'run-1', destinationDir: 'D:/exports', confirmed: true, auditReason: 'Skills Center acceptance' })
     expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
   })
+
+  it('converges capability grant state, deduplicates repeated approval and keeps package context', async () => {
+    const grant: CapabilityDto = {
+      id: 'grant-1', skillVersionId: 'version-1', capability: 'network.fetch',
+      scope: { allowedDomains: ['example.com'], maxCalls: 3 }, status: 'requested', grantMode: 'persistent',
+      grantedBy: null, grantedAt: null, expiresAt: null, revokedAt: null, consumedAt: null,
+      requestedScope: { allowedDomains: ['example.com'], maxCalls: 3 }, grantedScope: {},
+    }
+    const detail: PackageDetail = {
+      package: { id: 'package-1', name: 'Research', description: 'Research', sourceType: 'github', sourceUri: null, sourceRef: 'main', createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null },
+      versions: [{ id: 'version-1', packageId: 'package-1', version: '1.0.0', runtime: 'instruction-agent', manifest: {}, manifestHash: 'manifest-1', packagePath: '/packages/package-1', sourceSnapshot: {}, isCompatible: true, status: 'runnable', securityStatus: 'verified', createdAt: 1 }],
+      installations: [], capabilityGrants: [grant],
+    }
+    useSkillRuntimeStore.setState({ selectedPackage: detail })
+    const approval = deferred<CapabilityDto>()
+    const approveMock = vi.spyOn(platform, 'approveCapabilityGrant').mockReturnValue(approval.promise)
+
+    const first = useSkillRuntimeStore.getState().approve('grant-1', { actor: 'test-user' })
+    const second = useSkillRuntimeStore.getState().approve('grant-1', { actor: 'test-user' })
+    expect(approveMock).toHaveBeenCalledTimes(1)
+    expect(useSkillRuntimeStore.getState().pendingMutations['grant:grant-1']).toBe(true)
+
+    approval.resolve({ ...grant, status: 'approved', grantedBy: 'test-user', grantedAt: 2, grantedScope: grant.requestedScope })
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2)
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toMatchObject({ id: 'grant-1', status: 'approved', grantedBy: 'test-user' })
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+
+    const rejectMock = vi.spyOn(platform, 'rejectCapabilityGrant').mockResolvedValue({ ...grant, status: 'rejected' })
+    await useSkillRuntimeStore.getState().reject('grant-1', { actor: 'test-user', reason: 'not needed' })
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0].status).toBe('rejected')
+    expect(rejectMock).toHaveBeenCalledWith('grant-1', { actor: 'test-user', reason: 'not needed' })
+
+    const revokeMock = vi.spyOn(platform, 'revokeCapabilityGrant').mockResolvedValue({})
+    await useSkillRuntimeStore.getState().revokeCapabilityGrant('grant-1', { actor: 'test-user', reason: 'policy changed' })
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toMatchObject({ id: 'grant-1', status: 'revoked' })
+    expect(revokeMock).toHaveBeenCalledWith('grant-1', { actor: 'test-user', reason: 'policy changed' })
+  })
+
+  it('does not mutate a capability grant when the server rejects the operation', async () => {
+    const grant: CapabilityDto = { id: 'grant-2', skillVersionId: 'version-2', capability: 'filesystem.read', scope: {}, status: 'requested' }
+    useSkillRuntimeStore.setState({ selectedPackage: { package: { id: 'package-2', name: 'Files', description: '', sourceType: 'local', sourceUri: null, sourceRef: null, createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null }, versions: [], installations: [], capabilityGrants: [grant] } })
+    const error = { code: 'REVISION_CONFLICT', message: 'Grant 已被其他操作者更新', status: 409, retryable: false }
+    vi.spyOn(platform, 'approveCapabilityGrant').mockRejectedValue(error)
+
+    await expect(useSkillRuntimeStore.getState().approve('grant-2', { actor: 'test-user' })).rejects.toEqual(error)
+    expect(useSkillRuntimeStore.getState().selectedPackage?.capabilityGrants[0]).toEqual(grant)
+    expect(useSkillRuntimeStore.getState().errorDetails).toMatchObject({ code: 'REVISION_CONFLICT', status: 409 })
+    expect(useSkillRuntimeStore.getState().toasts.at(-1)).toMatchObject({ tone: 'error' })
+    expect(useSkillRuntimeStore.getState().pendingMutations).toEqual({})
+  })
+
 })

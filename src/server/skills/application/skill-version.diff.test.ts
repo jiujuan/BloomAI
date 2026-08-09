@@ -16,7 +16,9 @@ describe('skill version diff', () => {
         ],
         prompt: 'do not expose this',
       },
-      sourceSnapshot: { sourceSha256: 'source-1' },
+      sourceSnapshot: { sourceSha256: 'source-1', resolvedCommit: 'commit-1' },
+      securityStatus: 'verified',
+      securityFindings: { warnings: [] },
     }
     const to = {
       id: 'v2',
@@ -31,7 +33,9 @@ describe('skill version diff', () => {
         ],
         prompt: 'another secret',
       },
-      sourceSnapshot: { sourceSha256: 'source-2' },
+      sourceSnapshot: { sourceSha256: 'source-2', resolvedCommit: 'commit-2' },
+      securityStatus: 'unreviewed',
+      securityFindings: { warnings: ['new executable'] },
     }
 
     const first = diffSkillVersions(from, to)
@@ -45,7 +49,20 @@ describe('skill version diff', () => {
     })
     expect(first.capabilities).toEqual({ added: ['image.generate'], removed: [] })
     expect(first.sourceShaChanged).toBe(true)
+    expect(first.sourceCommitChanged).toBe(true)
+    expect(first.source).toMatchObject({ fromSha: 'source-1', toSha: 'source-2', fromCommit: 'commit-1', toCommit: 'commit-2' })
+    expect(first.security).toEqual({
+      statusChanged: true,
+      fromStatus: 'verified',
+      toStatus: 'unreviewed',
+      findingsChanged: true,
+    })
     expect(first.riskSummary).toMatchObject({ level: 'high', warnings: expect.arrayContaining(['capability expansion: image.generate']) })
+    expect(first.riskSummary.warnings).toEqual(expect.arrayContaining([
+      'security status changed: verified -> unreviewed',
+      'security findings changed',
+      'source commit changed',
+    ]))
     expect(JSON.stringify(first)).not.toContain('do not expose this')
     expect(JSON.stringify(first)).not.toContain('another secret')
   })

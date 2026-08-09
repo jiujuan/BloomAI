@@ -115,6 +115,3 @@ export const legacySkillRepo: LegacySkillRepository = {
     return getOrmDb().select().from(skill_runs).where(eq(skill_runs.skill_id, skillId)).orderBy(desc(skill_runs.created_at)).limit(limit).all()
   },
 }
-
-/** Compatibility alias for existing Legacy Skill callers. Package Runtime must not import this adapter. */
-export const skillRepo = legacySkillRepo

@@ -18,11 +18,12 @@ function createTool(id: string): Tool {
   }
 }
 
-function createBroker() {
-  const ports = createFakeSkillRuntimePorts({ now: 100 })
+function createBroker(options: { now?: number; searchExpiresAt?: number } = {}) {
+  const now = options.now ?? 100
+  const ports = createFakeSkillRuntimePorts({ now })
   const version = ports.packages.createVersion({ packageId: 'pkg-1', version: '1.0.0', manifest: {}, manifestHash: 'hash', packagePath: '/pkg' })
   const run = ports.runs.createRun({ skillVersionId: version.id, status: 'running', input: {}, context: {} })
-  ports.grants.createCapabilityGrant({ skillVersionId: version.id, capability: 'web.search', grantMode: 'persistent' })
+  ports.grants.createCapabilityGrant({ skillVersionId: version.id, capability: 'web.search', grantMode: 'persistent', ...(options.searchExpiresAt === undefined ? {} : { expiresAt: options.searchExpiresAt }) })
   ports.grants.createCapabilityGrant({ skillVersionId: version.id, capability: 'web.fetch', grantMode: 'persistent' })
   const toolRun: ToolRun = {
     id: 'tool-run-1',
@@ -57,6 +58,7 @@ function createBroker() {
     approvals: { consume: vi.fn() },
     permissions: { has: vi.fn(() => false) },
     imageAdapterFactory: () => ({ run: vi.fn() }) as never,
+    now: () => now,
   })
   return { broker, ports, run, executeTool, tools }
 }
@@ -89,6 +91,19 @@ describe('CapabilityBroker package execution contract', () => {
       'capability.completed',
       'capability.call',
     ])
+  })
+
+  it('uses the injected runtime clock for grant expiry during lookup and consumption', async () => {
+    const { broker, run, executeTool } = createBroker({ now: 100, searchExpiresAt: 150 })
+
+    await expect(broker.executeCapability({
+      caller: 'package-runtime',
+      capability: 'web.search',
+      input: { query: 'clock-bound' },
+      runId: run.id,
+    })).resolves.toMatchObject({ status: 'completed' })
+
+    expect(executeTool).toHaveBeenCalledOnce()
   })
 
   it('replays an idempotent result without invoking the tool twice', async () => {

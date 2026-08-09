@@ -1,9 +1,11 @@
 import type { SkillRunStatus } from '../application/ports'
+import { SERVICE_ERROR_CODES } from '../../services/errors'
 
 export type SkillRuntimeCorrelation = {
   requestId?: string
   runId?: string
   skillVersionId?: string
+  versionId?: string
   packageId?: string
   workerId?: string
   grantId?: string
@@ -11,7 +13,7 @@ export type SkillRuntimeCorrelation = {
 }
 
 type MetricAttribute = string | number | boolean
-type MetricKind = 'queue' | 'run' | 'capability' | 'artifact' | 'import' | 'migration'
+export type MetricKind = 'queue' | 'run' | 'capability' | 'artifact' | 'import' | 'migration' | 'install' | 'approval' | 'error'
 
 export type SkillRuntimeMetricPoint = {
   timestamp: number
@@ -36,6 +38,13 @@ export type SkillRuntimeMetricCounters = {
   runsByStatus: Record<string, number>
   capabilityErrors: Record<string, number>
   migrationEvents: Record<string, number>
+  installCount: number
+  approvalCount: number
+  errorCount: number
+  legacyRejectCount: number
+  installsByOutcome: Record<string, number>
+  approvalsByAction: Record<string, number>
+  errorsByCode: Record<string, number>
 }
 
 export type SkillRuntimeMetricSnapshot = {
@@ -89,6 +98,25 @@ export type RecordQueueMetricInput = {
   correlation?: SkillRuntimeCorrelation
 }
 
+export type RecordInstallMetricInput = {
+  outcome: string
+  durationMs?: number
+  correlation?: SkillRuntimeCorrelation
+}
+
+export type RecordApprovalMetricInput = {
+  action: string
+  outcome: string
+  durationMs?: number
+  correlation?: SkillRuntimeCorrelation
+}
+
+export type RecordErrorMetricInput = {
+  code?: string | null
+  operation?: string
+  correlation?: SkillRuntimeCorrelation
+}
+
 export const migrationEvents = [
   'legacy_run_blocked',
   'migration_previewed',
@@ -128,6 +156,14 @@ const IMPORT_REJECT_REASONS = new Set([
   'review_required', 'fingerprint_changed', 'unknown',
 ])
 const MIGRATION_EVENTS = new Set<string>(migrationEvents)
+const INSTALL_OUTCOMES = new Set(['success', 'partial_failure', 'error', 'rejected', 'unknown'])
+const APPROVAL_ACTIONS = new Set(['approve', 'reject', 'unknown'])
+const APPROVAL_OUTCOMES = new Set(['success', 'error', 'rejected', 'unknown'])
+const ERROR_OPERATIONS = new Set(['inspect', 'install', 'approve', 'reject', 'run', 'artifact', 'capability', 'queue', 'migration', 'unknown'])
+const ERROR_CODES = new Set<string>([
+  ...SERVICE_ERROR_CODES,
+  ...CAPABILITY_ERROR_CODES,
+])
 
 function finiteNonNegative(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
@@ -157,6 +193,27 @@ function safeMigrationEvent(value: string | undefined): string {
   return value && MIGRATION_EVENTS.has(value) ? value : 'unknown'
 }
 
+function safeInstallOutcome(value: string | undefined): string {
+  return value && INSTALL_OUTCOMES.has(value) ? value : 'unknown'
+}
+
+function safeApprovalAction(value: string | undefined): string {
+  return value && APPROVAL_ACTIONS.has(value) ? value : 'unknown'
+}
+
+function safeApprovalOutcome(value: string | undefined): string {
+  return value && APPROVAL_OUTCOMES.has(value) ? value : 'unknown'
+}
+
+function safeErrorMetricCode(value: string | null | undefined): string {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
+  return normalized && ERROR_CODES.has(normalized) ? normalized : 'unknown'
+}
+
+function safeErrorOperation(value: string | undefined): string {
+  return value && ERROR_OPERATIONS.has(value) ? value : 'unknown'
+}
+
 function safeTimestamp(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : Date.now()
 }
@@ -178,6 +235,13 @@ function cloneCounters(counters: SkillRuntimeMetricCounters): SkillRuntimeMetric
     runsByStatus: { ...counters.runsByStatus },
     capabilityErrors: { ...counters.capabilityErrors },
     migrationEvents: { ...counters.migrationEvents },
+    installCount: counters.installCount,
+    approvalCount: counters.approvalCount,
+    errorCount: counters.errorCount,
+    legacyRejectCount: counters.legacyRejectCount,
+    installsByOutcome: { ...counters.installsByOutcome },
+    approvalsByAction: { ...counters.approvalsByAction },
+    errorsByCode: { ...counters.errorsByCode },
   }
 }
 
@@ -189,6 +253,10 @@ type MetricEvent = {
     capabilityError?: string
     artifactOperation?: string
     migrationEvent?: string
+    installOutcome?: string
+    approvalAction?: string
+    errorCode?: string
+    legacyReject?: number
   }
 }
 
@@ -331,6 +399,41 @@ export class SkillRuntimeMetrics {
     })
   }
 
+  recordInstall(input: RecordInstallMetricInput): void {
+    const timestamp = safeTimestamp(this.now())
+    const outcome = safeInstallOutcome(input.outcome)
+    const durationMs = finiteNonNegative(input.durationMs)
+    this.push({
+      point: { timestamp, kind: 'install', value: durationMs, attributes: { outcome } },
+      counters: { installCount: 1, installOutcome: outcome },
+    })
+  }
+
+  recordApproval(input: RecordApprovalMetricInput): void {
+    const timestamp = safeTimestamp(this.now())
+    const action = safeApprovalAction(input.action)
+    const outcome = safeApprovalOutcome(input.outcome)
+    const durationMs = finiteNonNegative(input.durationMs)
+    this.push({
+      point: { timestamp, kind: 'approval', value: durationMs, attributes: { action, outcome } },
+      counters: { approvalCount: 1, approvalAction: action },
+    })
+  }
+
+  recordError(input: RecordErrorMetricInput): void {
+    const timestamp = safeTimestamp(this.now())
+    const code = safeErrorMetricCode(input.code)
+    const operation = safeErrorOperation(input.operation)
+    this.push({
+      point: { timestamp, kind: 'error', value: 1, attributes: { code, operation } },
+      counters: { errorCount: 1, errorCode: code },
+    })
+  }
+
+  recordLegacyReject(input?: SkillRuntimeCorrelation): void {
+    this.recordMigration({ event: 'legacy_run_blocked', correlation: input })
+  }
+
   recordImportReject(reason: string, correlation?: SkillRuntimeCorrelation): void {
     const timestamp = safeTimestamp(this.now())
     const safeReason = safeImportRejectReason(reason)
@@ -351,7 +454,7 @@ export class SkillRuntimeMetrics {
     const value = input.value === undefined ? 1 : finiteNonNegative(input.value)
     this.push({
       point: { timestamp, kind: 'migration', value, attributes: { event } },
-      counters: { migrationEvent: event },
+      counters: { migrationEvent: event, ...(event === 'legacy_run_blocked' ? { legacyReject: 1 } : {}) },
     })
   }
 
@@ -375,6 +478,13 @@ export class SkillRuntimeMetrics {
       if (delta.capabilityError) counters.capabilityErrors[delta.capabilityError] = (counters.capabilityErrors[delta.capabilityError] ?? 0) + 1
       if (delta.artifactOperation) counters.artifactOperations[delta.artifactOperation] = (counters.artifactOperations[delta.artifactOperation] ?? 0) + 1
       if (delta.migrationEvent) counters.migrationEvents[delta.migrationEvent] = (counters.migrationEvents[delta.migrationEvent] ?? 0) + 1
+      counters.installCount += delta.installCount ?? 0
+      counters.approvalCount += delta.approvalCount ?? 0
+      counters.errorCount += delta.errorCount ?? 0
+      counters.legacyRejectCount += delta.legacyReject ?? 0
+      if (delta.installOutcome) counters.installsByOutcome[delta.installOutcome] = (counters.installsByOutcome[delta.installOutcome] ?? 0) + 1
+      if (delta.approvalAction) counters.approvalsByAction[delta.approvalAction] = (counters.approvalsByAction[delta.approvalAction] ?? 0) + 1
+      if (delta.errorCode) counters.errorsByCode[delta.errorCode] = (counters.errorsByCode[delta.errorCode] ?? 0) + 1
     }
     return {
       generatedAt: safeTimestamp(this.now()),
@@ -414,6 +524,13 @@ function emptyCounters(): SkillRuntimeMetricCounters {
     runsByStatus: {},
     capabilityErrors: {},
     migrationEvents: {},
+    installCount: 0,
+    approvalCount: 0,
+    errorCount: 0,
+    legacyRejectCount: 0,
+    installsByOutcome: {},
+    approvalsByAction: {},
+    errorsByCode: {},
   }
 }
 
@@ -423,6 +540,22 @@ export function recordRunMetric(input: RecordRunMetricInput): void {
 
 export function recordCapabilityMetric(input: RecordCapabilityMetricInput): void {
   try { SkillRuntimeMetrics.global().recordCapability(input) } catch { /* observability must never block runtime execution */ }
+}
+
+export function recordInstallMetric(input: RecordInstallMetricInput): void {
+  try { SkillRuntimeMetrics.global().recordInstall(input) } catch { /* observability must never block package installation */ }
+}
+
+export function recordApprovalMetric(input: RecordApprovalMetricInput): void {
+  try { SkillRuntimeMetrics.global().recordApproval(input) } catch { /* observability must never block approval decisions */ }
+}
+
+export function recordErrorMetric(input: RecordErrorMetricInput): void {
+  try { SkillRuntimeMetrics.global().recordError(input) } catch { /* observability must never block runtime errors */ }
+}
+
+export function recordLegacyRejectMetric(input?: SkillRuntimeCorrelation): void {
+  try { SkillRuntimeMetrics.global().recordLegacyReject(input) } catch { /* observability must never block Legacy rejection */ }
 }
 
 export function recordMigrationMetric(input: RecordMigrationMetricInput | MigrationMetricEvent | string, correlation?: SkillRuntimeCorrelation): void {

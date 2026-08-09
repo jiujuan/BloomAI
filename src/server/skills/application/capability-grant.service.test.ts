@@ -18,7 +18,8 @@ function setup() {
     packagePath: '/tmp/approval-skill',
   })
   const run = ports.runs.createRun({ skillVersionId: version.id, status: 'created', input: {}, context: {}, sessionId: 'session-a' })
-  return { ports, version, run, service: new CapabilityGrantService({ ...ports, audit: { append: () => undefined } }) }
+  const audits: Array<Record<string, unknown>> = []
+  return { ports, version, run, audits, service: new CapabilityGrantService({ ...ports, audit: { append: (event) => audits.push(event as Record<string, unknown>) } }) }
 }
 
 describe('CapabilityGrantService', () => {
@@ -43,6 +44,44 @@ describe('CapabilityGrantService', () => {
     expect(approved.status).toBe('approved')
     expect(approved.grantedScope).toEqual({ allowedDomains: ['example.com'], maxCalls: 2 })
     expect(approved.approvedBy).toBe('user-1')
+  })
+
+  it('records the approval actor and reason in the audit payload', () => {
+    const { service, run, audits } = setup()
+    const [grant] = service.requestCapabilities(run.id)
+
+    service.approveGrant(grant.grantId, {
+      actor: 'admin-1',
+      reason: 'Approved for the documented search workflow',
+      scope: { allowedDomains: ['example.com'], maxCalls: 2 },
+    })
+
+    expect(audits.at(-1)).toMatchObject({
+      actor: 'admin-1',
+      action: 'capability.approved',
+      payload: expect.objectContaining({ reason: 'Approved for the documented search workflow' }),
+    })
+  })
+
+  it('keeps approve, reject, and revoke retries state-stable', () => {
+    const { service, run } = setup()
+    const [approveRequest, rejectRequest] = service.requestCapabilities(run.id)
+    const approved = service.approveGrant(approveRequest.grantId, {
+      actor: 'admin-1',
+      scope: { allowedDomains: ['example.com'], maxCalls: 2 },
+    })
+    expect(service.approveGrant(approveRequest.grantId, {
+      actor: 'admin-2',
+      scope: { allowedDomains: ['example.com'], maxCalls: 2 },
+    })).toEqual(approved)
+
+    const rejected = service.rejectGrant(rejectRequest.grantId, { actor: 'admin-1', reason: 'not required' })
+    expect(service.rejectGrant(rejectRequest.grantId, { actor: 'admin-2', reason: 'different retry reason' })).toEqual(rejected)
+
+    const [revokeRequest] = service.requestCapabilities(run.id, [{ capability: 'image.generate', scope: { allowedModels: ['safe-model'] } }])
+    const revokeApproved = service.approveGrant(revokeRequest.grantId, { actor: 'admin-1' })
+    const revoked = service.revokeGrant(revokeApproved.grantId, { actor: 'admin-1', reason: 'cleanup' })
+    expect(service.revokeGrant(revoked.grantId, { actor: 'admin-2', reason: 'retry' })).toEqual(revoked)
   })
 
   it('rejects, revokes, expires, and consumes grants without crossing run ownership', () => {

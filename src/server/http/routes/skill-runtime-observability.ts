@@ -1,26 +1,44 @@
 import { Hono } from 'hono'
+import { z } from 'zod'
+import { errorResponse } from '../dtos/skill-runtime.error'
+import { pageSuccess, successResponse } from '../dtos/skill-runtime.response'
+import { ServiceError } from '../../services/errors'
 import type { Context } from 'hono'
 import {
+  createSkillRuntimeAuditReader,
   getRuntimeDiagnostics,
   getRuntimeHealth,
+  type AuditEventSnapshot,
+  type AuditQuery,
+  type Page,
   type RuntimeDiagnosticsSnapshot,
   type RuntimeHealth,
-} from '../../skills/observability/skill-runtime.diagnostics'
+} from '../../services/skill-runtime-observability.service'
+
+const auditQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+  action: z.string().trim().min(1).max(200).optional(),
+  resourceType: z.string().trim().min(1).max(100).optional(),
+  resourceId: z.string().trim().min(1).max(200).optional(),
+}).strict()
 
 export type SkillRuntimeObservabilityRouteOptions = {
   health?: (context: Context) => RuntimeHealth | unknown | Promise<RuntimeHealth | unknown>
   diagnostics?: (context: Context) => RuntimeDiagnosticsSnapshot | unknown | Promise<RuntimeDiagnosticsSnapshot | unknown>
+  audit?: (context: Context, query: AuditQuery) => Page<AuditEventSnapshot> | Promise<Page<AuditEventSnapshot>>
   isAdmin?: (context: Context) => boolean | Promise<boolean>
 }
 
 function defaultIsAdmin(context: Context): boolean {
-  return context.req.header('x-bloom-role')?.trim().toLowerCase() === 'admin'
+  const role = context.req.header('x-bloom-role')?.trim().toLowerCase()
+  return role === 'admin' || role === 'owner'
 }
 
 /**
  * Health is intentionally public so process/load balancers can use it for
- * liveness and readiness checks. Diagnostics expose operational state and
- * therefore require an administrator role.
+ * liveness and readiness checks. Diagnostics and audit records expose
+ * operational state, therefore they require an administrator or owner role.
  */
 export function createSkillRuntimeObservabilityRoutes(
   options: SkillRuntimeObservabilityRouteOptions = {},
@@ -28,17 +46,40 @@ export function createSkillRuntimeObservabilityRoutes(
   const routes = new Hono()
   const health = options.health ?? (() => getRuntimeHealth())
   const diagnostics = options.diagnostics ?? (() => getRuntimeDiagnostics())
+  const auditReader = createSkillRuntimeAuditReader()
+  const audit = options.audit ?? ((_context: Context, query: AuditQuery) => auditReader(query))
   const isAdmin = options.isAdmin ?? defaultIsAdmin
 
   routes.get('/skill-runtime/health', async (context) => {
-    return context.json({ data: await health(context) })
+    try {
+      return successResponse(context, await health(context))
+    } catch (error) {
+      return errorResponse(context, error)
+    }
   })
 
   routes.get('/skill-runtime/diagnostics', async (context) => {
     if (!(await isAdmin(context))) {
-      return context.json({ error: { code: 'FORBIDDEN', message: 'Administrator access required' } }, 403)
+      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator or owner access required'))
     }
-    return context.json({ data: await diagnostics(context) })
+    try {
+      return successResponse(context, await diagnostics(context))
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
+
+  routes.get('/skill-runtime/audit', async (context) => {
+    if (!(await isAdmin(context))) {
+      return errorResponse(context, new ServiceError('FORBIDDEN', 'Administrator or owner access required'))
+    }
+    try {
+      const query = auditQuerySchema.parse(context.req.query())
+      const page = await audit(context, query)
+      return pageSuccess(context, page.data, query, page.total)
+    } catch (error) {
+      return errorResponse(context, error)
+    }
   })
 
   return routes

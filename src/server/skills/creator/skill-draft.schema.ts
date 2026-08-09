@@ -3,6 +3,9 @@ import { capabilityScopeSchema, skillCapabilitySchema, type RequestedCapability 
 
 export const skillDraftCapabilitySchema = z.object({ capability: skillCapabilitySchema, scope: capabilityScopeSchema }).strict()
 export const skillDraftContentSchema = z.object({
+  // Creator drafts are package-runtime records only. Keeping this as a literal
+  // makes the boundary explicit while still normalizing older persisted drafts.
+  runtimeKind: z.literal('package').default('package'),
   name: z.string().trim().min(1).max(200),
   slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(120),
   version: z.string().trim().min(1).max(80).default('0.1.0'),
@@ -21,11 +24,15 @@ export const createSkillDraftSchema = z.object({
 }).strict()
 
 export const updateSkillDraftSchema = z.object({
-  expectedRevision: z.number().int().positive(),
+  expectedRevision: z.number().int().nonnegative(),
   patch: skillDraftContentSchema.partial(),
 }).strict()
 
-export const publishSkillDraftSchema = z.object({ enable: z.boolean().default(false) }).strict()
+export const publishSkillDraftSchema = z.object({
+  enable: z.boolean().default(false),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  idempotencyKey: z.string().trim().min(1).max(200).optional(),
+}).strict()
 
 export type SkillDraftContent = z.infer<typeof skillDraftContentSchema>
 export type SkillDraftCapability = z.infer<typeof skillDraftCapabilitySchema>

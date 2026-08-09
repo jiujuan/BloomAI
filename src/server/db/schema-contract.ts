@@ -232,6 +232,7 @@ export function getExpectedSchemaContract(): SchemaContract {
         columns: {
           id,
           run_id: required,
+          skill_version_id: optional,
           kind: required,
           artifact_kind: required,
           mime_type: optional,
@@ -239,6 +240,7 @@ export function getExpectedSchemaContract(): SchemaContract {
           relative_path: required,
           size_bytes: required,
           sha256: required,
+          status: required,
           metadata_json: required,
           created_at: required,
           retention_until: optional,
@@ -248,6 +250,7 @@ export function getExpectedSchemaContract(): SchemaContract {
         indexes: {
           idx_skill_artifacts_run: { columns: ['run_id'] },
           idx_skill_artifacts_run_created: { columns: ['run_id', 'created_at'] },
+          idx_skill_artifacts_version: { columns: ['skill_version_id'] },
           idx_skill_artifacts_retention: { columns: ['retention_until', 'exported_at'] },
         },
         foreignKeys: [{ from: 'run_id', table: 'skill_runs_v2', to: 'id' }],
@@ -385,6 +388,8 @@ export function getExpectedSchemaContract(): SchemaContract {
           validation_json: required,
           base_version_id: optional,
           published_version_id: optional,
+          publish_idempotency_key: optional,
+          publish_result_json: required,
           created_at: required,
           updated_at: required,
         },

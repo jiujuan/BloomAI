@@ -1,6 +1,6 @@
 import { resolveLegacySkillId } from '../../../shared/skill-references'
 import type { LegacySkillRepository, Skill } from '../../db/repositories/skill.repo'
-import { skillRepo } from '../../db/repositories/skill.repo'
+import { legacySkillRepo } from '../../db/repositories/skill.repo'
 import { ServiceError } from '../../services/errors'
 import { assertLegacyReadOnly, assertLegacyRunDisabled } from '../legacy/registry'
 
@@ -82,7 +82,7 @@ function requireLegacySkill(repo: LegacySkillRepositoryPort, resolveId: typeof r
 
 export function createLegacySkillAdapter(overrides: Partial<LegacySkillAdapterDependencies> = {}) {
   const dependencies: LegacySkillAdapterDependencies = {
-    repo: skillRepo,
+    repo: legacySkillRepo,
     resolveLegacySkillId,
     ...overrides,
   }

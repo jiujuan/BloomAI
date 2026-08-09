@@ -187,7 +187,7 @@ export class CapabilityBroker {
     let grant: (CapabilityGrantSnapshot & { scope: CapabilityScope }) | undefined
 
     if (parsed.caller === 'package-runtime') {
-      grant = this.requirePackageGrant(parsed)
+      grant = this.requirePackageGrant(parsed, this.now())
       context.correlation = {
         ...context.correlation,
         skillVersionId: grant.skillVersionId,
@@ -195,7 +195,7 @@ export class CapabilityBroker {
       }
       this.enforcePackageScope(parsed, grant.scope)
       packageScope = grant.scope
-      if (!this.dependencies.grants.consumeCapabilityGrant(grant.id, Date.now(), {
+      if (!this.dependencies.grants.consumeCapabilityGrant(grant.id, this.now(), {
         runId: parsed.runId,
         sessionId: parsed.sessionId,
       })) {
@@ -390,7 +390,7 @@ export class CapabilityBroker {
     )
   }
 
-  private requirePackageGrant(request: CapabilityRequest): CapabilityGrantSnapshot & { scope: CapabilityScope } {
+  private requirePackageGrant(request: CapabilityRequest, now = this.now()): CapabilityGrantSnapshot & { scope: CapabilityScope } {
     if (!request.runId) throw new CapabilityDeniedError('Package capability calls require a runId')
     const run = this.dependencies.runs.getRun(request.runId)
     if (!run) throw new CapabilityDeniedError(`Skill run not found: ${request.runId}`)
@@ -402,6 +402,7 @@ export class CapabilityBroker {
       capability: capability.data,
       sessionId: request.sessionId,
       runId: request.runId,
+      now,
     })
     if (!grant) {
       // Active-grant lookup intentionally filters exhausted grants. Inspect all grants

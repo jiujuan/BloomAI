@@ -9,7 +9,7 @@ describe('skill creator HTTP contract', () => {
 
   it('returns a stable feature-disabled error instead of hiding creator routes', async () => {
     const { createHonoApp } = await import('../app')
-    const response = await createHonoApp().request('/api/v1/skill-drafts', { method: 'POST', body: JSON.stringify({ content: {} }), headers: { 'content-type': 'application/json' } })
+    const response = await createHonoApp().request('/api/v1/skill-drafts', { method: 'POST', body: JSON.stringify({ content: {} }), headers: { 'content-type': 'application/json', 'x-bloom-role': 'admin' } })
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({ error: { code: 'FEATURE_DISABLED', message: expect.stringContaining('creatorEnabled') } })
   })

@@ -1,23 +1,33 @@
 import { ServiceError } from '../../services/errors'
 import type { AuditRepository, Clock, InstallationSnapshot, PackageSkillRepository, PackageSnapshot, SkillRunRepository, VersionSnapshot } from './ports'
 
+type CapabilityVersionRevalidator = {
+  revalidateVersion(versionId: string): { safe: boolean; findings?: readonly { capability: string; reason: string }[] }
+}
+
 type LifecycleDependencies = {
   packages: PackageSkillRepository
   runs?: Pick<SkillRunRepository, 'listRuns'>
   audit?: AuditRepository
   clock?: Clock
+  capabilityGrantService?: CapabilityVersionRevalidator
+}
+
+type AuditContext = {
+  actor?: string | null
+  requestId?: string
 }
 
 type InstallationCommandOptions = {
   expectedRevision: number
   idempotencyKey: string
-}
+} & AuditContext
 
 type DeletePackageOptions = {
   confirm: boolean
   idempotencyKey: string
   reason: string
-}
+} & AuditContext
 
 const ACTIVE_RUN_STATUSES = new Set(['created', 'validating', 'running', 'waiting_input', 'waiting_approval'])
 
@@ -52,8 +62,14 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     }
   }
 
-  function audit(action: string, resourceType: string, resourceId: string, payload: Record<string, unknown>) {
-    dependencies.audit?.append({ actor: null, action, resourceType, resourceId, payload })
+  function audit(action: string, resourceType: string, resourceId: string, payload: Record<string, unknown>, context?: AuditContext) {
+    dependencies.audit?.append({
+      actor: context?.actor ?? null,
+      action,
+      resourceType,
+      resourceId,
+      payload: { ...payload, ...(context?.requestId ? { requestId: context.requestId } : {}) },
+    })
   }
 
   function mutateInstallation(
@@ -66,8 +82,13 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     if (duplicate) return duplicate
     const installation = installationOrThrow(installationId)
     assertRevision(installation, options.expectedRevision)
-    if (installation.status === 'uninstalled' || installation.deletedAt !== null) {
+    if (installation.status === 'uninstalled' || installation.deletedAt !== null && installation.deletedAt !== undefined) {
       throw new ServiceError('CONFLICT', 'Uninstalled skill installation cannot be enabled or disabled')
+    }
+    if (enabled) {
+      const currentVersion = dependencies.packages.getVersion(installation.currentVersionId)
+      assertActivatableVersion(currentVersion, installation.packageId)
+      assertCapabilitiesRevalidated(dependencies.capabilityGrantService, currentVersion.id)
     }
     if (!dependencies.packages.setInstallationEnabledCas) {
       throw new ServiceError('INTERNAL_ERROR', 'Skill installation lifecycle CAS is unavailable')
@@ -84,7 +105,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       newRevision: updated.revision ?? options.expectedRevision,
       previousVersionId: installation.currentVersionId,
       currentVersionId: updated.currentVersionId,
-    })
+    }, options)
     return updated
   }
 
@@ -108,7 +129,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       expectedRevision: options.expectedRevision,
       newRevision: updated.revision ?? options.expectedRevision,
       currentVersionId: installation.currentVersionId,
-    })
+    }, options)
     return updated
   }
 
@@ -130,6 +151,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     if (!targetVersionId) throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'No previous verified skill version is available for rollback')
     const target = dependencies.packages.getVersion(targetVersionId)
     assertRollbackTarget(target, installation.packageId, installation.currentVersionId)
+    assertCapabilitiesRevalidated(dependencies.capabilityGrantService, target.id)
     if (!dependencies.packages.rollbackInstallation) {
       throw new ServiceError('INTERNAL_ERROR', 'Skill installation rollback lifecycle is unavailable')
     }
@@ -147,7 +169,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
       previousVersionId: installation.currentVersionId,
       currentVersionId: updated.currentVersionId,
       reason,
-    })
+    }, input)
     return updated
   }
 
@@ -176,7 +198,7 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
     }
     const deleted = dependencies.packages.softDeletePackage({ packageId, idempotencyKey: input.idempotencyKey, reason })
     if (!deleted) throw new ServiceError('CONFLICT', 'Skill package could not be deleted')
-    audit('skill.package.soft_deleted', 'skill_package', packageId, { reason })
+    audit('skill.package.soft_deleted', 'skill_package', packageId, { reason }, input)
     return deleted
   }
 
@@ -190,7 +212,22 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
   }
 }
 
-function assertRollbackTarget(target: VersionSnapshot | undefined, packageId: string, currentVersionId: string) {
+function assertActivatableVersion(target: VersionSnapshot | undefined, packageId: string): asserts target is VersionSnapshot {
+  if (!target || target.packageId !== packageId || !target.isCompatible || target.status !== 'runnable' || !['verified', 'approved'].includes(target.securityStatus ?? '')) {
+    throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can be enabled')
+  }
+}
+
+function assertCapabilitiesRevalidated(revalidator: CapabilityVersionRevalidator | undefined, versionId: string) {
+  if (!revalidator) return
+  const result = revalidator.revalidateVersion(versionId)
+  if (!result.safe) {
+    const firstFinding = result.findings?.[0]
+    throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', firstFinding?.reason ?? 'Version capability declarations are not allowed')
+  }
+}
+
+function assertRollbackTarget(target: VersionSnapshot | undefined, packageId: string, currentVersionId: string): asserts target is VersionSnapshot {
   if (!target || target.packageId !== packageId || target.id === currentVersionId) {
     throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Rollback target does not belong to this installation')
   }

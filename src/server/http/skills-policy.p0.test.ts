@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest'
+import {
+  getSkillOperationForRequest,
+  getSkillRole,
+  isSkillOperationAllowed,
+  type SkillOperation,
+} from './skills-policy'
+
+describe('Skills Admin P0 authorization boundary', () => {
+  it('fails closed to the user role when the role is absent or unknown', () => {
+    expect(getSkillRole(undefined)).toBe('user')
+    expect(getSkillRole('superuser')).toBe('user')
+    expect(isSkillOperationAllowed('user', 'package.install')).toBe(false)
+    expect(isSkillOperationAllowed('user', 'package.read')).toBe(true)
+    expect(isSkillOperationAllowed('user', 'run.create')).toBe(true)
+  })
+
+  it('allows dangerous management operations only to admin and owner', () => {
+    const dangerous: SkillOperation[] = [
+      'package.install',
+      'package.update',
+      'package.delete',
+      'installation.manage',
+      'grant.manage',
+      'run.manage',
+      'artifact.export',
+    ]
+    for (const operation of dangerous) {
+      expect(isSkillOperationAllowed('user', operation)).toBe(false)
+      expect(isSkillOperationAllowed('admin', operation)).toBe(true)
+      expect(isSkillOperationAllowed('owner', operation)).toBe(true)
+    }
+  })
+
+  it('maps destructive Skills requests to a stable operation name', () => {
+    expect(getSkillOperationForRequest('POST', '/api/v1/skill-packages/install')).toBe('package.install')
+    expect(getSkillOperationForRequest('PATCH', '/api/v1/skill-installations/i-1')).toBe('installation.manage')
+    expect(getSkillOperationForRequest('POST', '/api/v1/skill-runs/r-1/cancel')).toBe('run.manage')
+    expect(getSkillOperationForRequest('GET', '/api/v1/skill-packages')).toBeUndefined()
+  })
+})

@@ -12,15 +12,21 @@ export type SkillVersionCandidate = {
   isCompatible?: boolean
   status?: string
   securityStatus?: string
+  securityFindings?: JsonObject
   snapshotHash?: string
 }
 
 type ExtendedPackageRepository = PackageSkillRepository
 
+type CapabilityVersionRevalidator = {
+  revalidateVersion(versionId: string): { safe: boolean; findings?: readonly { capability: string; reason: string }[] }
+}
+
 type VersionServiceDependencies = {
   packages: ExtendedPackageRepository
   runs?: { listRuns?: (options: { limit: number; offset: number; status?: string; skillVersionId?: string }) => { data: readonly any[]; total: number } }
   grants?: { listCapabilityGrants?: (skillVersionId: string, options?: Record<string, unknown>) => readonly any[] }
+  capabilityGrantService?: CapabilityVersionRevalidator
 }
 
 export type VersionUpdatePreview = {
@@ -55,7 +61,7 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
     },
 
     async previewUpdate(packageId: string, candidate: SkillVersionCandidate): Promise<VersionUpdatePreview> {
-      assertPackageExists(packageId)
+      assertActivePackage(packageId)
       const current = currentVersion(packageId, packages)
       const normalized = normalizeCandidate(candidate)
       const immutableHash = computeImmutableHash(normalized)
@@ -75,17 +81,19 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
         immutableHash,
         status: normalized.status ?? 'runnable',
         securityStatus: normalized.securityStatus ?? 'unreviewed',
+        securityFindings: normalized.securityFindings ?? {},
         snapshotHash: normalized.snapshotHash ?? snapshotHash(normalized.sourceSnapshot),
       }
       const runningRuns = dependencies.runs?.listRuns?.({ limit: 100, offset: 0, status: 'running', skillVersionId: current?.id })?.total ?? 0
       const activeGrants = current ? dependencies.grants?.listCapabilityGrants?.(current.id, {})?.filter((grant: any) => grant.revokedAt === null && grant.status === 'approved').length ?? 0 : 0
+      const diff = current ? diffSkillVersions(current, candidateVersion) : null
       return {
         packageId,
         currentVersionId: current?.id ?? null,
         candidate: normalized,
         duplicate: Boolean(existing),
         existingVersionId: existing?.id ?? null,
-        diff: current ? diffSkillVersions(current, candidateVersion) : null,
+        diff,
         checks: {
           runningRuns,
           activeGrants,
@@ -94,6 +102,7 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
             ...(runningRuns > 0 ? [`${runningRuns} running run(s) continue on the current version`] : []),
             ...(activeGrants > 0 ? [`${activeGrants} active grant(s) require review`] : []),
             ...(normalized.isCompatible === false ? ['candidate version is incompatible'] : []),
+            ...(diff?.riskSummary.warnings ?? []),
           ],
         },
       }
@@ -105,29 +114,41 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
         return { packageId, duplicate: true, version: this.getVersion(preview.existingVersionId), currentVersionId: preview.currentVersionId }
       }
       if (!preview.checks.compatible) throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Skill version is incompatible with the Package Runtime')
+      const normalized = preview.candidate
       const created = packages.createVersion({
         packageId,
-        version: candidate.version,
-        manifest: candidate.manifest,
-        manifestHash: candidate.manifestHash,
-        packagePath: candidate.packagePath,
-        sourceSnapshot: candidate.sourceSnapshot,
-        isCompatible: candidate.isCompatible,
-        immutableHash: computeImmutableHash(candidate),
-        status: candidate.status,
-        securityStatus: candidate.securityStatus,
-        snapshotHash: candidate.snapshotHash,
+        version: normalized.version,
+        manifest: normalized.manifest,
+        manifestHash: normalized.manifestHash,
+        packagePath: normalized.packagePath,
+        sourceSnapshot: normalized.sourceSnapshot,
+        isCompatible: normalized.isCompatible,
+        immutableHash: computeImmutableHash(normalized),
+        status: normalized.status,
+        securityStatus: normalized.securityStatus,
+        securityFindings: normalized.securityFindings,
+        snapshotHash: normalized.snapshotHash,
       } as any)
       return { packageId, duplicate: false, version: created, currentVersionId: preview.currentVersionId }
     },
 
     switchCurrent(installationId: string, versionId: string, options: { expectedRevision: number; idempotencyKey: string }) {
+      const duplicate = packages.getInstallationCommandResult?.(installationId, options.idempotencyKey)
+      if (duplicate) return duplicate
       const installation = packages.getInstallation?.(installationId)
       if (!installation) throw new ServiceError('NOT_FOUND', 'Skill installation not found')
+      if (installation.status === 'uninstalled' || installation.deletedAt !== null && installation.deletedAt !== undefined) {
+        throw new ServiceError('CONFLICT', 'Uninstalled skill installation cannot switch versions')
+      }
       const version = this.getVersion(versionId)
       if (version.packageId !== installation.packageId) throw new ServiceError('VALIDATION_ERROR', 'Version does not belong to installation package')
-      if (!version.isCompatible || !['runnable', 'verified', undefined].includes((version as any).status)) {
-        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only compatible runnable versions can become current')
+      if (!version.isCompatible || version.status !== 'runnable' || !['verified', 'approved'].includes(version.securityStatus ?? '')) {
+        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can become current')
+      }
+      const revalidation = dependencies.capabilityGrantService?.revalidateVersion(version.id)
+      if (revalidation && !revalidation.safe) {
+        const firstFinding = revalidation.findings?.[0]
+        throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', firstFinding?.reason ?? 'Version capability declarations are not allowed')
       }
       if (!packages.switchCurrentVersion) throw new ServiceError('INTERNAL_ERROR', 'Current version switching is unavailable')
       const switched = packages.switchCurrentVersion({ installationId, versionId, ...options })
@@ -138,6 +159,14 @@ export function createSkillVersionService(dependencies: VersionServiceDependenci
 
   function assertPackageExists(packageId: string): void {
     if (!packages.getPackage(packageId)) throw new ServiceError('NOT_FOUND', 'Skill package not found')
+  }
+
+  function assertActivePackage(packageId: string): void {
+    const pkg = packages.getPackage(packageId)
+    if (!pkg) throw new ServiceError('NOT_FOUND', 'Skill package not found')
+    if (pkg.deletedAt !== null && pkg.deletedAt !== undefined) {
+      throw new ServiceError('CONFLICT', 'Archived skill packages cannot be updated')
+    }
   }
 }
 
@@ -156,6 +185,7 @@ function normalizeCandidate(candidate: SkillVersionCandidate): SkillVersionCandi
     isCompatible: candidate.isCompatible !== false,
     status: candidate.status ?? 'runnable',
     securityStatus: candidate.securityStatus ?? 'unreviewed',
+    securityFindings: candidate.securityFindings ?? {},
     snapshotHash: candidate.snapshotHash ?? snapshotHash(candidate.sourceSnapshot),
   }
 }

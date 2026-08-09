@@ -1,7 +1,15 @@
 import { API_BASE } from '@shared/constants'
 
 export type PaginationInput = { limit?: number; offset?: number }
-export type SkillRuntimeSourceFilter = 'all' | 'legacy' | 'package'
+export type PackageListInput = PaginationInput & {
+  search?: string
+  sourceType?: string
+  includeArchived?: boolean
+  sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'
+  direction?: 'asc' | 'desc'
+}
+export type DraftListInput = PaginationInput & { status?: 'draft' | 'published' | 'discarded' | string }
+export type SkillRuntimeSourceFilter = 'all' | 'package'
 export type SkillRuntimeFilterStatus = 'all' | 'enabled' | 'disabled' | 'attention'
 
 export type PaginationMeta = { limit: number; offset: number; total: number; hasMore: boolean; nextOffset: number | null }
@@ -17,6 +25,22 @@ export type RuntimeErrorCode =
   | 'NOT_FOUND'
   | 'NETWORK_ERROR'
   | string
+
+export type RuntimeToastTone = 'success' | 'info' | 'warning' | 'error'
+export type RuntimeToast = {
+  id: string
+  tone: RuntimeToastTone
+  title: string
+  message?: string
+  createdAt: number
+}
+export type RuntimeMutationStatus = 'pending' | 'success' | 'error'
+export type RuntimeMutationState = {
+  status: RuntimeMutationStatus
+  startedAt: number
+  finishedAt?: number
+  error?: RuntimeError
+}
 
 export type RuntimeError = {
   code: RuntimeErrorCode
@@ -68,6 +92,16 @@ export type CapabilityGrant = CapabilityDto & {
 }
 
 export type RequestedCapability = { capability: string; scope: CapabilityScope }
+
+export type PackageImportDiagnostic = {
+  code?: string
+  severity: 'info' | 'warning' | 'error' | 'critical' | string
+  message: string
+  path?: string
+  line?: number
+  column?: number
+  details?: Record<string, unknown>
+}
 
 export type PackageManifest = {
   name: string
@@ -192,10 +226,29 @@ export type PackageInstallInput = {
   confirm: true
 }
 
+export type PackageImportReviewStatus = 'scanning' | 'validated' | 'warning' | 'pending' | 'approved' | 'rejected' | 'installed' | string
+
+export type PackageImportReview = {
+  id: string
+  source: string
+  sourceSha: string
+  sourceRef: string | null
+  inspection: Record<string, unknown>
+  securityFindings: Record<string, unknown>
+  status: PackageImportReviewStatus
+  reviewer: string | null
+  decision: Record<string, unknown> | null
+  createdAt: number
+  updatedAt: number
+}
+
 export type InspectedPackage = {
   sourceType: string
   relativeSkillPath: string
   manifestHash: string
+  sourceFingerprint: string
+  diagnostics: PackageImportDiagnostic[]
+  importReviewRequired: boolean
   manifest: PackageManifest
   sourceSnapshot: {
     sourceSha256: string
@@ -203,6 +256,13 @@ export type InspectedPackage = {
     sourceRef?: string
     files: Array<{ path: string; sha256: string; sizeBytes: number }>
   }
+}
+
+export type PackageInspectionResult = {
+  reviewId: string
+  sourceFingerprint: string
+  resolvedCommitSha?: string
+  packages: InspectedPackage[]
 }
 
 export type VersionCandidate = {
@@ -342,7 +402,11 @@ export type SkillArtifact = {
   created_at?: number
 }
 
+export type CreatorRuntimeKind = 'package'
+
 export type SkillDraftContent = {
+  /** Creator drafts are intentionally package-runtime only. */
+  runtimeKind?: CreatorRuntimeKind
   name: string
   slug: string
   version?: string
@@ -353,6 +417,66 @@ export type SkillDraftContent = {
   capabilities?: RequestedCapability[]
   visibility?: 'private' | 'workspace' | 'public'
   author?: string
+}
+
+export type CreatorPublishResult = {
+  draftId?: string
+  packageId?: string
+  versionId?: string
+  snapshotId?: string
+  installationId?: string
+  installationEnabled?: boolean
+  manifestHash?: string
+  snapshotHash?: string
+  idempotent?: boolean
+  package?: { id?: string }
+  version?: { id?: string }
+  installation?: { id?: string }
+  [key: string]: unknown
+}
+
+export type CreatorCapabilityRisk = {
+  severity: 'high' | 'medium' | 'low'
+  approvalRequired: boolean
+  label: string
+}
+
+const HIGH_RISK_CREATOR_CAPABILITIES = new Set(['command', 'workspace_write', 'shell.execute', 'file.write', 'package.install'])
+const MEDIUM_RISK_CREATOR_CAPABILITIES = new Set(['web.fetch', 'document.read_uploaded', 'package.read', 'artifact.write', 'image.generate'])
+
+export function getCreatorCapabilityRisk(capability: string): CreatorCapabilityRisk {
+  if (HIGH_RISK_CREATOR_CAPABILITIES.has(capability)) return { severity: 'high', approvalRequired: true, label: '高风险 · 需要审批' }
+  if (MEDIUM_RISK_CREATOR_CAPABILITIES.has(capability)) return { severity: 'medium', approvalRequired: true, label: '需审批确认' }
+  return { severity: 'low', approvalRequired: false, label: '低风险' }
+}
+
+export function normalizeSkillDraftContent(value: unknown): SkillDraftContent {
+  const row = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return { ...row, runtimeKind: 'package' } as SkillDraftContent
+}
+
+export function normalizeCreatorPublishResult(value: unknown): CreatorPublishResult {
+  const row = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const packageRow = row.package && typeof row.package === 'object' ? row.package as Record<string, unknown> : undefined
+  const versionRow = row.version && typeof row.version === 'object' ? row.version as Record<string, unknown> : undefined
+  const installationRow = row.installation && typeof row.installation === 'object' ? row.installation as Record<string, unknown> : undefined
+  return {
+    ...row,
+    draftId: typeof row.draftId === 'string' ? row.draftId : typeof row.draft_id === 'string' ? row.draft_id : undefined,
+    packageId: typeof row.packageId === 'string' ? row.packageId : typeof row.package_id === 'string' ? row.package_id : typeof packageRow?.id === 'string' ? packageRow.id : undefined,
+    versionId: typeof row.versionId === 'string' ? row.versionId : typeof row.version_id === 'string' ? row.version_id : typeof versionRow?.id === 'string' ? versionRow.id : undefined,
+    snapshotId: typeof row.snapshotId === 'string' ? row.snapshotId : typeof row.snapshot_id === 'string' ? row.snapshot_id : undefined,
+    installationId: typeof row.installationId === 'string' ? row.installationId : typeof row.installation_id === 'string' ? row.installation_id : typeof installationRow?.id === 'string' ? installationRow.id : undefined,
+    installationEnabled: typeof row.installationEnabled === 'boolean' ? row.installationEnabled : undefined,
+    manifestHash: typeof row.manifestHash === 'string' ? row.manifestHash : typeof row.manifest_hash === 'string' ? row.manifest_hash : undefined,
+    snapshotHash: typeof row.snapshotHash === 'string' ? row.snapshotHash : typeof row.snapshot_hash === 'string' ? row.snapshot_hash : undefined,
+    idempotent: row.idempotent === true,
+  }
+}
+
+export function getPublishedPackageId(value: unknown): string | null {
+  const result = normalizeCreatorPublishResult(value)
+  return result.packageId || null
 }
 
 export type DraftDto = {
@@ -388,7 +512,33 @@ export type DraftPreview = {
   capabilityRisks?: Array<{ capability: string; scope: CapabilityScope; severity: string }>
 }
 
+export type SkillRuntimeSettings = {
+  import: Record<string, unknown>
+  security: Record<string, unknown>
+  artifacts: Record<string, unknown>
+  runtime: Record<string, unknown>
+  updatedAt?: number
+  revision?: number
+  [key: string]: unknown
+}
+
+export type SkillRuntimeFeatureFlags = Record<string, boolean> & {
+  runtimeEnabled?: boolean
+  packageExecutionEnabled?: boolean
+  importEnabled?: boolean
+  githubImportEnabled?: boolean
+  npxImportEnabled?: boolean
+  creatorEnabled?: boolean
+  creatorPublishEnabled?: boolean
+}
+
 export type SkillRuntimeCapabilities = {
+  operationalStatus: 'ready' | 'degraded' | 'disabled'
+  statusReason: 'runtime_ready' | 'package_execution_disabled' | 'runtime_disabled' | string
+  canManage: boolean
+  canExecute: boolean
+  sourcePolicy: { allowedKinds: string[] }
+  capabilityPolicy: { allowedCapabilities: string[] }
   protocolVersion: string
   configVersion: string
   runtimeEnabled: boolean
@@ -399,6 +549,72 @@ export type SkillRuntimeCapabilities = {
   creatorEnabled: boolean
   creatorPublishEnabled: boolean
   limits: Record<string, number>
+}
+
+export type SkillRuntimeDiagnosticsHealth = {
+  liveness: boolean
+  readiness: boolean
+  /** Canonical v1.2 status plus pre-v1.2 compatibility values. */
+  status: 'healthy' | 'degraded' | 'disabled' | 'ready' | 'not_ready' | string
+  /** Canonical availability is preferred by the renderer when present. */
+  availability?: 'healthy' | 'degraded' | 'disabled' | string
+  /** Compatibility value for legacy consumers. */
+  legacyStatus?: string
+  checks: Array<{ name: string; status: 'ok' | 'warning' | 'failed' | string; message?: string }>
+}
+
+export type SkillRuntimeDiagnosticsMetrics = {
+  generatedAt?: number
+  retentionMs?: number
+  counters?: {
+    installCount?: number
+    approvalCount?: number
+    queueDepth?: number
+    runsByStatus?: Record<string, number>
+    artifactOperations?: Record<string, number>
+    errorCount?: number
+    legacyRejectCount?: number
+  }
+}
+
+export type SkillRuntimeDiagnosticsSnapshot = {
+  /** Present in the HTTP contract; the UI does not render this value. */
+  generatedAt?: number
+  health: SkillRuntimeDiagnosticsHealth
+  worker: {
+    status: string
+    workerId?: string | null
+    heartbeatAt?: number | null
+    activeRuns?: number
+    concurrency?: number
+  }
+  queue: {
+    depth: number
+    queued: number
+    leased: number
+    retryWait: number
+    dead: number
+    lagMs: number
+  }
+  migration: {
+    current: string | null
+    applied: string[]
+    pending: string[]
+  }
+  policy: {
+    version: string
+    configVersion: string
+  }
+  /** The renderer intentionally receives only safe failure metadata. */
+  recentFailures: Array<{
+    runId?: string
+    status?: string
+    errorCode?: string | null
+    errorMessage?: string | null
+    updatedAt?: number
+  }>
+  /** Safe aggregate metrics used by the Runtime settings view. */
+  metrics?: SkillRuntimeDiagnosticsMetrics
 }
 
 export function parseJson<T>(value: string | null | undefined, fallback: T): T {

@@ -2,7 +2,7 @@ import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import type { PackageInstallSource } from './package-installer'
 import { sanitizeSecurityPayload, validateExternalSource } from '../security/skill-security-checklist'
 
-export type PackageImportReviewStatus = 'pending' | 'approved' | 'rejected' | 'installed'
+export type PackageImportReviewStatus = 'scanning' | 'validated' | 'warning' | 'pending' | 'approved' | 'rejected' | 'installed'
 
 export type PackageImportReview = {
   id: string
@@ -34,6 +34,7 @@ export class PackageInstallReviewService {
     sourceFingerprint: string
     inspection: Record<string, unknown>
     securityFindings?: Record<string, unknown>
+    status?: Extract<PackageImportReviewStatus, 'scanning' | 'validated' | 'warning' | 'pending'>
   }): PackageImportReview {
     const source = validateExternalSource(input.source) as PackageInstallSource
     const inspection = sanitizeReviewObject(input.inspection, 'inspection')
@@ -43,7 +44,7 @@ export class PackageInstallReviewService {
       sourceRef: sourceRef(source),
       inspection,
       securityFindings: sanitizeReviewObject(input.securityFindings ?? {}, 'security findings'),
-      status: 'pending',
+      status: input.status ?? 'pending',
     })
     return mapReview(row)
   }
@@ -79,14 +80,14 @@ export class PackageInstallReviewService {
     if (!confirm) throw new PackageInstallReviewError('REVIEW_NOT_APPROVED', 'Package install requires explicit confirmation')
     if (review.sourceSha !== sourceFingerprint) throw new PackageInstallReviewError('REVIEW_FINGERPRINT_MISMATCH', 'Package source fingerprint changed since inspection')
     if (review.status === 'rejected') throw new PackageInstallReviewError('REVIEW_REJECTED', 'Package import review was rejected')
-    if (review.status !== 'pending' && review.status !== 'approved' && review.status !== 'installed') {
+    if (!['scanning', 'validated', 'warning', 'pending', 'approved', 'installed'].includes(review.status)) {
       throw new PackageInstallReviewError('REVIEW_NOT_APPROVED', 'Package import review is not installable')
     }
     return review
   }
 
   markInstalled(id: string, result: Record<string, unknown>): PackageImportReview {
-    const decision = sanitizeReviewObject({ action: 'install', result }, 'decision')
+    const decision = sanitizeReviewDecision({ action: 'install', result }, 'decision')
     const row = skillPackageRepo.updateImportReview(id, { status: 'installed', decision: JSON.stringify(decision) })
     if (!row) throw new PackageInstallReviewError('REVIEW_NOT_FOUND', `Import review not found: ${id}`)
     return mapReview(row)
@@ -105,7 +106,7 @@ function mapReview(row: any): PackageImportReview {
     securityFindings: parseJsonObject(row.security_findings_json ?? '{}'),
     status: row.status as PackageImportReviewStatus,
     reviewer: row.reviewer ?? null,
-    decision: row.decision ? parseJsonObject(row.decision) : null,
+    decision: row.decision ? parseJsonObject(row.decision, 'decision') : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -121,10 +122,20 @@ function parseJsonObject(value: string, fieldName = 'stored review payload'): Re
   try {
     const parsed = JSON.parse(value)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return sanitizeReviewObject(parsed as Record<string, unknown>, fieldName)
+    return fieldName === 'decision'
+      ? sanitizeReviewDecision(parsed as Record<string, unknown>, fieldName)
+      : sanitizeReviewObject(parsed as Record<string, unknown>, fieldName)
   } catch {
     return {}
   }
+}
+
+function sanitizeReviewDecision(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {
+  const { result, ...metadata } = value
+  const sanitizedMetadata = sanitizeReviewObject(metadata, fieldName)
+  if (result === undefined) return sanitizedMetadata
+  const sanitizedResult = sanitizeReviewObject(result as Record<string, unknown>, `${fieldName}.result`)
+  return { ...sanitizedMetadata, result: sanitizedResult }
 }
 
 function sanitizeReviewObject(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {

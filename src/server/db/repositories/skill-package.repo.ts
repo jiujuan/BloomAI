@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lte, max, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lte, like, max, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { resolvePackageSkillId } from '../../../shared/skill-references'
@@ -20,11 +20,13 @@ import {
   skill_audit_events,
   skill_drafts,
 } from '../schema'
-import { ServiceError } from '../../services/errors'
-import { sanitizeSecurityPayload } from '../../skills/security/skill-security-checklist'
+import { ServiceError } from '../../domain/errors'
+import { sanitizeSecurityPayload } from '../../security/security-payload'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
+  AuditEventSnapshot,
+  AuditQuery,
   AuditRepository,
   ArtifactSnapshot,
   CapabilityGrantRepository,
@@ -46,9 +48,16 @@ import type {
   SkillRunStatus,
   SkillRuntimePorts,
   VersionSnapshot,
-} from '../../skills/application/ports'
+} from '../../domain/skill-runtime-ports'
 
 const jsonObjectSchema = z.record(z.unknown())
+
+type StoredDraftPublishResult = {
+  package: { id: string; [key: string]: unknown }
+  version: { id: string; [key: string]: unknown }
+  snapshot: { id: string; [key: string]: unknown }
+  installation: { id: string; [key: string]: unknown }
+}
 
 function stringifyJsonObject(value: unknown, fieldName: string): string {
   const parsed = jsonObjectSchema.safeParse(value)
@@ -99,6 +108,23 @@ export const skillPackageRepo = {
     return getOrmDb().select().from(skill_drafts).where(eq(skill_drafts.id, id)).get()
   },
 
+  listDrafts(options: {
+    ownerId: string
+    limit: number
+    offset: number
+    status?: string
+  }) {
+    const conditions = [
+      eq(skill_drafts.owner_id, options.ownerId),
+      options.status === undefined ? undefined : eq(skill_drafts.status, options.status),
+    ].filter(Boolean)
+    const where = conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_drafts).where(where)
+    const data = query.orderBy(desc(skill_drafts.updated_at), asc(skill_drafts.id)).limit(options.limit).offset(options.offset).all()
+    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_drafts).where(where).get()?.count ?? 0
+    return { data, total: Number(total) }
+  },
+
   updateDraftCas(data: { id: string; ownerId: string; expectedRevision: number; content: Record<string, unknown> }) {
     const result = getOrmDb().update(skill_drafts).set({
       content_json: stringifyJsonObject(data.content, 'content'), revision: data.expectedRevision + 1, updated_at: Date.now(),
@@ -124,10 +150,38 @@ export const skillPackageRepo = {
     return result.changes === 1 ? this.getDraft(data.id) : undefined
   },
 
-  listPackages(options: { limit: number; offset: number }) {
-    const data = getOrmDb().select().from(skill_packages).orderBy(desc(skill_packages.updated_at))
+  listPackages(options: {
+    limit: number
+    offset: number
+    includeArchived?: boolean
+    search?: string
+    sourceType?: string
+    sort?: 'updatedAt' | 'createdAt' | 'name' | 'sourceType'
+    direction?: 'asc' | 'desc'
+  }) {
+    const conditions = [
+      options.includeArchived ? undefined : isNull(skill_packages.deleted_at),
+      options.sourceType ? eq(skill_packages.source_type, options.sourceType) : undefined,
+      options.search ? or(
+        like(skill_packages.name, `%${options.search}%`),
+        like(skill_packages.description, `%${options.search}%`),
+      ) : undefined,
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const sortColumn = options.sort === 'createdAt'
+      ? skill_packages.created_at
+      : options.sort === 'name'
+        ? skill_packages.name
+        : options.sort === 'sourceType'
+          ? skill_packages.source_type
+          : skill_packages.updated_at
+    const primaryOrder = options.direction === 'asc' ? asc(sortColumn) : desc(sortColumn)
+    const query = getOrmDb().select().from(skill_packages)
+    const data = (where === undefined ? query : query.where(where))
+      .orderBy(primaryOrder, asc(skill_packages.id))
       .limit(options.limit).offset(options.offset).all()
-    const total = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages).get()?.count ?? 0
+    const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_packages)
+    const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0
     return { data, total: Number(total) }
   },
 
@@ -196,7 +250,7 @@ export const skillPackageRepo = {
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       if (!installation || installation.revision !== data.expectedRevision) return undefined
       const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
-      if (!target || target.package_id !== installation.package_id) return undefined
+      if (!isVerifiedRunnableVersion(target, installation.package_id)) return undefined
 
       const now = Date.now()
       const result = tx.update(skill_installations).set({
@@ -365,6 +419,188 @@ export const skillPackageRepo = {
       }
       tx.insert(skill_installations).values(installationRow).run()
       return { package: packageRow, version: versionRow, snapshot: snapshotRow, installation: installationRow }
+    })
+  },
+
+  publishDraftTransaction(data: {
+    package: {
+      name: string
+      description: string
+      sourceType: string
+      sourceUri?: string | null
+      sourceRef?: string | null
+    }
+    version: {
+      version: string
+      manifest: Record<string, unknown>
+      manifestHash: string
+      packagePath: string
+      sourceSnapshot: Record<string, unknown>
+      isCompatible?: boolean
+      immutableHash?: string
+      status?: string
+      securityStatus?: string
+      snapshotHash?: string
+      securityFindings?: Record<string, unknown>
+    }
+    snapshot: {
+      filesManifest: Record<string, unknown>
+      totalBytes: number
+      fileCount: number
+      snapshotRoot: string
+      snapshotHash: string
+    }
+    installation: { status: string; enabled?: boolean }
+    draft: {
+      id: string
+      ownerId: string
+      expectedRevision: number
+      validation: Record<string, unknown>
+      idempotencyKey?: string
+      audit?: {
+        actor?: string | null
+        requestId?: string | null
+        action?: string
+        resourceType?: string
+        resourceId?: string | null
+        securityDecision?: string
+        policyVersion?: string
+        payload?: Record<string, unknown>
+      }
+    }
+  }) {
+    return getOrmDb().transaction((tx) => {
+      // Read the Draft by owner first so a retry can be resolved from the
+      // persisted publish result without re-running the Package creation path.
+      const currentDraft = tx.select().from(skill_drafts).where(and(
+        eq(skill_drafts.id, data.draft.id),
+        eq(skill_drafts.owner_id, data.draft.ownerId),
+      )).get()
+      if (!currentDraft) throw new ServiceError('NOT_FOUND', 'Skill draft not found')
+
+      if (currentDraft.status === 'published') {
+        if (data.draft.idempotencyKey && currentDraft.publish_idempotency_key === data.draft.idempotencyKey) {
+          try {
+            const stored = JSON.parse(currentDraft.publish_result_json) as StoredDraftPublishResult
+            if (stored?.package?.id && stored.version?.id && stored.snapshot?.id && stored.installation?.id) {
+              return { ...stored, idempotent: true }
+            }
+          } catch {
+            // A published Draft without a valid stored result is not safe to
+            // replay as success; fail closed below with a stable conflict.
+          }
+        }
+        if (currentDraft.publish_idempotency_key) {
+          throw new ServiceError('IDEMPOTENCY_CONFLICT', 'Published draft cannot be published with a different idempotency key')
+        }
+        throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+      }
+
+      if (currentDraft.status !== 'draft' || currentDraft.revision !== data.draft.expectedRevision) {
+        throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+      }
+
+      const now = Date.now()
+      const packageRow = {
+        id: uuidv4(),
+        name: data.package.name,
+        description: data.package.description,
+        source_type: data.package.sourceType,
+        source_uri: data.package.sourceUri ?? null,
+        source_ref: data.package.sourceRef ?? null,
+        created_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_packages).values(packageRow).run()
+
+      const versionRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        version: data.version.version,
+        runtime: 'instruction-agent',
+        manifest_json: stringifyJsonObject(data.version.manifest, 'manifest'),
+        manifest_hash: data.version.manifestHash,
+        package_path: data.version.packagePath,
+        source_snapshot_json: stringifyJsonObject(data.version.sourceSnapshot, 'sourceSnapshot'),
+        is_compatible: data.version.isCompatible === false ? 0 : 1,
+        immutable_hash: data.version.immutableHash ?? '',
+        status: data.version.status ?? 'runnable',
+        security_status: data.version.securityStatus ?? 'unreviewed',
+        snapshot_hash: data.version.snapshotHash ?? '',
+        security_findings_json: stringifySecurityFindings(data.version.securityFindings),
+        published_at: null,
+        created_at: now,
+      }
+      tx.insert(skill_versions).values(versionRow).run()
+
+      const snapshotRow = {
+        id: uuidv4(),
+        version_id: versionRow.id,
+        files_manifest_json: stringifyJsonObject(data.snapshot.filesManifest, 'filesManifest'),
+        total_bytes: data.snapshot.totalBytes,
+        file_count: data.snapshot.fileCount,
+        snapshot_root: data.snapshot.snapshotRoot,
+        snapshot_hash: data.snapshot.snapshotHash,
+        created_at: now,
+      }
+      tx.insert(skill_version_snapshots).values(snapshotRow).run()
+
+      const installationRow = {
+        id: uuidv4(),
+        package_id: packageRow.id,
+        current_version_id: versionRow.id,
+        status: data.installation.status,
+        enabled: data.installation.enabled === false ? 0 : 1,
+        installed_at: now,
+        updated_at: now,
+      }
+      tx.insert(skill_installations).values(installationRow).run()
+
+      const result = {
+        package: packageRow,
+        version: versionRow,
+        snapshot: snapshotRow,
+        installation: installationRow,
+      }
+      const draftUpdate = tx.update(skill_drafts).set({
+        status: 'published',
+        published_version_id: versionRow.id,
+        validation_json: JSON.stringify(data.draft.validation),
+        publish_idempotency_key: data.draft.idempotencyKey ?? null,
+        publish_result_json: JSON.stringify(result),
+        updated_at: now,
+      }).where(and(
+        eq(skill_drafts.id, data.draft.id),
+        eq(skill_drafts.owner_id, data.draft.ownerId),
+        eq(skill_drafts.revision, data.draft.expectedRevision),
+        eq(skill_drafts.status, 'draft'),
+      )).run()
+      if (draftUpdate.changes !== 1) throw new ServiceError('REVISION_CONFLICT', 'Draft changed during publish')
+
+      if (data.draft.audit) {
+        const audit = data.draft.audit
+        const payload = {
+          ...(audit.payload ?? {}),
+          packageId: packageRow.id,
+          versionId: versionRow.id,
+          snapshotId: snapshotRow.id,
+          installationId: installationRow.id,
+        }
+        tx.insert(skill_audit_events).values({
+          id: uuidv4(),
+          actor: audit.actor ?? null,
+          action: audit.action ?? 'skill.draft.published',
+          resource_type: audit.resourceType ?? 'skill_draft',
+          resource_id: audit.resourceId ?? data.draft.id,
+          payload_json: stringifySecurityObject(payload, 'audit payload'),
+          security_decision: audit.securityDecision ?? 'allowed',
+          policy_version: audit.policyVersion ?? 'skills-admin-v1.2',
+          source_fingerprint: null,
+          created_at: now,
+        }).run()
+      }
+
+      return { ...result, idempotent: false }
     })
   },
 
@@ -631,6 +867,10 @@ export const skillPackageRepo = {
 
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       if (!installation || installation.revision !== data.expectedRevision) return undefined
+      if (data.enabled) {
+        const currentVersion = tx.select().from(skill_versions).where(eq(skill_versions.id, installation.current_version_id)).get()
+        if (!isVerifiedRunnableVersion(currentVersion, installation.package_id)) return undefined
+      }
       const now = Date.now()
       const updatedResult = tx.update(skill_installations).set({
         enabled: data.enabled ? 1 : 0,
@@ -703,7 +943,7 @@ export const skillPackageRepo = {
 
       const installation = tx.select().from(skill_installations).where(eq(skill_installations.id, data.installationId)).get()
       const target = tx.select().from(skill_versions).where(eq(skill_versions.id, data.versionId)).get()
-      if (!installation || installation.revision !== data.expectedRevision || !target || target.package_id !== installation.package_id) return undefined
+      if (!installation || installation.revision !== data.expectedRevision || !isVerifiedRunnableVersion(target, installation.package_id)) return undefined
       const now = Date.now()
       const updatedResult = tx.update(skill_installations).set({
         previous_version_id: installation.current_version_id,
@@ -1041,14 +1281,18 @@ export const skillPackageRepo = {
       const installation = this.listInstallations(directVersion.package_id).find((entry) =>
         entry.current_version_id === directVersion.id && entry.enabled === 1 && entry.status === 'installed'
       )
-      return installation ? directVersion : undefined
+      return installation && isVerifiedRunnableVersion(directVersion, directVersion.package_id) ? directVersion : undefined
     }
     const installation = this.getInstallation(packageReferenceId)
-    if (installation?.enabled === 1 && installation.status === 'installed') return this.getVersion(installation.current_version_id)
+    if (installation?.enabled === 1 && installation.status === 'installed') {
+      const version = this.getVersion(installation.current_version_id)
+      return version && isVerifiedRunnableVersion(version, installation.package_id) ? version : undefined
+    }
     const packageRecord = this.getPackage(packageReferenceId)
     if (!packageRecord) return undefined
     const activeInstallation = this.listInstallations(packageRecord.id).find((entry) => entry.enabled === 1 && entry.status === 'installed')
-    return activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
+    const version = activeInstallation ? this.getVersion(activeInstallation.current_version_id) : undefined
+    return version && isVerifiedRunnableVersion(version, packageRecord.id) ? version : undefined
   },
 
   isPackageReference(referenceId: string) {
@@ -1126,11 +1370,15 @@ export const skillPackageRepo = {
     sizeBytes?: number
     metadata?: Record<string, unknown>
     retentionUntil?: number | null
+    status?: 'processing' | 'ready' | 'orphaned'
+    skillVersionId?: string | null
   }) {
-    if (!this.getRun(data.runId)) throw new Error(`Run not found: ${data.runId}`)
+    const run = this.getRun(data.runId)
+    if (!run) throw new Error(`Run not found: ${data.runId}`)
     const row = {
       id: uuidv4(),
       run_id: data.runId,
+      skill_version_id: data.skillVersionId ?? run.skill_version_id ?? null,
       kind: data.kind,
       artifact_kind: data.kind,
       mime_type: data.mimeType ?? null,
@@ -1138,6 +1386,7 @@ export const skillPackageRepo = {
       relative_path: data.path,
       size_bytes: data.sizeBytes ?? 0,
       sha256: data.sha256,
+      status: data.status ?? 'ready',
       metadata_json: stringifyJsonObject(data.metadata ?? {}, 'metadata'),
       created_at: Date.now(),
       retention_until: data.retentionUntil ?? null,
@@ -1158,6 +1407,14 @@ export const skillPackageRepo = {
       .orderBy(asc(skill_artifacts.created_at))
       .all()
   },
+  updateArtifactStatus(data: { id: string; status: 'processing' | 'ready' | 'orphaned' }) {
+    getOrmDb().update(skill_artifacts)
+      .set({ status: data.status })
+      .where(eq(skill_artifacts.id, data.id))
+      .run()
+    return this.getArtifact(data.id)
+  },
+
   markArtifactExported(data: { id: string; exportedAt: number; exportedBy?: string | null }) {
     getOrmDb().update(skill_artifacts)
       .set({ exported_at: data.exportedAt, exported_by: data.exportedBy ?? null })
@@ -1192,6 +1449,22 @@ export const skillPackageRepo = {
       source_fingerprint: sourceFingerprint,
       created_at: Date.now(),
     }).run()
+  },
+
+  listAuditEvents(options: AuditQuery): Page<AuditEventSnapshot> {
+    const conditions = [
+      options.action === undefined ? undefined : eq(skill_audit_events.action, options.action),
+      options.resourceType === undefined ? undefined : eq(skill_audit_events.resource_type, options.resourceType),
+      options.resourceId === undefined ? undefined : eq(skill_audit_events.resource_id, options.resourceId),
+    ].filter(Boolean)
+    const where = conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions)
+    const query = getOrmDb().select().from(skill_audit_events)
+    const rows = where === undefined
+      ? query.orderBy(desc(skill_audit_events.created_at), desc(skill_audit_events.id)).limit(options.limit).offset(options.offset).all()
+      : query.where(where).orderBy(desc(skill_audit_events.created_at), desc(skill_audit_events.id)).limit(options.limit).offset(options.offset).all()
+    const countQuery = getOrmDb().select({ count: sql<number>`count(*)` }).from(skill_audit_events)
+    const total = where === undefined ? countQuery.get()?.count ?? 0 : countQuery.where(where).get()?.count ?? 0
+    return { data: rows.map(mapAuditEvent), total: Number(total) }
   },
 
   createCapabilityGrant(data: {
@@ -1738,6 +2011,10 @@ export function createSqliteArtifactRepository(): ArtifactRepository {
     listArtifacts(runId) {
       return skillPackageRepo.listArtifacts(runId).map(mapArtifact)
     },
+    updateArtifactStatus(data) {
+      const row = skillPackageRepo.updateArtifactStatus(data)
+      return row ? mapArtifact(row) : undefined
+    },
     markArtifactExported(data) {
       const row = skillPackageRepo.markArtifactExported(data)
       return row ? mapArtifact(row) : undefined
@@ -1750,6 +2027,9 @@ export function createSqliteAuditRepository(): AuditRepository {
     append(event) {
       skillPackageRepo.appendAudit(event)
     },
+    list(options) {
+      return skillPackageRepo.listAuditEvents(options)
+    },
   }
 }
 
@@ -1759,6 +2039,34 @@ function parseObject(value: string, fieldName: string): JsonObject {
   return parsed.data
 }
 
+function mapAuditEvent(row: any): AuditEventSnapshot {
+  return {
+    id: String(row.id),
+    actor: row.actor ?? null,
+    action: String(row.action),
+    resourceType: String(row.resource_type),
+    resourceId: row.resource_id ?? null,
+    securityDecision: String(row.security_decision ?? 'not_evaluated'),
+    policyVersion: String(row.policy_version ?? 'legacy'),
+    sourceFingerprint: row.source_fingerprint ?? null,
+    payload: parseAuditPayload(row.payload_json),
+    createdAt: Number(row.created_at),
+  }
+}
+
+function parseAuditPayload(value: unknown): JsonObject {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const sanitized = sanitizeSecurityPayload(parsed)
+    return sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+      ? sanitized as JsonObject
+      : {}
+  } catch {
+    return {}
+  }
+}
+
 function stringifySecurityObject(value: unknown, fieldName: string): string {
   const sanitized = sanitizeSecurityPayload(value)
   return stringifyJsonObject(sanitized ?? {}, fieldName)
@@ -1766,6 +2074,14 @@ function stringifySecurityObject(value: unknown, fieldName: string): string {
 
 function stringifySecurityFindings(value: unknown): string {
   return stringifySecurityObject(value ?? {}, 'security findings')
+}
+
+function isVerifiedRunnableVersion(version: any, packageId: string): boolean {
+  return Boolean(version
+    && version.package_id === packageId
+    && version.is_compatible === 1
+    && version.status === 'runnable'
+    && ['verified', 'approved'].includes(version.security_status ?? ''))
 }
 
 function mapPackage(row: any): PackageSnapshot {
@@ -1895,7 +2211,22 @@ function mapGrant(row: any): CapabilityGrantSnapshot {
 }
 
 function mapArtifact(row: any): ArtifactSnapshot {
-  return { id: row.id, runId: row.run_id, kind: row.artifact_kind ?? row.kind, mimeType: row.mime_type, path: row.relative_path ?? row.path, sizeBytes: row.size_bytes, sha256: row.sha256, metadata: parseObject(row.metadata_json, 'artifact metadata'), createdAt: row.created_at, retentionUntil: row.retention_until ?? null, exportedAt: row.exported_at ?? null, exportedBy: row.exported_by ?? null }
+  return {
+    id: row.id,
+    runId: row.run_id,
+    skillVersionId: row.skill_version_id ?? null,
+    kind: row.artifact_kind ?? row.kind,
+    mimeType: row.mime_type,
+    path: row.relative_path ?? row.path,
+    sizeBytes: row.size_bytes,
+    sha256: row.sha256,
+    metadata: parseObject(row.metadata_json, 'artifact metadata'),
+    status: row.status ?? 'ready',
+    createdAt: row.created_at,
+    retentionUntil: row.retention_until ?? null,
+    exportedAt: row.exported_at ?? null,
+    exportedBy: row.exported_by ?? null,
+  }
 }
 
 function mapQueue(row: any): SkillRunQueueSnapshot {

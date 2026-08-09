@@ -2,11 +2,11 @@ import React from 'react'
 import { Clock3 } from 'lucide-react'
 import type { SkillRunEvent } from './skill-runtime.types'
 import { formatDate } from './skill-runtime.types'
-import { summarizeRunEvent } from './RunEventStream'
+import { mergeRunEvents, summarizeRunEvent } from './RunEventStream'
 
 export function RunTimeline({ events }: { events: SkillRunEvent[] }) {
-  const ordered = [...events].sort((left, right) => left.seq - right.seq)
-  return <section className="skills-detail-section" aria-labelledby="run-timeline-title"><div className="skills-detail-heading"><h3 id="run-timeline-title">状态时间线</h3><Clock3 size={15} aria-hidden="true" /></div>
+  const ordered = mergeRunEvents([], events)
+  return <section className="skills-detail-section" aria-labelledby="run-timeline-title"><div className="skills-detail-heading"><div><h3 id="run-timeline-title">Execution Timeline</h3><p className="skills-muted">事件按 server seq 去重并按顺序展示。</p></div><Clock3 size={15} aria-hidden="true" /></div>
     {ordered.length === 0 ? <p className="skills-muted">尚无可展示的状态变化。</p> : <ol className="skills-timeline">{ordered.map((event) => <li key={`${event.runId}:${event.seq}`} data-event-seq={event.seq}><span className={'skills-timeline-dot ' + eventTone(event.type)} aria-hidden="true" /><div><strong>{event.type}</strong><p>{summarizeRunEvent(event.payload)}</p></div><time>{formatDate(event.createdAt)}</time></li>)}</ol>}
   </section>
 }

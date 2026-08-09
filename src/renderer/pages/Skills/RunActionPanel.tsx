@@ -32,7 +32,8 @@ function InputField({ field, value, onChange }: { field: RunInputField; value: u
 function fallbackActions(run: SkillRun, requiredAction: RunRequiredAction): RunActionType[] {
   if (requiredAction.type === 'approval' || run.status === 'waiting_approval') return ['approve', 'reject', 'cancel']
   if (requiredAction.type === 'input' || run.status === 'waiting_input') return ['submit_input', 'cancel']
-  if (['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(run.status)) return []
+  if (run.status === 'failed') return ['retry']
+  if (['completed', 'completed_with_errors', 'cancelled'].includes(run.status)) return []
   return ['cancel']
 }
 

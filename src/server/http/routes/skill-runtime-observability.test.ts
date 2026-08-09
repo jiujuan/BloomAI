@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createSkillRuntimeObservabilityRoutes } from './skill-runtime-observability'
 
@@ -28,5 +28,61 @@ describe('Skill Runtime observability API', () => {
     const allowed = await allowedApp.request('/api/v1/skill-runtime/diagnostics')
     expect(allowed.status).toBe(200)
     expect(await allowed.json()).toMatchObject({ data: { health: { readiness: true } } })
+  })
+
+  it('serves a paginated administrator-only audit query', async () => {
+    const audit = vi.fn(() => ({
+      data: [{
+        id: 'audit-1',
+        actor: 'admin',
+        action: 'skill.installation.enabled',
+        resourceType: 'skill_installation',
+        resourceId: 'installation-1',
+        securityDecision: 'allowed',
+        policyVersion: 'v1',
+        sourceFingerprint: null,
+        payload: {},
+        createdAt: 30_000,
+      }],
+      total: 1,
+    }))
+    const app = new Hono()
+    app.route('/api/v1', createSkillRuntimeObservabilityRoutes({
+      isAdmin: () => true,
+      audit,
+    }))
+
+    const response = await app.request('/api/v1/skill-runtime/audit?limit=10&offset=0&action=skill.installation.enabled')
+    expect(response.status).toBe(200)
+    expect(audit).toHaveBeenCalledWith(expect.anything(), {
+      limit: 10,
+      offset: 0,
+      action: 'skill.installation.enabled',
+    })
+    expect(await response.json()).toMatchObject({
+      data: [{ id: 'audit-1', action: 'skill.installation.enabled' }],
+      meta: { page: { limit: 10, offset: 0, total: 1 } },
+    })
+  })
+
+  it('rejects non-admin audit access before querying and validates pagination', async () => {
+    const audit = vi.fn(() => ({ data: [], total: 0 }))
+    const deniedApp = new Hono()
+    deniedApp.route('/api/v1', createSkillRuntimeObservabilityRoutes({
+      isAdmin: () => false,
+      audit,
+    }))
+    const denied = await deniedApp.request('/api/v1/skill-runtime/audit?limit=0')
+    expect(denied.status).toBe(403)
+    expect(audit).not.toHaveBeenCalled()
+
+    const invalidApp = new Hono()
+    invalidApp.route('/api/v1', createSkillRuntimeObservabilityRoutes({
+      isAdmin: () => true,
+      audit,
+    }))
+    const invalid = await invalidApp.request('/api/v1/skill-runtime/audit?limit=101')
+    expect(invalid.status).toBe(400)
+    expect(audit).not.toHaveBeenCalled()
   })
 })

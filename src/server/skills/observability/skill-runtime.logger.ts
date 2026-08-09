@@ -46,6 +46,14 @@ function redactText(value: string): string {
   }), sanitizeErrorMessage(value))
 }
 
+function normalizeCorrelation(correlation: SkillRuntimeCorrelation): SkillRuntimeCorrelation {
+  const versionId = correlation.versionId ?? correlation.skillVersionId
+  return {
+    ...correlation,
+    ...(versionId ? { versionId } : {}),
+  }
+}
+
 function redactDetails(value: unknown, depth = 0): unknown {
   if (depth > 8) return '[TRUNCATED]'
   if (typeof value === 'string') return redactText(value)
@@ -61,13 +69,13 @@ function redactDetails(value: unknown, depth = 0): unknown {
 }
 
 export function getSkillCorrelation(): SkillRuntimeCorrelation {
-  return { ...(correlationStorage.getStore() ?? {}) }
+  return normalizeCorrelation(correlationStorage.getStore() ?? {})
 }
 
 export function withSkillCorrelation<T>(correlation: SkillRuntimeCorrelation, callback: () => T): T
 export function withSkillCorrelation<T>(correlation: SkillRuntimeCorrelation, callback: () => Promise<T>): Promise<T>
 export function withSkillCorrelation<T>(correlation: SkillRuntimeCorrelation, callback: () => T | Promise<T>): T | Promise<T> {
-  return correlationStorage.run({ ...(correlationStorage.getStore() ?? {}), ...correlation }, callback)
+  return correlationStorage.run(normalizeCorrelation({ ...(correlationStorage.getStore() ?? {}), ...correlation }), callback)
 }
 
 export class SkillRuntimeLogger {
@@ -130,7 +138,7 @@ export class SkillRuntimeLogger {
       scope: redactText(scope).slice(0, 160),
       message: redactText(message).slice(0, 2_000),
       details: redactDetails(details),
-      correlation: getSkillCorrelation(),
+      correlation: normalizeCorrelation(getSkillCorrelation()),
     }
     this.prune()
     this.entries.push(entry)

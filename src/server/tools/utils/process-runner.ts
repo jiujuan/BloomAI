@@ -319,12 +319,21 @@ function normalisePositiveLimit(value: number, name: string): number {
   return Math.floor(value)
 }
 
+const WINDOWS_TASKKILL_TIMEOUT_MS = 1_000
+
 async function terminateChild(child: ChildProcess, options: TerminateProcessOptions): Promise<void> {
   if (!isRunning(child)) return
   if (getProcessTerminationStrategy(options.platform) === 'windows-taskkill-tree') {
-    if (child.pid) {
-      await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => {})
-    }
+    // Do not wait indefinitely for taskkill. Under Windows process pressure the
+    // command can outlive the caller's kill grace period; keep the tree-kill
+    // attempt bounded and fall back to terminating the direct child.
+    const taskkill = child.pid
+      ? execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          timeout: WINDOWS_TASKKILL_TIMEOUT_MS,
+        }).catch(() => {})
+      : Promise.resolve()
+    await taskkill
     if (isRunning(child)) child.kill()
     return
   }

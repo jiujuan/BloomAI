@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   SkillRuntimeMetrics,
   migrationEvents,
+  recordApprovalMetric,
   recordCapabilityMetric,
+  recordErrorMetric,
+  recordInstallMetric,
+  recordLegacyRejectMetric,
   recordMigrationMetric,
   recordRunMetric,
   resetSkillRuntimeMetricsForTests,
@@ -137,3 +141,48 @@ describe('Skill Runtime metrics', () => {
   })
 
 })
+
+  it('records install, approval, error, and Legacy rejection signals without correlation labels', () => {
+    const metrics = new SkillRuntimeMetrics({ now: () => 30_000 })
+
+    metrics.recordInstall({ outcome: 'success', durationMs: 12, correlation: { requestId: 'req-install', packageId: 'package-install' } })
+    metrics.recordApproval({ action: 'approve', outcome: 'success', durationMs: 5, correlation: { runId: 'run-approval', grantId: 'grant-approval' } })
+    metrics.recordError({ code: 'PACKAGE_INSTALL_ERROR', operation: 'install', correlation: { runId: 'run-error' } })
+    metrics.recordLegacyReject({ requestId: 'req-legacy', runId: 'run-legacy' })
+
+    const snapshot = metrics.snapshot()
+    expect(snapshot.counters).toMatchObject({
+      installCount: 1,
+      approvalCount: 1,
+      errorCount: 1,
+      legacyRejectCount: 1,
+      installsByOutcome: { success: 1 },
+      approvalsByAction: { approve: 1 },
+      errorsByCode: { PACKAGE_INSTALL_ERROR: 1 },
+    })
+    expect(snapshot.points).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'install', attributes: expect.objectContaining({ outcome: 'success' }) }),
+      expect.objectContaining({ kind: 'approval', attributes: expect.objectContaining({ action: 'approve', outcome: 'success' }) }),
+      expect.objectContaining({ kind: 'error', attributes: expect.objectContaining({ code: 'PACKAGE_INSTALL_ERROR', operation: 'install' }) }),
+      expect.objectContaining({ kind: 'migration', attributes: expect.objectContaining({ event: 'legacy_run_blocked' }) }),
+    ]))
+    expect(JSON.stringify(snapshot.points)).not.toContain('req-install')
+    expect(JSON.stringify(snapshot.points)).not.toContain('run-approval')
+    expect(JSON.stringify(snapshot.points)).not.toContain('run-error')
+    expect(JSON.stringify(snapshot.points)).not.toContain('run-legacy')
+  })
+
+  it('keeps install, approval, error, and Legacy metric wrappers non-blocking', () => {
+    const methods = [
+      vi.spyOn(SkillRuntimeMetrics.prototype, 'recordInstall').mockImplementation(() => { throw new Error('install sink unavailable') }),
+      vi.spyOn(SkillRuntimeMetrics.prototype, 'recordApproval').mockImplementation(() => { throw new Error('approval sink unavailable') }),
+      vi.spyOn(SkillRuntimeMetrics.prototype, 'recordError').mockImplementation(() => { throw new Error('error sink unavailable') }),
+      vi.spyOn(SkillRuntimeMetrics.prototype, 'recordLegacyReject').mockImplementation(() => { throw new Error('legacy sink unavailable') }),
+    ]
+
+    expect(() => recordInstallMetric({ outcome: 'success' })).not.toThrow()
+    expect(() => recordApprovalMetric({ action: 'approve', outcome: 'success' })).not.toThrow()
+    expect(() => recordErrorMetric({ code: 'INTERNAL_ERROR' })).not.toThrow()
+    expect(() => recordLegacyRejectMetric()).not.toThrow()
+    methods.forEach((method) => method.mockRestore())
+  })
