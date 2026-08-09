@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5 已通过，Task 6 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6 已通过，Task 7 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 尚未开始，Capability Broker、Agent Tool Surface、`/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 尚未开始，Agent Tool Surface、`/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
 
 ---
 
@@ -613,25 +613,25 @@ stateDiagram-v2
 
 ### 9.2 Broker 规则
 
-- [ ] 远端调用前先创建 `pending_approval` 或 `running` 审计 Run；
-- [ ] Server、Tool、Role、Feature Flag、Catalog Version 全部重新从服务端读取；
-- [ ] 客户端不能伪造审批、风险、信任或启用状态；
-- [ ] `MCP_APPROVAL_REQUIRED` 返回安全 Preview、Request ID、Run ID 和过期时间；
-- [ ] Approve/Deny 只操作服务端 Approval Store；
-- [ ] Approval Token 一次性消费；
-- [ ] input Hash 变化、Catalog 变化、Role 变化和配置变化使 Approval 失效；
-- [ ] Tool 执行传递 AbortSignal；
-- [ ] timeout 后 invalidate client，非幂等 Tool 不自动重试；
-- [ ] content、structuredContent、isError 使用统一 Normalizer；
-- [ ] safe input/output、错误码、耗时和状态写入 Run 审计；
-- [ ] resolved secret 和未经脱敏的内容不入库。
+- [x] 远端调用前先创建 `pending_approval` 或 `running` 审计 Run；
+- [x] Server、Tool、Role、Feature Flag、Catalog Version 全部重新从服务端读取；
+- [x] 客户端不能伪造审批、风险、信任或启用状态；
+- [x] `MCP_APPROVAL_REQUIRED` 返回安全 Preview、Request ID、Run ID 和过期时间；
+- [x] Approve/Deny 只操作服务端 Approval Store；
+- [x] Approval Token 一次性消费；
+- [x] input Hash 变化、Catalog 变化、Role 变化和配置变化使 Approval 失效；
+- [x] Tool 执行传递 AbortSignal；
+- [x] timeout 后 invalidate client，非幂等 Tool 不自动重试；
+- [x] content、structuredContent、isError 使用统一 Normalizer；
+- [x] safe input/output、错误码、耗时和状态写入 Run 审计；
+- [x] resolved secret 和未经脱敏的内容不入库。
 
 ### 9.3 Task 6 验收
 
-- [ ] Agent 调用和手工 Test 使用同一 Broker；
-- [ ] denied 调用在远端调用之前生成可查询审计记录；
-- [ ] approval replay、stale input、expired、role mismatch、disabled、timeout、cancel 均有测试；
-- [ ] 结果、错误和 Run 状态一致。
+- [x] Agent 调用和手工 Test 使用同一 Broker；
+- [x] denied 调用在远端调用之前生成可查询审计记录；
+- [x] approval replay、stale input、expired、role mismatch、disabled、timeout、cancel 均有测试；
+- [x] 结果、错误和 Run 状态一致。
 
 **Verification**：
 

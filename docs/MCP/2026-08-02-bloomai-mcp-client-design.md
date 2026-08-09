@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5 已通过，Task 6 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6 已通过，Task 7 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 尚未开始，Capability Broker、Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task。本设计记录当前实现基线和后续目标。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 尚未开始，Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task。本设计记录当前实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -757,11 +757,11 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；MCP 路由和完整 MCP 生产闭环仍待后续 Task；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
-### Task 0～Task 4：实现准入 Gate
+### Task 0～Task 6：实现准入 Gate
 
 Task 0 已形成：
 
@@ -770,14 +770,18 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除。Task 6 已完成 Capability Broker、服务端 Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit：执行前重新校验 Server、Tool、Role、Feature Flag、Catalog Version 和配置，审批 Token 只在服务端一次性消费，结果统一规范化并以安全 input/output 写入审计；并通过 Broker、Adapter、类型和全量测试。
 
 ### Task 6：后端核心闭环
 
-必须实现：
+已实现：
 
-- MCP Capability Broker；
-- Approval、Run 审计、执行和取消闭环。
+- MCP Capability Broker：作为唯一的服务端 MCP Tool 执行入口，重新读取并校验 Server、Tool、Role、Feature Flag、Catalog Version 和连接配置；
+- Approval：服务端生成安全 Preview，绑定 input/config/catalog/role/session，上述状态变化会使请求失效，Approval Token 不出现在响应或审计中且只允许一次性消费；
+- 执行和取消：Agent 与手工 Test 共用 `McpToolAdapter` 和 Broker，执行传递 `AbortSignal`，超时不自动重试并记录稳定错误；
+- Run Audit：执行前创建 `pending_approval` 或 `running` Run，输入/输出先脱敏和规范化，统一记录状态、错误码、耗时和完成时间。
+
+Task 6 已通过 `npm run test:mcp-broker`、`npm run typecheck`、Task 0～Task 5 相关回归测试及全量 `npm test` 验证。
 
 ### Task 7～Task 9：产品接入
 

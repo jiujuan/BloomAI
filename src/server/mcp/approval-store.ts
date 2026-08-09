@@ -109,6 +109,22 @@ export class InMemoryApprovalStore {
     return request ? cloneRequest(request) : undefined
   }
 
+  /**
+   * Marks a pending request as rejected without exposing or accepting the
+   * opaque approval token. Approval/Deny callers only receive a safe snapshot.
+   */
+  deny(approvalRequestId: string): McpApprovalRequest {
+    const request = this.records.get(approvalRequestId)
+    if (!request || request.consumedAt !== null) {
+      throw new McpSecurityError('MCP_APPROVAL_INVALID')
+    }
+    if (this.now() >= request.expiresAt) {
+      throw new McpSecurityError('MCP_APPROVAL_EXPIRED')
+    }
+    request.consumedAt = this.now()
+    return cloneRequest(request)
+  }
+
   invalidateByConfigVersion(serverId: string, oldConfigVersion: string, _newConfigVersion: string): number {
     const invalidatedAt = this.now()
     let count = 0
