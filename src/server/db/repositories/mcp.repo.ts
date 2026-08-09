@@ -83,6 +83,8 @@ export type McpCatalogToolInput = {
   inputSchema: unknown
   outputSchema?: unknown
   schemaHash: string
+  schemaSupported?: boolean
+  schemaErrorCode?: 'MCP_SCHEMA_UNSUPPORTED'
   requiresApproval?: boolean
   riskLevel?: McpRiskLevel
   discoveredAt?: number
@@ -281,6 +283,7 @@ export const mcpRepo = {
         if (tool.id !== undefined && tool.id !== expectedToolId) throw new McpError('MCP_CONFIG_INVALID')
         if (existing && existing.id !== expectedToolId) throw new McpError('MCP_CONFIG_INVALID')
         const id = expectedToolId
+        const schemaSupported = tool.schemaSupported !== false
         const metadataChanged = !existing
           || existing.name !== tool.name
           || existing.description !== tool.description
@@ -288,6 +291,7 @@ export const mcpRepo = {
           || existing.output_schema_json !== outputSchemaJson
           || existing.schema_hash !== tool.schemaHash
           || Number(existing.is_removed) === 1
+          || !schemaSupported
         const updatedAt = assertTimestamp(tool.updatedAt ?? now, 'tool updatedAt')
 
         if (!existing) {
@@ -315,7 +319,7 @@ export const mcpRepo = {
             input_schema_json: inputSchemaJson,
             output_schema_json: outputSchemaJson,
             schema_hash: tool.schemaHash,
-            is_enabled: metadataChanged ? 0 : existing.is_enabled,
+            is_enabled: metadataChanged || !schemaSupported ? 0 : existing.is_enabled,
             is_removed: 0,
             updated_at: updatedAt,
             removed_at: null,
@@ -533,6 +537,10 @@ function normalizeCatalogToolInput(input: McpCatalogToolInput): McpCatalogToolIn
   if (!isJsonSafeValue(input.inputSchema) || input.inputSchema === undefined) throw new McpError('MCP_CONFIG_INVALID')
   if (input.outputSchema !== undefined && !isJsonSafeValue(input.outputSchema)) throw new McpError('MCP_CONFIG_INVALID')
   if (input.id !== undefined) assertNonEmpty(input.id, 'tool id')
+  if (input.schemaSupported !== undefined && typeof input.schemaSupported !== 'boolean') throw new McpError('MCP_CONFIG_INVALID')
+  if (input.schemaErrorCode !== undefined && input.schemaErrorCode !== 'MCP_SCHEMA_UNSUPPORTED') throw new McpError('MCP_CONFIG_INVALID')
+  if (input.schemaSupported === true && input.schemaErrorCode !== undefined) throw new McpError('MCP_CONFIG_INVALID')
+  const schemaSupported = input.schemaSupported ?? true
   const riskLevel = assertRiskLevel(input.riskLevel ?? 'medium')
   return {
     ...input,
@@ -540,6 +548,8 @@ function normalizeCatalogToolInput(input: McpCatalogToolInput): McpCatalogToolIn
     name,
     description,
     schemaHash,
+    schemaSupported,
+    ...(schemaSupported ? {} : { schemaErrorCode: 'MCP_SCHEMA_UNSUPPORTED' as const }),
     riskLevel,
     requiresApproval: input.requiresApproval ?? true,
   }

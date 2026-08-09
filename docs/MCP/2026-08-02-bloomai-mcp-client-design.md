@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4 已通过，Task 5 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5 已通过，Task 6 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 尚未开始，尚未实现 Catalog Preview/Confirm、MCP 路由或完整 MCP 生产闭环。本设计记录当前实现基线和后续目标。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 尚未开始，Capability Broker、Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task。本设计记录当前实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -159,6 +159,15 @@ flowchart LR
 - 每次 Agent 请求只读取本地已确认、未移除、已启用且 Role 允许的 Tool 元数据；
 - Tool 执行时由 Connection Manager 获取或恢复连接；
 - 连接失败只影响当前 MCP Tool 调用，不得使 Hono 或 Agent 进程崩溃。
+
+Task 5 已将 Catalog 生命周期落成服务端实现：
+
+- Preview 通过 `McpConnectionManager.listTools(..., { mode: 'temporary' })` 进行显式临时发现；即使持久化 Server 当前禁用，也只在临时连接配置中使用 `isEnabled=true`，不修改 Server 的持久化启用状态。
+- 远端 `toolId`、`localName` 和审批/风险字段不构成事实源；服务端始终使用远端 `remoteName`，并派生本地 ID `mcp:{serverId}:{remoteName}`、`requiresApproval=true` 和默认 `riskLevel=medium`。
+- 远端名称、名称、description、Schema 先经过安全规范化；Schema 只允许 Task 2 定义的支持子集。超出子集的 Tool 可以进入发现记录和 Preview，但标记为 `MCP_SCHEMA_UNSUPPORTED`，Confirm 后保持 disabled，不得进入可执行 Surface。
+- Preview 返回 `previewHash`、`configHash`、`catalogVersion`、TTL 和稳定排序的 Diff；DTO 不包含 resolved Secret、认证 Header 或未经脱敏的远程内容。
+- Confirm 只使用服务端内存中保存的 Preview Tool 集合，不接受客户端伪造的 Tool 列表；服务端重新计算配置 Hash 并校验 Preview TTL、Hash 和 Catalog Version，再委托 Repository 事务更新 Catalog。
+- Preview 默认有效期为 5 分钟；Preview 数据和同一 Service 实例内的 Confirm 幂等结果保存在内存 Map 中，服务重启或跨进程不会恢复旧 Preview。该边界不新增 Migration，后续若需要跨进程恢复必须另行设计持久化协议。
 
 ### 3.3 MCP 使用独立数据模型
 
@@ -404,13 +413,14 @@ configHash
 catalogVersion
 ```
 
-服务端重新校验当前配置和 Preview 是否仍然匹配。Stale Preview 必须返回 `MCP_PREVIEW_STALE`，不能覆盖当前 Catalog。
+服务端重新校验当前配置和 Preview 是否仍然匹配。Stale Preview 必须返回 `MCP_PREVIEW_STALE`，不能覆盖当前 Catalog。Confirm 不接受客户端提交的 Tool 列表，而是使用服务端保存的 Preview 快照；重复提交在同一 Service 实例内按 `serverId + previewHash + configHash + catalogVersion` 幂等返回。
 
 同步规则：
 
 - 新 Tool：插入并默认禁用；
 - 已存在且无变化：保留启用和审批策略；
 - Schema、description 或远程声明变化：更新元数据，重新进入 review/disabled；
+- Schema 不受支持：保留发现和审计元数据，但强制 `is_enabled=0`，不得执行；
 - 远程删除 Tool：设置 `is_removed=1`、`removed_at`，不删除历史 Run；
 - Catalog Version 原子递增。
 
@@ -747,7 +757,7 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Catalog、MCP 路由和完整 MCP 生产闭环仍未实现；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；MCP 路由和完整 MCP 生产闭环仍待后续 Task；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
@@ -762,13 +772,12 @@ Task 0 已形成：
 
 Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。
 
-### Task 4～Task 6：后端核心闭环
+### Task 6：后端核心闭环
 
 必须实现：
 
-- Adapter 和 Connection Manager；
-- Catalog Preview/Confirm；
-- Broker、Approval、Run 审计。
+- MCP Capability Broker；
+- Approval、Run 审计、执行和取消闭环。
 
 ### Task 7～Task 9：产品接入
 

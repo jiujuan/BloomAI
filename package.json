@@ -32,6 +32,7 @@
     "test:mcp-security": "vitest run src/server/mcp/security --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-contracts": "vitest run src/server/mcp/types.contract.test.ts src/server/mcp/errors.contract.test.ts src/server/mcp/result-normalizer.contract.test.ts src/server/mcp/schema-support.contract.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-db": "vitest run scripts/migrations/048-mcp-client.test.ts src/server/db/mcp-schema-contract.test.ts src/server/db/repositories/mcp.repo.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
+    "test:mcp-catalog": "vitest run src/server/mcp/tool-catalog.test.ts src/server/db/repositories/mcp.repo.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-adapter": "vitest run src/server/mcp/mastra-adapter.test.ts src/server/mcp/connection-manager.test.ts --pool=forks --maxWorkers=1 --minWorkers=1"
   },
   "dependencies": {

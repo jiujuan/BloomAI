@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpError } from '../../mcp/errors'
+import type { DiscoveredMcpTool } from '../../mcp/types'
 
 let dataDir: string
 let originalEnv: NodeJS.ProcessEnv
@@ -154,6 +155,179 @@ describe('mcpRepo', () => {
       now: 4_000,
     }).tools).toHaveLength(1)
     expect(mcpRepo.listTools('server-1')).toHaveLength(1)
+  })
+
+  it('previews without mutating the catalog and confirms changes with soft-delete semantics', async () => {
+    const { mcpRepo } = await loadRepo()
+    mcpRepo.createServer(baseServer)
+    mcpRepo.confirmCatalog({
+      serverId: 'server-1',
+      expectedCatalogVersion: 0,
+      tools: [
+        searchTool,
+        { ...searchTool, remoteName: 'obsolete', name: 'Obsolete', description: 'No longer available' },
+      ],
+      now: 2_000,
+    })
+
+    const search = mcpRepo.getToolByRemoteName('server-1', 'search')!
+    const obsolete = mcpRepo.getToolByRemoteName('server-1', 'obsolete')!
+    mcpRepo.setToolEnabled(search.id, true)
+    mcpRepo.setToolEnabled(obsolete.id, true)
+    mcpRepo.createRun({
+      id: 'run-before-catalog-confirm',
+      serverId: 'server-1',
+      toolId: obsolete.id,
+      remoteName: 'obsolete',
+      status: 'success',
+      inputHash: 'input-hash-before-catalog-confirm',
+      safeInput: { query: 'historical input' },
+      createdAt: 2_500,
+    })
+
+    const remoteTools: DiscoveredMcpTool[] = [
+      {
+        serverId: 'server-1',
+        serverName: 'Docs Server',
+        localName: 'Docs Server_search',
+        remoteName: 'search',
+        name: 'Search',
+        description: 'Changed description',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' }, page: { type: 'integer' } } },
+        outputSchema: { type: 'object' },
+      },
+      {
+        serverId: 'server-1',
+        serverName: 'Docs Server',
+        localName: 'Docs Server_new',
+        remoteName: 'new',
+        name: 'New',
+        description: 'New tool',
+        inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+      },
+      {
+        serverId: 'server-1',
+        serverName: 'Docs Server',
+        localName: 'Docs Server_unsafe',
+        remoteName: 'unsafe',
+        name: 'Unsafe',
+        description: 'Unsupported schema',
+        inputSchema: { $ref: '#/$defs/unsupported' },
+      },
+    ]
+    const { McpToolCatalogService } = await import('../../mcp/tool-catalog')
+    const manager = {
+      listTools: vi.fn(async () => remoteTools),
+    }
+    const service = new McpToolCatalogService({
+      repository: mcpRepo,
+      connectionManager: manager,
+      clock: () => 6_000,
+      idFactory: () => 'preview-integration',
+    })
+
+    const beforePreview = mcpRepo.listTools('server-1', { includeRemoved: true }).map((entry) => ({
+      id: entry.id,
+      remoteName: entry.remoteName,
+      isEnabled: entry.isEnabled,
+      isRemoved: entry.isRemoved,
+      description: entry.description,
+    }))
+    const preview = await service.preview('server-1')
+
+    expect(manager.listTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'server-1',
+        isEnabled: true,
+        secretRefs: ['${env:MCP_TOKEN}'],
+      }),
+      { mode: 'temporary', signal: undefined },
+    )
+    expect(preview.diff.map((entry) => [entry.remoteName, entry.kind])).toEqual([
+      ['new', 'added'],
+      ['obsolete', 'removed'],
+      ['search', 'changed'],
+      ['unsafe', 'added'],
+    ])
+    expect(mcpRepo.listTools('server-1', { includeRemoved: true }).map((entry) => ({
+      id: entry.id,
+      remoteName: entry.remoteName,
+      isEnabled: entry.isEnabled,
+      isRemoved: entry.isRemoved,
+      description: entry.description,
+    }))).toEqual(beforePreview)
+    expect(mcpRepo.getServer('server-1')?.catalogVersion).toBe(1)
+
+    const confirmed = service.confirm({
+      serverId: 'server-1',
+      previewHash: preview.previewHash,
+      configHash: preview.configHash,
+      catalogVersion: preview.catalogVersion,
+    })
+    expect(confirmed.server.catalogVersion).toBe(2)
+    expect(mcpRepo.getToolByRemoteName('server-1', 'search')).toMatchObject({
+      description: 'Changed description',
+      isEnabled: false,
+      isRemoved: false,
+    })
+    expect(mcpRepo.getToolByRemoteName('server-1', 'new')).toMatchObject({
+      isEnabled: false,
+      isRemoved: false,
+    })
+    expect(mcpRepo.getToolByRemoteName('server-1', 'unsafe')).toMatchObject({
+      isEnabled: false,
+      isRemoved: false,
+    })
+    expect(mcpRepo.getToolByRemoteName('server-1', 'obsolete')).toMatchObject({
+      isEnabled: false,
+      isRemoved: true,
+      removedAt: 6_000,
+    })
+    expect(mcpRepo.listTools('server-1')).toHaveLength(3)
+    expect(mcpRepo.listTools('server-1', { includeRemoved: true })).toHaveLength(4)
+    expect(mcpRepo.getRun('run-before-catalog-confirm')).toMatchObject({
+      status: 'success',
+      remoteName: 'obsolete',
+    })
+
+    const repeated = service.confirm({
+      serverId: 'server-1',
+      previewHash: preview.previewHash,
+      configHash: preview.configHash,
+      catalogVersion: preview.catalogVersion,
+    })
+    expect(repeated).toBe(confirmed)
+    expect(mcpRepo.getServer('server-1')?.catalogVersion).toBe(2)
+  })
+
+  it('rejects a preview after another catalog confirmation advances the catalog version', async () => {
+    const { mcpRepo } = await loadRepo()
+    mcpRepo.createServer(baseServer)
+    const { McpToolCatalogService } = await import('../../mcp/tool-catalog')
+    const service = new McpToolCatalogService({
+      repository: mcpRepo,
+      connectionManager: { listTools: vi.fn(async () => [{
+        serverId: 'server-1',
+        serverName: 'Docs Server',
+        localName: 'Docs Server_search',
+        remoteName: 'search',
+        name: 'Search',
+        description: 'Search documents',
+        inputSchema: { type: 'object' },
+      }]) },
+      clock: () => 1_000,
+      idFactory: () => 'preview-version-stale',
+    })
+    const preview = await service.preview('server-1')
+    mcpRepo.confirmCatalog({ serverId: 'server-1', expectedCatalogVersion: 0, tools: [searchTool], now: 2_000 })
+
+    expect(() => service.confirm({
+      serverId: 'server-1',
+      previewHash: preview.previewHash,
+      configHash: preview.configHash,
+      catalogVersion: preview.catalogVersion,
+    })).toThrowError(new McpError('MCP_PREVIEW_STALE'))
+    expect(mcpRepo.getServer('server-1')?.catalogVersion).toBe(1)
   })
 
   it('rejects caller-supplied ids that violate the stable local tool id contract', async () => {

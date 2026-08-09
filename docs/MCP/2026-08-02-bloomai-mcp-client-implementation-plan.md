@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4 已通过，Task 5 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5 已通过，Task 6 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 尚未开始，尚未实现 Catalog Preview/Confirm、`/api/v1/mcp` 路由或完整 MCP 生产闭环。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 尚未开始，Capability Broker、Agent Tool Surface、`/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
 
 ---
 
@@ -546,28 +546,28 @@ npm run test:architecture
 
 ### 8.1 Preview 和 Diff
 
-- [ ] Preview 不修改已确认 Catalog；
-- [ ] Diff 分类为 `added`、`changed`、`removed`、`unchanged`；
-- [ ] 生成 `previewHash`、`configHash` 和 `catalogVersion`；
-- [ ] Schema 和 description 使用稳定规范化和 Hash；
-- [ ] 不返回 Secret 或未经脱敏的远程内容；
-- [ ] 不支持的 Schema 被标记为不可执行。
+- [x] Preview 不修改已确认 Catalog；
+- [x] Diff 分类为 `added`、`changed`、`removed`、`unchanged`；
+- [x] 生成 `previewHash`、`configHash` 和 `catalogVersion`；
+- [x] Schema 和 description 使用稳定规范化和 Hash；
+- [x] 不返回 Secret 或未经脱敏的远程内容；
+- [x] 不支持的 Schema 被标记为不可执行。
 
 ### 8.2 Confirm
 
-- [ ] Confirm 必须校验 `previewHash`、`configHash` 和 `catalogVersion`；
-- [ ] 过期 Preview 返回 `MCP_PREVIEW_STALE`；
-- [ ] Confirm 在事务中更新 Tool Catalog 和 Catalog Version；
-- [ ] 新 Tool 默认禁用；
-- [ ] Schema/description 改变的 Tool 默认重新 review/disabled；
-- [ ] removed Tool 软删除，不删除历史 Run；
-- [ ] 重复 Confirm 幂等。
+- [x] Confirm 必须校验 `previewHash`、`configHash` 和 `catalogVersion`；
+- [x] 过期 Preview 返回 `MCP_PREVIEW_STALE`；
+- [x] Confirm 在事务中更新 Tool Catalog 和 Catalog Version；
+- [x] 新 Tool 默认禁用；
+- [x] Schema/description 改变的 Tool 默认重新 review/disabled；
+- [x] removed Tool 软删除，不删除历史 Run；
+- [x] 重复 Confirm 幂等。
 
 ### 8.3 Task 5 验收
 
-- [ ] Preview、Diff、Confirm、Stale、重复提交和软删除均有测试；
-- [ ] 未 Confirm 前，Agent Surface 和 enabled 查询不发生变化；
-- [ ] Catalog Version 变化可使旧 Approval 失效。
+- [x] Preview、Diff、Confirm、Stale、重复提交和软删除均有测试；
+- [x] 未 Confirm 前，Agent Surface 和 enabled 查询不发生变化；
+- [x] Catalog Version 变化可使旧 Approval 失效。
 
 **Verification**：
 
@@ -939,14 +939,14 @@ pending_approval
 - [x] 没有 `getTools/callTool/close` 等未验证假设；
 - [x] Task 1 已通过 Secret、stdio、HTTP SSRF、Approval Store 和一次性 Token 测试；
 - [x] Task 2 已锁定错误码、状态机、`NormalizedMcpResult` 和 Schema 子集；
-- [ ] `048-mcp-client.sql`、Repository、Adapter、Connection Manager 已有实现和测试；Catalog、Broker、Agent、API 留待后续 Task；
+- [x] `048-mcp-client.sql`、Repository、Adapter、Connection Manager、Catalog Preview/Confirm 已有实现和测试；Broker、Agent、API 留待后续 Task；
 - [ ] 客户端无法伪造批准、风险、信任、Role 或 Tool enablement。
 
 ### P1 必须全部关闭
 
-- [ ] 新 Tool 默认 disabled；
-- [ ] Schema/description 变化触发 review/disabled；
-- [ ] 远端删除保留历史 Run；
+- [x] 新 Tool 默认 disabled；
+- [x] Schema/description 变化触发 review/disabled；
+- [x] 远端删除保留历史 Run；
 - [ ] Agent Surface 不在每次聊天请求建连或刷新 Catalog；
 - [ ] Test/Refresh/Preview/Confirm/Enable/Approve/Deny/Run 全链路可用；
 - [x] timeout、AbortSignal、client invalidate、disconnectAll 和孤儿进程清理有证据；
