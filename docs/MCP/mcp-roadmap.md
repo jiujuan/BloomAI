@@ -1,11 +1,11 @@
 # BloomAI MCP 后续能力路线图
 
-- **状态**：规划文档，未进入当前一期实现
+- **状态**：规划文档；Task 0 已通过，一期仍未进入生产实现
 - **日期**：2026-08-09
 - **前置文档**：
   - 设计方案：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
   - 一期实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
-- **路线图基线**：只有一期 MCP Client MVP 的 Task 0～Task 10 全部通过 Release Gate 后，才允许启动本路线图中的后续能力。
+- **路线图基线**：Task 0 Spike 已通过并冻结当前 Mastra Adapter 事实；只有一期 MCP Client MVP 的 Task 0～Task 10 全部通过 Release Gate 后，才允许启动本路线图中的后续能力。
 
 ---
 
@@ -42,7 +42,7 @@ BloomAI
 | Tools | 支持 | 基线能力 | MVP |
 | stdio | 支持 | 基线能力 | MVP |
 | Streamable HTTP | 支持 | 基线能力 | MVP |
-| legacy SSE | 不公开支持 | 兼容性扩展 | R5 |
+| legacy SSE | 不公开支持 | Mastra fallback 已记录；BloomAI MVP fail closed，独立兼容性扩展仍为 R5 | R5 |
 | Resources | 不支持 | 只读资源能力 | R1 |
 | Prompts | 不支持 | 受控 Prompt 模板能力 | R2 |
 | Elicitation | 不支持 | 服务器请求用户结构化输入 | R3 |
@@ -316,7 +316,7 @@ src/renderer/pages/McpServers/OAuth*.tsx
 
 ### 8.1 目标
 
-只有 Task 0 或真实生态验证证明需要时，才增加 legacy SSE 支持。SSE 不能因为 Mastra HTTP fallback 而被隐式纳入产品。
+Task 0 已确认 Mastra HTTP 运行时具备 legacy HTTP+SSE fallback 能力，但 BloomAI MVP 检测并拒绝未明确允许的 fallback。只有真实生态验证证明需要时，才增加独立 legacy SSE 支持；SSE 不能因为 Mastra HTTP fallback 而被隐式纳入产品。
 
 建议 Feature Flag：
 
@@ -328,7 +328,7 @@ MCP_SSE_ENABLED
 
 ### 8.2 进入条件
 
-- [ ] Task 0 已记录当前 `@mastra/mcp` 的 SSE fallback 行为；
+- [x] Task 0 已记录当前 `@mastra/mcp` 的 SSE fallback 行为；
 - [ ] 已有真实 SSE Fixture；
 - [ ] 已明确 SSE 与 Streamable HTTP 的认证、重连和关闭差异；
 - [ ] 已完成 SSRF、redirect、DNS、timeout 和资源清理测试；

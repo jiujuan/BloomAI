@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0 已通过，Task 0 Spike 进行中
+- **状态**：Gate 0、Task 0 已通过，Task 1 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：当前工作区尚未发现 `@mastra/mcp` 依赖、MCP Adapter、MCP 路由或 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 Fixture 和契约测试已完成；尚未实现生产 Adapter、Connection Manager、MCP 路由或正式 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -44,7 +44,7 @@
 - 远程下载或自动安装可执行的 stdio Server；
 - 多租户云端凭据托管。
 
-如果 Task 0 证明 Mastra 的 HTTP 实现会静默 fallback 到 legacy SSE，必须在 Spike 结果中明确检测、拒绝或纳入支持范围；不能让 SSE 在未记录决策的情况下进入一期。
+Task 0 已确认 Mastra HTTP 运行时具备 legacy HTTP+SSE fallback 路径，但本次 Streamable HTTP Fixture 未发生 fallback。BloomAI 一期采用 fail-closed 检测：发现 deprecated fallback 日志或无 session id 的 legacy SSE 初始 GET 即拒绝；独立 legacy SSE 延后到 `mcp-roadmap.md` 的 R5。
 
 ### 1.3 能力矩阵
 
@@ -53,7 +53,7 @@
 | 多 MCP Server | 支持 | 以 `server_id` 隔离配置、Catalog、连接和审计 | 本文、实施计划 |
 | stdio | 支持 | 本地命令，`shell: false`，最小化环境变量 | 本文、实施计划 |
 | Streamable HTTP | 支持 | 必须执行 URL、DNS、redirect 和 SSRF 检查 | 本文、实施计划 |
-| legacy SSE | 待 Spike 决策 | 不默默纳入一期；由 Task 0 给出结论 | `mcp-roadmap.md` |
+| legacy SSE | 一期拒绝隐式 fallback | Mastra 具备 fallback 能力；BloomAI MVP 检测并拒绝未明确允许的 legacy SSE，独立支持延后到 R5 | `mcp-roadmap.md` |
 | Tools | 支持 | 一期唯一进入 Agent 的 MCP 能力 | 本文、实施计划 |
 | Resources | 后续 | 只读资源权限、大小限制和审计另行设计 | `mcp-roadmap.md` |
 | Prompts | 后续 | 参数校验、注入防护和 Agent 上下文策略另行设计 | `mcp-roadmap.md` |
@@ -234,13 +234,13 @@ Feature Flag 未明确开启时：
 
 ### 4.1 依赖版本策略
 
-当前仓库使用 `@mastra/core@1.51.0`，但尚未安装 `@mastra/mcp`。实施计划将 `@mastra/mcp@1.15.1` 作为候选版本，最终版本必须以 Task 0 Spike 的实际类型和运行时结果为准，并以精确版本写入 `package.json` 和 `package-lock.json`。
+Task 0 已将当前基线锁定为 `@mastra/core@1.51.0`、`@mastra/mcp@1.15.1` 和 `@modelcontextprotocol/sdk@1.30.0`。`@mastra/mcp` 使用精确版本写入 `package.json` 和 `package-lock.json`；任何版本升级都必须重新执行 Spike。完整证据见 `docs/MCP/mcp-mastra-spike-result.md`。
 
 不能在正式代码中继续依赖未经 Spike 证实的 Mastra MCP 工具发现、工具执行、连接关闭方法名，或把某个 Tool 字段直接当作远端名称。
 
 ### 4.2 BloomAI 内部稳定接口
 
-以下是 BloomAI 自己的 Adapter 契约，不是 Mastra 公共 API 的声明：
+以下是 BloomAI 自己的 Adapter 契约，不是 Mastra 公共 API 的声明。Task 0 已用真实运行时冻结其方法和执行路径；完整证据见 `docs/MCP/mcp-mastra-spike-result.md`：
 
 ```ts
 interface McpProviderConnection {
@@ -261,13 +261,7 @@ interface McpProviderAdapter {
 }
 ```
 
-Mastra Adapter 的实现方式必须由 Task 0 固定。候选路径包括：
-
-1. 保存 `MCPClient.listTools()` 返回的 Mastra Tool，并调用其 `execute()`；
-2. 使用当前锁定版本实际暴露的代理 API；
-3. 在 Adapter 内部调用底层 MCP SDK。
-
-无论采用哪条路径，`src/server/mcp` 之外的模块都只能依赖 BloomAI 内部契约。
+Task 0 已固定当前锁定版本的实现路径：保存 `MCPClient.listTools()` 返回的 namespaced Mastra Tool，在 Adapter 内部通过独立 `remoteName` 映射调用其 `execute(input, { abortSignal })`，由 Mastra 继续转发到底层 MCP SDK 的 `tools/call`。`src/server/mcp` 之外的模块只能依赖 BloomAI 内部契约；正式实现仍留给 Task 4。
 
 ### 4.3 工具名称与 ID
 
@@ -283,7 +277,7 @@ BloomAI 本地 Tool ID 使用命名空间：
 mcp:{serverId}:{remoteName}
 ```
 
-如果 Mastra 返回的工具名采用 `serverName_toolName` 形式，只能在 Adapter 内部做反向映射，不能把该命名名称当成远端原始名称的唯一事实源。
+当前版本实际返回 `serverName_toolName` 形式的 namespaced key，Tool `id` 也保留该本地名称。Adapter 必须在已知 Server 命名空间内维护 `localName` 到原始 `remoteName` 的独立映射，不能把 namespaced `id` 当成远端原始名称的唯一事实源。
 
 ---
 
@@ -742,20 +736,21 @@ Gate 0
 
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
+- `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
 - 确认当前工作区尚未有生产实现，不能把计划状态描述为已完成；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
 ### Task 0～Task 2：实现准入 Gate
 
-必须形成：
+Task 0 已形成：
 
 - `docs/MCP/mcp-mastra-spike-result.md`；
 - 精确版本和 lockfile；
 - 真实 stdio/HTTP Fixture；
-- Adapter Contract Test；
-- 安全边界测试；
-- `NormalizedMcpResult`、错误码和 Schema 子集。
+- Adapter Contract Test。
+
+Task 1 的安全边界测试和 Task 2 的 `NormalizedMcpResult`、错误码、Schema 子集仍未开始。
 
 ### Task 3～Task 6：后端核心闭环
 
@@ -792,17 +787,17 @@ Gate 0
 
 ## 13. 开放问题和决策记录要求
 
-以下问题必须在 Task 0 结果文档中关闭，不能留在生产代码中隐式决定：
+Task 0 已在结果文档中关闭以下问题：
 
 1. `@mastra/mcp` 最终精确版本；
 2. `listTools()` 返回 Tool 的保存和执行方式；
 3. Tool 名称空间到远端原始名称的映射；
-4. Streamable HTTP 是否会 fallback 到 SSE；
-5. AbortSignal 是否能够真正取消远端调用；
-6. disconnect、reconnect 和 timeout 后 client invalidate 行为；
-7. `content`、`structuredContent`、`isError` 的结果规范化方式。
+4. Streamable HTTP fallback 的观测和一期 fail-closed 决策；
+5. Tool 执行中的 AbortSignal 传递；
+6. disconnect、reconnect 和 timeout 后的恢复边界；
+7. `content`、`structuredContent`、`isError` 的运行时形态。
 
-这些决定应写入：
+Task 2 仍需定义最终 `NormalizedMcpResult` 和稳定错误码。这些证据写入：
 
 ```text
 docs/MCP/mcp-mastra-spike-result.md

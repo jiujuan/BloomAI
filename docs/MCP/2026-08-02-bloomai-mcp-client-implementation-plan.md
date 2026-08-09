@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0 已通过，Task 0 Spike 进行中
+- **状态**：Gate 0、Task 0 已通过，Task 1 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：当前工作区尚未发现 `@mastra/mcp` 依赖、MCP 生产模块、`/api/v1/mcp` 路由或 MCP 测试脚本。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture 和契约测试已完成。尚未实现生产 Adapter、Connection Manager、`/api/v1/mcp` 路由或正式 MCP 生产模块。
 
 ---
 
@@ -37,7 +37,7 @@ Resources、Prompts、Elicitation、OAuth、MCP Registry 和独立 legacy SSE �
 | 项目 | 统一值 |
 |---|---|
 | 全局 Feature Flag | `MCP_CLIENT_ENABLED`，未明确为 `true` 时 fail closed |
-| Candidate Mastra 包 | `@mastra/mcp@1.15.1`，最终版本以 Task 0 Spike 为准 |
+| Mastra MCP 基线 | `@mastra/mcp@1.15.1`，已由 Task 0 Spike 验证并以精确版本锁定；升级必须重新 Spike |
 | 版本策略 | `package.json` 使用精确版本，不使用 `^` |
 | MCP API 前缀 | `/api/v1/mcp` |
 | Migration | `scripts/migrations/048-mcp-client.sql` |
@@ -192,30 +192,30 @@ Select-String -Path docs/MCP/*.md -Pattern $patterns
 
 ### 3.1 依赖和类型验证
 
-- [ ] 执行 `npm view @mastra/mcp@1.15.1 version peerDependencies --json`；
-- [ ] 将通过候选版本以精确版本写入 `package.json`，禁止使用 `^`；
-- [ ] 执行 `npm install --save-exact @mastra/mcp@<通过版本>`；
-- [ ] 确认 `@mastra/core` peer dependency 和当前 Node engine 兼容；
-- [ ] 检查 `MCPClient` 构造参数、Server Definition、Tool 类型、Transport 类型；
-- [ ] 记录当前版本是否提供 `listTools`、`resources`、`prompts`、`disconnect`、`reconnectServer` 等能力。
+- [x] 执行 `npm view @mastra/mcp@1.15.1 version peerDependencies --json`；
+- [x] 将通过候选版本以精确版本写入 `package.json`，禁止使用 `^`；
+- [x] 执行 `npm install --save-exact @mastra/mcp@<通过版本>`；
+- [x] 确认 `@mastra/core` peer dependency 和当前 Node engine 兼容；
+- [x] 检查 `MCPClient` 构造参数、Server Definition、Tool 类型、Transport 类型；
+- [x] 记录当前版本是否提供 `listTools`、`resources`、`prompts`、`disconnect`、`reconnectServer` 等能力。
 
 ### 3.2 Tool 执行路径验证
 
-- [ ] 验证 `listTools()` 的实际返回结构；
-- [ ] 验证工具命名空间和远端原始 `remoteName` 的映射；
-- [ ] 验证通过返回 Tool 的 `execute()`、代理 API 或底层 SDK 执行远端 Tool 的实际路径；
-- [ ] 验证 input schema、output schema、`content`、`structuredContent`、`isError` 的运行时形态；
-- [ ] 验证 `AbortSignal` 是否能中断等待和远端调用；
-- [ ] 验证 disconnect、reconnect 和超时后的 client invalidate。
+- [x] 验证 `listTools()` 的实际返回结构；
+- [x] 验证工具命名空间和远端原始 `remoteName` 的映射；
+- [x] 验证通过返回 Tool 的 `execute()`、代理 API 或底层 SDK 执行远端 Tool 的实际路径；
+- [x] 验证 input schema、output schema、`content`、`structuredContent`、`isError` 的运行时形态；
+- [x] 验证 `AbortSignal` 是否能中断等待和远端调用；
+- [x] 验证 disconnect、reconnect 和超时后的 client invalidate。
 
 ### 3.3 真实 Fixture
 
-- [ ] stdio Fixture 只使用固定本地脚本，不通过 CI 中的任意 `npx` 下载；
-- [ ] HTTP Fixture 支持 Streamable HTTP 的最小握手、tools/list 和 tools/call；
-- [ ] Fixture 提供成功 Tool、结构化结果、错误结果、延迟 Tool 和大结果 Tool；
-- [ ] Fixture 不需要真实 Token，不允许测试读取用户真实环境变量；
-- [ ] 明确 HTTP 实现是否会 fallback 到 legacy SSE；
-- [ ] 如果不能关闭或检测 SSE fallback，Spike 必须失败并记录阻断原因。
+- [x] stdio Fixture 只使用固定本地脚本，不通过 CI 中的任意 `npx` 下载；
+- [x] HTTP Fixture 支持 Streamable HTTP 的最小握手、tools/list 和 tools/call；
+- [x] Fixture 提供成功 Tool、结构化结果、错误结果、延迟 Tool 和大结果 Tool；
+- [x] Fixture 不需要真实 Token，不允许测试读取用户真实环境变量；
+- [x] 明确 HTTP 实现是否会 fallback 到 legacy SSE；
+- [x] 如果不能关闭或检测 SSE fallback，Spike 必须失败并记录阻断原因。
 
 ### 3.4 Spike 结果文档
 
@@ -236,13 +236,13 @@ Select-String -Path docs/MCP/*.md -Pattern $patterns
 
 ### 3.5 Task 0 验收
 
-- [ ] 当前锁定版本能够完成一期 stdio 和 Streamable HTTP MVP；
-- [ ] `mastra-adapter.contract.test.ts` 通过；
-- [ ] 真实 Fixture 通过；
-- [ ] Adapter 不依赖未验证的 `getTools/callTool/close`；
-- [ ] SSE 行为有明确结论；
-- [ ] `mcp-mastra-spike-result.md` 已完成并引用于设计文档和本计划；
-- [ ] 若 Spike 失败，停止后续 Task，不得绕过证据硬写生产 Adapter。
+- [x] 当前锁定版本能够完成一期 stdio 和 Streamable HTTP MVP；
+- [x] `mastra-adapter.contract.test.ts` 通过；
+- [x] 真实 Fixture 通过；
+- [x] Adapter 不依赖未验证的 `getTools/callTool/close`；
+- [x] SSE 行为有明确结论；
+- [x] `mcp-mastra-spike-result.md` 已完成并引用于设计文档和本计划；
+- [x] 若 Spike 失败，停止后续 Task，不得绕过证据硬写生产 Adapter。
 
 **Verification**：
 
