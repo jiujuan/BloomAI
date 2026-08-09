@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6 已通过，Task 7 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7 已通过，Task 8 尚未开始
 - **日期**：2026-08-09
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 尚未开始，Agent Tool Surface、`/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 的 `/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
 
 ---
 
@@ -658,20 +658,20 @@ npm run typecheck
 
 ### 10.1 Tool Surface
 
-- [ ] Agent 只看到已 Confirm、未移除、已启用的 Catalog Tool；
-- [ ] Server disabled 时所有子 Tool 不可见；
-- [ ] Role Scope 在服务端派生，客户端不能指定；
-- [ ] Tool description 和 schema 经过安全限制；
-- [ ] Tool `execute()` 只调用 MCP Capability Broker；
-- [ ] 不将 Mastra 原始 Tool 对象直接挂载为最终能力；
-- [ ] Feature Flag 关闭时不注册 MCP Tool；
-- [ ] Tool 名称不会覆盖 BloomAI 内置工具。
+- [x] Agent 只看到已 Confirm、未移除、已启用的 Catalog Tool；
+- [x] Server disabled 时所有子 Tool 不可见；
+- [x] Role Scope 在服务端派生，客户端不能指定；
+- [x] Tool description 和 schema 经过安全限制；
+- [x] Tool `execute()` 只调用 MCP Capability Broker；
+- [x] 不将 Mastra 原始 Tool 对象直接挂载为最终能力；
+- [x] Feature Flag 关闭时不注册 MCP Tool；
+- [x] Tool 名称不会覆盖 BloomAI 内置工具。
 
 ### 10.2 Task 7 验收
 
-- [ ] General/Writing/Coding/Deep Research 等现有 Role 的 Scope 有明确测试；
-- [ ] Agent 构建不触发 `tools/list` 或新建外部连接；
-- [ ] enabled/disabled、removed、role denied 与 Broker 结果一致。
+- [x] General/Writing/Coding/Deep Research 等现有 Role 的 Scope 有明确测试；
+- [x] Agent 构建不触发 `tools/list` 或新建外部连接；
+- [x] enabled/disabled、removed、role denied 与 Broker 结果一致。
 
 **Verification**：
 

@@ -233,6 +233,37 @@ describe('McpCapabilityBroker', () => {
     expect(rolePolicy).toHaveBeenCalledWith(expect.objectContaining({ role: 'general' }))
   })
 
+  it('accepts only server-derived Agent roles and keeps manual callers on general', async () => {
+    const rolePolicy = vi.fn(() => true)
+    const { broker } = createBroker({ rolePolicy, ids: ['run-agent-role', 'run-manual-role'] })
+
+    await broker.execute({
+      serverId: 'server-1',
+      toolId: 'mcp:server-1:echo',
+      input: { query: 'agent-role' },
+      sessionId: 'session-1',
+      role: 'coding',
+      caller: 'agent',
+    })
+    await broker.execute({
+      serverId: 'server-1',
+      toolId: 'mcp:server-1:echo',
+      input: { query: 'manual-role' },
+      sessionId: 'session-1',
+      role: 'coding',
+      caller: 'manual_test',
+    })
+
+    expect(rolePolicy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ role: 'coding' }),
+    )
+    expect(rolePolicy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ role: 'general' }),
+    )
+  })
+
   it('creates a pending run and returns a safe approval preview without calling the remote', async () => {
     const { broker, repository, executeTool } = createBroker({ ids: ['run-approval'] })
 

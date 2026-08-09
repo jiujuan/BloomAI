@@ -213,6 +213,7 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     const requestContext = dependencies.createRequestContext()
     requestContext.set('model', input.model)
     requestContext.set('sessionId', input.sessionId)
+    requestContext.set('agentId', 'chat')
     await applyTrustedProjectContext(requestContext, input.sessionId, false)
     const prompt = [
       `User request: ${query}`,
@@ -272,6 +273,7 @@ export function createChatService(overrides: ChatServiceDependencies = {}) {
     requestContext.set('mode', input.mode)
     requestContext.set('model', input.model)
     requestContext.set('sessionId', input.sessionId)
+    requestContext.set('agentId', input.teamAgentId || 'chat')
     if (input.planTasks.length) requestContext.set('planTasks', input.planTasks)
     if (input.writing) requestContext.set('writing', input.writing)
 

@@ -28,6 +28,7 @@ export type McpCapabilityRepository = Pick<
 export type McpRoleResolverInput = {
   sessionId: string
   requestedRole?: string
+  caller?: 'agent' | 'manual_test' | 'approval'
 }
 
 export type McpRoleResolver = (input: McpRoleResolverInput) => string
@@ -344,7 +345,11 @@ export class McpCapabilityBroker {
 
     let role: string
     try {
-      role = normalizeRole(this.roleResolver({ sessionId: input.sessionId, requestedRole: input.role }))
+      role = normalizeRole(this.roleResolver({
+        sessionId: input.sessionId,
+        requestedRole: input.role,
+        caller: input.caller,
+      }))
     } catch (error) {
       return { ok: false, role: fallbackRole, error: mapBrokerError(error, 'MCP_ROLE_NOT_ALLOWED') }
     }
@@ -637,10 +642,18 @@ function normalizeExecuteInput(input: McpBrokerExecuteInput): McpBrokerExecuteIn
   return input
 }
 
-function defaultRoleResolver(_input: McpRoleResolverInput): string {
-  // Role is a server-owned authorization fact. A caller-provided value may be
-  // passed as a hint to an injected server resolver, but the safe default must
-  // never promote caller input into an authorization role.
+const SERVER_DERIVED_ROLES = new Set(['general', 'writing', 'coding', 'deep_research'])
+
+function defaultRoleResolver(input: McpRoleResolverInput): string {
+  // Role is a server-owned authorization fact. Only the internal Agent adapter
+  // and an approval replay may carry a previously-derived role through the
+  // Broker. Manual callers and calls without an explicit trusted caller remain
+  // on the safe general role, preserving the Task 6 fail-closed contract.
+  if ((input.caller === 'agent' || input.caller === 'approval')
+    && typeof input.requestedRole === 'string'
+    && SERVER_DERIVED_ROLES.has(input.requestedRole)) {
+    return input.requestedRole
+  }
   return defaultRole()
 }
 

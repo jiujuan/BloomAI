@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6 已通过，Task 7 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7 已通过，Task 8 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 尚未开始，Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task。本设计记录当前实现基线和后续目标。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 的 MCP 路由和完整 MCP 生产闭环仍待后续 Task。本设计记录当前实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -168,6 +168,13 @@ Task 5 已将 Catalog 生命周期落成服务端实现：
 - Preview 返回 `previewHash`、`configHash`、`catalogVersion`、TTL 和稳定排序的 Diff；DTO 不包含 resolved Secret、认证 Header 或未经脱敏的远程内容。
 - Confirm 只使用服务端内存中保存的 Preview Tool 集合，不接受客户端伪造的 Tool 列表；服务端重新计算配置 Hash 并校验 Preview TTL、Hash 和 Catalog Version，再委托 Repository 事务更新 Catalog。
 - Preview 默认有效期为 5 分钟；Preview 数据和同一 Service 实例内的 Confirm 幂等结果保存在内存 Map 中，服务重启或跨进程不会恢复旧 Preview。该边界不新增 Migration，后续若需要跨进程恢复必须另行设计持久化协议。
+
+Task 7 已将这条 Catalog 规则接入 Agent：
+
+- `agent-tool-surface.ts` 只读取本地 Repository Catalog，过滤 disabled Server、未 Confirm Catalog、disabled/removed Tool 和不支持的 Schema，不建立连接或执行 `tools/list`；
+- Chat Agent 从可信 RequestContext 派生 `general` / `deep_research`，Writer/Coder Agent 分别固定为 `writing` / `coding`，不接受客户端 `role` 或 `requestedRole`；
+- Agent-facing Tool 由 BloomAI `createTool()` 重新生成，description 加入不可信元数据提示并限长，input/output Schema 仅转换 Task 2 支持子集，`execute()` 只进入 Capability Broker；
+- 进程级 Mastra 组合根复用 Adapter、Connection Manager 和 Broker，Agent 构建不建立远程连接；MCP Tool ID 与内置 Tool ID 冲突时内置 Tool 优先，Feature Flag 关闭时 fail closed。
 
 ### 3.3 MCP 使用独立数据模型
 
@@ -438,6 +445,8 @@ Tool 已 Confirm
 ```
 
 Agent 只看到 BloomAI 生成的本地 Tool，不直接看到 Mastra 的原始工具集合。每个本地 Tool 的 `execute()` 只负责把请求交给 MCP Capability Broker。
+
+Role 派生规则固定在服务端：Chat Agent 的 `chat` 路由为 `general`，`deep` 模式为 `deep_research`；Writer/Coder Specialist 分别固定为 `writing` / `coding`。请求体或模型输入中的 `role`、`requestedRole` 不参与路由。`McpCapabilityBroker` 仍是最终授权源，Agent Surface 的 Role Policy denied、Broker denied 和 Catalog 状态变化都 fail closed。
 
 ### 6.4 MCP Tool 执行
 
@@ -757,7 +766,7 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Agent Tool Surface、MCP 路由和完整 MCP 生产闭环仍待后续 Task；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先以及不建连/不刷新 Catalog 的 Agent 构建边界；MCP 路由、管理 UI 和完整 MCP 生产闭环仍待后续 Task；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
@@ -770,7 +779,7 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除。Task 6 已完成 Capability Broker、服务端 Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit：执行前重新校验 Server、Tool、Role、Feature Flag、Catalog Version 和配置，审批 Token 只在服务端一次性消费，结果统一规范化并以安全 input/output 写入审计；并通过 Broker、Adapter、类型和全量测试。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除。Task 6 已完成 Capability Broker、服务端 Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit：执行前重新校验 Server、Tool、Role、Feature Flag、Catalog Version 和配置，审批 Token 只在服务端一次性消费，结果统一规范化并以安全 input/output 写入审计；Task 7 已完成 Agent Role Scope 和 MCP Tool Surface：只读本地已确认 Catalog，按服务端派生 Role 注入 Chat/Writer/Coder，重新生成受限 Tool，执行统一进入 Broker，且 Agent 构建不建连/不刷新 Catalog；上述 Task 0～Task 7 均通过专项、架构、类型、MCP 回归和全量测试。
 
 ### Task 6：后端核心闭环
 
@@ -783,11 +792,21 @@ Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval
 
 Task 6 已通过 `npm run test:mcp-broker`、`npm run typecheck`、Task 0～Task 5 相关回归测试及全量 `npm test` 验证。
 
-### Task 7～Task 9：产品接入
+### Task 7：Agent Role Scope 和 MCP Tool Surface
+
+已实现：
+
+- Agent Surface 只从本地已 Confirm Catalog 读取，过滤 disabled Server、disabled/removed Tool、unsupported Schema，并在 Feature Flag 关闭时 fail closed；
+- Chat 的 Role 由可信 RequestContext 派生为 `general` / `deep_research`，Writer/Coder 分别固定为 `writing` / `coding`，客户端不能指定 Role；
+- BloomAI `createTool()` 重新生成模型可见 Tool，description/schema 受限，`execute()` 只调用 Capability Broker，内置 Tool ID 优先；
+- 进程级 MCP 依赖复用且 Agent 构建不执行 `tools/list`、不建立外部连接。
+
+Task 7 已通过 `npm run test:mcp-agent`、`npm run test:mcp-broker`、`npm run typecheck`、`npm run test:architecture`、MCP 回归测试及全量 `npm test` 验证。
+
+### Task 8～Task 9：产品接入
 
 必须实现：
 
-- Agent Role Scope；
 - `/api/v1/mcp`；
 - MCP 管理 UI；
 - Test、Refresh、Confirm、Enable、Approve、Run 全链路。
