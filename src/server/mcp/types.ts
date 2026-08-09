@@ -172,8 +172,10 @@ export type McpServerConnectionConfig = {
 
 export type DiscoveredMcpTool = {
   serverId?: string
+  serverName?: string
   localName: string
   remoteName: string
+  toolId?: string
   name?: string
   description?: string
   inputSchema?: unknown

@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3 已通过，Task 4 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4 已通过，Task 5 尚未开始
 - **日期**：2026-08-09
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试已完成；Task 4 尚未开始，尚未实现生产 Adapter、Connection Manager、MCP 路由或完整 MCP 生产代码。本设计是实现目标，不代表后续功能已经完成。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 尚未开始，尚未实现 Catalog Preview/Confirm、MCP 路由或完整 MCP 生产闭环。本设计记录当前实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -747,11 +747,11 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Adapter、Connection Manager、MCP 路由和完整 MCP 生产闭环仍未实现；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Catalog、MCP 路由和完整 MCP 生产闭环仍未实现；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
-### Task 0～Task 3：实现准入 Gate
+### Task 0～Task 4：实现准入 Gate
 
 Task 0 已形成：
 
@@ -760,7 +760,7 @@ Task 0 已形成：
 - 真实 stdio/HTTP Fixture；
 - Adapter Contract Test。
 
-Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。
+Task 1 已形成安全边界、Transport/SSRF、Secret、Feature Flag、Approval Store 契约及专项测试；Task 2 已完成 `NormalizedMcpResult`、稳定错误码、Run 状态机、领域类型和 JSON Schema 子集的实现与契约测试。Task 3 已完成 Migration 048、Schema Contract、Repository 以及唯一约束、软删除、版本冲突、历史 Run 和敏感数据不落库的测试。Task 4 已完成 Mastra Adapter、Connection Manager 和 Provider 边界：生产代码仅由 Adapter 导入 `@mastra/mcp`，支持 stdio/Streamable HTTP、秘密解析、命名空间和本地 Tool ID、结果/错误规范化、缓存/临时连接、single-flight、发现缓存、失效、重连、超时、取消和 `disconnectAll()` 清理，并通过 Fake/真实 Fixture 及架构边界测试。
 
 ### Task 4～Task 6：后端核心闭环
 
@@ -811,4 +811,4 @@ Task 2 的最终 `NormalizedMcpResult`、稳定错误码、Run 状态机和 JSON
 docs/MCP/mcp-mastra-spike-result.md
 ```
 
-并已同步回本文和实施计划。Task 3 已完成并通过数据库、类型、架构、契约和安全验证。
+并已同步回本文和实施计划。Task 3 已完成并通过数据库、类型、架构、契约和安全验证；Task 4 已完成并通过 Adapter、Connection Manager、类型、架构、协议 Fixture 和生命周期验证。

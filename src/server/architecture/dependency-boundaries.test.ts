@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -7,6 +8,7 @@ import {
 } from './dependency-boundaries'
 
 const serverDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const mcpDirectory = path.join(serverDirectory, 'mcp')
 
 function violation(layer: 'route' | 'repository' | 'service', file: string, source: string, reason: string) {
   return { layer, file, source, reason }
@@ -124,4 +126,53 @@ describe('server dependency boundaries', () => {
   it('keeps every production Route, Service, and Repository within the strict boundary', () => {
     expect(findProductionDependencyBoundaryViolations({ serverDirectory })).toEqual([])
   })
+
+  it('keeps the Mastra MCP dependency behind the single production adapter', () => {
+    const imports = readProductionMcpFiles(mcpDirectory).flatMap(({ file, source }) => (
+      extractMastraMcpImports(source).map((dependency) => ({ file, dependency }))
+    ))
+
+    expect(imports).toEqual([{
+      file: 'mastra-adapter.ts',
+      dependency: '@mastra/mcp',
+    }])
+  })
 })
+
+
+type ProductionSource = {
+  file: string
+  source: string
+}
+
+function readProductionMcpFiles(directory: string): ProductionSource[] {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) return readProductionMcpFiles(entryPath).map((file) => ({
+      ...file,
+      file: path.join(entry.name, file.file).replaceAll(path.sep, '/'),
+    }))
+    if (!isProductionTypeScript(entry.name)) return []
+    return [{ file: entry.name, source: fs.readFileSync(entryPath, 'utf8') }]
+  })
+}
+
+function isProductionTypeScript(fileName: string): boolean {
+  return fileName.endsWith('.ts')
+    && !fileName.endsWith('.d.ts')
+    && !fileName.endsWith('.test.ts')
+    && !fileName.endsWith('.spec.ts')
+    && !fileName.endsWith('.e2e.ts')
+}
+
+function extractMastraMcpImports(source: string): string[] {
+  const staticImports = Array.from(
+    source.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"](@mastra\/mcp)['"]/g),
+    (match) => match[1],
+  )
+  const dynamicImports = Array.from(
+    source.matchAll(/\bimport\s*\(\s*['"](@mastra\/mcp)['"]\s*\)/g),
+    (match) => match[1],
+  )
+  return [...staticImports, ...dynamicImports]
+}
