@@ -82,4 +82,9 @@ describe('Package import workflow contract', () => {
     expect(markup).toContain('command')
     expect(markup).toContain('source fingerprint')
   })
+
+  it('does not label an inspection without an Import Review as validated', () => {
+    const markup = renderToStaticMarkup(<PackageInstallDialog onClose={() => undefined} initialInspection={inspection} />)
+    expect(markup).not.toContain('已验证')
+  })
 })

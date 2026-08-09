@@ -229,7 +229,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
     }
   }
 
-  const activeStatus = review?.status || (inspection ? 'validated' : undefined)
+  const activeStatus = review?.status
   return (
     <div className="skills-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="skills-modal skills-install-modal skills-import-workflow" role="dialog" aria-modal="true" aria-labelledby="package-install-title" onMouseDown={(event) => event.stopPropagation()}>
