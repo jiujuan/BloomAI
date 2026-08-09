@@ -1,28 +1,73 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：已确认，待实施
-- **日期**：2026-08-02
-- **范围**：BloomAI 作为 MCP Client，连接用户配置的外部 MCP Server，并将其工具受控地提供给现有 Mastra Agent。
-- **非范围**：BloomAI 作为 MCP Server、MCP 市场/自动安装、容器隔离、OAuth、SSE、将密钥明文持久化。
+- **状态**：Gate 0 已通过，Task 0 Spike 进行中
+- **日期**：2026-08-09
+- **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
+- **当前基线**：当前工作区尚未发现 `@mastra/mcp` 依赖、MCP Adapter、MCP 路由或 MCP 生产代码。本设计是实现目标，不代表功能已经完成。
+- **关联文档**：
+  - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
+  - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
 
 ---
 
-## 1. 目标与成功标准
+## 1. 目标、范围与成功标准
 
-BloomAI 已有 Mastra Agent、工具注册、`CapabilityBroker`、工具权限、运行审计和 Tools UI。本设计的目标不是新增一条绕开这些机制的 MCP 调用通道，而是将外部 MCP 工具纳入既有工具治理模型。
+### 1.1 一期 MVP 范围
 
-一期完成后，用户可以：
+一期只实现“连接外部 MCP Server 并安全使用其 Tools”的闭环：
 
-1. 手工配置一个 `stdio` 或 Streamable HTTP MCP Server。
-2. 测试连接并从远端读取工具目录。
-3. 启用或禁用整个 Server，以及其中单个工具。
-4. 在聊天中让 Mastra Agent 使用已启用的 MCP 工具。
-5. 在调用前得到风险审批，在调用后查看输入、输出摘要、耗时与错误。
-6. 通过 `${env:NAME}` 引用 Token 或环境变量，而不是将明文秘密写入 SQLite。
+1. BloomAI 作为 MCP Client。
+2. 手工配置一个或多个外部 MCP Server。
+3. 支持 `stdio` 和 Streamable HTTP 两种一期 Transport。
+4. 测试连接并读取远端 Tool Catalog。
+5. 对 Catalog 提供 Preview、Diff、Confirm 流程。
+6. Server 和单个 Tool 可独立启用、禁用。
+7. 新发现的 Tool 默认禁用，不直接进入 Agent Tool Surface。
+8. General Chat Agent 只能使用当前用户 Role 允许、Catalog 已确认且已启用的 MCP Tool。
+9. 手工测试和 Agent 调用共用同一个 Capability Broker、审批、超时、取消和审计协议。
+10. 对高风险、不可信 Server 或明确要求审批的调用执行服务端审批。
+11. 支持 `${env:NAME}` 秘密引用，不把解析后的值写入 SQLite、日志、HTTP 响应或前端状态。
+12. 支持结果脱敏、大小截断、错误归类、连接失效和应用退出清理。
+
+### 1.2 一期明确不包含的能力
+
+以下能力不属于一期公共产品契约，具体拆分见 `docs/MCP/mcp-roadmap.md`：
+
+- BloomAI 作为 MCP Server；
+- Resources；
+- Prompts；
+- Elicitation；
+- OAuth 登录、授权回调和 Token 刷新；
+- MCP Registry、市场和 Server 自动安装；
+- 容器或操作系统级沙箱；
+- SSE 作为独立公开 Transport；
+- 远程下载或自动安装可执行的 stdio Server；
+- 多租户云端凭据托管。
+
+如果 Task 0 证明 Mastra 的 HTTP 实现会静默 fallback 到 legacy SSE，必须在 Spike 结果中明确检测、拒绝或纳入支持范围；不能让 SSE 在未记录决策的情况下进入一期。
+
+### 1.3 能力矩阵
+
+| 能力 | 一期状态 | 说明 | 后续文档 |
+|---|---|---|---|
+| 多 MCP Server | 支持 | 以 `server_id` 隔离配置、Catalog、连接和审计 | 本文、实施计划 |
+| stdio | 支持 | 本地命令，`shell: false`，最小化环境变量 | 本文、实施计划 |
+| Streamable HTTP | 支持 | 必须执行 URL、DNS、redirect 和 SSRF 检查 | 本文、实施计划 |
+| legacy SSE | 待 Spike 决策 | 不默默纳入一期；由 Task 0 给出结论 | `mcp-roadmap.md` |
+| Tools | 支持 | 一期唯一进入 Agent 的 MCP 能力 | 本文、实施计划 |
+| Resources | 后续 | 只读资源权限、大小限制和审计另行设计 | `mcp-roadmap.md` |
+| Prompts | 后续 | 参数校验、注入防护和 Agent 上下文策略另行设计 | `mcp-roadmap.md` |
+| Elicitation | 后续 | 需要 UI/会话级用户输入闭环 | `mcp-roadmap.md` |
+| Tool Approval | 支持 | 由 BloomAI 服务端 Approval Store 和 Broker 负责 | 本文、实施计划 |
+| OAuth | 后续 | 包括授权回调、Token 存储和刷新 | `mcp-roadmap.md` |
+| MCP Registry | 后续 | 需要供应链审核和安装策略 | `mcp-roadmap.md` |
+| 动态工具加载 | 受控支持 | 通过显式 Refresh/Preview/Confirm 更新本地 Catalog，不在每次聊天请求中刷新 | 本文、实施计划 |
+
+---
 
 ## 2. 当前架构与接入点
 
-当前调用路径如下：
+当前 BloomAI 的工具调用路径为：
 
 ```text
 Chat UI
@@ -36,115 +81,242 @@ Chat UI
                 -> tools / tool_runs / tool_permissions
 ```
 
-相关现有文件：
+MCP 一期新增的目标路径为：
 
-| 职责 | 文件 |
+```text
+Chat UI
+  -> Hono chat route / chat.service
+    -> Mastra Chat Agent
+      -> buildAgentTools(sessionId)
+        -> buildMcpToolSurface(sessionId, role)
+          -> MCP Tool Adapter
+            -> MCP Capability Broker
+              -> McpConnectionManager
+                -> Mastra MCP Adapter
+                  -> 外部 MCP Server
+```
+
+现有接入点：
+
+| 职责 | 文件或模块 |
 |---|---|
 | Mastra 实例 | `src/server/mastra/index.ts` |
 | Chat Agent 与按请求构建工具 | `src/server/mastra/chat-agent.ts` |
-| 工具转换为 Mastra Tool | `src/server/mastra/tools.ts` |
-| 内置工具执行与运行记录 | `src/server/tools/execute-tool.ts` |
-| 权限、审批和超时策略 | `src/server/skills/policy/capability-broker.ts` |
-| 工具持久化 | `src/server/db/client.ts`、`src/server/db/schema.ts`、`src/server/db/repositories/tool.repo.ts` |
-| Tools HTTP API | `src/server/http/routes/tools.ts` |
-| Tools 前端状态 | `src/renderer/pages/Tools/tools.store.ts` |
+| 内置工具转换 | `src/server/mastra/tools.ts` |
+| 内置工具执行和运行记录 | `src/server/tools/execute-tool.ts` |
+| 现有权限和 Capability Broker | `src/server/skills/policy/capability-broker.ts` |
+| 数据库客户端和 Schema | `src/server/db/client.ts`、`src/server/db/schema.ts` |
+| 既有工具 API | `src/server/http/routes/tools.ts` |
+| 前端工具状态 | `src/renderer/pages/Tools/tools.store.ts` |
 
-`package-lock.json` 当前解析到 `@mastra/core@1.51.0`。`@mastra/mcp@1.13.0` 的 peer dependency 为 `@mastra/core >=1.0.0-0 <2.0.0-0`，因此可作为一期验证的依赖版本；正式实施时锁定 `@mastra/mcp@^1.13.0` 并运行 typecheck 验证。
+MCP 一期不得把 `@mastra/mcp` 直接导入 `src/server/mastra/tools.ts`。Mastra 具体类型和生命周期必须隔离在 MCP Provider Adapter 中。
+
+---
 
 ## 3. 架构决策
 
-### 3.1 决策：使用 Provider Adapter，而不是直接挂载 MCPClient 工具
+### 3.1 使用 Provider Adapter，不直接挂载 Mastra 原始工具
 
-Mastra MCP Client 可以直接发现 MCP 工具并将其提供给 Agent。但 BloomAI 不能直接将其返回值挂载到 Agent：那会绕过现有工具启停、审批、运行记录和失败治理。
+Mastra MCP Client 负责 MCP 协议连接和远程能力发现，但 BloomAI 不能把 Mastra 返回的原始 Tool 对象直接挂到 Agent 上，否则会绕过：
 
-采用以下架构：
+- BloomAI 的 Server/Tool 启停策略；
+- Role Scope；
+- Catalog Confirm；
+- Capability Broker；
+- Tool Approval；
+- 执行审计；
+- 超时、取消和结果脱敏。
+
+采用以下边界：
 
 ```mermaid
 flowchart LR
-  UI["MCP Servers 管理界面"] --> API["MCP HTTP API"]
+  UI["MCP Servers 管理界面"] --> API["Hono /api/v1/mcp"]
   API --> SVC["McpService"]
-  SVC --> REPO["McpServerRepository"]
+  SVC --> REPO["MCP Repository"]
   REPO --> DB[("SQLite")]
   SVC --> CATALOG["McpToolCatalog"]
-  CATALOG --> CONN["McpConnectionManager"]
-  CONN --> CLIENT["Mastra MCPClient"]
-  CLIENT --> EXT["外部 MCP Server"]
+  CATALOG --> MANAGER["McpConnectionManager"]
+  MANAGER --> ADAPTER["Mastra MCP Adapter"]
+  ADAPTER --> EXT["外部 MCP Server"]
 
-  AGENT["Mastra Agent"] --> BUILD["buildAgentTools(sessionId)"]
-  BUILD --> ADAPTER["MCP Tool Adapter"]
-  ADAPTER --> BROKER["MCP Capability Broker"]
-  BROKER --> CONN
-  BROKER --> RUNS["审计 / 审批 / 超时"]
+  AGENT["Mastra Agent"] --> SURFACE["MCP Tool Surface"]
+  SURFACE --> BROKER["MCP Capability Broker"]
+  BROKER --> CATALOG
+  BROKER --> MANAGER
+  BROKER --> RUNS["Approval / Audit / Timeout"]
 ```
 
-### 3.2 决策：工具目录缓存，本地同步构建 Agent Tool Surface
+### 3.2 Catalog 驱动 Agent Tool Surface
 
-`buildAgentTools(sessionId)` 当前为同步函数。不得在每次聊天请求内新建 MCP 连接或重新执行 `tools/list`。
+`buildAgentTools(sessionId)` 当前是请求级工具构建入口。一期不得在每次聊天请求内新建 MCP 连接或执行 `tools/list`。
 
-- 测试连接、显式刷新工具、配置变更时：建立连接并同步远端工具目录。
-- 每次 Agent 请求：只读取 SQLite 中已发现、已启用的 MCP Tool 元数据并同步构建 Tool Surface。
-- Tool `execute()`：按需从连接管理器获取或恢复连接，并调用远端工具。
+规则：
 
-这样能够维持 Agent 的请求级启停生效特性，并隔离网络或子进程故障。
+- 测试连接、显式 Refresh 或连接配置变更时，创建临时或受控连接并发现工具；
+- Refresh 只生成 Preview，不直接改变已确认 Catalog；
+- 用户 Confirm 后才更新 Catalog；
+- 每次 Agent 请求只读取本地已确认、未移除、已启用且 Role 允许的 Tool 元数据；
+- Tool 执行时由 Connection Manager 获取或恢复连接；
+- 连接失败只影响当前 MCP Tool 调用，不得使 Hono 或 Agent 进程崩溃。
 
-### 3.3 决策：独立 MCP 数据模型，不复用 native `tools` 表作为唯一事实源
+### 3.3 MCP 使用独立数据模型
 
-现有 `tools` 表描述的是内置 executor；其 `toolRegistry` 为静态对象。MCP Tool 是动态远端资源，连接配置、远端名称、schema 变更和 Server 级健康状态都需要一等模型。
+现有 `tools` 表主要描述 BloomAI 内置 executor，不能作为动态远程 MCP Tool 的唯一事实源。MCP 需要独立保存：
 
-- `mcp_servers`：Server 配置、信任、状态。
-- `mcp_server_tools`：发现到的工具缓存、启用和审批策略。
-- `mcp_tool_runs`：MCP 调用审计；保留关键字段与 `tool_runs` 对齐。
+- Server 连接配置和健康状态；
+- 远端 Tool 原始名称；
+- Tool Schema、Schema Hash 和 Catalog Version；
+- 启用、移除、风险和审批策略；
+- MCP Tool 调用审计。
 
-Tools UI 可以聚合显示 native 工具和 MCP 工具，但 MCP 的权威数据保留在独立表中。
+一期 Migration 使用当前仓库可用的下一个编号：
 
-### 3.4 决策：一期秘密只允许引用，不允许明文
+```text
+scripts/migrations/048-mcp-client.sql
+```
 
-因为 Hono Server 运行在 Electron 子进程中，一期不引入主进程密钥代理。配置中只允许 `${env:VARIABLE_NAME}`，例如：
+当前 `044`～`047` 已被占用，不能复用。
 
-```json
-{
-  "Authorization": "Bearer ${env:GITHUB_TOKEN}"
+### 3.4 秘密只保存引用
+
+Server 配置可以保存：
+
+```text
+${env:NAME}
+```
+
+不能保存解析后的 Token 或 Header 值。解析值只在连接创建和调用期间存在于内存，并且：
+
+- 不写入 SQLite；
+- 不进入日志；
+- 不进入 HTTP 响应；
+- 不进入前端 Store；
+- 不进入测试快照。
+
+通过 `MCP_ALLOWED_ENV_NAMES` 对允许引用的环境变量名称做全局 allowlist。
+
+### 3.5 BloomAI Broker 是最终授权源
+
+Mastra 的 Tool 能力不能替代 BloomAI 的授权策略。所有 MCP 调用必须先经过 BloomAI Capability Broker，由 Broker 决定：
+
+- Server 是否启用；
+- Tool 是否启用；
+- 当前 Agent Role 是否允许；
+- 是否需要审批；
+- Approval Token 是否有效且只能消费一次；
+- Input Hash 和 Catalog Version 是否匹配；
+- 是否允许执行、取消、超时和重试。
+
+客户端传入的 `approvalGranted`、`trustLevel`、`riskLevel` 或 `requiresApproval` 不能覆盖服务端策略。
+
+### 3.6 Feature Flag 必须 fail closed
+
+只有以下条件同时满足时，才允许建立外部连接或注册 MCP Tool：
+
+```text
+MCP_CLIENT_ENABLED === "true"
++ Server enabled
++ Tool confirmed and enabled
++ Role Scope allowed
+```
+
+Feature Flag 未明确开启时：
+
+- 不建立外部连接；
+- 不执行 MCP Tool；
+- 不向 Agent 注册 MCP Tool；
+- 允许只读查询历史 Run。
+
+---
+
+## 4. Mastra 集成契约
+
+### 4.1 依赖版本策略
+
+当前仓库使用 `@mastra/core@1.51.0`，但尚未安装 `@mastra/mcp`。实施计划将 `@mastra/mcp@1.15.1` 作为候选版本，最终版本必须以 Task 0 Spike 的实际类型和运行时结果为准，并以精确版本写入 `package.json` 和 `package-lock.json`。
+
+不能在正式代码中继续依赖未经 Spike 证实的 Mastra MCP 工具发现、工具执行、连接关闭方法名，或把某个 Tool 字段直接当作远端名称。
+
+### 4.2 BloomAI 内部稳定接口
+
+以下是 BloomAI 自己的 Adapter 契约，不是 Mastra 公共 API 的声明：
+
+```ts
+interface McpProviderConnection {
+  listTools(signal?: AbortSignal): Promise<DiscoveredMcpTool[]>;
+  executeTool(
+    remoteName: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  disconnect(): Promise<void>;
+}
+
+interface McpProviderAdapter {
+  createConnection(
+    config: McpServerConnectionConfig,
+    signal?: AbortSignal,
+  ): Promise<McpProviderConnection>;
 }
 ```
 
-解析后的值仅存在于调用进程内存；日志、数据库、HTTP 响应、运行记录均不得输出明文。UI 仅显示变量名。
+Mastra Adapter 的实现方式必须由 Task 0 固定。候选路径包括：
 
-## 4. 数据模型
+1. 保存 `MCPClient.listTools()` 返回的 Mastra Tool，并调用其 `execute()`；
+2. 使用当前锁定版本实际暴露的代理 API；
+3. 在 Adapter 内部调用底层 MCP SDK。
 
-### 4.1 `mcp_servers`
+无论采用哪条路径，`src/server/mcp` 之外的模块都只能依赖 BloomAI 内部契约。
+
+### 4.3 工具名称与 ID
+
+远端名称必须原样保存：
+
+```text
+remoteName = 外部 MCP Server 返回的原始 Tool 名称
+```
+
+BloomAI 本地 Tool ID 使用命名空间：
+
+```text
+mcp:{serverId}:{remoteName}
+```
+
+如果 Mastra 返回的工具名采用 `serverName_toolName` 形式，只能在 Adapter 内部做反向映射，不能把该命名名称当成远端原始名称的唯一事实源。
+
+---
+
+## 5. 数据模型
+
+### 5.1 `mcp_servers`
+
+建议字段：
 
 ```sql
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  description TEXT,
-  transport TEXT NOT NULL CHECK (transport IN ('stdio', 'http')),
-  endpoint TEXT,
-  command TEXT,
-  args_json TEXT NOT NULL DEFAULT '[]',
-  headers_template_json TEXT NOT NULL DEFAULT '{}',
-  env_template_json TEXT NOT NULL DEFAULT '{}',
+  transport_kind TEXT NOT NULL
+    CHECK (transport_kind IN ('stdio', 'streamable_http')),
+  config_json TEXT NOT NULL,
+  secret_refs_json TEXT NOT NULL,
   is_enabled INTEGER NOT NULL DEFAULT 0,
   trust_level TEXT NOT NULL DEFAULT 'untrusted'
     CHECK (trust_level IN ('untrusted', 'reviewed', 'trusted')),
-  status TEXT NOT NULL DEFAULT 'disabled'
-    CHECK (status IN ('disabled', 'connecting', 'connected', 'degraded', 'error')),
-  last_connected_at INTEGER,
-  last_tool_sync_at INTEGER,
-  last_error TEXT,
+  connection_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (connection_status IN ('unknown', 'healthy', 'error', 'disabled')),
+  catalog_version INTEGER NOT NULL DEFAULT 0,
+  last_error_code TEXT,
+  last_error_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 ```
 
-不变量：
+`config_json` 只能保存经校验的非秘密连接配置；秘密只能保存引用。HTTP Header 的值不得直接持久化。
 
-- `stdio`：必须提供 `command`，`endpoint` 必须为 `NULL`。
-- `http`：必须提供绝对 URL `endpoint`，`command` 必须为 `NULL`。
-- `args_json` 必须是 string array；headers/env 必须是 string-to-string object。
-- 生产环境 HTTP endpoint 必须为 `https:`；允许 `http://127.0.0.1` 和 `http://localhost` 用于本地开发。
-
-### 4.2 `mcp_server_tools`
+### 5.2 `mcp_server_tools`
 
 ```sql
 CREATE TABLE IF NOT EXISTS mcp_server_tools (
@@ -155,239 +327,485 @@ CREATE TABLE IF NOT EXISTS mcp_server_tools (
   description TEXT NOT NULL,
   input_schema_json TEXT NOT NULL,
   output_schema_json TEXT,
-  is_enabled INTEGER NOT NULL DEFAULT 1,
+  schema_hash TEXT NOT NULL,
+  is_enabled INTEGER NOT NULL DEFAULT 0,
+  is_removed INTEGER NOT NULL DEFAULT 0,
   requires_approval INTEGER NOT NULL DEFAULT 1,
   risk_level TEXT NOT NULL DEFAULT 'medium'
     CHECK (risk_level IN ('low', 'medium', 'high')),
   discovered_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  removed_at INTEGER,
   UNIQUE(server_id, remote_name)
 );
 ```
 
-工具 ID 固定为 `mcp:{serverId}:{remoteName}`。`remoteName` 保留远端原始名称，绝不让外部 Tool 覆盖 BloomAI 内置工具 ID。
+约束：
 
-### 4.3 `mcp_tool_runs`
+- 新发现 Tool 默认禁用；
+- Schema 或 description 变化时进入 review/disabled；
+- 远端删除使用软删除，保留历史 Run 可读性；
+- `remote_name` 永远保存远端原始名称。
+
+### 5.3 `mcp_tool_runs`
 
 ```sql
 CREATE TABLE IF NOT EXISTS mcp_tool_runs (
   id TEXT PRIMARY KEY,
   server_id TEXT NOT NULL,
   tool_id TEXT NOT NULL,
+  remote_name TEXT NOT NULL,
   session_id TEXT,
-  input_json TEXT NOT NULL,
-  output_json TEXT,
-  status TEXT NOT NULL CHECK (status IN ('running', 'success', 'error', 'denied')),
-  error_msg TEXT,
+  agent_role TEXT,
+  status TEXT NOT NULL
+    CHECK (status IN (
+      'pending_approval', 'running', 'success', 'error',
+      'denied', 'cancelled'
+    )),
+  input_hash TEXT NOT NULL,
+  safe_input_json TEXT,
+  safe_output_json TEXT,
+  error_code TEXT,
   duration_ms INTEGER,
-  started_at INTEGER NOT NULL,
-  finished_at INTEGER
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER
 );
 ```
 
-输出以脱敏和大小限制后的 JSON 保存；原始 MCP content 不能无限制写库。
+原始敏感 input/output 不写入数据库。Approval 的短生命周期状态保存在服务端 Approval Store，不接受客户端布尔值作为授权事实。
 
-## 5. 模块与接口
-
-```text
-src/server/mcp/
-  types.ts                 # 领域类型与值对象
-  schemas.ts               # Zod: 创建/更新配置、连接和工具调用输入
-  server-repository.ts     # 三张 MCP 表的持久化操作
-  secret-resolver.ts       # ${env:NAME} 严格解析与脱敏
-  connection-manager.ts    # MCPClient 生命周期和连接缓存
-  tool-catalog.ts          # tools/list 同步、schema diff、风险默认值
-  tool-adapter.ts          # MCP catalog -> Mastra createTool
-  capability-broker.ts     # 启用、信任、审批、超时、审计、tools/call
-  mcp.service.ts           # Route 可调用的应用服务
-  index.ts                 # 稳定公开入口
-```
-
-主要接口：
-
-```ts
-export interface McpConnectionManager {
-  testConnection(server: ResolvedMcpServerConfig): Promise<DiscoveredMcpTool[]>
-  getClient(serverId: string): Promise<ConnectedMcpClient>
-  disconnect(serverId: string): Promise<void>
-  disconnectAll(): Promise<void>
-}
-
-export interface McpToolCatalog {
-  sync(serverId: string, tools: DiscoveredMcpTool[]): Promise<SyncResult>
-  listEnabled(): McpServerTool[]
-}
-
-export interface McpCapabilityBroker {
-  execute(input: ExecuteMcpToolInput): Promise<McpToolExecution>
-}
-```
-
-`ConnectedMcpClient` 隐藏 Mastra 具体类型，并提供 `callTool(remoteName, input)`。这能降低将来升级 Mastra API 的影响范围。
+---
 
 ## 6. 连接、同步与调用生命周期
 
-### 6.1 配置与测试连接
+### 6.1 配置与 Preview
 
-1. 用户在 UI 填写 Server 配置。
-2. API 用 Zod 校验 transport 的 discriminated union。
-3. `secret-resolver` 检查所有模板只使用允许的 `${env:NAME}` 语法；不解析并返回值给浏览器。
-4. `McpConnectionManager.testConnection()` 创建临时 Mastra MCPClient。
-5. 读取 `tools/list`，规范化工具元数据。
-6. 仅在用户提交创建或刷新确认后写入 catalog。
-7. 临时连接总是在 `finally` 中关闭。
+1. 用户提交 Server 配置。
+2. API 使用 Zod 校验 transport discriminated union。
+3. Secret Resolver 只接受 `${env:NAME}`，并检查 `MCP_ALLOWED_ENV_NAMES`。
+4. HTTP 执行 URL、DNS、redirect 和 SSRF 检查；stdio 校验 command、args、cwd 和 env allowlist。
+5. `McpConnectionManager` 创建临时连接。
+6. Adapter 读取 Tool Catalog。
+7. 服务端生成 `previewHash`、`configHash` 和 `catalogVersion`。
+8. Preview 返回安全 DTO，不返回 resolved secret、完整 Header 或未经脱敏的远程结果。
 
-### 6.2 目录同步
+### 6.2 Confirm 与 Catalog 同步
 
-同步以 `server_id + remote_name` 为主键：
-
-- 新工具：默认 `is_enabled=1`、`requires_approval=1`、风险由规则推导。
-- 已存在但 schema/description 变化：更新元数据并将 `requires_approval=1`；如果 Server 是 `trusted`，降级为 `reviewed`。
-- 远端已删除工具：保留历史调用记录，删除 catalog 行或标记为禁用；一期选择删除 catalog 行。
-- 刷新失败：保留上次成功 catalog，更新 Server `status=error/degraded` 和 `last_error`。
-
-### 6.3 Agent 调用
+Confirm 必须同时提交：
 
 ```text
-Agent selects mcp:{serverId}:{remoteName}
-  -> McpToolAdapter.execute(input)
-    -> McpCapabilityBroker.execute(...)
-      -> validate enabled / server trust / approval
-      -> create mcp_tool_runs row
-      -> get or reconnect MCP client
-      -> client.callTool(remoteName, input)
-      -> normalize + redact + size-limit output
-      -> finish run
-      -> return result to Agent
+serverId
+previewHash
+configHash
+catalogVersion
 ```
 
-Tool 执行超时一期统一为 30 秒；连接测试为 10 秒。所有状态更新在异常路径中完成，防止永远遗留 `running` 记录。
+服务端重新校验当前配置和 Preview 是否仍然匹配。Stale Preview 必须返回 `MCP_PREVIEW_STALE`，不能覆盖当前 Catalog。
+
+同步规则：
+
+- 新 Tool：插入并默认禁用；
+- 已存在且无变化：保留启用和审批策略；
+- Schema、description 或远程声明变化：更新元数据，重新进入 review/disabled；
+- 远程删除 Tool：设置 `is_removed=1`、`removed_at`，不删除历史 Run；
+- Catalog Version 原子递增。
+
+### 6.3 Agent Tool Surface
+
+Agent 构建时只读取：
+
+```text
+MCP_CLIENT_ENABLED = true
+Server is_enabled = 1
+Tool is_enabled = 1
+Tool is_removed = 0
+Tool 已 Confirm
+当前 Role Scope 允许
+```
+
+Agent 只看到 BloomAI 生成的本地 Tool，不直接看到 Mastra 的原始工具集合。每个本地 Tool 的 `execute()` 只负责把请求交给 MCP Capability Broker。
+
+### 6.4 MCP Tool 执行
+
+执行顺序：
+
+```text
+Agent / 手工 Test
+  -> Tool Adapter
+  -> Broker 创建 Run
+  -> 检查 Server / Tool / Role / Catalog
+  -> 判断是否需要审批
+  -> pending_approval 或直接 running
+  -> Approval Token 服务端一次性消费
+  -> Connection Manager 获取连接
+  -> Provider Adapter 执行远端 Tool
+  -> 结果规范化、脱敏、截断
+  -> 更新 Run
+  -> 返回 Safe Result
+```
+
+超时必须：
+
+- 传递 `AbortSignal`；
+- 对无法可靠取消的连接执行 client invalidate；
+- 非幂等 Tool 不自动重试；
+- 将当前 Run 标记为错误或取消，并保留审计记录。
+
+### 6.5 应用退出与连接失效
+
+应用退出时调用：
+
+```text
+mcpConnectionManager.disconnectAll()
+```
+
+任何 stdio 子进程、HTTP 连接、Abort Controller 和缓存都必须清理。连接错误不得导致 Hono、Mastra 或 Electron 主进程退出。
+
+---
 
 ## 7. 安全模型
 
-### 7.1 信任层级
+### 7.1 Transport 安全
 
-| Trust level | 规则 |
-|---|---|
-| `untrusted` | 任意 Tool 调用必须交互确认。 |
-| `reviewed` | 低风险 Tool 可通过会话级授权；中高风险 Tool 必须确认。 |
-| `trusted` | 低风险 Tool 可自动调用；中高风险 Tool 仍必须确认。 |
+#### stdio
 
-### 7.2 风险推导
+- 使用参数数组，不拼接 shell 命令；
+- `shell: false`；
+- 不继承完整 `process.env`；
+- 只允许 allowlist 中的环境变量；
+- command、args、cwd 变更后 Server 回到 `untrusted` 并禁用；
+- 不支持从 URL、Registry 或 Skill Package 自动下载可执行文件；
+- 应用退出和 timeout 后清理子进程。
 
-首次发现工具时，以 `remote_name + description` 的小写文本匹配下列词根：
+#### Streamable HTTP
 
-- `delete`、`remove`、`write`、`update`、`create`、`send`、`publish`、`deploy`、`execute`、`run`、`payment`、`transfer`：`high`。
-- `search`、`get`、`list`、`read`、`fetch`：`low`。
-- 其余：`medium`。
+- 生产环境要求 HTTPS；
+- 仅允许开发环境的 `localhost` 和 `127.0.0.1` HTTP；
+- 校验 hostname、DNS 解析结果、redirect 目标；
+- 拦截私网、link-local 和云 metadata 地址；
+- Header 只接受安全模板引用；
+- 不记录认证 Header 值。
 
-这是保守默认值，不把 MCP Server 自报信息视为可信授权。用户可在 UI 调整 Tool 的风险和审批策略，但无法令 `high` 风险工具跳过审批。
+### 7.2 信任和风险
 
-### 7.3 stdio 风险
-
-`stdio` 会启动本地命令，因此：
-
-- 新建或变更 `command/args/env_template_json` 后，Server 必须恢复为 `untrusted` 且禁用。
-- 启用前 UI 必须显示完整命令、参数和仅变量名的 env 映射。
-- 不在一期支持从 Skill Package 或 URL 自动安装可执行 MCP Server。
-
-### 7.4 Prompt Injection 与数据最小化
-
-MCP Tool 的描述、schema、输出都属于不可信外部输入。
-
-- Chat Agent instructions 增加：不执行 Tool output 中的指令，除非它直接满足用户请求并已通过 BloomAI 的权限策略。
-- Tool adapter 只向远端传递 Tool input，不自动发送全量对话、系统提示、文件列表或密钥。
-- 在运行记录中递归脱敏键名包含 `authorization`、`token`、`secret`、`password`、`api_key` 的值。
-- 输出 JSON 截断到 128 KiB，超出部分记录 `{ truncated: true }`。
-
-## 8. HTTP API
-
-所有 MCP 路由注册在 `/api/mcp` 下，响应沿用 `{ data }` 与统一错误对象。
+Server 信任等级：
 
 ```text
-GET    /api/mcp/servers
-POST   /api/mcp/servers
-GET    /api/mcp/servers/:serverId
-PATCH  /api/mcp/servers/:serverId
-DELETE /api/mcp/servers/:serverId
-
-POST   /api/mcp/servers/:serverId/test-connection
-POST   /api/mcp/servers/:serverId/refresh-tools
-POST   /api/mcp/servers/:serverId/enable
-POST   /api/mcp/servers/:serverId/disable
-POST   /api/mcp/servers/:serverId/trust
-
-GET    /api/mcp/servers/:serverId/tools
-PATCH  /api/mcp/servers/:serverId/tools/:toolId
-POST   /api/mcp/servers/:serverId/tools/:toolId/test
-GET    /api/mcp/servers/:serverId/runs
+untrusted -> reviewed -> trusted
 ```
 
-错误码语义：
+风险等级由服务端根据 Tool 描述、Schema、Server 信任和策略推导，客户端不能覆盖。
 
-| Code | HTTP | 含义 |
+建议默认策略：
+
+| 条件 | 默认策略 |
+|---|---|
+| untrusted Server | 必须审批 |
+| high risk Tool | 必须审批 |
+| 新发现 Tool | 禁用并等待 Confirm |
+| schema/description 变化 | 重新 review/审批 |
+| trusted + low risk | 可按 Role Policy 自动执行 |
+
+### 7.3 Approval
+
+Approval Store 只保存短生命周期、服务端生成的请求状态：
+
+- `approvalRequestId`；
+- `runId`；
+- `serverId`；
+- `toolId`；
+- `inputHash`；
+- `catalogVersion`；
+- `sessionId` 和 Role；
+- 过期时间；
+- 消费状态。
+
+不保存原始敏感 input，不接受客户端传入 `approvalGranted: true`。
+
+### 7.4 外部内容和 Prompt Injection
+
+Tool description、input schema、content、structuredContent 和错误信息均视为不可信外部输入：
+
+- 不把 Tool output 当作系统指令；
+- 不自动把远端返回的指令写入 Agent instructions；
+- 不向远端发送全量对话、系统提示、文件列表或秘密；
+- 递归脱敏 `authorization`、`token`、`secret`、`password`、`api_key` 等字段；
+- 输出限制为 128 KiB，超出部分返回截断标记；
+- 只允许 JSON-safe 值进入 Safe Result。
+
+---
+
+## 8. HTTP API 契约
+
+所有路由统一注册在 `/api/v1/mcp` 下，响应沿用项目现有 `{ data }` 和统一错误对象。
+
+```text
+GET    /api/v1/mcp/servers
+POST   /api/v1/mcp/servers
+GET    /api/v1/mcp/servers/:serverId
+PATCH  /api/v1/mcp/servers/:serverId
+DELETE /api/v1/mcp/servers/:serverId
+
+POST   /api/v1/mcp/servers/:serverId/test-connection
+POST   /api/v1/mcp/servers/:serverId/tools/preview
+POST   /api/v1/mcp/servers/:serverId/tools/confirm
+POST   /api/v1/mcp/servers/:serverId/enable
+POST   /api/v1/mcp/servers/:serverId/disable
+POST   /api/v1/mcp/servers/:serverId/trust
+
+GET    /api/v1/mcp/servers/:serverId/tools
+PATCH  /api/v1/mcp/servers/:serverId/tools/:toolId
+POST   /api/v1/mcp/servers/:serverId/tools/:toolId/test
+
+POST   /api/v1/mcp/servers/:serverId/approvals/:requestId/approve
+POST   /api/v1/mcp/servers/:serverId/approvals/:requestId/deny
+GET    /api/v1/mcp/servers/:serverId/runs
+```
+
+安全 DTO 不得返回：
+
+- resolved environment；
+- Authorization、Cookie 或 Token Header；
+- 原始审批 Token；
+- 未脱敏 input/output；
+- 外部连接对象或 Mastra Tool 实例。
+
+一期稳定错误码：
+
+| 错误码 | HTTP | 语义 |
 |---|---:|---|
-| `MCP_CONFIG_INVALID` | 400 | 配置或模板格式不合法。 |
-| `MCP_SERVER_NOT_FOUND` | 404 | Server 不存在。 |
-| `MCP_TOOL_NOT_FOUND` | 404 | 工具不属于该 Server。 |
-| `MCP_APPROVAL_REQUIRED` | 409 | 当前调用需要用户确认。 |
-| `MCP_SERVER_DISABLED` | 409 | Server 被禁用。 |
-| `MCP_TOOL_DISABLED` | 409 | Tool 被禁用。 |
-| `MCP_CONNECTION_FAILED` | 502 | 连接/握手失败。 |
-| `MCP_TOOL_TIMEOUT` | 504 | 远端调用超时。 |
+| `MCP_DISABLED` | 409 | 全局 Feature Flag 未开启 |
+| `MCP_CONFIG_INVALID` | 400 | 配置或模板不合法 |
+| `MCP_SERVER_NOT_FOUND` | 404 | Server 不存在 |
+| `MCP_TOOL_NOT_FOUND` | 404 | Tool 不属于该 Server |
+| `MCP_SERVER_DISABLED` | 409 | Server 被禁用 |
+| `MCP_TOOL_DISABLED` | 409 | Tool 被禁用或已移除 |
+| `MCP_ROLE_NOT_ALLOWED` | 409 | 当前 Agent Role 不允许 |
+| `MCP_APPROVAL_REQUIRED` | 409 | 当前调用需要审批 |
+| `MCP_APPROVAL_INVALID` | 409 | Approval Token 无效或已消费 |
+| `MCP_APPROVAL_EXPIRED` | 409 | Approval 已过期 |
+| `MCP_PREVIEW_STALE` | 409 | Preview 与当前配置或 Catalog 不一致 |
+| `MCP_SCHEMA_UNSUPPORTED` | 422 | Schema 超出一期支持子集 |
+| `MCP_CONNECTION_FAILED` | 502 | 连接或握手失败 |
+| `MCP_PROTOCOL_ERROR` | 502 | MCP 协议错误 |
+| `MCP_TOOL_ERROR` | 502 | 远端 Tool 返回错误 |
+| `MCP_TOOL_TIMEOUT` | 504 | 远端调用超时并使连接失效 |
+| `MCP_TOOL_CANCELLED` | 499 | 调用被用户或系统取消 |
+
+---
 
 ## 9. 前端设计
 
-在现有 Tools 导航下新增 MCP Servers 页面和详情页。
+在现有 Tools 导航下增加 MCP Servers 页面和详情页。
 
-### 列表页
+### 9.1 列表页
 
-- Server 名称、transport、连接状态、发现 Tool 数、信任等级、启用状态。
-- “新增”“测试连接”“刷新工具”“启用/禁用”“删除”。
-- `stdio` Server 显示 command 摘要；HTTP Server 显示 origin，不展示 headers 值。
+展示：
 
-### 详情页
+- Server 名称；
+- transport；
+- 连接状态；
+- Catalog Version；
+- Tool 数量；
+- 信任等级；
+- 启用状态。
 
-- 可编辑配置；修改连接相关字段后必须重新测试。
-- Tool 列表，支持单工具启停、风险/审批状态、schema 查看和手工测试。
-- 调用记录按时间倒序，支持状态与 Tool 筛选。
-- 首次启用 `stdio` 或未信任 Server 时显示风险确认弹窗。
+操作：
+
+- 新增；
+- 测试连接；
+- Refresh；
+- Preview/Diff；
+- Confirm；
+- 启用/禁用；
+- 删除或软删除。
+
+`stdio` 只展示 command 摘要；HTTP 只展示 origin；不展示 Header 值和解析后的环境变量。
+
+### 9.2 详情页
+
+- 编辑连接配置；
+- 配置变更后清除旧 Preview 并要求重新测试；
+- 展示新增、变化、移除的 Tool Diff；
+- 单 Tool 启用/禁用；
+- 显示风险和审批策略；
+- 手工 Test；
+- Approval 卡片；
+- Run 审计列表和错误诊断。
+
+客户端不能乐观地把未 Confirm 的 Tool 标记为 enabled。
+
+---
 
 ## 10. 可观测性与失败行为
 
-新增指标：
+建议指标：
 
-- `mcp_connection_attempt_total{transport,status}`
-- `mcp_tool_call_total{server_id,tool_id,status}`
-- `mcp_tool_call_duration_ms{server_id,tool_id}`
-- `mcp_catalog_sync_total{status}`
+```text
+mcp_connection_attempt_total{transport,status}
+mcp_catalog_sync_total{status}
+mcp_tool_call_total{server_id,tool_id,status}
+mcp_tool_call_duration_ms{server_id,tool_id}
+mcp_approval_total{status}
+```
 
-日志只记录 Server ID、Tool ID、transport、耗时、错误类别；不得记录 resolved headers、环境变量值、完整敏感输出。
+日志只记录：
 
-应用退出时调用 `mcpConnectionManager.disconnectAll()`。连接错误不应使 Mastra Agent 或 Hono Server 进程崩溃；应转换成对当前 Tool Call 可见的错误。
+- Server ID；
+- Tool ID；
+- transport；
+- 耗时；
+- 错误类别；
+- Run ID。
+
+不得记录：
+
+- resolved Header；
+- 环境变量值；
+- 原始 Approval Token；
+- 完整敏感 input/output；
+- 外部连接对象。
+
+---
 
 ## 11. 测试策略
 
-- 单元：模板解析、配置校验、风险推导、脱敏、catalog diff。
-- Repository：CRUD、唯一约束、刷新后删除远端已不存在 Tool。
-- Broker：禁用、未信任审批、超时、失败审计、输出截断。
-- Adapter：Tool ID 命名空间、Zod schema 转换、Agent 仅看到 enabled Tool。
-- HTTP：路由参数校验、错误规范、测试连接与刷新流程。
-- 集成：使用 Fake/Mock MCP Client；不在 CI 启动任意 `npx` 子进程。
-- 手工 smoke：一个只读 stdio Server 和一个本地 HTTP MCP Server。
+### 11.1 Unit
 
-## 12. 分期与验收
+- transport discriminated union；
+- secret template 和 env allowlist；
+- SSRF、redirect、DNS 地址检查；
+- stdio 命令和环境隔离；
+- 风险推导；
+- Approval Token 一次性消费；
+- Safe Result 脱敏和截断；
+- JSON Schema 支持子集；
+- Catalog Diff 和 Hash。
 
-### Phase 0：依赖与协议 Spike
+### 11.2 Repository 和 Migration
 
-仅验证 `@mastra/mcp@^1.13.0` 与当前 Mastra 依赖、stdio、HTTP、tools/list、tools/call 的类型和运行时兼容性。
+- Migration 顺序和 `048-mcp-client.sql`；
+- Schema Contract；
+- Server/Tool/Run CRUD；
+- 唯一约束；
+- Catalog Version；
+- 软删除保留历史 Run。
 
-### Phase 1：MCP Client MVP
+### 11.3 Adapter 和 Broker
 
-实现本设计的表、服务、Agent 接入、API、UI、安全边界和测试。
+- Fake Provider Adapter；
+- Task 0 的真实 stdio Fixture；
+- Task 0 的真实 Streamable HTTP Fixture；
+- Tool 名称映射；
+- Tool `execute()` 或底层调用路径；
+- timeout、AbortSignal、client invalidate；
+- denied、expired、replay、role mismatch；
+- 非幂等 Tool 不自动重试。
 
-### Phase 2（不在本次实现）
+### 11.4 HTTP、Agent 和 UI
 
-SSE、Electron Secret Vault、OAuth、schema diff UI、导入导出、Server 模板、市场和容器隔离。
+- `/api/v1/mcp` 路由契约；
+- Preview/Confirm stale；
+- Test/Refresh/Enable/Approve/Deny/Run；
+- Agent 只看到已确认且启用的 Tool；
+- Feature Flag fail closed；
+- UI 不显示秘密和 Approval Token。
 
-验收以本文第 1 节成功标准为准，另要求：现有内置工具、Legacy Skills、Deep Research、Writing/Coding Agent 的回归测试全部通过。
+### 11.5 真实协议和安全回归
+
+CI 不允许依赖任意 `npx` 下载。使用仓库内固定 Fixture，并在发布前执行真实 stdio/HTTP smoke、SSRF 攻击样例、进程清理和 secret 泄露检查。
+
+---
+
+## 12. 实施顺序和验收 Gate
+
+正式实施严格按以下顺序执行：
+
+```text
+Gate 0
+  -> Task 0 Mastra API / 协议 Spike
+  -> Task 1 安全和秘密契约
+  -> Task 2 领域类型和结果契约
+  -> Task 3 Migration 048 / Repository
+  -> Task 4 Mastra Adapter / Connection Manager
+  -> Task 5 Catalog Preview / Diff / Confirm
+  -> Task 6 Capability Broker / Approval / Audit
+  -> Task 7 Agent Role Scope / Tool Surface
+  -> Task 8 McpService /api/v1/mcp
+  -> Task 9 MCP 管理 UI
+  -> Task 10 真实协议 / 安全 / 回归 / Release Gate
+```
+
+### Gate 0：文档准入
+
+必须完成：
+
+- 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
+- 本文与 `mcp-roadmap.md` 的后续能力边界一致；
+- 确认当前工作区尚未有生产实现，不能把计划状态描述为已完成；
+- 确认一期为 Tools-first；
+- 确认 Task 0 为 Mastra API 的唯一事实来源。
+
+### Task 0～Task 2：实现准入 Gate
+
+必须形成：
+
+- `docs/MCP/mcp-mastra-spike-result.md`；
+- 精确版本和 lockfile；
+- 真实 stdio/HTTP Fixture；
+- Adapter Contract Test；
+- 安全边界测试；
+- `NormalizedMcpResult`、错误码和 Schema 子集。
+
+### Task 3～Task 6：后端核心闭环
+
+必须实现：
+
+- `048-mcp-client.sql`；
+- Repository；
+- Adapter 和 Connection Manager；
+- Catalog Preview/Confirm；
+- Broker、Approval、Run 审计。
+
+### Task 7～Task 9：产品接入
+
+必须实现：
+
+- Agent Role Scope；
+- `/api/v1/mcp`；
+- MCP 管理 UI；
+- Test、Refresh、Confirm、Enable、Approve、Run 全链路。
+
+### Task 10：发布 Gate
+
+以下任一项失败都不能发布：
+
+1. 真实协议 Fixture 未通过；
+2. 存在任何 resolved secret、Header、Approval Token 或敏感 output 泄露；
+3. 客户端可通过布尔值、重放或篡改 input 绕过审批；
+4. Mastra Tool 与远端 Tool 映射不确定；
+5. timeout 后对非幂等 Tool 自动重试；
+6. Migration、typecheck、build 或既有回归测试失败；
+7. Feature Flag 关闭后现有 Chat、Tools、Skills、Deep Research 不可用。
+
+---
+
+## 13. 开放问题和决策记录要求
+
+以下问题必须在 Task 0 结果文档中关闭，不能留在生产代码中隐式决定：
+
+1. `@mastra/mcp` 最终精确版本；
+2. `listTools()` 返回 Tool 的保存和执行方式；
+3. Tool 名称空间到远端原始名称的映射；
+4. Streamable HTTP 是否会 fallback 到 SSE；
+5. AbortSignal 是否能够真正取消远端调用；
+6. disconnect、reconnect 和 timeout 后 client invalidate 行为；
+7. `content`、`structuredContent`、`isError` 的结果规范化方式。
+
+这些决定应写入：
+
+```text
+docs/MCP/mcp-mastra-spike-result.md
+```
+
+并同步回本文和实施计划。
