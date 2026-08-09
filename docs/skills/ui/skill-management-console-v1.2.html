@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BloomAI Skills 管理工作台 v1.2 交互式后台原型，沿用 BloomAI 当前暖灰/白色基础配色、品牌渐变和语义状态色。">
+  <title>BloomAI · Skills Management Console v1.2</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-muted: #f7f9fb;
+      --surface-raised: #ffffff;
+      --ink: #16212b;
+      --ink-soft: #42505c;
+      --muted: #758391;
+      --faint: #9aa7b3;
+      --line: #dce3e9;
+      --line-strong: #c7d0d8;
+      --rail: #1e2933;
+      --rail-soft: #2a3742;
+      --rail-ink: #dce6ed;
+      --blue: #22769c;
+      --blue-deep: #145776;
+      --blue-bg: #e7f3f8;
+      --teal: #287d70;
+      --teal-bg: #e8f5f1;
+      --amber: #a66b16;
+      --amber-bg: #fff4d9;
+      --red: #b2443d;
+      --red-bg: #fbeceb;
+      --purple: #6c5b98;
+      --purple-bg: #f0edfa;
+      --shadow-sm: 0 1px 2px rgba(24, 40, 54, .05);
+      --shadow-md: 0 12px 30px rgba(24, 40, 54, .12);
+      --radius-sm: 5px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; font-family: var(--font); background: var(--bg); color: var(--ink); }
+    body { font-size: 13px; line-height: 1.45; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 3px solid rgba(34,118,156,.24); outline-offset: 2px; }
+    .app-shell { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+    .sidebar { background: var(--rail); color: var(--rail-ink); display: flex; flex-direction: column; min-height: 100vh; border-right: 1px solid #172029; }
+    .brand { padding: 22px 18px 18px; display: flex; gap: 11px; align-items: center; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .brand-mark { width: 34px; height: 34px; border-radius: 9px; background: #d7eef2; color: #1d6e78; display: grid; place-items: center; font-weight: 800; letter-spacing: -1px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.5); }
+    .brand-copy strong { display: block; font-size: 15px; letter-spacing: -.2px; }
+    .brand-copy small { display: block; color: #9caebd; margin-top: 2px; font-size: 11px; }
+    .sidebar-scroll { padding: 17px 12px; overflow: auto; }
+    .nav-label { color: #80909e; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; padding: 10px 10px 7px; }
+    .nav-item { width: 100%; border: 0; background: transparent; color: #c8d3dc; display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 11px; border-radius: 7px; margin: 2px 0; transition: background .15s, color .15s; }
+    .nav-item:hover { background: rgba(255,255,255,.07); color: #fff; }
+    .nav-item.active { background: #314452; color: #fff; box-shadow: inset 3px 0 0 #65b9c7; }
+    .nav-icon { width: 17px; height: 17px; display: grid; place-items: center; color: #93a7b5; flex: 0 0 auto; }
+    .nav-item.active .nav-icon { color: #93d2d9; }
+    .nav-name { flex: 1; }
+    .nav-count { min-width: 20px; padding: 2px 6px; border-radius: 99px; color: #bad0db; background: rgba(255,255,255,.08); text-align: center; font-size: 11px; }
+    .sidebar-footer { margin-top: auto; padding: 14px 14px 16px; border-top: 1px solid rgba(255,255,255,.08); }
+    .workspace-switcher { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.05); }
+    .workspace-avatar { width: 28px; height: 28px; border-radius: 7px; background: #5b8e9e; color: #effcff; display: grid; place-items: center; font-weight: 700; }
+    .workspace-copy { min-width: 0; flex: 1; }
+    .workspace-copy strong { display: block; font-size: 12px; }
+    .workspace-copy small { display: block; color: #9aadb9; font-size: 10px; margin-top: 2px; }
+    .main-shell { min-width: 0; display: flex; flex-direction: column; }
+    .topbar { height: 68px; display: flex; align-items: center; gap: 18px; padding: 0 30px; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+    .crumbs { display: flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--muted); }
+    .crumbs strong { color: var(--ink); font-weight: 680; }
+    .crumbs .slash { color: #b5c0c8; }
+    .topbar-tools { display: flex; align-items: center; gap: 9px; margin-left: auto; }
+    .searchbox { width: min(320px, 28vw); height: 34px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface-muted); padding: 0 10px; border-radius: 7px; color: var(--muted); }
+    .searchbox input { border: 0; outline: 0; background: transparent; color: var(--ink); width: 100%; min-width: 0; }
+    .icon { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: 0 0 auto; }
+    .icon svg { width: 100%; height: 100%; display: block; }
+    .icon-button { width: 34px; height: 34px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); border-radius: 7px; display: grid; place-items: center; }
+    .icon-button:hover { background: var(--surface-muted); }
+    .avatar { width: 31px; height: 31px; border-radius: 50%; background: #203f51; color: white; display: grid; place-items: center; font-weight: 700; font-size: 11px; }
+    .page { padding: 26px 30px 42px; min-width: 0; }
+    .page-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 22px; }
+    .eyebrow { color: var(--blue); font-size: 11px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 26px; line-height: 1.2; letter-spacing: -.03em; }
+    h2 { font-size: 17px; line-height: 1.3; letter-spacing: -.01em; }
+    h3 { font-size: 14px; }
+    .page-subtitle { margin-top: 7px; color: var(--muted); max-width: 730px; }
+    .page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); height: 34px; padding: 0 12px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-weight: 620; white-space: nowrap; box-shadow: var(--shadow-sm); }
+    .btn:hover { background: var(--surface-muted); }
+    .btn.primary { color: white; background: var(--blue); border-color: var(--blue); }
+    .btn.primary:hover { background: var(--blue-deep); }
+    .btn.soft { color: var(--blue-deep); background: var(--blue-bg); border-color: #b8d9e5; box-shadow: none; }
+    .btn.warning { color: var(--amber); background: var(--amber-bg); border-color: #efd7a2; box-shadow: none; }
+    .btn.danger { color: var(--red); background: var(--red-bg); border-color: #efc1bd; box-shadow: none; }
+    .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; }
+    .btn.sm { height: 30px; padding: 0 9px; font-size: 12px; }
+    .btn .icon { width: 15px; height: 15px; }
+    .panel { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+    .panel-header { min-height: 54px; padding: 15px 17px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+    .panel-title { display: flex; align-items: center; gap: 9px; }
+    .panel-title .muted { color: var(--muted); font-weight: 500; }
+    .panel-body { padding: 17px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 15px 16px; box-shadow: var(--shadow-sm); }
+    .metric-top { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+    .metric-value { font-size: 27px; font-weight: 740; margin-top: 9px; letter-spacing: -.04em; }
+    .metric-foot { color: var(--muted); font-size: 11px; margin-top: 6px; }
+    .metric-foot .up { color: var(--teal); font-weight: 700; }
+    .metric-icon { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; }
+    .metric-icon.blue { color: var(--blue); background: var(--blue-bg); }
+    .metric-icon.teal { color: var(--teal); background: var(--teal-bg); }
+    .metric-icon.amber { color: var(--amber); background: var(--amber-bg); }
+    .metric-icon.purple { color: var(--purple); background: var(--purple-bg); }
+    .section-gap { margin-top: 18px; }
+    .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .input, .select { height: 34px; border: 1px solid var(--line); background: var(--surface-muted); color: var(--ink); border-radius: 7px; padding: 0 10px; min-width: 0; }
+    .input::placeholder { color: #9ca9b4; }
+    .select { padding-right: 28px; }
+    .toolbar .input { min-width: 210px; }
+    .tabs { display: flex; gap: 3px; border-bottom: 1px solid var(--line); padding: 0 16px; overflow-x: auto; }
+    .tab { position: relative; border: 0; background: transparent; color: var(--muted); padding: 12px 10px 11px; white-space: nowrap; font-weight: 650; }
+    .tab:hover { color: var(--ink); }
+    .tab.active { color: var(--blue-deep); }
+    .tab.active::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: -1px; height: 2px; background: var(--blue); border-radius: 2px 2px 0 0; }
+    .table-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 850px; }
+    th, td { padding: 13px 17px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th { background: var(--surface-muted); color: var(--muted); font-size: 11px; font-weight: 760; letter-spacing: .03em; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr { transition: background .14s; }
+    tbody tr:hover { background: #fbfcfd; }
+    .skill-cell { display: flex; gap: 10px; align-items: center; min-width: 250px; }
+    .skill-logo { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex: 0 0 auto; }
+    .logo-blue { color: #17647d; background: #dff0f4; }
+    .logo-teal { color: #236e61; background: #dff2ea; }
+    .logo-amber { color: #8d5b13; background: #fcedc6; }
+    .logo-purple { color: #63528c; background: #eee9fb; }
+    .skill-title { font-weight: 700; color: var(--ink); }
+    .skill-meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 99px; padding: 4px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .badge.blue { color: var(--blue); background: var(--blue-bg); }
+    .badge.teal { color: var(--teal); background: var(--teal-bg); }
+    .badge.amber { color: var(--amber); background: var(--amber-bg); }
+    .badge.red { color: var(--red); background: var(--red-bg); }
+    .badge.gray { color: var(--muted); background: #eef1f4; }
+    .badge.purple { color: var(--purple); background: var(--purple-bg); }
+    .badge.no-dot::before { display: none; }
+    .risk { color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+    .risk-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .risk-low .risk-dot { background: var(--teal); }
+    .risk-medium .risk-dot { background: var(--amber); }
+    .risk-high .risk-dot { background: var(--red); }
+    .row-actions { display: flex; gap: 4px; justify-content: flex-end; min-width: 132px; overflow: visible; }
+    .icon-btn { position: relative; z-index: 1; width: 29px; height: 29px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); display: grid; place-items: center; transition: border-color .15s, background .15s, color .15s; }
+    .icon-btn:hover, .icon-btn:focus-visible { border-color: var(--line); background: var(--surface-muted); color: var(--ink); z-index: 4; }
+    .icon-btn[data-tooltip]::after { content: attr(data-tooltip); position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; opacity: 0; pointer-events: none; white-space: nowrap; padding: 5px 8px; border-radius: 5px; color: #fff; background: #242422; font-size: 11px; font-weight: 600; line-height: 1.3; box-shadow: 0 5px 14px rgba(24, 40, 54, .16); transform: translateY(-3px); transition: opacity .15s ease, transform .15s ease; }
+    .icon-btn[data-tooltip]:hover::after, .icon-btn[data-tooltip]:focus-visible::after { opacity: 1; transform: translateY(0); }
+    .icon-btn.danger:hover, .icon-btn.danger:focus-visible { border-color: #efc1bd; background: var(--red-bg); color: var(--red); }
+    .empty-state { min-height: 250px; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 28px; }
+    .empty-icon { width: 44px; height: 44px; display: grid; place-items: center; margin: 0 auto 10px; color: var(--blue); background: var(--blue-bg); border-radius: 12px; }
+    .two-col { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, .9fr); gap: 18px; }
+    .three-col { display: grid; grid-template-columns: minmax(210px, .72fr) minmax(440px, 1.5fr) minmax(300px, .9fr); gap: 18px; }
+    .mini-list { display: grid; gap: 0; }
+    .mini-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .mini-item:last-child { border-bottom: 0; padding-bottom: 0; }
+    .mini-item:first-child { padding-top: 0; }
+    .mini-copy { min-width: 0; flex: 1; }
+    .mini-copy strong { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mini-copy small { display: block; color: var(--muted); margin-top: 3px; }
+    .mini-value { color: var(--ink-soft); font-size: 12px; white-space: nowrap; }
+    .progress { height: 6px; background: #edf1f3; border-radius: 99px; overflow: hidden; }
+    .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+    .progress.teal > span { background: var(--teal); }
+    .progress.amber > span { background: var(--amber); }
+    .notice { padding: 12px 14px; display: flex; align-items: flex-start; gap: 10px; border: 1px solid; border-radius: 8px; }
+    .notice.blue { color: var(--blue-deep); background: var(--blue-bg); border-color: #bfdee8; }
+    .notice.amber { color: #7d5616; background: var(--amber-bg); border-color: #ebd39f; }
+    .notice.red { color: #8f3d38; background: var(--red-bg); border-color: #eac3bf; }
+    .notice strong { display: block; margin-bottom: 2px; }
+    .notice p { color: inherit; opacity: .86; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .hero-card { padding: 18px; display: flex; align-items: flex-start; gap: 15px; }
+    .hero-logo { width: 50px; height: 50px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; font-size: 15px; flex: 0 0 auto; }
+    .hero-main { flex: 1; min-width: 0; }
+    .hero-main h2 { font-size: 22px; letter-spacing: -.03em; }
+    .hero-main p { color: var(--muted); margin-top: 5px; max-width: 760px; }
+    .hero-meta { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+    .hero-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+    .detail-tabs { margin-top: 18px; }
+    .detail-content { padding-top: 18px; }
+    .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .info-box { border: 1px solid var(--line); border-radius: 7px; padding: 12px; background: var(--surface-muted); }
+    .info-box dt { color: var(--muted); font-size: 11px; }
+    .info-box dd { margin: 4px 0 0; font-weight: 700; color: var(--ink-soft); }
+    .cap-list { display: flex; gap: 7px; flex-wrap: wrap; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface-muted); color: var(--ink-soft); padding: 5px 8px; border-radius: 99px; font-size: 11px; }
+    .chip .chip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+    .code-preview { margin: 0; padding: 16px; background: #1e2933; color: #d6e5eb; border-radius: 8px; font: 12px/1.65 var(--mono); overflow: auto; min-height: 230px; white-space: pre-wrap; }
+    .code-preview .syntax-key { color: #91d4da; }
+    .code-preview .syntax-comment { color: #8ea1ab; }
+    .code-preview .syntax-string { color: #efd38b; }
+    .tree { display: grid; gap: 3px; font-size: 12px; }
+    .tree-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; color: var(--ink-soft); }
+    .tree-row:hover, .tree-row.selected { background: var(--blue-bg); color: var(--blue-deep); }
+    .tree-indent-1 { padding-left: 27px; }
+    .tree-indent-2 { padding-left: 46px; }
+    .tree-name { flex: 1; }
+    .tree-size { color: var(--faint); font: 10px var(--mono); }
+    .stepper { display: flex; gap: 3px; align-items: center; margin-bottom: 18px; overflow-x: auto; }
+    .step { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .step:not(:last-child)::after { content: ""; width: 28px; height: 1px; background: var(--line-strong); margin: 0 3px; }
+    .step-num { width: 23px; height: 23px; border: 1px solid var(--line-strong); border-radius: 50%; display: grid; place-items: center; font-weight: 750; }
+    .step.active { color: var(--blue-deep); font-weight: 700; }
+    .step.active .step-num { color: white; background: var(--blue); border-color: var(--blue); }
+    .step.done { color: var(--teal); }
+    .step.done .step-num { color: white; background: var(--teal); border-color: var(--teal); }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+    .field { display: grid; gap: 6px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+    .field label span { color: var(--red); }
+    .field input, .field select, .field textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 7px; color: var(--ink); }
+    .field textarea { resize: vertical; min-height: 93px; line-height: 1.55; }
+    .helper { color: var(--muted); font-size: 11px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .toggle-row:last-child { border-bottom: 0; }
+    .toggle-copy { flex: 1; }
+    .toggle-copy strong { display: block; font-size: 12px; }
+    .toggle-copy small { display: block; color: var(--muted); margin-top: 2px; }
+    .switch { position: relative; width: 38px; height: 21px; flex: 0 0 auto; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; border-radius: 99px; background: #cfd8df; transition: .16s; cursor: pointer; }
+    .slider::before { content: ""; position: absolute; width: 17px; height: 17px; left: 2px; top: 2px; border-radius: 50%; background: white; box-shadow: 0 1px 2px rgba(0,0,0,.18); transition: .16s; }
+    .switch input:checked + .slider { background: var(--teal); }
+    .switch input:checked + .slider::before { transform: translateX(17px); }
+    .cap-select-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .cap-option { border: 1px solid var(--line); background: var(--surface-muted); border-radius: 7px; padding: 10px; display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+    .cap-option:hover { border-color: #9bc6d6; background: #f5fbfd; }
+    .cap-option input { margin-top: 2px; accent-color: var(--blue); }
+    .cap-option strong { display: block; font-size: 12px; }
+    .cap-option small { display: block; color: var(--muted); margin-top: 2px; }
+    .creator-preview { position: sticky; top: 90px; }
+    .creator-preview .code-preview { min-height: 320px; }
+    .validation-list { display: grid; gap: 8px; }
+    .validation-row { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 12px; }
+    .validation-ok { color: var(--teal); }
+    .validation-warn { color: var(--amber); }
+    .run-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .run-kpi { border: 1px solid var(--line); background: var(--surface-muted); border-radius: 7px; padding: 12px; }
+    .run-kpi small { color: var(--muted); display: block; }
+    .run-kpi strong { display: block; margin-top: 5px; font-size: 17px; }
+    .timeline { position: relative; display: grid; gap: 0; }
+    .timeline::before { content: ""; position: absolute; left: 8px; top: 9px; bottom: 9px; width: 1px; background: var(--line); }
+    .timeline-item { display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 11px; position: relative; padding-bottom: 17px; }
+    .timeline-dot { width: 17px; height: 17px; border-radius: 50%; background: var(--surface); border: 3px solid var(--blue); z-index: 1; }
+    .timeline-dot.success { border-color: var(--teal); }
+    .timeline-dot.warn { border-color: var(--amber); }
+    .timeline-dot.danger { border-color: var(--red); }
+    .timeline-copy { min-width: 0; }
+    .timeline-title { font-weight: 700; }
+    .timeline-meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .timeline-detail { margin-top: 7px; padding: 8px 10px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); font-size: 11px; }
+    .artifact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .artifact-card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+    .artifact-thumb { height: 125px; background: #e9eff2; display: grid; place-items: center; color: var(--blue); }
+    .artifact-thumb.image { background: #dcecef; color: #2c707b; }
+    .artifact-thumb.pdf { background: #f7e4e0; color: var(--red); }
+    .artifact-thumb.markdown { background: #e6f1e7; color: var(--teal); }
+    .artifact-body { padding: 11px; }
+    .artifact-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .artifact-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .artifact-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 10px; }
+    .settings-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 18px; }
+    .setting-group + .setting-group { margin-top: 22px; }
+    .setting-group h3 { margin-bottom: 5px; }
+    .setting-group > p { color: var(--muted); font-size: 12px; margin-bottom: 7px; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(18,30,39,.45); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(560px, 100%); max-height: min(720px, 92vh); overflow: auto; border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,.35); }
+    .modal.wide { width: min(820px, 100%); }
+    .modal-head { padding: 17px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .modal-head h2 { font-size: 17px; }
+    .modal-body { padding: 18px; }
+    .modal-foot { padding: 13px 18px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+    .close-btn { width: 30px; height: 30px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); display: grid; place-items: center; }
+    .close-btn:hover { border-color: var(--line); background: var(--surface-muted); color: var(--ink); }
+    .source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .source-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface-muted); text-align: left; }
+    .source-card.selected { border-color: var(--blue); background: var(--blue-bg); box-shadow: inset 0 0 0 1px var(--blue); }
+    .source-card strong { display: block; margin-top: 7px; }
+    .source-card small { display: block; color: var(--muted); margin-top: 3px; }
+    .source-card .source-icon { width: 25px; height: 25px; border-radius: 6px; display: grid; place-items: center; background: var(--surface); color: var(--blue); }
+    .drop-zone { border: 1px dashed #a5bac5; border-radius: 8px; background: #f7fbfc; padding: 20px; text-align: center; color: var(--muted); }
+    .drop-zone strong { color: var(--blue-deep); display: block; margin-bottom: 3px; }
+    .toast-stack { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: grid; gap: 8px; width: min(330px, calc(100vw - 44px)); }
+    .toast { border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-md); border-radius: 8px; padding: 12px 13px; display: flex; align-items: flex-start; gap: 9px; animation: toast-in .18s ease-out; }
+    .toast strong { display: block; }
+    .toast small { display: block; color: var(--muted); margin-top: 2px; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .mobile-menu { display: none; }
+    .mono { font-family: var(--mono); }
+    .muted { color: var(--muted); }
+    .right { text-align: right; }
+    .mt-10 { margin-top: 10px; }
+    .mt-14 { margin-top: 14px; }
+    .mt-18 { margin-top: 18px; }
+    .mb-12 { margin-bottom: 12px; }
+    .divider { height: 1px; background: var(--line); margin: 16px 0; }
+    .callout-list { display: grid; gap: 9px; }
+    .callout-row { display: flex; gap: 9px; align-items: flex-start; }
+    .callout-row strong { display: block; }
+    .callout-row small { display: block; color: var(--muted); margin-top: 2px; }
+    @media (max-width: 1180px) {
+      .app-shell { grid-template-columns: 218px minmax(0, 1fr); }
+      .page { padding-left: 22px; padding-right: 22px; }
+      .topbar { padding-left: 22px; padding-right: 22px; }
+      .three-col { grid-template-columns: 190px minmax(390px, 1.4fr) minmax(270px, .85fr); }
+    }
+    @media (max-width: 960px) {
+      .app-shell { grid-template-columns: 70px minmax(0, 1fr); }
+      .brand { justify-content: center; padding: 15px 10px; }
+      .brand-copy, .nav-name, .nav-count, .nav-label, .workspace-copy { display: none; }
+      .sidebar-scroll { padding: 12px 9px; }
+      .nav-item { justify-content: center; padding: 11px 0; }
+      .sidebar-footer { padding: 12px 9px; }
+      .workspace-switcher { justify-content: center; padding: 9px 0; }
+      .topbar { gap: 10px; }
+      .crumbs { display: none; }
+      .mobile-menu { display: grid; }
+      .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .two-col, .settings-grid { grid-template-columns: 1fr; }
+      .three-col { grid-template-columns: 1fr; }
+      .creator-preview { position: static; }
+    }
+    @media (max-width: 640px) {
+      .app-shell { display: block; }
+      .sidebar { display: none; }
+      .topbar { height: 60px; padding: 0 14px; }
+      .topbar-tools { gap: 6px; }
+      .searchbox { width: auto; flex: 1; }
+      .page { padding: 18px 14px 30px; }
+      .page-head { display: block; }
+      .page-actions { justify-content: flex-start; margin-top: 13px; }
+      h1 { font-size: 23px; }
+      .grid-4 { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .metric { padding: 12px; }
+      .metric-value { font-size: 22px; }
+      .artifact-grid { grid-template-columns: 1fr 1fr; }
+      .form-grid, .cap-select-grid, .info-grid, .run-summary { grid-template-columns: 1fr; }
+      .hero-card { display: block; }
+      .hero-actions { justify-content: flex-start; margin-top: 14px; }
+      .source-grid { grid-template-columns: 1fr; }
+      .panel-header { display: block; }
+      .panel-header .toolbar { margin-top: 11px; }
+      .toolbar .input { min-width: 0; width: 100%; }
+    }
+
+    /* v1.2 visual system: align the standalone prototype with BloomAI's current renderer tokens. */
+    :root {
+      --bg: #f5f5f4;
+      --surface: #ffffff;
+      --surface-muted: #f5f5f4;
+      --surface-raised: #ffffff;
+      --ink: #1a1a18;
+      --ink-soft: #3d3d3a;
+      --muted: #73726c;
+      --faint: #a8a69e;
+      --line: #dddbd6;
+      --line-strong: #b8b5ae;
+      --rail: #f5f5f4;
+      --rail-soft: #eeede9;
+      --rail-ink: #3d3d3a;
+      --blue: #0c447c;
+      --blue-deep: #08365f;
+      --blue-bg: #eff5fc;
+      --teal: #085041;
+      --teal-bg: #edf7f2;
+      --amber: #633806;
+      --amber-bg: #fef5e8;
+      --red: #7a1b1b;
+      --red-bg: #fcebeb;
+      --purple: #534ab7;
+      --purple-bg: #f2f0ff;
+      --brand-purple: #7c6ff7;
+      --brand-blue: #4b9bf5;
+      --success-border: #5dcaa5;
+      --warning-border: #ef9f27;
+      --danger-border: #f09595;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, .08);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, .12);
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 10px;
+    }
+    html, body { background: var(--bg); color: var(--ink); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline-color: rgba(83, 74, 183, .3); }
+    .sidebar { background: var(--rail); color: var(--rail-ink); border-right: .5px solid var(--line); }
+    .brand { border-bottom-color: var(--line); }
+    .brand-mark { background: linear-gradient(135deg, var(--brand-purple), var(--brand-blue)); color: #fff; box-shadow: none; }
+    .brand-copy small { color: var(--muted); }
+    .nav-label { color: var(--muted); }
+    .nav-item { color: var(--ink-soft); }
+    .nav-item:hover { background: var(--rail-soft); color: var(--ink); }
+    .nav-item.active { background: var(--surface); color: var(--ink); border: .5px solid var(--line); box-shadow: inset 3px 0 0 var(--brand-purple), var(--shadow-sm); }
+    .nav-icon, .nav-item.active .nav-icon { color: var(--muted); }
+    .nav-item.active .nav-icon { color: var(--purple); }
+    .nav-count { color: var(--ink-soft); background: var(--surface); border: .5px solid var(--line); }
+    .sidebar-footer { border-top-color: var(--line); }
+    .workspace-switcher { background: var(--surface); border: .5px solid var(--line); }
+    .workspace-avatar { background: linear-gradient(135deg, var(--brand-purple), var(--brand-blue)); color: #fff; }
+    .workspace-copy small { color: var(--muted); }
+    .topbar { background: rgba(255, 255, 255, .94); border-bottom-color: var(--line); }
+    .crumbs .slash { color: var(--line-strong); }
+    .searchbox { background: var(--surface-muted); border-color: var(--line); }
+    .icon-button { background: var(--surface); border-color: var(--line); }
+    .icon-button:hover { background: var(--surface-muted); }
+    .avatar { background: linear-gradient(135deg, var(--brand-purple), var(--brand-blue)); }
+    .eyebrow { color: var(--purple); }
+    .btn { border-color: var(--line); background: var(--surface); color: var(--ink-soft); box-shadow: var(--shadow-sm); }
+    .btn:hover { background: var(--surface-muted); }
+    .btn.primary { background: linear-gradient(135deg, var(--brand-purple), var(--brand-blue)); border-color: transparent; color: #fff; }
+    .btn.primary:hover { background: linear-gradient(135deg, #6c5fe3, #3b85de); }
+    .btn.soft { color: var(--blue); background: var(--blue-bg); border-color: var(--border-info, #85b7eb); }
+    .btn.warning { color: var(--amber); background: var(--amber-bg); border-color: var(--warning-border); }
+    .btn.danger { color: var(--red); background: var(--red-bg); border-color: var(--danger-border); }
+    .panel, .metric, .info-box { border-color: var(--line); background: var(--surface); }
+    .panel-header, th, .tabs { border-color: var(--line); }
+    th { background: var(--surface-muted); }
+    tbody tr:hover { background: #fafaf9; }
+    .metric-icon.blue, .badge.blue, .notice.blue { color: var(--blue); background: var(--blue-bg); }
+    .metric-icon.teal, .badge.teal { color: var(--teal); background: var(--teal-bg); }
+    .metric-icon.amber, .badge.amber { color: var(--amber); background: var(--amber-bg); }
+    .metric-icon.red, .badge.red { color: var(--red); background: var(--red-bg); }
+    .metric-icon.purple, .badge.purple { color: var(--purple); background: var(--purple-bg); }
+    .badge.gray { color: var(--muted); background: var(--bg-tertiary, #eeede9); }
+    .badge { border: .5px solid transparent; }
+    .badge.blue { border-color: #85b7eb; }
+    .badge.teal { border-color: var(--success-border); }
+    .badge.amber { border-color: var(--warning-border); }
+    .badge.red { border-color: var(--danger-border); }
+    .badge-icon { display: inline-grid; place-items: center; width: 12px; height: 12px; }
+    .badge-icon .icon { width: 12px; height: 12px; }
+    .badge::before { display: inline-block; }
+    .badge:has(.badge-icon)::before { display: none; }
+    .risk-low .risk-dot { background: var(--teal); }
+    .risk-medium .risk-dot { background: var(--amber); }
+    .risk-high .risk-dot { background: var(--red); }
+    .logo-blue { color: var(--blue); background: var(--blue-bg); }
+    .logo-teal { color: var(--teal); background: var(--teal-bg); }
+    .logo-amber { color: var(--amber); background: var(--amber-bg); }
+    .logo-purple { color: var(--purple); background: var(--purple-bg); }
+    .tab.active { color: var(--blue); }
+    .tab.active::after { background: var(--brand-purple); }
+    .tree-row:hover, .tree-row.selected { background: var(--blue-bg); color: var(--blue); }
+    .progress { background: var(--bg-tertiary, #eeede9); }
+    .progress > span { background: var(--brand-blue); }
+    .progress.teal > span { background: var(--teal); }
+    .progress.amber > span { background: var(--warning-border); }
+    .notice.blue { border-color: #85b7eb; }
+    .notice.amber { color: var(--amber); background: var(--amber-bg); border-color: var(--warning-border); }
+    .notice.red { color: var(--red); background: var(--red-bg); border-color: var(--danger-border); }
+    .empty-icon { color: var(--purple); background: var(--purple-bg); }
+    .chip { border-color: var(--line); background: var(--surface-muted); }
+    .chip .chip-dot { background: var(--brand-blue); }
+    .code-preview { background: #242422; color: #e8e6e0; }
+    .code-preview .syntax-key { color: #9d92ff; }
+    .code-preview .syntax-string { color: #dda348; }
+    .slider { background: var(--line-strong); }
+    .switch input:checked + .slider { background: var(--teal); }
+    .runtime-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border: .5px solid var(--success-border); border-radius: 999px; color: var(--teal); background: var(--teal-bg); font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .runtime-status .icon { width: 13px; height: 13px; }
+    .context-status { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: .5px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 11px; white-space: nowrap; }
+    .context-status .icon { width: 13px; height: 13px; }
+    .status-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border: .5px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--muted); font-size: 11px; }
+    .status-legend strong { color: var(--ink-soft); margin-right: 2px; }
+    .status-token { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 999px; font-weight: 700; }
+    .status-token .icon { width: 12px; height: 12px; }
+    .status-token.success { color: var(--teal); background: var(--teal-bg); }
+    .status-token.info { color: var(--blue); background: var(--blue-bg); }
+    .status-token.warning { color: var(--amber); background: var(--amber-bg); }
+    .status-token.danger { color: var(--red); background: var(--red-bg); }
+    @media (max-width: 1120px) { .context-status { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Skills 管理导航">
+      <div class="brand">
+        <div class="brand-mark">B</div>
+        <div class="brand-copy"><strong>BloomAI</strong><small>Skills Control Plane</small></div>
+      </div>
+      <div class="sidebar-scroll">
+        <div class="nav-label">Workbench</div>
+        <button class="nav-item active" data-nav="center"><span class="nav-icon" data-icon="grid"></span><span class="nav-name">Skills Center</span><span class="nav-count">5</span></button>
+        <button class="nav-item" data-nav="creator"><span class="nav-icon" data-icon="wand"></span><span class="nav-name">Skills Creator</span><span class="nav-count">3</span></button>
+        <div class="nav-label">Manage</div>
+        <button class="nav-item" data-nav="import"><span class="nav-icon" data-icon="download"></span><span class="nav-name">导入 Skill</span></button>
+        <button class="nav-item" data-nav="detail"><span class="nav-icon" data-icon="package"></span><span class="nav-name">Skill 详情</span></button>
+        <button class="nav-item" data-nav="permissions"><span class="nav-icon" data-icon="shield"></span><span class="nav-name">权限与安装</span><span class="nav-count">4</span></button>
+        <div class="nav-label">Observe</div>
+        <button class="nav-item" data-nav="runs"><span class="nav-icon" data-icon="activity"></span><span class="nav-name">运行记录</span><span class="nav-count">8</span></button>
+        <button class="nav-item" data-nav="artifacts"><span class="nav-icon" data-icon="file"></span><span class="nav-name">Artifacts</span></button>
+        <div class="nav-label">System</div>
+        <button class="nav-item" data-nav="settings"><span class="nav-icon" data-icon="settings"></span><span class="nav-name">系统设置</span></button>
+      </div>
+      <div class="sidebar-footer">
+        <div class="workspace-switcher">
+          <div class="workspace-avatar">P</div>
+          <div class="workspace-copy"><strong>Product Workbench</strong><small>4 个已安装 Skill</small></div>
+          <span data-icon="chevron"></span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main-shell">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" aria-label="打开导航" data-action="mobile-nav"><span data-icon="menu"></span></button>
+        <div class="crumbs"><span>Control Plane</span><span class="slash">/</span><strong id="crumb-current">Skills Center</strong></div>
+        <div class="topbar-tools">
+          <span class="runtime-status" title="Runtime 状态正常"><span data-icon="check"></span><span>Runtime Healthy</span></span>
+          <span class="context-status"><span data-icon="activity"></span><span>2 Workers</span></span>
+          <label class="searchbox" aria-label="全局搜索"><span data-icon="search"></span><input id="global-search" type="search" placeholder="搜索 Skill、Run 或 Artifact" /></label>
+          <button class="icon-button" aria-label="通知" data-action="notifications"><span data-icon="bell"></span></button>
+          <button class="icon-button" aria-label="帮助" data-action="help"><span data-icon="help"></span></button>
+          <div class="avatar" aria-label="当前用户">XC</div>
+        </div>
+      </header>
+
+      <main class="page">
+        <section class="view active" id="view-center" data-view="center"></section>
+        <section class="view" id="view-import" data-view="import"></section>
+        <section class="view" id="view-creator" data-view="creator"></section>
+        <section class="view" id="view-detail" data-view="detail"></section>
+        <section class="view" id="view-permissions" data-view="permissions"></section>
+        <section class="view" id="view-runs" data-view="runs"></section>
+        <section class="view" id="view-run-detail" data-view="run-detail"></section>
+        <section class="view" id="view-artifacts" data-view="artifacts"></section>
+        <section class="view" id="view-settings" data-view="settings"></section>
+      </main>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+    <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
+  </div>
+  <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var icons = {
+        grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>',
+        wand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 4 5 5"/><path d="m13 6 5 5"/><path d="M4 20 15.5 8.5"/><path d="m4 15 5 5"/><path d="m3 5 1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z"/></svg>',
+        download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>',
+        package: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="M4 7v10l8 4 8-4V7"/><path d="M12 11v10"/></svg>',
+        shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 20 6v5c0 5.1-3.2 8.4-8 10-4.8-1.6-8-4.9-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg>',
+        activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>',
+        file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>',
+        settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="M4.9 4.9 7 7M17 17l2.1 2.1M3 12h3M18 12h3M4.9 19.1 7 17M17 7l2.1-2.1M12 3v3M12 18v3"/></svg>',
+        search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>',
+        bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 9a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
+        help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.6 1.7c-1.4 1.1-2.1 1.5-2.1 3.1"/><path d="M12 17h.01"/></svg>',
+        menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+        plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>',
+        filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M7 12h10M10 18h4"/></svg>',
+        arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+        chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg>',
+        down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6"/></svg>',
+        check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg>',
+        close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+        upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>',
+        eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 12s3.2-6 9.5-6 9.5 6 9.5 6-3.2 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+        edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 16-.8 4.8L8 20l11.3-11.3a2 2 0 0 0 0-2.8l-.2-.2a2 2 0 0 0-2.8 0L5 17Z"/><path d="m14.5 6.5 3 3"/></svg>',
+        play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m8 5 11 7-11 7V5Z"/></svg>',
+        pause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 5v14M16 5v14"/></svg>',
+        stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+        refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 11a8 8 0 0 0-14.8-3.9L3 10"/><path d="M3 5v5h5"/><path d="M4 13a8 8 0 0 0 14.8 3.9L21 14"/><path d="M21 19v-5h-5"/></svg>',
+        external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>',
+        folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a3 3 0 0 1-3 3H5a2 2 0 0 1-2-2V6Z"/></svg>',
+        fileText: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 12h6M9 16h6"/></svg>',
+        image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m20 15-4-4-7 7"/></svg>',
+        lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+        key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l2 2M14 9l2 2"/></svg>',
+        clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+        externalSmall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 5h5v5M19 5l-8 8"/><path d="M17 13v5H6V7h5"/></svg>',
+        spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 14 9l6 3-6 3-2 6-2-6-6-3 6-3 2-6Z"/></svg>',
+        code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/></svg>',
+        cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9a4.5 4.5 0 0 0 1 9Z"/></svg>',
+        database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5"/><path d="M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg>',
+        info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+        link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/><path d="m8.5 15.5 7-7"/></svg>'
+      };
+      function icon(name, cls) { return '<span class="icon ' + (cls || '') + '">' + (icons[name] || icons.info) + '</span>'; }
+      document.querySelectorAll('[data-icon]').forEach(function (el) { el.innerHTML = icon(el.getAttribute('data-icon')); });
+
+      var state = {
+        view: 'center',
+        centerFilter: 'all',
+        centerSearch: '',
+        selectedSkillId: 'article-illustrator',
+        detailTab: 'overview',
+        importSource: 'github',
+        creatorCapabilities: ['web_search', 'image_generate'],
+        creatorRuntime: 'instruction-agent',
+        selectedRunId: 'run-20260805-0912',
+        selectedArtifactId: 'art-01'
+      };
+
+      var skills = [
+        { id: 'article-illustrator', name: 'Article Illustrator', slug: 'article-illustrator', initials: 'AI', logo: 'blue', type: 'Package · instruction-agent', description: '把文章拆分为配图计划，生成插图 Prompt，并批量输出图片与 Markdown 说明。', version: '1.4.2', status: 'enabled', statusText: '已启用', statusTone: 'teal', source: 'GitHub Archive', sourceMeta: 'jimliu/baoyu-skills', risk: 'low', riskText: '低风险', updated: '今天 09:18', runs: 184, success: '96.7%', surfaces: ['Chat', 'Image'], capabilities: ['web_search', 'image_generate', 'skill_read'], install: 'Product Workspace', files: '18 个文件', color: 'blue' },
+        { id: 'research-analysis', name: 'Research Analysis', slug: 'research-analysis', initials: 'RA', logo: 'teal', type: 'Package · instruction-agent', description: '联网研究、提炼观点、生成 Markdown 报告，并保留来源与引用结构。', version: '0.9.7', status: 'enabled', statusText: '已启用', statusTone: 'teal', source: 'GitHub Archive', sourceMeta: 'KKKKhazix/hv-analysis', risk: 'medium', riskText: '中风险', updated: '昨天 16:42', runs: 76, success: '91.4%', surfaces: ['Chat'], capabilities: ['web_search', 'workspace_write', 'skill_read'], install: 'Product Workspace', files: '27 个文件', color: 'teal' },
+        { id: 'illustration-prompts', name: 'Illustration Prompts', slug: 'illustration-prompts', initials: 'IP', logo: 'amber', type: 'Package · instruction-agent', description: '从内容大纲生成统一风格的图像 Prompt、尺寸建议和视觉素材清单。', version: '0.3.0-draft', status: 'draft', statusText: '草稿', statusTone: 'amber', source: '本地目录', sourceMeta: 'D:/skills/illustration-prompts', risk: 'low', riskText: '低风险', updated: '今天 08:57', runs: 0, success: '—', surfaces: ['Image'], capabilities: ['image_generate', 'skill_read'], install: '未安装', files: '9 个文件', color: 'amber' },
+        { id: 'web-clipper', name: 'Web Clipper', slug: 'web-clipper', initials: 'WC', logo: 'blue', type: 'Package · instruction-agent', description: '提取网页正文、保留结构化摘要，并输出可检索的 Markdown 资料。', version: '1.1.0', status: 'disabled', statusText: '已禁用', statusTone: 'gray', source: 'ZIP 导入', sourceMeta: 'web-clipper-1.1.0.zip', risk: 'medium', riskText: '中风险', updated: '7 月 25 日', runs: 12, success: '83.3%', surfaces: ['Chat'], capabilities: ['web_search', 'workspace_write'], install: 'Product Workspace', files: '14 个文件', color: 'blue' },
+        { id: 'pdf-report', name: 'PDF Report Builder', slug: 'pdf-report-builder', initials: 'PB', logo: 'teal', type: 'Package · instruction-agent', description: '把研究结果整理成带目录、引用和封面的 PDF 报告。', version: '0.8.1', status: 'quarantined', statusText: '已隔离', statusTone: 'red', source: 'GitHub Archive', sourceMeta: 'demo/pdf-report', risk: 'high', riskText: '高风险', updated: '7 月 22 日', runs: 4, success: '50%', surfaces: ['Chat'], capabilities: ['web_search', 'workspace_write', 'command'], install: '待审核', files: '33 个文件', color: 'teal' }
+      ];
+
+      var runs = [
+        { id: 'run-20260805-0912', skill: 'Article Illustrator', version: '1.4.2', surface: 'Image', status: 'running', statusText: '运行中', tone: 'blue', started: '今天 09:12', duration: '02:18', step: '正在生成第 4 / 6 张图片', user: 'xing', artifacts: 3, input: '《AI Agent 产品架构》文章配图' },
+        { id: 'run-20260805-0831', skill: 'Research Analysis', version: '0.9.7', surface: 'Chat', status: 'waiting_approval', statusText: '等待审批', tone: 'amber', started: '今天 08:31', duration: '08:42', step: '请求 workspace_write', user: 'xing', artifacts: 1, input: '分析 2026 年 Agent Runtime 趋势' },
+        { id: 'run-20260804-1612', skill: 'Article Illustrator', version: '1.4.2', surface: 'Image', status: 'completed_with_errors', statusText: '部分成功', tone: 'amber', started: '昨天 16:12', duration: '06:18', step: '5 / 6 张图片生成成功', user: 'xing', artifacts: 8, input: '《知识库产品路线图》配图' },
+        { id: 'run-20260803-1405', skill: 'PDF Report Builder', version: '0.8.1', surface: 'Chat', status: 'failed', statusText: '失败', tone: 'red', started: '8 月 3 日 14:05', duration: '01:07', step: 'command capability 被拒绝', user: 'admin', artifacts: 0, input: '生成研究分析 PDF' }
+      ];
+
+      var artifacts = [
+        { id: 'art-01', name: 'article-illustration-04.png', type: 'image', label: 'PNG 图片', size: '2.4 MB', skill: 'Article Illustrator', run: 'run-20260805-0912', created: '今天 09:28', color: 'image' },
+        { id: 'art-02', name: 'illustration-plan.md', type: 'markdown', label: 'Markdown', size: '18 KB', skill: 'Article Illustrator', run: 'run-20260805-0912', created: '今天 09:14', color: 'markdown' },
+        { id: 'art-03', name: 'research-sources.md', type: 'markdown', label: 'Markdown', size: '42 KB', skill: 'Research Analysis', run: 'run-20260805-0831', created: '今天 08:37', color: 'markdown' },
+        { id: 'art-04', name: 'research-report.pdf', type: 'pdf', label: 'PDF 报告', size: '1.8 MB', skill: 'Research Analysis', run: 'run-20260804-1017', created: '昨天 10:17', color: 'pdf' },
+        { id: 'art-05', name: 'hero-visual-prompt.json', type: 'json', label: 'JSON', size: '6 KB', skill: 'Illustration Prompts', run: 'run-20260802-1522', created: '8 月 2 日', color: 'file' },
+        { id: 'art-06', name: 'article-illustration.zip', type: 'zip', label: 'ZIP Archive', size: '14.2 MB', skill: 'Article Illustrator', run: 'run-20260804-1612', created: '昨天 16:25', color: 'file' }
+      ];
+
+      var grants = [
+        { id: 'grant-01', capability: 'image_generate', scope: '模型：gpt-image-1 · 6 张 / Run', subject: 'Article Illustrator', level: 'session', levelText: 'Session', state: 'active', expires: '今天 12:00', by: '用户批准' },
+        { id: 'grant-02', capability: 'web_search', scope: '域名：*.arxiv.org、mastra.ai', subject: 'Research Analysis', level: 'persistent', levelText: 'Persistent', state: 'active', expires: '2026-09-01', by: 'Workspace Policy' },
+        { id: 'grant-03', capability: 'workspace_write', scope: '仅限 /projects/product/reports', subject: 'Research Analysis', level: 'once', levelText: 'Once', state: 'pending', expires: '等待批准', by: 'Run 请求' },
+        { id: 'grant-04', capability: 'command', scope: '未定义 scope，风险过高', subject: 'PDF Report Builder', level: 'once', levelText: 'Once', state: 'revoked', expires: '已撤销', by: '管理员' }
+      ];
+
+      var fileTree = [
+        { icon: 'fileText', name: 'SKILL.md', indent: 0, size: '8.4 KB', selected: true },
+        { icon: 'folder', name: 'references', indent: 0, size: '3 个文件' },
+        { icon: 'fileText', name: 'workflow.md', indent: 1, size: '6.1 KB' },
+        { icon: 'fileText', name: 'style-presets.md', indent: 1, size: '4.8 KB' },
+        { icon: 'fileText', name: 'prompt-construction.md', indent: 1, size: '5.2 KB' },
+        { icon: 'folder', name: 'assets', indent: 0, size: '12 个文件' },
+        { icon: 'image', name: 'example-01.png', indent: 1, size: '1.2 MB' },
+        { icon: 'folder', name: 'scripts', indent: 0, size: '2 个文件' },
+        { icon: 'code', name: 'validate-prompts.ts', indent: 1, size: '3.7 KB' },
+        { icon: 'folder', name: 'templates', indent: 0, size: '1 个文件' }
+      ];
+
+      var versionHistory = [
+        { version: '1.4.2', state: '当前', date: '今天 09:18', source: 'commit a31f4b8', changes: '修复多图失败重试，并增加 image_generate scope' },
+        { version: '1.4.1', state: '已安装', date: '7 月 31 日', source: 'commit 4c8219e', changes: '优化图片规划步骤' },
+        { version: '1.3.0', state: '可回滚', date: '7 月 19 日', source: 'tag v1.3.0', changes: '增加文章风格预设和参考图读取' }
+      ];
+
+      function getSkill(id) { return skills.find(function (item) { return item.id === id; }) || skills[0]; }
+      function getRun(id) { return runs.find(function (item) { return item.id === id; }) || runs[0]; }
+      function getArtifact(id) { return artifacts.find(function (item) { return item.id === id; }) || artifacts[0]; }
+      function statusIcon(tone) { return ({ teal: 'check', blue: 'play', amber: 'clock', red: 'info', gray: 'pause', purple: 'spark' })[tone] || 'info'; }
+      function statusBadge(item, tone) { var badgeTone = tone || item.statusTone || item.tone || 'gray'; return '<span class="badge ' + badgeTone + '"><span class="badge-icon">' + icon(statusIcon(badgeTone)) + '</span>' + (item.statusText || item.state || '') + '</span>'; }
+      function runStatusBadge(run) { return statusBadge(run, run.tone); }
+      function logo(skill, cls) { return '<div class="skill-logo logo-' + (skill.logo || 'blue') + ' ' + (cls || '') + '">' + skill.initials + '</div>'; }
+      function capabilityLabel(value) {
+        var labels = { web_search: 'web_search', image_generate: 'image_generate', skill_read: 'skill_read', workspace_read: 'workspace_read', workspace_write: 'workspace_write', browser: 'browser', command: 'command' };
+        return labels[value] || value;
+      }
+      function capabilityChips(list) { return '<div class="cap-list">' + list.map(function (item) { return '<span class="chip"><span class="chip-dot"></span>' + capabilityLabel(item) + '</span>'; }).join('') + '</div>'; }
+      function iconButton(name, label, action, id, cls) {
+        var safeLabel = htmlEscape(label);
+        return '<button type="button" class="icon-btn ' + (cls || '') + '" aria-label="' + safeLabel + '" title="' + safeLabel + '" data-tooltip="' + safeLabel + '" data-action="' + action + '"' + (id ? ' data-id="' + id + '"' : '') + '>' + icon(name) + '</button>';
+      }
+      function skillRowActions(skill) {
+        var enabled = skill.status === 'enabled';
+        return iconButton('eye', '查看详情', 'open-detail', skill.id) +
+          iconButton(enabled ? 'pause' : 'play', enabled ? '禁用 Skill' : '启用 Skill', 'toggle-skill', skill.id) +
+          iconButton('edit', '创建新版本', 'new-version', skill.id) +
+          iconButton('stop', '卸载 Installation', 'uninstall-skill', skill.id, 'danger');
+      }
+      function actionButton(label, cls, action, id, iconName) { return '<button class="btn ' + (cls || '') + '" data-action="' + action + '"' + (id ? ' data-id="' + id + '"' : '') + '>' + (iconName ? icon(iconName) : '') + '<span>' + label + '</span></button>'; }
+      function metric(label, value, foot, tone, iconName) { return '<div class="metric"><div class="metric-top"><span>' + label + '</span><span class="metric-icon ' + tone + '">' + icon(iconName) + '</span></div><div class="metric-value">' + value + '</div><div class="metric-foot">' + foot + '</div></div>'; }
+      function htmlEscape(value) { return String(value).replace(/[&<>"']/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]; }); }
+      function toast(title, message, tone) {
+        var stack = document.getElementById('toast-stack');
+        var el = document.createElement('div');
+        el.className = 'toast';
+        el.innerHTML = '<div class="metric-icon ' + (tone || 'blue') + '">' + icon(tone === 'teal' ? 'check' : tone === 'red' ? 'info' : 'spark') + '</div><div><strong>' + title + '</strong><small>' + message + '</small></div>';
+        stack.appendChild(el);
+        setTimeout(function () { el.remove(); }, 3600);
+      }
+
+      function pageHead(eyebrow, title, subtitle, actions) {
+        return '<div class="page-head"><div><div class="eyebrow">' + eyebrow + '</div><h1>' + title + '</h1><p class="page-subtitle">' + subtitle + '</p></div><div class="page-actions">' + (actions || '') + '</div></div>';
+      }
+
+      function renderCenter() {
+        var tabs = [
+          { key: 'all', label: '全部 Skills', count: skills.length },
+          { key: 'enabled', label: '已启用', count: skills.filter(function (s) { return s.status === 'enabled'; }).length },
+          { key: 'installed', label: '已安装', count: skills.filter(function (s) { return s.install !== '未安装'; }).length },
+          { key: 'pending', label: '待审批', count: 2 },
+          { key: 'running', label: '运行中', count: 1 },
+          { key: 'failed', label: '失败', count: 2 },
+          { key: 'draft', label: '草稿', count: 1 },
+          { key: 'quarantined', label: '隔离区', count: 1 }
+        ];
+        var filtered = skills.filter(function (skill) {
+          var matchesSearch = !state.centerSearch || (skill.name + ' ' + skill.slug + ' ' + skill.description).toLowerCase().indexOf(state.centerSearch.toLowerCase()) >= 0;
+          var matchesFilter = state.centerFilter === 'all' || (state.centerFilter === 'installed' && skill.install !== '未安装') || (state.centerFilter === 'pending' && skill.status === 'quarantined') || (state.centerFilter === 'running' && skill.id === 'article-illustrator') || (state.centerFilter === 'failed' && skill.status === 'quarantined') || skill.status === state.centerFilter;
+          return matchesSearch && matchesFilter;
+        });
+        var rows = filtered.map(function (skill) {
+          return '<tr><td><div class="skill-cell">' + logo(skill) + '<div><div class="skill-title">' + skill.name + '</div><div class="skill-meta">' + skill.type + ' · ' + skill.slug + '</div></div></div></td><td><strong>v' + skill.version + '</strong><div class="skill-meta">' + skill.updated + '</div></td><td>' + statusBadge(skill) + '</td><td><div class="risk risk-' + skill.risk + '"><span class="risk-dot"></span>' + skill.riskText + '</div></td><td>' + capabilityChips(skill.capabilities.slice(0, 3)) + '</td><td class="right"><div class="row-actions">' + skillRowActions(skill) + '</div></td></tr>';
+        }).join('');
+        return pageHead('Workbench / Skills', 'Skills Center', '统一查看、导入、安装、启用和运营当前 Workbench 的全部 Skills。', actionButton('创建 Skill', 'soft', 'go-creator', null, 'wand') + actionButton('导入 Skill', 'primary', 'go-import', null, 'download')) +
+          '<div class="grid-4">' + metric('全部 Skills', String(skills.length), '<span class="up">+2</span> 本月新增', 'blue', 'package') + metric('已启用', String(skills.filter(function (s) { return s.status === 'enabled'; }).length), '覆盖 Chat 和 Image', 'teal', 'check') + metric('本周 Runs', '247', '<span class="up">+18.4%</span> 对比上周', 'purple', 'activity') + metric('待处理事项', '4', '2 个审批 · 2 个更新', 'amber', 'bell') + '</div>' +
+          '<div class="status-legend section-gap"><strong>状态语言</strong><span class="status-token success">' + icon('check') + '可运行</span><span class="status-token info">' + icon('play') + '执行中</span><span class="status-token warning">' + icon('clock') + '等待处理</span><span class="status-token danger">' + icon('info') + '需关注</span></div>' +
+          '<div class="section-gap panel"><div class="panel-header"><div class="panel-title"><h2>Skill Catalog</h2><span class="muted">' + filtered.length + ' 个结果</span></div><div class="toolbar"><label class="searchbox" style="width:220px"><span data-icon="search">' + icon('search') + '</span><input id="center-search" value="' + htmlEscape(state.centerSearch) + '" placeholder="搜索名称、Slug 或描述" /></label><select class="select" id="center-sort" aria-label="排序"><option>最近更新</option><option>运行次数</option><option>名称</option></select><button class="btn sm" data-action="filters">' + icon('filter') + '<span>筛选</span></button></div></div><div class="tabs">' + tabs.map(function (tab) { return '<button class="tab ' + (state.centerFilter === tab.key ? 'active' : '') + '" data-action="center-filter" data-filter="' + tab.key + '">' + tab.label + ' <span class="muted">' + tab.count + '</span></button>'; }).join('') + '</div><div class="table-wrap"><table><thead><tr><th>SKILL</th><th>VERSION</th><th>STATUS</th><th>RISK</th><th>CAPABILITIES</th><th></th></tr></thead><tbody>' + (rows || '<tr><td colspan="6"><div class="empty-state"><div><div class="empty-icon">' + icon('search') + '</div><strong>没有匹配的 Skill</strong><p class="mt-10">尝试调整搜索词或筛选条件。</p></div></div></td></tr>') + '</tbody></table></div></div>' +
+          '<div class="two-col section-gap"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>最近运行</h2><span class="muted">实时</span></div><button class="btn sm" data-action="go-runs">查看全部 ' + icon('arrow') + '</button></div><div class="panel-body"><div class="mini-list">' + runs.slice(0, 4).map(function (run) { return '<div class="mini-item"><div class="metric-icon ' + (run.tone === 'red' ? 'amber' : run.tone) + '">' + icon(run.status === 'running' ? 'play' : run.status === 'waiting_approval' ? 'lock' : run.status === 'failed' ? 'info' : 'check') + '</div><div class="mini-copy"><strong>' + run.skill + '</strong><small>' + run.input + ' · ' + run.started + '</small></div>' + runStatusBadge(run) + '<button class="btn sm ghost" data-action="open-run" data-id="' + run.id + '">' + icon('chevron') + '</button></div>'; }).join('') + '</div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>需要关注</h2></div></div><div class="panel-body"><div class="callout-list"><div class="callout-row"><div class="metric-icon amber">' + icon('shield') + '</div><div><strong>2 个 Skill 等待权限审批</strong><small>Research Analysis 请求 workspace_write。</small></div></div><div class="callout-row"><div class="metric-icon blue">' + icon('refresh') + '</div><div><strong>2 个 Skill 有可用更新</strong><small>建议先查看 Capability Diff 再更新。</small></div></div><div class="callout-row"><div class="metric-icon red">' + icon('info') + '</div><div><strong>1 个包处于隔离区</strong><small>PDF Report Builder 包含未定义 command scope。</small></div></div></div></div></div></div>';
+      }
+
+      function renderImport() {
+        var sourceCards = [
+          { key: 'github', icon: 'cloud', title: 'GitHub Archive', desc: '按 ref 生成不可变快照' },
+          { key: 'local', icon: 'folder', title: '本地目录', desc: '导入真实 SKILL.md 目录' },
+          { key: 'zip', icon: 'package', title: 'ZIP 文件', desc: '上传归档并执行扫描' },
+          { key: 'npx', icon: 'code', title: 'npx skills 产物', desc: '导入 --copy 生成的目录' }
+        ];
+        var source = state.importSource;
+        var fields = source === 'github' ? '<div class="form-grid"><div class="field full"><label>Repository URL <span>*</span></label><input value="https://github.com/jimliu/baoyu-skills" /></div><div class="field"><label>Ref / Commit <span>*</span></label><input value="main" /></div><div class="field"><label>Subdirectory</label><input placeholder="例如：article-illustrator" /></div></div>' : source === 'local' ? '<div class="drop-zone"><div class="empty-icon">' + icon('folder') + '</div><strong>拖入 Skill 根目录，或选择本地目录</strong><p>必须包含 SKILL.md；支持 references、assets、scripts 和 templates。</p><button class="btn soft mt-14" data-action="choose-folder">选择目录</button></div>' : source === 'zip' ? '<div class="drop-zone"><div class="empty-icon">' + icon('upload') + '</div><strong>拖入 ZIP 文件</strong><p>单包不超过 50 MB；导入时会检查 Zip Slip 和符号链接。</p><button class="btn soft mt-14" data-action="choose-zip">选择 ZIP</button></div>' : '<div class="form-grid"><div class="field full"><label>产物目录 <span>*</span></label><input value="D:/skills/baoyu-skills/article-illustrator" /></div><div class="field full"><label>来源备注</label><input placeholder="记录 npx skills add 的来源或命令" value="npx skills add jimliu/baoyu-skills --copy" /></div></div>';
+        return pageHead('Manage / Import', '导入 Skill', '把本地目录、ZIP、GitHub Archive 或 npx skills 产物转换为可审核的 Skill Version。', actionButton('返回 Skills Center', 'ghost', 'go-center', null, 'arrow')) +
+          '<div class="stepper"><div class="step done"><span class="step-num">1</span><span>选择来源</span></div><div class="step active"><span class="step-num">2</span><span>解析和扫描</span></div><div class="step"><span class="step-num">3</span><span>确认安装</span></div></div>' +
+          '<div class="two-col"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>选择导入方式</h2><span class="muted">不会直接执行 Skill</span></div></div><div class="panel-body"><div class="source-grid">' + sourceCards.map(function (card) { return '<button class="source-card ' + (source === card.key ? 'selected' : '') + '" data-action="import-source" data-source="' + card.key + '">' + '<span class="source-icon">' + icon(card.icon) + '</span><strong>' + card.title + '</strong><small>' + card.desc + '</small></button>'; }).join('') + '</div><div class="divider"></div>' + fields + '<div class="notice amber mt-18"><div>' + icon('shield') + '</div><div><strong>导入与执行分离</strong><p>导入阶段只读取、扫描和计算内容哈希；任何 web、image、filesystem 或 command 能力都必须在运行时重新授权。</p></div></div><div class="page-actions" style="justify-content:flex-start;margin-top:18px">' + actionButton('开始扫描', 'primary', 'scan-import', null, 'search') + actionButton('取消', '', 'go-center') + '</div></div></div><div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>安全检查</h2><span class="badge teal no-dot">预览</span></div></div><div class="panel-body"><div class="validation-list"><div class="validation-row validation-ok">' + icon('check') + '<span>根目录和路径已归一化</span></div><div class="validation-row validation-ok">' + icon('check') + '<span>已发现 SKILL.md</span></div><div class="validation-row validation-ok">' + icon('check') + '<span>未发现符号链接逃逸</span></div><div class="validation-row validation-warn">' + icon('info') + '<span>发现 2 个 scripts 文件，需要人工确认</span></div><div class="validation-row validation-ok">' + icon('check') + '<span>包大小 3.8 MB，低于限制</span></div></div><div class="divider"></div><dl class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-box"><dt>Runtime</dt><dd>instruction-agent</dd></div><div class="info-box"><dt>风险等级</dt><dd style="color:var(--amber)">中风险</dd></div><div class="info-box"><dt>文件数量</dt><dd>18</dd></div><div class="info-box"><dt>内容哈希</dt><dd class="mono">a31f4b8</dd></div></dl></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>最近导入</h2></div></div><div class="panel-body"><div class="mini-list"><div class="mini-item"><div class="metric-icon teal">' + icon('check') + '</div><div class="mini-copy"><strong>web-clipper</strong><small>ZIP · 7 月 25 日</small></div><span class="badge teal no-dot">已安装</span></div><div class="mini-item"><div class="metric-icon amber">' + icon('info') + '</div><div class="mini-copy"><strong>pdf-report-builder</strong><small>GitHub · 7 月 22 日</small></div><span class="badge red no-dot">隔离</span></div></div></div></div></div></div>';
+      }
+
+      function creatorPreview() {
+        var caps = state.creatorCapabilities;
+        var capLines = caps.length ? caps.map(function (c) { return '  - ' + c; }).join('\n') : '  - skill_read';
+        var preview = '# ' + (document.getElementById('creator-name') ? document.getElementById('creator-name').value || 'Untitled Skill' : 'Article Illustration Assistant') + '\n\n' + (document.getElementById('creator-description') ? document.getElementById('creator-description').value || '填写 Skill 描述后，这里会实时预览。' : '把文章转换为统一风格的多图插画计划。') + '\n\n## Runtime\n\n- type: ' + state.creatorRuntime + '\n- version: 0.1.0-draft\n\n## Capabilities\n\n' + capLines + '\n\n## Instructions\n\n1. 先读取 SKILL.md 和 references。\n2. 生成执行计划并等待必要的审批。\n3. 保留中间结果和最终 Artifacts。';
+        var safe = htmlEscape(preview).replace(/(^|\n)(# .*)/g, '$1<span class="syntax-key">$2</span>').replace(/(https?:\/\/[^\s]+)/g, '<span class="syntax-string">$1</span>');
+        return '<pre class="code-preview">' + safe + '</pre>';
+      }
+
+      function renderCreator() {
+        var capabilities = [
+          { key: 'skill_read', title: 'Skill Read', desc: '读取 SKILL.md、references 和只读 assets' },
+          { key: 'web_search', title: 'Web Search', desc: '允许联网检索，支持域名 scope' },
+          { key: 'image_generate', title: 'Image Generate', desc: '生成图片，支持数量和模型限制' },
+          { key: 'workspace_read', title: 'Workspace Read', desc: '读取项目工作区中的用户文件' },
+          { key: 'workspace_write', title: 'Workspace Write', desc: '写入指定工作区目录，需要审批' },
+          { key: 'command', title: 'Command', desc: '执行命令，默认关闭并进入隔离 Worker' }
+        ];
+        return pageHead('Workspace / Creator', 'Skills Creator', '从模板创建一个可版本化、可扫描、可安装的 Skill Package。创建过程不会修改已发布版本。', actionButton('返回 Skills Center', 'ghost', 'go-center', null, 'arrow')) +
+          '<div class="stepper"><div class="step active"><span class="step-num">1</span><span>定义 Skill</span></div><div class="step"><span class="step-num">2</span><span>配置能力</span></div><div class="step"><span class="step-num">3</span><span>生成文件</span></div><div class="step"><span class="step-num">4</span><span>验证和发布</span></div></div>' +
+          '<div class="three-col"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>创建步骤</h2></div></div><div class="panel-body"><div class="mini-list"><div class="mini-item"><div class="metric-icon blue">1</div><div class="mini-copy"><strong>定义 Skill</strong><small>名称、描述和 Runtime</small></div></div><div class="mini-item"><div class="metric-icon" style="background:#eef1f4;color:var(--muted)">2</div><div class="mini-copy"><strong>配置能力</strong><small>最小权限原则</small></div></div><div class="mini-item"><div class="metric-icon" style="background:#eef1f4;color:var(--muted)">3</div><div class="mini-copy"><strong>生成文件</strong><small>SKILL.md 和目录结构</small></div></div><div class="mini-item"><div class="metric-icon" style="background:#eef1f4;color:var(--muted)">4</div><div class="mini-copy"><strong>验证和发布</strong><small>扫描后创建 Draft</small></div></div></div><div class="divider"></div><div class="notice blue"><div>' + icon('info') + '</div><div><strong>Creator 原则</strong><p>发布后通过“新版本”修改，不原地覆盖已经安装的 Skill Version。</p></div></div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Skill 基础信息</h2><span class="badge amber no-dot">Draft</span></div></div><div class="panel-body"><div class="form-grid"><div class="field"><label for="creator-name">Skill 名称 <span>*</span></label><input id="creator-name" value="Article Illustration Assistant" /></div><div class="field"><label for="creator-slug">Slug <span>*</span></label><input id="creator-slug" value="article-illustration-assistant" /></div><div class="field"><label for="creator-runtime">Runtime</label><select id="creator-runtime"><option value="instruction-agent">instruction-agent</option></select></div><div class="field"><label for="creator-template">模板</label><select id="creator-template"><option>Instruction Agent · 多步骤工作流</option><option>Research · 联网分析</option><option>Image · 图片生成</option><option>空白 Skill</option></select></div><div class="field full"><label for="creator-description">描述 <span>*</span></label><textarea id="creator-description">把文章转换为统一风格的多图插画计划，并输出 Prompt、图片和可下载的 Markdown 说明。</textarea><div class="helper">建议用一句话描述输入、核心能力和输出结果。</div></div><div class="field full"><label for="creator-instructions">生成指令</label><textarea id="creator-instructions" style="min-height:126px">先读取文章内容和 references/style-presets.md。将文章拆解为 4-8 个视觉场景，生成图片计划，等待用户确认后逐张生成图片。每一步都记录事件并保存 Artifact。</textarea></div></div><div class="divider"></div><h3>请求能力（requestedCapabilities）</h3><p class="muted mt-10 mb-12">这里是 Skill 的声明，不等于最终授权；运行时仍由 Capability Broker 决定。</p><div class="cap-select-grid">' + capabilities.map(function (cap) { return '<label class="cap-option"><input type="checkbox" data-capability="' + cap.key + '" ' + (state.creatorCapabilities.indexOf(cap.key) >= 0 ? 'checked' : '') + ' /><span><strong>' + cap.title + '</strong><small>' + cap.desc + '</small></span></label>'; }).join('') + '</div><div class="page-actions" style="justify-content:flex-start;margin-top:18px">' + actionButton('保存 Draft', 'soft', 'save-creator', null, 'file') + actionButton('下一步：生成文件', 'primary', 'creator-next', null, 'arrow') + '</div></div></div><div class="creator-preview"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>SKILL.md 预览</h2><span class="badge teal no-dot">实时</span></div><button class="icon-btn" aria-label="打开预览" data-action="preview-skill">' + icon('external') + '</button></div><div class="panel-body">' + creatorPreview() + '<div class="divider"></div><h3>生成目录</h3><div class="tree mt-10"><div class="tree-row selected">' + icon('fileText') + '<span class="tree-name">SKILL.md</span><span class="tree-size">draft</span></div><div class="tree-row">' + icon('folder') + '<span class="tree-name">references/</span><span class="tree-size">待生成</span></div><div class="tree-row">' + icon('folder') + '<span class="tree-name">assets/</span><span class="tree-size">可选</span></div><div class="tree-row">' + icon('folder') + '<span class="tree-name">scripts/</span><span class="tree-size">禁用</span></div></div></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>验证摘要</h2></div></div><div class="panel-body"><div class="validation-list"><div class="validation-row validation-ok">' + icon('check') + '<span>名称和 slug 可用</span></div><div class="validation-row validation-ok">' + icon('check') + '<span>Runtime 配置正确</span></div><div class="validation-row validation-warn">' + icon('info') + '<span>workspace_write 尚未声明</span></div><div class="validation-row validation-ok">' + icon('check') + '<span>首期不执行 Python / Shell</span></div></div></div></div></div></div>';
+      }
+
+      function renderDetail() {
+        var skill = getSkill(state.selectedSkillId);
+        var tabs = [
+          { key: 'overview', label: 'Overview' },
+          { key: 'files', label: '文件树' },
+          { key: 'versions', label: '版本与 Diff' },
+          { key: 'permissions', label: '权限' },
+          { key: 'runs', label: '运行记录' }
+        ];
+        var detailBody = '';
+        if (state.detailTab === 'overview') {
+          detailBody = '<div class="two-col"><div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Skill 概览</h2></div></div><div class="panel-body"><div class="info-grid"><div class="info-box"><dt>Runtime</dt><dd>' + skill.type.split('·')[1].trim() + '</dd></div><div class="info-box"><dt>当前版本</dt><dd>v' + skill.version + '</dd></div><div class="info-box"><dt>内容哈希</dt><dd class="mono">a31f4b8</dd></div><div class="info-box"><dt>来源</dt><dd>' + skill.source + '</dd></div><div class="info-box"><dt>安装到</dt><dd>' + skill.install + '</dd></div><div class="info-box"><dt>文件</dt><dd>' + skill.files + '</dd></div></div><div class="divider"></div><h3>用途描述</h3><p class="muted mt-10">' + skill.description + '</p><div class="divider"></div><h3>请求能力</h3><div class="mt-10">' + capabilityChips(skill.capabilities) + '</div></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>SKILL.md 摘要</h2><span class="muted">只读预览</span></div><button class="btn sm" data-action="go-creator">创建新版本 ' + icon('edit') + '</button></div><div class="panel-body"><pre class="code-preview"><span class="syntax-key"># Article Illustrator</span>\n\n将文章转化为可执行的插图计划。\n\n<span class="syntax-key">## Workflow</span>\n\n1. 读取文章和 style presets。\n2. 生成场景规划与 Prompt。\n3. 请求 image_generate 能力。\n4. 保存图片、Prompt 和 Markdown Artifacts。\n\n<span class="syntax-comment"># Safety</span>\n- 不执行任意 shell。\n- 每次图片生成最多 6 张。\n- 需要 workspace_write 时等待审批。</pre></div></div></div><div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>运行健康度</h2></div><span class="badge teal no-dot">良好</span></div><div class="panel-body"><div class="metric-top"><span>成功率</span><strong>' + skill.success + '</strong></div><div class="progress teal mt-10"><span style="width:96.7%"></span></div><div class="metric-top mt-14"><span>平均耗时</span><strong>03:42</strong></div><div class="progress mt-10"><span style="width:63%"></span></div><div class="metric-top mt-14"><span>Artifacts / Run</span><strong>4.8</strong></div><div class="divider"></div><div class="callout-list"><div class="callout-row"><div class="metric-icon teal">' + icon('check') + '</div><div><strong>最近 7 天无失败</strong><small>上一次失败发生在 7 月 27 日。</small></div></div><div class="callout-row"><div class="metric-icon blue">' + icon('activity') + '</div><div><strong>184 次累计运行</strong><small>主要来自 Image Surface。</small></div></div></div></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>可用 Surface</h2></div></div><div class="panel-body"><div class="toggle-row"><div class="toggle-copy"><strong>Chat</strong><small>允许在 Chat Agent 中发现</small></div><label class="switch"><input type="checkbox" checked data-action="surface-toggle" data-surface="chat"><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>Image</strong><small>允许在 AI 画图页面中发现</small></div><label class="switch"><input type="checkbox" checked data-action="surface-toggle" data-surface="image"><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>Skills API</strong><small>允许通过 API 创建 Run</small></div><label class="switch"><input type="checkbox" checked data-action="surface-toggle" data-surface="api"><span class="slider"></span></label></div></div></div></div></div>';
+        } else if (state.detailTab === 'files') {
+          detailBody = '<div class="two-col"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Package 文件树</h2><span class="muted">18 个文件 · 3.8 MB</span></div><button class="btn sm" data-action="download-package">下载归档 ' + icon('download') + '</button></div><div class="panel-body"><div class="tree">' + fileTree.map(function (file) { return '<button class="tree-row ' + (file.selected ? 'selected' : '') + ' tree-indent-' + file.indent + '" data-action="select-file" data-file="' + file.name + '">' + icon(file.icon) + '<span class="tree-name">' + file.name + '</span><span class="tree-size">' + file.size + '</span></button>'; }).join('') + '</div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>SKILL.md</h2><span class="badge teal no-dot">已校验</span></div><button class="btn sm" data-action="copy-file">复制内容</button></div><div class="panel-body"><pre class="code-preview"><span class="syntax-key"># Article Illustrator</span>\n\n<span class="syntax-key">## Purpose</span>\n将长文章转换为多图插画计划。\n\n<span class="syntax-key">## Read first</span>\n- references/workflow.md\n- references/style-presets.md\n\n<span class="syntax-key">## Capabilities</span>\n- web_search\n- image_generate\n- skill_read\n\n<span class="syntax-key">## Output</span>\n- illustration-plan.md\n- prompts/*.md\n- images/*.png</pre><div class="notice blue mt-14"><div>' + icon('info') + '</div><div><strong>文件读取受控</strong><p>Skill Runtime 只能读取当前 Version 快照中的文件，路径逃逸和符号链接已被拦截。</p></div></div></div></div></div>';
+        } else if (state.detailTab === 'versions') {
+          detailBody = '<div class="panel"><div class="panel-header"><div class="panel-title"><h2>版本历史</h2><span class="muted">当前安装锁定 v1.4.2</span></div><div class="toolbar"><button class="btn sm" data-action="check-update">检查更新</button><button class="btn sm primary" data-action="new-version">创建新版本</button></div></div><div class="table-wrap"><table><thead><tr><th>VERSION</th><th>STATE</th><th>来源</th><th>变更摘要</th><th></th></tr></thead><tbody>' + versionHistory.map(function (v, index) { return '<tr><td><strong>v' + v.version + '</strong><div class="skill-meta">' + v.date + '</div></td><td><span class="badge ' + (index === 0 ? 'teal' : 'gray') + '">' + v.state + '</span></td><td class="mono muted">' + v.source + '</td><td>' + v.changes + '</td><td class="right">' + (index === 0 ? iconButton('check', '当前版本', 'noop') : actionButton('查看 Diff', 'sm', 'open-diff', v.version, 'arrow')) + '</td></tr>'; }).join('') + '</tbody></table></div></div><div class="two-col section-gap"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Capability Diff</h2><span class="badge amber no-dot">需确认</span></div></div><div class="panel-body"><div class="notice amber"><div>' + icon('shield') + '</div><div><strong>新版本增加 image_generate</strong><p>更新前需要重新确认图片生成模型、数量和成本 scope。</p></div></div><div class="callout-list mt-14"><div class="callout-row"><div class="validation-ok">' + icon('plus') + '</div><div><strong>新增 image_generate</strong><small>gpt-image-1 · max 6 / Run</small></div></div><div class="callout-row"><div class="validation-ok">' + icon('check') + '</div><div><strong>保留 skill_read</strong><small>仅限 Package 根目录</small></div></div><div class="callout-row"><div class="validation-warn">' + icon('info') + '</div><div><strong>references 增加 2 个文件</strong><small>需要重新扫描内容哈希</small></div></div></div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>更新策略</h2></div></div><div class="panel-body"><div class="toggle-row"><div class="toggle-copy"><strong>自动检查更新</strong><small>只检查，不自动切换版本</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>锁定当前版本</strong><small>运行中永远使用 v1.4.2</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div></div></div></div>';
+        } else if (state.detailTab === 'permissions') {
+          detailBody = '<div class="two-col"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Capability Policy</h2><span class="muted">当前 Skill</span></div><button class="btn sm" data-action="edit-policy">编辑策略 ' + icon('edit') + '</button></div><div class="panel-body"><div class="toggle-row"><div class="toggle-copy"><strong>skill_read</strong><small>允许读取 SKILL.md、references、只读 assets</small></div><span class="badge teal">默认允许</span></div><div class="toggle-row"><div class="toggle-copy"><strong>web_search</strong><small>域名 allowlist：mastra.ai、github.com</small></div><span class="badge teal">需记录</span></div><div class="toggle-row"><div class="toggle-copy"><strong>image_generate</strong><small>模型 gpt-image-1 · 6 张 / Run</small></div><span class="badge amber">Session</span></div><div class="toggle-row"><div class="toggle-copy"><strong>workspace_write</strong><small>没有声明，不允许调用</small></div><span class="badge gray">拒绝</span></div><div class="toggle-row"><div class="toggle-copy"><strong>command</strong><small>首期不开放任意命令执行</small></div><span class="badge gray">拒绝</span></div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>安装关系</h2></div><button class="btn sm" data-action="manage-installation">管理安装</button></div><div class="panel-body"><div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-box"><dt>Workspace</dt><dd>Product Workspace</dd></div><div class="info-box"><dt>Project</dt><dd>BloomAI Core</dd></div><div class="info-box"><dt>状态</dt><dd style="color:var(--teal)">Enabled</dd></div><div class="info-box"><dt>安装版本</dt><dd>v1.4.2</dd></div></div><div class="divider"></div><div class="notice blue"><div>' + icon('lock') + '</div><div><strong>版本锁定</strong><p>更新、禁用和回滚由 Control Plane 管理，Agent 无权修改安装关系。</p></div></div></div></div></div>';
+        } else {
+          detailBody = '<div class="panel"><div class="panel-header"><div class="panel-title"><h2>最近运行</h2><span class="muted">' + skill.name + '</span></div><button class="btn sm primary" data-action="start-run" data-id="' + skill.id + '">' + icon('play') + '<span>启动 Run</span></button></div><div class="table-wrap"><table><thead><tr><th>RUN ID</th><th>SURFACE</th><th>STATUS</th><th>STARTED</th><th>DURATION</th><th>ARTIFACTS</th><th></th></tr></thead><tbody>' + runs.filter(function (run) { return run.skill === skill.name; }).map(function (run) { return '<tr><td class="mono">' + run.id + '</td><td>' + run.surface + '</td><td>' + runStatusBadge(run) + '</td><td>' + run.started + '</td><td>' + run.duration + '</td><td>' + run.artifacts + '</td><td class="right">' + actionButton('查看', 'sm', 'open-run', run.id, 'arrow') + '</td></tr>'; }).join('') + '</tbody></table></div></div>';
+        }
+        return pageHead('Manage / Skill Detail', 'Skill 详情', '查看版本快照、文件结构、权限策略、安装关系和每一次 Run 的可追溯信息。', actionButton('返回列表', 'ghost', 'go-center', null, 'arrow')) +
+          '<div class="panel hero-card">' + logo(skill, 'hero-logo') + '<div class="hero-main"><div class="hero-meta"><span class="badge ' + skill.statusTone + '">' + skill.statusText + '</span><span class="badge gray no-dot">' + skill.type + '</span></div><h2>' + skill.name + '</h2><p>' + skill.description + '</p><div class="hero-meta"><span class="chip">v' + skill.version + '</span><span class="chip">' + skill.source + '</span><span class="chip">' + skill.riskText + '</span></div></div><div class="hero-actions">' + actionButton('运行 Skill', 'primary', 'start-run', skill.id, 'play') + skillRowActions(skill) + '</div></div><div class="panel detail-tabs"><div class="tabs">' + tabs.map(function (tab) { return '<button class="tab ' + (state.detailTab === tab.key ? 'active' : '') + '" data-action="detail-tab" data-tab="' + tab.key + '">' + tab.label + '</button>'; }).join('') + '</div></div><div class="detail-content">' + detailBody + '</div>';
+      }
+
+      function renderPermissions() {
+        return pageHead('Observe / Policy', '权限与安装', '集中管理 Skill Installation、Capability Grant、审批状态和权限审计。', actionButton('新建权限策略', 'primary', 'new-policy', null, 'plus')) +
+          '<div class="grid-4">' + metric('已安装', String(skills.filter(function (s) { return s.install !== '未安装'; }).length), 'Package Runtime · 当前 Workspace', 'teal', 'package') + metric('Active Grants', '6', '2 个 Session · 4 个 Persistent', 'blue', 'key') + metric('待审批', '2', '最长等待 08:42', 'amber', 'clock') + metric('本月撤销', '3', '全部已写入审计', 'purple', 'shield') + '</div>' +
+          '<div class="section-gap panel"><div class="panel-header"><div class="panel-title"><h2>Capability Grants</h2><span class="muted">所有授权均可追溯</span></div><div class="toolbar"><input class="input" placeholder="搜索 Capability 或 Skill" /><select class="select"><option>全部状态</option><option>Active</option><option>Pending</option><option>Revoked</option></select><button class="btn sm" data-action="audit-export">导出审计</button></div></div><div class="table-wrap"><table><thead><tr><th>CAPABILITY</th><th>SKILL / SUBJECT</th><th>LEVEL</th><th>SCOPE</th><th>STATE</th><th>EXPIRES</th><th></th></tr></thead><tbody>' + grants.map(function (grant) { return '<tr><td><div class="skill-cell" style="min-width:170px"><div class="metric-icon ' + (grant.state === 'revoked' ? 'amber' : grant.state === 'pending' ? 'amber' : 'blue') + '">' + icon(grant.capability === 'command' ? 'code' : grant.capability === 'web_search' ? 'cloud' : grant.capability === 'image_generate' ? 'image' : 'folder') + '</div><div><div class="skill-title mono">' + grant.capability + '</div><div class="skill-meta">' + grant.by + '</div></div></div></td><td>' + grant.subject + '</td><td><span class="badge ' + (grant.level === 'persistent' ? 'purple' : grant.level === 'session' ? 'blue' : 'amber') + ' no-dot">' + grant.levelText + '</span></td><td class="muted">' + grant.scope + '</td><td><span class="badge ' + (grant.state === 'active' ? 'teal' : grant.state === 'pending' ? 'amber' : 'red') + '">' + (grant.state === 'active' ? 'Active' : grant.state === 'pending' ? 'Pending' : 'Revoked') + '</span></td><td>' + grant.expires + '</td><td class="right">' + (grant.state === 'pending' ? actionButton('审批', 'sm warning', 'approve-grant', grant.id, 'check') : grant.state === 'active' ? actionButton('撤销', 'sm danger', 'revoke-grant', grant.id, 'stop') : iconButton('eye', '查看审计', 'view-grant', grant.id)) + '</td></tr>'; }).join('') + '</tbody></table></div></div>' +
+          '<div class="two-col section-gap"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>安装关系</h2><span class="muted">Project-scoped</span></div></div><div class="panel-body"><div class="mini-list">' + skills.filter(function (s) { return s.install !== '未安装'; }).slice(0, 4).map(function (skill) { return '<div class="mini-item">' + logo(skill) + '<div class="mini-copy"><strong>' + skill.name + '</strong><small>' + skill.install + ' · v' + skill.version + '</small></div><label class="switch"><input type="checkbox" ' + (skill.status === 'enabled' ? 'checked' : '') + ' data-action="installation-toggle" data-id="' + skill.id + '"><span class="slider"></span></label></div>'; }).join('') + '</div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>审批队列</h2><span class="badge amber no-dot">2 pending</span></div><button class="btn sm" data-action="go-runs">查看 Run</button></div><div class="panel-body"><div class="notice amber"><div>' + icon('lock') + '</div><div><strong>Research Analysis 请求 workspace_write</strong><p>范围：/projects/product/reports · 需要一次性批准。</p><div class="page-actions" style="justify-content:flex-start;margin-top:10px">' + actionButton('批准本次', 'sm primary', 'approve-grant', 'grant-03', 'check') + actionButton('拒绝', 'sm danger', 'reject-grant', 'grant-03', 'close') + '</div></div></div></div></div></div>';
+      }
+
+      function renderRuns() {
+        var activeRun = getRun(state.selectedRunId);
+        var rows = runs.map(function (run) { return '<tr><td><div class="skill-title mono">' + run.id + '</div><div class="skill-meta">' + run.user + ' · ' + run.started + '</div></td><td><strong>' + run.skill + '</strong><div class="skill-meta">v' + run.version + ' · ' + run.surface + '</div></td><td>' + runStatusBadge(run) + '<div class="skill-meta">' + run.step + '</div></td><td>' + run.duration + '</td><td>' + run.artifacts + '</td><td class="right">' + actionButton('详情', 'sm', 'open-run', run.id, 'arrow') + '</td></tr>'; }).join('');
+        return pageHead('Observe / Runtime', '运行记录', '查看 Skill Run 的状态、步骤、审批、事件和 Artifacts。长任务状态由 Worker 持久化维护。', actionButton('刷新', '', 'refresh-runs', null, 'refresh') + actionButton('启动 Run', 'primary', 'start-run', state.selectedSkillId, 'play')) +
+          '<div class="grid-4">' + metric('今日 Runs', '38', '<span class="up">92.1%</span> 成功或部分成功', 'blue', 'activity') + metric('运行中', '1', '最长 02:18', 'teal', 'play') + metric('等待审批', '2', '需要用户动作', 'amber', 'lock') + metric('Artifacts', '96', '今日新增 18 个', 'purple', 'file') + '</div>' +
+          '<div class="section-gap panel"><div class="panel-header"><div class="panel-title"><h2>Run Explorer</h2><span class="muted">最近 30 天</span></div><div class="toolbar"><input class="input" placeholder="搜索 Run ID、Skill 或输入摘要" /><select class="select"><option>全部状态</option><option>运行中</option><option>等待审批</option><option>成功</option><option>失败</option></select><select class="select"><option>全部 Surface</option><option>Chat</option><option>Image</option></select></div></div><div class="table-wrap"><table><thead><tr><th>RUN ID</th><th>SKILL</th><th>STATUS</th><th>DURATION</th><th>ARTIFACTS</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>' +
+          '<div class="two-col section-gap"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>运行状态分布</h2></div></div><div class="panel-body"><div class="callout-list"><div><div class="metric-top"><span>成功</span><strong>78%</strong></div><div class="progress teal mt-10"><span style="width:78%"></span></div></div><div><div class="metric-top"><span>部分成功</span><strong>14%</strong></div><div class="progress amber mt-10"><span style="width:14%"></span></div></div><div><div class="metric-top"><span>失败 / 取消</span><strong>8%</strong></div><div class="progress mt-10"><span style="width:8%;background:var(--red)"></span></div></div></div></div></div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>当前活动 Run</h2><span class="badge blue">运行中</span></div></div><div class="panel-body"><div class="skill-cell">' + logo(getSkill('article-illustrator')) + '<div><div class="skill-title">' + activeRun.skill + '</div><div class="skill-meta">' + activeRun.input + '</div></div></div><div class="notice blue mt-14"><div>' + icon('activity') + '</div><div><strong>' + activeRun.step + '</strong><p>' + activeRun.started + ' 开始 · 已生成 ' + activeRun.artifacts + ' 个 Artifact。</p></div></div><div class="page-actions" style="justify-content:flex-start;margin-top:12px">' + actionButton('打开运行详情', 'sm primary', 'open-run', activeRun.id, 'arrow') + actionButton('取消 Run', 'sm danger', 'cancel-run', activeRun.id, 'stop') + '</div></div></div></div>';
+      }
+
+      function renderRunDetail() {
+        var run = getRun(state.selectedRunId);
+        var statusTone = run.tone === 'blue' ? 'blue' : run.tone;
+        var timeline = [
+          { time: '09:12:01', title: 'Run created', detail: '绑定 Article Illustrator v1.4.2，Surface：Image。', tone: 'success' },
+          { time: '09:12:02', title: 'Skill loaded', detail: '读取 SKILL.md 和 references/style-presets.md。', tone: 'success' },
+          { time: '09:12:11', title: 'Step 1 completed', detail: '生成 6 个视觉场景和 6 条图片 Prompt。', tone: 'success' },
+          { time: '09:13:09', title: 'Capability granted', detail: '用户批准 image_generate：gpt-image-1 · max 6 / Run。', tone: 'success' },
+          { time: '09:18:22', title: 'Artifact created', detail: '生成 illustration-plan.md、prompt-01.md 和 2 张图片。', tone: 'success' },
+          { time: '09:28:35', title: 'Step 4 running', detail: run.status === 'running' ? '正在生成第 4 / 6 张图片，Worker heartbeat 正常。' : '运行已经完成，等待下一步状态。', tone: run.status === 'failed' ? 'danger' : 'warn' }
+        ];
+        return pageHead('Observe / Run Detail', 'Run 详情', '通过状态机、事件流和 Artifact 关联复盘一次 Skill 执行。', actionButton('返回运行记录', 'ghost', 'go-runs', null, 'arrow')) +
+          '<div class="panel hero-card">' + logo(getSkill('article-illustrator'), 'hero-logo') + '<div class="hero-main"><div class="hero-meta"><span class="badge ' + statusTone + '">' + run.statusText + '</span><span class="badge gray no-dot">' + run.surface + '</span></div><h2>' + run.skill + ' <span class="muted">· ' + run.id + '</span></h2><p>' + run.input + '</p><div class="hero-meta"><span class="chip">v' + run.version + '</span><span class="chip">用户：' + run.user + '</span><span class="chip">Worker：skill-worker-02</span></div></div><div class="hero-actions">' + (run.status === 'running' ? actionButton('取消 Run', 'danger', 'cancel-run', run.id, 'stop') : actionButton('重新运行', 'primary', 'rerun', run.id, 'refresh')) + actionButton('导出事件', '', 'export-events', run.id, 'download') + '</div></div><div class="run-summary section-gap"><div class="run-kpi"><small>当前状态</small><strong>' + run.statusText + '</strong></div><div class="run-kpi"><small>持续时间</small><strong>' + run.duration + '</strong></div><div class="run-kpi"><small>Artifacts</small><strong>' + run.artifacts + '</strong></div><div class="run-kpi"><small>Token 使用</small><strong>8,412</strong></div></div><div class="two-col"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Execution Timeline</h2><span class="muted">事件已脱敏</span></div><button class="btn sm" data-action="refresh-run">' + icon('refresh') + '<span>刷新</span></button></div><div class="panel-body"><div class="timeline">' + timeline.map(function (item) { return '<div class="timeline-item"><span class="timeline-dot ' + item.tone + '"></span><div class="timeline-copy"><div class="timeline-title">' + item.title + '</div><div class="timeline-meta">今天 ' + item.time + '</div><div class="timeline-detail">' + item.detail + '</div></div></div>'; }).join('') + '</div></div></div><div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Run Context</h2></div></div><div class="panel-body"><dl class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-box"><dt>Skill Version</dt><dd>v' + run.version + '</dd></div><div class="info-box"><dt>Surface</dt><dd>' + run.surface + '</dd></div><div class="info-box"><dt>Model</dt><dd>gpt-5.4</dd></div><div class="info-box"><dt>Policy</dt><dd>image-default</dd></div></dl><div class="divider"></div><h3>Granted Capabilities</h3><div class="mt-10">' + capabilityChips(['skill_read', 'image_generate']) + '</div></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>Run Artifacts</h2><span class="muted">' + run.artifacts + ' 个</span></div><button class="btn sm" data-action="go-artifacts">查看全部</button></div><div class="panel-body"><div class="mini-list">' + artifacts.slice(0, 3).map(function (a) { return '<div class="mini-item"><div class="metric-icon ' + (a.color === 'image' ? 'teal' : 'blue') + '">' + icon(a.type === 'image' ? 'image' : 'file') + '</div><div class="mini-copy"><strong>' + a.name + '</strong><small>' + a.size + ' · ' + a.created + '</small></div><button class="btn sm ghost" data-action="open-artifact" data-id="' + a.id + '">' + icon('eye') + '</button></div>'; }).join('') + '</div></div></div></div></div>';
+      }
+
+      function renderArtifacts() {
+        return pageHead('Observe / Outputs', 'Artifacts', '集中查看图片、Markdown、HTML、PDF、JSON 和压缩包，并追溯到原始 Run 与 Skill Version。', actionButton('导出清单', '', 'export-artifacts', null, 'download') + actionButton('刷新', 'primary', 'refresh-artifacts', null, 'refresh')) +
+          '<div class="grid-4">' + metric('全部 Artifacts', '96', '本周新增 48 个', 'blue', 'file') + metric('图片', '42', '主要来自 Image Surface', 'teal', 'image') + metric('文档', '38', 'Markdown、HTML、PDF', 'purple', 'fileText') + metric('存储占用', '1.8 GB', '保留策略：30 天', 'amber', 'database') + '</div>' +
+          '<div class="section-gap panel"><div class="panel-header"><div class="panel-title"><h2>Artifact Library</h2><span class="muted">按时间倒序</span></div><div class="toolbar"><input class="input" placeholder="搜索文件名或 Run ID" /><select class="select"><option>全部类型</option><option>图片</option><option>Markdown</option><option>PDF</option><option>JSON</option></select><select class="select"><option>全部 Skill</option><option>Article Illustrator</option><option>Research Analysis</option></select></div></div><div class="panel-body"><div class="artifact-grid">' + artifacts.map(function (a) { return '<article class="artifact-card"><div class="artifact-thumb ' + a.color + '">' + icon(a.type === 'image' ? 'image' : a.type === 'pdf' ? 'fileText' : 'file') + '</div><div class="artifact-body"><div class="artifact-name" title="' + a.name + '">' + a.name + '</div><div class="artifact-meta">' + a.label + ' · ' + a.size + '</div><div class="artifact-meta">' + a.skill + ' · ' + a.created + '</div><div class="artifact-foot"><span class="chip">' + a.run.replace('run-20260805-', '#') + '</span><button class="btn sm" data-action="open-artifact" data-id="' + a.id + '">' + icon('eye') + '<span>预览</span></button></div></div></article>'; }).join('') + '</div></div></div>';
+      }
+
+      function renderSettings() {
+        return pageHead('System / Settings', '系统设置', '配置 Skills Control Plane 的默认导入策略、权限策略、Runtime 开关和 Artifact 保留策略。', actionButton('保存设置', 'primary', 'save-settings', null, 'check')) +
+          '<div class="settings-grid"><div class="panel"><div class="panel-header"><div class="panel-title"><h2>默认策略</h2><span class="muted">Product Workspace</span></div></div><div class="panel-body"><div class="setting-group"><h3>Runtime</h3><p>控制新 Package Runtime 是否接收生产流量。</p><div class="toggle-row"><div class="toggle-copy"><strong>启用 Package Runtime</strong><small>支持目录型 Skill、持久化 Run 和 Artifacts</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>允许 Mastra Workspace Skills</strong><small>将可见 Skill Version 注入 Project Workspace</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div></div><div class="setting-group"><h3>导入和安全</h3><p>默认拒绝高风险执行，不让导入动作直接触发 Skill Run。</p><div class="toggle-row"><div class="toggle-copy"><strong>允许 GitHub Archive</strong><small>只允许 HTTPS 和指定 GitHub 域名</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>允许 npx 产物目录导入</strong><small>只导入 --copy 生成的本地目录</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>服务端直接执行 npx</strong><small>高风险能力，默认关闭</small></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div></div><div class="setting-group"><h3>Artifact</h3><p>控制输出文件的存储和自动清理。</p><div class="form-grid"><div class="field"><label>默认保留天数</label><select><option>30 天</option><option>90 天</option><option>永久</option></select></div><div class="field"><label>单 Run 最大 Artifact 数</label><input value="50" /></div></div></div></div></div><div><div class="panel"><div class="panel-header"><div class="panel-title"><h2>Feature Flags</h2></div></div><div class="panel-body"><div class="notice blue"><div>' + icon('info') + '</div><div><strong>当前环境：staging</strong><p>所有新 Runtime 功能可以通过 kill switch 快速关闭。</p></div></div><div class="toggle-row mt-10"><div class="toggle-copy"><strong>动态 Skills Resolver</strong><small>按 Project / Agent / Surface 计算可见集合</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>Hybrid Skill Search</strong><small>BM25 + Vector 混合检索</small></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div><div class="toggle-row"><div class="toggle-copy"><strong>Command Capability</strong><small>即使 Skill 声明也不开放</small></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div></div></div><div class="panel section-gap"><div class="panel-header"><div class="panel-title"><h2>Runtime 健康</h2><span class="badge teal">Healthy</span></div></div><div class="panel-body"><div class="callout-list"><div class="callout-row"><div class="metric-icon teal">' + icon('check') + '</div><div><strong>Worker heartbeat 正常</strong><small>2 个 Worker · 最近心跳 12 秒前</small></div></div><div class="callout-row"><div class="metric-icon blue">' + icon('database') + '</div><div><strong>Artifact Store 余量充足</strong><small>已用 1.8 GB / 20 GB</small></div></div><div class="callout-row"><div class="metric-icon amber">' + icon('clock') + '</div><div><strong>2 个 Run 等待审批</strong><small>最长等待时间 08:42</small></div></div></div></div></div></div></div>';
+      }
+
+      function renderView(view) {
+        var target = document.getElementById('view-' + view);
+        if (!target) return;
+        if (view === 'center') target.innerHTML = renderCenter();
+        if (view === 'import') target.innerHTML = renderImport();
+        if (view === 'creator') target.innerHTML = renderCreator();
+        if (view === 'detail') target.innerHTML = renderDetail();
+        if (view === 'permissions') target.innerHTML = renderPermissions();
+        if (view === 'runs') target.innerHTML = renderRuns();
+        if (view === 'run-detail') target.innerHTML = renderRunDetail();
+        if (view === 'artifacts') target.innerHTML = renderArtifacts();
+        if (view === 'settings') target.innerHTML = renderSettings();
+        bindViewEvents(target);
+      }
+
+      function activateView(view) {
+        state.view = view;
+        document.querySelectorAll('.view').forEach(function (el) { el.classList.toggle('active', el.getAttribute('data-view') === view); });
+        document.querySelectorAll('.nav-item').forEach(function (el) { el.classList.toggle('active', el.getAttribute('data-nav') === (view === 'run-detail' ? 'runs' : view)); });
+        var labels = { center: 'Skills Center', import: '导入 Skill', creator: 'Skills Creator', detail: 'Skill 详情', permissions: '权限与安装', runs: '运行记录', 'run-detail': 'Run 详情', artifacts: 'Artifacts', settings: '系统设置' };
+        document.getElementById('crumb-current').textContent = labels[view] || 'Skills Center';
+        renderView(view);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      function openModal(title, body, footer, wide) {
+        var backdrop = document.getElementById('modal-backdrop');
+        var modal = document.getElementById('modal');
+        modal.className = 'modal' + (wide ? ' wide' : '');
+        modal.innerHTML = '<div class="modal-head"><h2 id="modal-title">' + title + '</h2><button class="close-btn" aria-label="关闭" data-action="close-modal">' + icon('close') + '</button></div><div class="modal-body">' + body + '</div>' + (footer ? '<div class="modal-foot">' + footer + '</div>' : '');
+        modal.querySelectorAll('[data-action]').forEach(function (el) { el.addEventListener('click', handleAction); });
+        backdrop.classList.add('open');
+        var focusable = modal.querySelector('button, input, textarea, select');
+        if (focusable) focusable.focus();
+      }
+      function closeModal() { document.getElementById('modal-backdrop').classList.remove('open'); }
+
+      function bindViewEvents(target) {
+        target.querySelectorAll('[data-action]').forEach(function (el) {
+          el.addEventListener('click', handleAction);
+        });
+        target.querySelectorAll('input[data-capability]').forEach(function (el) {
+          el.addEventListener('change', function () {
+            var key = el.getAttribute('data-capability');
+            if (el.checked && state.creatorCapabilities.indexOf(key) < 0) state.creatorCapabilities.push(key);
+            if (!el.checked) state.creatorCapabilities = state.creatorCapabilities.filter(function (item) { return item !== key; });
+            renderView('creator');
+          });
+        });
+        var centerInput = target.querySelector('#center-search');
+        if (centerInput) centerInput.addEventListener('input', function () { state.centerSearch = centerInput.value; renderView('center'); var refreshed = document.getElementById('center-search'); if (refreshed) { refreshed.focus(); refreshed.setSelectionRange(refreshed.value.length, refreshed.value.length); } });
+        var creatorName = target.querySelector('#creator-name');
+        var creatorDescription = target.querySelector('#creator-description');
+        if (creatorName) creatorName.addEventListener('input', function () { var value = creatorName.value; var start = creatorName.selectionStart; var end = creatorName.selectionEnd; renderView('creator'); var el = document.getElementById('creator-name'); if (el) { el.value = value; el.focus(); el.setSelectionRange(start, end); } });
+        if (creatorDescription) creatorDescription.addEventListener('input', function () { var value = creatorDescription.value; var start = creatorDescription.selectionStart; var end = creatorDescription.selectionEnd; renderView('creator'); var el = document.getElementById('creator-description'); if (el) { el.value = value; el.focus(); el.setSelectionRange(start, end); } });
+        var creatorRuntime = target.querySelector('#creator-runtime');
+        if (creatorRuntime) creatorRuntime.addEventListener('change', function () { state.creatorRuntime = creatorRuntime.value; renderView('creator'); });
+      }
+
+      function handleAction(event) {
+        var el = event.currentTarget;
+        var action = el.getAttribute('data-action');
+        var id = el.getAttribute('data-id');
+        if (action === 'go-center') return activateView('center');
+        if (action === 'go-import') return activateView('import');
+        if (action === 'go-creator') return activateView('creator');
+        if (action === 'go-runs') return activateView('runs');
+        if (action === 'go-artifacts') return activateView('artifacts');
+        if (action === 'open-detail') { state.selectedSkillId = id; state.detailTab = 'overview'; return activateView('detail'); }
+        if (action === 'detail-tab') { state.detailTab = el.getAttribute('data-tab'); return renderView('detail'); }
+        if (action === 'center-filter') { state.centerFilter = el.getAttribute('data-filter'); return renderView('center'); }
+        if (action === 'import-source') { state.importSource = el.getAttribute('data-source'); return renderView('import'); }
+        if (action === 'scan-import') { return toast('扫描任务已创建', '导入包正在进行静态检查，完成后会进入待安装列表。', 'teal'); }
+        if (action === 'choose-folder' || action === 'choose-zip') { return toast('原型交互', '这里会调用桌面文件选择器或浏览器上传控件。', 'blue'); }
+        if (action === 'save-creator') { return toast('Draft 已保存', 'Article Illustration Assistant · v0.1.0-draft 已写入 Creator 草稿。', 'teal'); }
+        if (action === 'creator-next') { return toast('文件结构已生成', 'SKILL.md、references 和 assets 目录已准备进入验证步骤。', 'teal'); }
+        if (action === 'preview-skill') { return openModal('SKILL.md 预览', creatorPreview(), actionButton('复制内容', 'soft', 'copy-file') + actionButton('关闭', '', 'close-modal'), true); }
+        if (action === 'toggle-skill') { var skill = getSkill(id); skill.status = skill.status === 'enabled' ? 'disabled' : 'enabled'; skill.statusText = skill.status === 'enabled' ? '已启用' : '已禁用'; skill.statusTone = skill.status === 'enabled' ? 'teal' : 'gray'; renderView(state.view); return toast(skill.status === 'enabled' ? 'Skill 已启用' : 'Skill 已禁用', skill.name + ' 的安装关系已更新。', skill.status === 'enabled' ? 'teal' : 'amber'); }
+        if (action === 'start-run') { state.selectedSkillId = id || state.selectedSkillId; return openModal('启动 Skill Run', '<div class="notice blue"><div>' + icon('info') + '</div><div><strong>' + getSkill(state.selectedSkillId).name + ' · v' + getSkill(state.selectedSkillId).version + '</strong><p>Run 会固定当前 Skill Version；执行中如果需要高风险能力，会进入 waiting_approval。</p></div></div><div class="form-grid mt-18"><div class="field full"><label>输入摘要</label><textarea>请根据当前文章生成 6 张配图，并保存 Prompt 与 Markdown 计划。</textarea></div><div class="field"><label>Surface</label><select><option>Image</option><option>Chat</option><option>Skills API</option></select></div><div class="field"><label>Policy Profile</label><select><option>image-default</option><option>read-only</option><option>strict</option></select></div></div>', actionButton('取消', '', 'close-modal') + actionButton('创建 Run', 'primary', 'confirm-start-run', state.selectedSkillId, 'play')); }
+        if (action === 'confirm-start-run') { closeModal(); var newRun = { id: 'run-20260805-' + String(Date.now()).slice(-4), skill: getSkill(id).name, version: getSkill(id).version, surface: 'Image', status: 'queued', statusText: '已排队', tone: 'blue', started: '刚刚', duration: '00:00', step: '等待 Worker 消费', user: 'xing', artifacts: 0, input: '请根据当前文章生成 6 张配图，并保存 Prompt 与 Markdown 计划。' }; runs.unshift(newRun); state.selectedRunId = newRun.id; activateView('run-detail'); return toast('Run 已创建', '已进入队列，Worker 将在后台开始执行。', 'teal'); }
+        if (action === 'open-run') { state.selectedRunId = id; return activateView('run-detail'); }
+        if (action === 'cancel-run') { var run = getRun(id); run.status = 'cancelled'; run.statusText = '已取消'; run.tone = 'gray'; run.step = '由用户取消'; renderView(state.view); return toast('Run 已取消', id + ' 已写入取消事件。', 'amber'); }
+        if (action === 'rerun') { closeModal(); return toast('已创建重试 Run', '新的 Run 会固定当前 Skill Version 并记录 retryOf。', 'teal'); }
+        if (action === 'refresh-run' || action === 'refresh-runs' || action === 'refresh-artifacts') return toast('数据已刷新', '已拉取最新的 Worker、Event 和 Artifact 状态。', 'teal');
+        if (action === 'open-artifact') { var art = getArtifact(id); return openModal('Artifact 预览', '<div class="artifact-thumb ' + art.color + '" style="height:180px;border-radius:8px">' + icon(art.type === 'image' ? 'image' : art.type === 'pdf' ? 'fileText' : 'file') + '</div><div class="mt-14"><h3>' + art.name + '</h3><p class="muted mt-10">' + art.label + ' · ' + art.size + ' · 创建于 ' + art.created + '</p><div class="notice blue mt-14"><div>' + icon('link') + '</div><div><strong>来源追溯</strong><p>' + art.skill + ' · ' + art.run + ' · 可根据 runId 复现。</p></div></div></div>', actionButton('下载 Artifact', 'soft', 'download-artifact', art.id, 'download') + actionButton('关闭', '', 'close-modal'), true); }
+        if (action === 'download-artifact' || action === 'download-package') { closeModal(); return toast('下载已准备', '原型中会从 Artifact Store 生成受控下载链接。', 'teal'); }
+        if (action === 'copy-file') { return toast('已复制', '文件内容已复制到剪贴板（原型反馈）。', 'teal'); }
+        if (action === 'check-update') { return toast('检查完成', '发现 v1.5.0，可查看 Capability Diff 后更新。', 'blue'); }
+        if (action === 'new-version') { return activateView('creator'); }
+        if (action === 'open-diff') { return openModal('版本 Diff · v' + id, '<div class="notice amber"><div>' + icon('shield') + '</div><div><strong>更新前需要重新确认权限</strong><p>新版本声明 image_generate；当前 Installation 不会自动切换。</p></div></div><div class="divider"></div><pre class="code-preview"><span class="syntax-comment">@@ SKILL.md</span>\n<span class="syntax-key">+ image_generate</span>\n<span class="syntax-key">+ max 6 images per run</span>\n<span class="syntax-comment">@@ references/workflow.md</span>\n<span class="syntax-string">+ retry partial failures</span></pre>', actionButton('稍后处理', '', 'close-modal') + actionButton('创建更新草稿', 'primary', 'confirm-update', id, 'edit'), true); }
+        if (action === 'confirm-update') { closeModal(); return toast('更新草稿已创建', '新版本已进入待审核状态，不会影响当前运行。', 'teal'); }
+        if (action === 'edit-policy' || action === 'manage-installation' || action === 'new-policy') { return openModal(action === 'new-policy' ? '新建权限策略' : '编辑 Capability Policy', '<div class="form-grid"><div class="field"><label>Policy Name</label><input value="image-default" /></div><div class="field"><label>作用范围</label><select><option>Product Workspace</option><option>BloomAI Core</option></select></div><div class="field full"><label>允许能力</label><div class="cap-select-grid"><label class="cap-option"><input type="checkbox" checked><span><strong>skill_read</strong><small>默认允许只读</small></span></label><label class="cap-option"><input type="checkbox" checked><span><strong>image_generate</strong><small>Session Grant</small></span></label><label class="cap-option"><input type="checkbox"><span><strong>workspace_write</strong><small>每次审批</small></span></label><label class="cap-option"><input type="checkbox"><span><strong>command</strong><small>强制拒绝</small></span></label></div></div></div>', actionButton('取消', '', 'close-modal') + actionButton('保存策略', 'primary', 'save-policy', null, 'check')); }
+        if (action === 'save-policy') { closeModal(); return toast('策略已保存', '新的 Capability Policy 将应用于后续 Run。', 'teal'); }
+        if (action === 'approve-grant') { var grant = grants.find(function (g) { return g.id === id; }); if (grant) { grant.state = 'active'; grant.expires = '本次 Run'; grant.by = '用户批准'; } renderView(state.view); return toast('权限已批准', 'Worker 可以继续执行等待中的 Run。', 'teal'); }
+        if (action === 'reject-grant') { var reject = grants.find(function (g) { return g.id === id; }); if (reject) { reject.state = 'revoked'; reject.expires = '已拒绝'; } renderView(state.view); return toast('已拒绝权限', 'Run 将收到 capability_denied 事件。', 'amber'); }
+        if (action === 'revoke-grant') { var revoke = grants.find(function (g) { return g.id === id; }); if (revoke) { revoke.state = 'revoked'; revoke.expires = '已撤销'; } renderView(state.view); return toast('权限已撤销', '后续 Tool Call 将被 Capability Broker 拒绝。', 'amber'); }
+        if (action === 'audit-export' || action === 'export-events' || action === 'export-artifacts') return toast('导出任务已创建', '系统会生成脱敏后的 CSV / JSON 下载文件。', 'teal');
+        if (action === 'surface-toggle' || action === 'installation-toggle') return toast('设置已更新', '新的可见性配置将在下一次 Agent 请求生效。', 'teal');
+        if (action === 'save-settings') return toast('设置已保存', 'Feature Flags 和默认策略已写入 Workspace。', 'teal');
+        if (action === 'filters') return toast('筛选面板', '真实产品中这里会展开多条件筛选抽屉。', 'blue');
+        if (action === 'uninstall-skill') { var uninstallSkill = getSkill(id); return openModal('确认卸载 Skill', '<div class="notice red"><div>' + icon('stop') + '</div><div><strong>' + htmlEscape(uninstallSkill.name) + '</strong><p>卸载后将从当前 Workspace 移除 Installation，历史 Run 和 Artifact 会保留。</p></div></div><p class="muted mt-14">这是针对当前 Skill 的单动作确认，不会修改其他 Skill 的状态。</p>', actionButton('取消', '', 'close-modal') + actionButton('确认卸载', 'danger', 'confirm-uninstall', id, 'stop')); }
+        if (action === 'confirm-uninstall') { var skillToUninstall = getSkill(id); closeModal(); skillToUninstall.install = '未安装'; skillToUninstall.status = 'disabled'; skillToUninstall.statusText = '未安装'; skillToUninstall.statusTone = 'gray'; renderView(state.view); return toast('卸载已完成', skillToUninstall.name + ' 已从当前 Workspace 卸载，历史 Run 和 Artifact 将保留。', 'amber'); }
+        if (action === 'notifications') return openModal('通知中心', '<div class="mini-list"><div class="mini-item"><div class="metric-icon amber">' + icon('lock') + '</div><div class="mini-copy"><strong>Research Analysis 等待审批</strong><small>workspace_write · 08:42</small></div><span class="badge amber no-dot">Pending</span></div><div class="mini-item"><div class="metric-icon blue">' + icon('refresh') + '</div><div class="mini-copy"><strong>Article Illustrator 有新版本</strong><small>v1.5.0 · Capability Diff 可查看</small></div><span class="badge blue no-dot">Update</span></div></div>', actionButton('全部标为已读', 'soft', 'close-modal') + actionButton('关闭', '', 'close-modal')); 
+        if (action === 'help') return openModal('Skills Control Plane 帮助', '<div class="notice blue"><div>' + icon('info') + '</div><div><strong>Control Plane 与 Runtime 分离</strong><p>BloomAI 负责 Catalog、Import、Install、Policy、Run、Artifact 和 Audit；Mastra 负责 Agent 运行时 Skill 发现、搜索、读取和激活。</p></div></div><div class="divider"></div><p class="muted">当前原型覆盖文档 6.7 中的后台管理界面和 Skills Creator 主流程。</p>', actionButton('关闭', '', 'close-modal')); 
+        if (action === 'close-modal') return closeModal();
+        if (action === 'mobile-nav') return toast('移动端导航', '实际产品中会展开侧边导航抽屉。', 'blue');
+        if (action === 'refresh-artifacts') return toast('Artifact 列表已刷新', '已读取最新的 Artifact Store 状态。', 'teal');
+      }
+
+      document.querySelectorAll('[data-nav]').forEach(function (el) { el.addEventListener('click', function () { activateView(el.getAttribute('data-nav')); }); });
+      document.getElementById('global-search').addEventListener('input', function (event) { state.centerSearch = event.target.value; if (state.view !== 'center') activateView('center'); else renderView('center'); });
+      document.getElementById('modal-backdrop').addEventListener('click', function (event) { if (event.target.id === 'modal-backdrop') closeModal(); });
+      document.addEventListener('keydown', function (event) { if (event.key === 'Escape') closeModal(); });
+      renderView('center');
+    })();
+  </script>
+</body>
+</html>
