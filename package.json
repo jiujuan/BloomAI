@@ -8,6 +8,7 @@
     "dev": "node scripts/dev-with-utf8-console.cjs",
     "build": "tsc --noEmit && vite build --config electron.vite.config.mts",
     "test": "vitest run --pool=forks --maxWorkers=1 --minWorkers=1",
+    "test:mcp-ui": "vitest run src/renderer/pages/McpServers --pool=forks --maxWorkers=1 --minWorkers=1",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"lint ok\"",
     "db:migrate": "node scripts/db-migrate.js",

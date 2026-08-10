@@ -449,7 +449,7 @@ export const useLlmStore = create<LlmState & LlmActions>()(
 
 interface UIState {
   sidebarOpen: boolean
-  activePage: 'chat' | 'settings' | 'personas' | 'tools' | 'skills' | 'schedules' | 'image' | 'article-illustration'
+  activePage: 'chat' | 'settings' | 'personas' | 'tools' | 'skills' | 'schedules' | 'image' | 'article-illustration' | 'mcp-servers'
   theme: 'light' | 'dark' | 'system'
   showOnboarding: boolean
 }

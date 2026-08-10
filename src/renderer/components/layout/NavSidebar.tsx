@@ -1,5 +1,5 @@
 import React from 'react'
-import { BookImage, CalendarClock, Image, MessageCircle, Puzzle, Settings, User, Wrench } from 'lucide-react'
+import { BookImage, CalendarClock, Image, MessageCircle, Puzzle, ServerCog, Settings, User, Wrench } from 'lucide-react'
 import { useUIStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 
@@ -8,6 +8,7 @@ export const mainNavigationItems = [
   { id: 'image' as const, icon: Image, label: 'AI 画图' },
   { id: 'article-illustration' as const, icon: BookImage, label: '文章配图' },
   { id: 'tools' as const, icon: Wrench, label: 'Tools' },
+  { id: 'mcp-servers' as const, icon: ServerCog, label: 'MCP Servers' },
   { id: 'skills' as const, icon: Puzzle, label: 'Skills' },
   { id: 'schedules' as const, icon: CalendarClock, label: '定时任务' },
   { id: 'personas' as const, icon: User, label: 'Personas' },

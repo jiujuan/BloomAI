@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7、Task 8 已通过，Task 9 尚未开始
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7、Task 8、Task 9 已通过，Task 10 尚未开始
 - **日期**：2026-08-10
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试。Task 9 的 MCP 管理 UI 尚未开始。本设计记录当前实现基线和后续目标。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试；Task 9 已完成 MCP Server 管理 UI、Server/Catalog/Approval/Run 管理、前端 Secret/Approval 安全边界、Feature Flag fail-closed 及 renderer API/store/UI 测试，并通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`。Task 10 尚未开始。本设计记录当前实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -766,7 +766,7 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先以及不建连/不刷新 Catalog 的 Agent 构建边界；MCP 路由、管理 UI 和完整 MCP 生产闭环仍待后续 Task；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先以及不建连/不刷新 Catalog 的 Agent 构建边界；Task 8 的 MCP 路由和 Task 9 的管理 UI 已完成，Task 10 的真实协议、安全攻防、回归和 Release Gate 仍待执行；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
@@ -816,7 +816,14 @@ Task 8 已通过 `npm run test:mcp-http`、`npm run typecheck`、`npm run test:a
 
 ### Task 9：MCP Server 管理 UI
 
-尚未开始。后续将在现有 Tools 导航下实现 Server、Catalog、Approval 和 Run 管理界面，并遵循本设计的前端 Secret、Approval 和 Feature Flag 安全规则。
+已实现：
+
+- 在现有导航下增加 MCP Servers 页面，覆盖 Server 列表/详情、配置编辑、新增、软删除、连接测试、Catalog Preview/Diff/Confirm、启用/禁用、Trust Level、Tool Policy、手工 Test、Approval 和 Runs/Audit；
+- renderer API 统一走 `API_BASE` 与 `/mcp/...`，Server Safe DTO 只展示 stdio command/args 摘要、HTTP origin 和 Header 名称，Secret 值要求使用 `${env:NAME}` 引用且不会回填；
+- Store 对配置变化清除 Preview、Tool、连接测试和旧 Approval 状态，Confirm/Approve/Deny 后重新加载服务端状态，未 Confirm 的 Tool 不做 enabled 乐观更新，过期 Preview 禁止 Confirm；
+- Feature Flag 关闭时 fail closed，仅显示安全禁用状态；API、Store 和 UI 测试覆盖 Secret/Header/Approval Token 不泄露、错误提示和安全状态。
+
+Task 9 已通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build` 验证。
 
 ### Task 10：发布 Gate
 
