@@ -6,6 +6,7 @@ import { chatMemory } from './memory'
 import { projectWorkspaceFactory } from './workspace/project-workspace.factory'
 import { PROJECT_WORKSPACE_POLICY } from './workspace/project-workspace.policy'
 import { MastraSkillSource, type LoadedMastraSkillSource } from './skills/mastra-skill-source'
+import { buildMcpToolSurfaceForRequest, type McpAgentToolSurfaceDependencies } from '../mcp/agent-tool-surface'
 
 /**
  * Per-request values supplied by the server's trusted request orchestration and read
@@ -108,16 +109,35 @@ export function resolveInstructions(
 export function buildChatAgentTools(
   requestContext: any,
   source: MastraSkillSource = mastraSkillSource,
+  mcpToolSurface?: McpAgentToolSurfaceDependencies,
 ): Record<string, ReturnType<typeof buildAgentTools>[string]> {
   const sessionId = requestContext?.get('sessionId') as string | undefined
-  const tools = buildAgentTools(sessionId)
+  const builtinTools = buildAgentTools(sessionId)
   const packageSource = resolvePackageSkillRuntime(requestContext, source)
-  if (!packageSource) return tools
-  const runId = requestContext.get('runId') as string
-  return {
-    ...tools,
-    ...packageSource.createToolSet({ runId, ...(sessionId ? { sessionId } : {}) }),
-  }
+  const tools = packageSource
+    ? {
+        ...builtinTools,
+        ...packageSource.createToolSet({
+          runId: requestContext.get('runId') as string,
+          ...(sessionId ? { sessionId } : {}),
+        }),
+      }
+    : builtinTools
+
+  if (!mcpToolSurface) return tools
+
+  const mcpTools = buildMcpToolSurfaceForRequest(
+    {
+      sessionId: sessionId ?? '',
+      mode: requestContext?.get('mode'),
+      agentId: requestContext?.get('agentId'),
+    },
+    {
+      ...mcpToolSurface,
+      builtinToolIds: new Set(Object.keys(tools)),
+    },
+  )
+  return { ...tools, ...mcpTools }
 }
 
 /** Dynamic resolver: it relies exclusively on the server-derived projectId context key. */
@@ -139,6 +159,7 @@ export function omitWorkspaceToolCollisions<T>(tools: Record<string, T>): Record
 
 export type ChatAgentDependencies = {
   readonly skillSource?: MastraSkillSource
+  readonly mcpToolSurface?: McpAgentToolSurfaceDependencies
 }
 
 export function createChatAgent(dependencies: ChatAgentDependencies = {}) {
@@ -152,7 +173,7 @@ export function createChatAgent(dependencies: ChatAgentDependencies = {}) {
     // Built-ins and Legacy tools are rebuilt per request. Package tools are additionally
     // created from the pinned source and durable run context for this request only.
     tools: ({ requestContext }) => {
-      const tools = buildChatAgentTools(requestContext, skillSource)
+      const tools = buildChatAgentTools(requestContext, skillSource, dependencies.mcpToolSurface)
       return requestContext?.get('projectId') ? omitWorkspaceToolCollisions(tools) : tools
     },
     workspace: ({ requestContext }) => resolveProjectWorkspace(requestContext),

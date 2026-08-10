@@ -11,6 +11,7 @@ import { SkillsAdminShell } from '@renderer/pages/Skills'
 import { ImageStudioPage } from '@renderer/pages/ImageStudio'
 import { ArticleIllustrationWorkbench } from '@renderer/pages/ImageStudio/ArticleIllustrationWorkbench'
 import { SchedulesPage } from '@renderer/pages/Schedules'
+import { McpServersPage } from '@renderer/pages/McpServers'
 import { useSessionStore, usePersonaStore, useProjectStore, useSettingsStore, useUIStore, useChatStore } from '@renderer/store'
 import { applyTheme, applyFont } from '@renderer/api'
 import { useSkillRuntimeStore } from '@renderer/pages/Skills/skill-runtime.store'
@@ -112,6 +113,11 @@ export function App() {
           </div>
         )}
         {activePage === 'schedules' && <SchedulesPage />}
+        {activePage === 'mcp-servers' && (
+          <div className="page-full">
+            <McpServersPage />
+          </div>
+        )}
         {activePage === 'settings' && (
           <div className="page-full">
             <SettingsPage />

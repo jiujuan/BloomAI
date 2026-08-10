@@ -1,11 +1,29 @@
 import type { Context } from 'hono'
 import { isServiceError, type ServiceErrorCode, type ServiceErrorDetails } from '../services/errors'
+import {
+  getMcpErrorCode,
+  MCP_ERROR_HTTP_STATUS,
+  MCP_ERROR_MESSAGES,
+  type McpErrorCode,
+} from '../mcp/errors'
+import { sanitizeCatalogValue } from '../mcp/catalog-hash'
 
-export type HttpErrorStatus = 400 | 403 | 404 | 409 | 422 | 429 | 500 | 502
+export type HttpErrorStatus = 400 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 504
+
+type HttpErrorCode = ServiceErrorCode | McpErrorCode
+type HttpErrorDetails = ServiceErrorDetails | Readonly<Record<string, unknown>>
 
 export type HttpErrorResponse = {
   status: HttpErrorStatus
-  body: { error: { code: ServiceErrorCode; message: string; details?: ServiceErrorDetails; retryable?: boolean; requestId?: string } }
+  body: {
+    error: {
+      code: HttpErrorCode
+      message: string
+      details?: HttpErrorDetails
+      retryable?: boolean
+      requestId?: string
+    }
+  }
 }
 
 type HttpErrorLogger = (
@@ -86,11 +104,65 @@ function stableErrorBody(
   }
 }
 
+function stableMcpErrorBody(
+  code: McpErrorCode,
+  details: Readonly<Record<string, unknown>> | undefined,
+  requestId: string | undefined,
+) {
+  return {
+    error: {
+      code,
+      message: MCP_ERROR_MESSAGES[code],
+      ...(details === undefined ? {} : { details }),
+      ...(requestId === undefined ? {} : { requestId }),
+    },
+  }
+}
+
+function toSafeMcpErrorDetails(
+  error: unknown,
+  code: McpErrorCode,
+): Readonly<Record<string, unknown>> | undefined {
+  if (code !== 'MCP_APPROVAL_REQUIRED' || !isRecord(error) || !isRecord(error.details)) return undefined
+
+  const source = error.details
+  const details: Record<string, unknown> = {}
+  if (typeof source.approvalRequestId === 'string') details.approvalRequestId = source.approvalRequestId
+  if (typeof source.runId === 'string') details.runId = source.runId
+  if (typeof source.expiresAt === 'number' && Number.isFinite(source.expiresAt)) details.expiresAt = source.expiresAt
+
+  const preview = isRecord(source.preview)
+    ? source.preview
+    : isRecord(source.safePreview)
+      ? source.safePreview
+      : undefined
+  if (preview) {
+    const safePreview: Record<string, unknown> = {}
+    for (const key of ['serverId', 'toolId', 'remoteName', 'toolName', 'riskLevel', 'trustLevel', 'catalogVersion']) {
+      if (typeof preview[key] === 'string') safePreview[key] = preview[key]
+    }
+    if (Object.prototype.hasOwnProperty.call(preview, 'safeInput')) {
+      safePreview.safeInput = sanitizeCatalogValue(preview.safeInput) ?? '[REDACTED]'
+    }
+    details.safePreview = safePreview
+  }
+
+  return Object.keys(details).length === 0 ? undefined : details
+}
+
 /**
  * Converts application failures into the stable HTTP error envelope without
  * coupling services to Hono or HTTP status codes.
  */
 export function mapErrorToHttpResponse(error: unknown, requestId?: string): HttpErrorResponse {
+  const mcpCode = getMcpErrorCode(error)
+  if (mcpCode) {
+    return {
+      status: MCP_ERROR_HTTP_STATUS[mcpCode] as HttpErrorStatus,
+      body: stableMcpErrorBody(toMcpCode(mcpCode), toSafeMcpErrorDetails(error, mcpCode), requestId),
+    }
+  }
+
   if (isServiceError(error)) {
     return {
       status: STATUS_BY_SERVICE_ERROR[error.code],
@@ -116,4 +188,12 @@ export function createHttpErrorHandler(logError: HttpErrorLogger) {
     if (requestId) context.header('x-request-id', requestId)
     return context.json(response.body, response.status)
   }
+}
+
+function toMcpCode(code: McpErrorCode): McpErrorCode {
+  return code
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }

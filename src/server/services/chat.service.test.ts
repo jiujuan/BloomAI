@@ -151,6 +151,7 @@ describe('Chat Service plan proposal', () => {
     })).resolves.toEqual({ tasks: ['Inspect input', 'Generate output'] })
     expect(requestContext.set).toHaveBeenNthCalledWith(1, 'model', 'planner-model')
     expect(requestContext.set).toHaveBeenNthCalledWith(2, 'sessionId', 'plan-1')
+    expect(requestContext.set).toHaveBeenNthCalledWith(3, 'agentId', 'chat')
     expect(generate).toHaveBeenCalledWith(
       expect.stringContaining('avoid repeating these tasks'),
       expect.objectContaining({ memory: { thread: 'plan-1', resource: 'bloomai-local-user' } }),
@@ -199,6 +200,7 @@ describe('Chat Service stream orchestration', () => {
     expect(requestContext.set).toHaveBeenNthCalledWith(1, 'mode', 'chat')
     expect(requestContext.set).toHaveBeenNthCalledWith(2, 'model', 'agnes')
     expect(requestContext.set).toHaveBeenNthCalledWith(3, 'sessionId', 'session-1')
+    expect(requestContext.set).toHaveBeenNthCalledWith(4, 'agentId', 'chat')
     expect(handleChatStream).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'chat',
       params: expect.objectContaining({
@@ -233,6 +235,35 @@ describe('Chat Service stream orchestration', () => {
       params: expect.objectContaining({ messages: input.messages }),
     }))
     expect(handleChatStream.mock.calls[0][0].params.memory).toBeUndefined()
+  })
+
+  it('derives the specialist agent id from the trusted tab mapping and never copies body role fields into RequestContext', async () => {
+    const requestContext = { set: vi.fn() }
+    const handleChatStream = vi.fn().mockResolvedValue(new ReadableStream({ start: (controller) => controller.close() }))
+    const service = createChatService({
+      projectService: noProjectService(),
+      handleChatStream: handleChatStream as any,
+      createRequestContext: () => requestContext as any,
+      messageRepo: { count: vi.fn(() => 1), save: vi.fn() },
+      sessionRepo: { touch: vi.fn(), update: vi.fn() },
+      logError: vi.fn(),
+    })
+
+    const input = normalizeChatInput({
+      body: {
+        role: 'admin',
+        requestedRole: 'coding',
+        messages: [{ role: 'user', content: 'Write this' }],
+      },
+      headers: { sessionId: 'writer-session', agentTab: 'writing' },
+    })
+
+    await service.streamChat(input)
+
+    expect(requestContext.set).toHaveBeenCalledWith('agentId', 'writer')
+    expect(requestContext.set).not.toHaveBeenCalledWith('role', expect.anything())
+    expect(requestContext.set).not.toHaveBeenCalledWith('requestedRole', expect.anything())
+    expect(handleChatStream).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'writer' }))
   })
 
   it('routes a deep request without a team agent through the workflow stream', async () => {

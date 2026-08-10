@@ -5,9 +5,12 @@ import { OtelBridge } from '@mastra/otel-bridge'
 import { serverLogger } from '../logger/logger'
 import { readConfigValue } from '../config/config'
 import { chatAgent, createChatAgent } from './chat-agent'
+import { createWriterAgent, createCoderAgent } from './agents/team'
+import type { McpAgentToolSurfaceDependencies } from '../mcp/agent-tool-surface'
+import { mcpAdapter, mcpConnectionManager, mcpCapabilityBroker } from '../mcp/composition-root'
+export { mcpAdapter, mcpConnectionManager, mcpCapabilityBroker } from '../mcp/composition-root'
 import { MastraSkillSource } from './skills/mastra-skill-source'
 import { planAgent } from './plan-agent'
-import { writerAgent, coderAgent } from './agents/team'
 import { createScheduleHooks } from './schedules/hooks'
 import { createScheduledTaskRunWriter } from '../db/repositories/scheduled-task-run.repo'
 import { scheduledTaskAgent } from './schedules/scheduled-task-agent'
@@ -40,16 +43,35 @@ export const scheduleRuntimeStorage = new LibSQLStore({
   url: process.env.VITEST ? ':memory:' : resolveScheduleRuntimeUrl(),
 })
 
+/**
+ * Process-level MCP composition root. Construction is deliberately side-effect free:
+ * the adapter validates and connects only when the Connection Manager is asked to
+ * execute or discover a tool, never while an Agent or Mastra runtime is built.
+ */
+export const mcpAgentToolSurface: McpAgentToolSurfaceDependencies = {
+  broker: mcpCapabilityBroker,
+}
+
 export type MastraRuntimeDependencies = {
   /** Inject a request/runtime source in tests or an alternate composition root. */
   readonly skillSource?: MastraSkillSource
   /** Preserve the ability to supply a fully constructed Chat Agent. */
   readonly chatAgent?: typeof chatAgent
+  /** Replace the process-level MCP surface in tests or an alternate composition root. */
+  readonly mcpToolSurface?: McpAgentToolSurfaceDependencies
+  /** Replace specialist Agents in tests or an alternate composition root. */
+  readonly writerAgent?: ReturnType<typeof createWriterAgent>
+  readonly coderAgent?: ReturnType<typeof createCoderAgent>
 }
 
 export function createMastraRuntime(dependencies: MastraRuntimeDependencies = {}) {
-  const resolvedChatAgent = dependencies.chatAgent
-    ?? (dependencies.skillSource ? createChatAgent({ skillSource: dependencies.skillSource }) : chatAgent)
+  const mcpToolSurface = dependencies.mcpToolSurface ?? mcpAgentToolSurface
+  const resolvedChatAgent = dependencies.chatAgent ?? createChatAgent({
+    ...(dependencies.skillSource ? { skillSource: dependencies.skillSource } : {}),
+    mcpToolSurface,
+  })
+  const resolvedWriterAgent = dependencies.writerAgent ?? createWriterAgent({ mcpToolSurface })
+  const resolvedCoderAgent = dependencies.coderAgent ?? createCoderAgent({ mcpToolSurface })
   return new Mastra({
     storage: scheduleRuntimeStorage,
     logger: serverLogger,
@@ -61,8 +83,8 @@ export function createMastraRuntime(dependencies: MastraRuntimeDependencies = {}
     agents: {
       chat: resolvedChatAgent,
       'plan-planner': planAgent,
-      writer: writerAgent,
-      coder: coderAgent,
+      writer: resolvedWriterAgent,
+      coder: resolvedCoderAgent,
       'scheduled-task': scheduledTaskAgent,
     },
   })
@@ -72,6 +94,7 @@ export const mastra = createMastraRuntime()
 
 export type MastraRuntimeShutdownDependencies = {
   mastra: Pick<typeof mastra, 'shutdown'>
+  mcpConnectionManager: Pick<typeof mcpConnectionManager, 'disconnectAll'>
   projectWorkspaceFactory: Pick<typeof projectWorkspaceFactory, 'shutdown'>
   scheduleRuntimeStorage: Pick<typeof scheduleRuntimeStorage, 'close'>
 }
@@ -82,11 +105,13 @@ export async function shutdownMastraRuntime(
 ): Promise<void> {
   const runtime: MastraRuntimeShutdownDependencies = {
     mastra,
+    mcpConnectionManager,
     projectWorkspaceFactory,
     scheduleRuntimeStorage,
     ...overrides,
   }
   await runtime.mastra.shutdown()
+  await runtime.mcpConnectionManager.disconnectAll()
   await runtime.projectWorkspaceFactory.shutdown()
   await runtime.scheduleRuntimeStorage.close()
 }
