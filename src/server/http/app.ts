@@ -24,6 +24,8 @@ import { skillSecurityRoutes } from './routes/skill-security'
 import { createSkillRuntimeObservabilityRoutes, type SkillRuntimeObservabilityRouteOptions } from './routes/skill-runtime-observability'
 import { skillRuntimeSettingsRoutes } from './routes/skill-runtime-settings'
 import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checklist'
+import { createMcpRoutes } from './routes/mcp'
+import { McpService } from '../mcp/mcp.service'
 
 /**
  * Single Hono HTTP server for BloomAI 鈥?replaces the previous Express app.
@@ -32,6 +34,7 @@ import { isAllowedBrowserOrigin } from '../skills/security/skill-security-checkl
  */
 export type HonoAppOptions = {
   skillRuntimeObservability?: SkillRuntimeObservabilityRouteOptions
+  mcp?: McpService
 }
 
 export function createHonoApp(options: HonoAppOptions = {}): Hono {
@@ -100,6 +103,7 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono {
   app.route('/api/v1/settings', settingsRoutes)
   app.route('/api/v1/llm', llmRoutes)
   app.route('/api/v1/tools', toolsRoutes)
+  app.route('/api/v1/mcp', createMcpRoutes(options.mcp ?? new McpService()))
   app.route('/api/v1/attachments', attachmentsRoutes)
   app.route('/api/v1', skillPackageRuntimeRoutes)
   app.route('/api/v1', skillCreatorRoutes)

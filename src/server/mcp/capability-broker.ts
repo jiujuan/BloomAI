@@ -11,6 +11,7 @@ import { normalizeMcpResult } from './result-normalizer'
 import type {
   JsonSafeObject,
   JsonSafeValue,
+  McpApprovalRequest,
   McpErrorCode,
   McpServerConnectionConfig,
   McpToolRun,
@@ -249,6 +250,12 @@ export class McpCapabilityBroker {
       createdAt: this.clock(),
     })
     return this.executeRemote(normalized, context, run)
+  }
+
+  /** Return only the safe, server-owned approval snapshot for management routes. */
+  getApprovalRequest(approvalRequestId: string): McpApprovalRequest | undefined {
+    if (!isNonEmptyString(approvalRequestId)) return undefined
+    return this.approvalStore.get(approvalRequestId)
   }
 
   async approve(

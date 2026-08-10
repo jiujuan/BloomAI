@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7 已通过，Task 8 尚未开始
-- **日期**：2026-08-09
+- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7、Task 8 已通过，Task 9 尚未开始
+- **日期**：2026-08-10
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 的 `/api/v1/mcp` 路由和完整 MCP 生产闭环仍待后续 Task。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试。Task 9 的 MCP 管理 UI 尚未开始。
 
 ---
 
@@ -725,21 +725,21 @@ GET    /api/v1/mcp/servers/:serverId/runs
 
 ### 11.2 Service 和 Route 规则
 
-- [ ] Route 只负责认证、输入校验、调用 Service 和输出 DTO；
-- [ ] Route 不直接访问 SQLite；
-- [ ] Route 不直接导入 `@mastra/mcp`；
-- [ ] Server 端重新计算 trust、risk、approval 和 enablement；
-- [ ] Safe DTO 不包含 resolved Secret、Header、原始 Approval Token 或未经脱敏结果；
-- [ ] 错误码映射与 Task 2 一致；
-- [ ] Test、Refresh、Preview、Confirm、Approve、Deny、Run 查询都有 route test；
-- [ ] Feature Flag 关闭时接口 fail closed，但历史 Run 可只读查询。
+- [x] Route 只负责认证、输入校验、调用 Service 和输出 DTO；
+- [x] Route 不直接访问 SQLite；
+- [x] Route 不直接导入 `@mastra/mcp`；
+- [x] Server 端重新计算 trust、risk、approval 和 enablement；
+- [x] Safe DTO 不包含 resolved Secret、Header、原始 Approval Token 或未经脱敏结果；
+- [x] 错误码映射与 Task 2 一致；
+- [x] Test、Refresh、Preview、Confirm、Approve、Deny、Run 查询都有 route test；
+- [x] Feature Flag 关闭时接口 fail closed，但历史 Run 可只读查询。
 
 ### 11.3 Task 8 验收
 
-- [ ] `/api/v1/mcp` 全部路由注册并覆盖测试；
-- [ ] Preview/Confirm、Test/Approve/Deny、Enable/Run 全链路可用；
-- [ ] stale Preview、disabled、role denied、connection failed、timeout 等错误映射稳定；
-- [ ] API 不泄露秘密和外部原始对象。
+- [x] `/api/v1/mcp` 全部路由注册并覆盖测试；
+- [x] Preview/Confirm、Test/Approve/Deny、Enable/Run 全链路可用；
+- [x] stale Preview、disabled、role denied、connection failed、timeout 等错误映射稳定；
+- [x] API 不泄露秘密和外部原始对象。
 
 **Verification**：
 

@@ -7,9 +7,8 @@ import { readConfigValue } from '../config/config'
 import { chatAgent, createChatAgent } from './chat-agent'
 import { createWriterAgent, createCoderAgent } from './agents/team'
 import type { McpAgentToolSurfaceDependencies } from '../mcp/agent-tool-surface'
-import { MastraMcpAdapter } from '../mcp/mastra-adapter'
-import { McpConnectionManager } from '../mcp/connection-manager'
-import { McpCapabilityBroker } from '../mcp/capability-broker'
+import { mcpAdapter, mcpConnectionManager, mcpCapabilityBroker } from '../mcp/composition-root'
+export { mcpAdapter, mcpConnectionManager, mcpCapabilityBroker } from '../mcp/composition-root'
 import { MastraSkillSource } from './skills/mastra-skill-source'
 import { planAgent } from './plan-agent'
 import { createScheduleHooks } from './schedules/hooks'
@@ -49,9 +48,6 @@ export const scheduleRuntimeStorage = new LibSQLStore({
  * the adapter validates and connects only when the Connection Manager is asked to
  * execute or discover a tool, never while an Agent or Mastra runtime is built.
  */
-export const mcpAdapter = new MastraMcpAdapter()
-export const mcpConnectionManager = new McpConnectionManager({ adapter: mcpAdapter })
-export const mcpCapabilityBroker = new McpCapabilityBroker({ connectionManager: mcpConnectionManager })
 export const mcpAgentToolSurface: McpAgentToolSurfaceDependencies = {
   broker: mcpCapabilityBroker,
 }

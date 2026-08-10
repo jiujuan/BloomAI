@@ -43,6 +43,7 @@ export type McpCatalogPreviewInput = {
 
 export type McpCatalogConfirmInput = {
   serverId: string
+  previewId?: string
   previewHash: string
   configHash: string
   catalogVersion: string
@@ -204,6 +205,7 @@ function normalizeConfirmInput(input: McpCatalogConfirmInput): McpCatalogConfirm
   if (!input || typeof input !== 'object') throw new McpError('MCP_CONFIG_INVALID')
   return {
     serverId: assertNonEmpty(input.serverId, 'server id'),
+    ...(input.previewId === undefined ? {} : { previewId: assertNonEmpty(input.previewId, 'preview id') }),
     previewHash: assertNonEmpty(input.previewHash, 'preview hash'),
     configHash: assertNonEmpty(input.configHash, 'config hash'),
     catalogVersion: assertCatalogVersion(input.catalogVersion),
@@ -215,7 +217,8 @@ function findStoredPreview(
   input: McpCatalogConfirmInput,
 ): StoredPreview | undefined {
   for (const stored of previews.values()) {
-    if (stored.preview.serverId === input.serverId
+    if ((input.previewId === undefined || stored.preview.previewId === input.previewId)
+      && stored.preview.serverId === input.serverId
       && stored.preview.previewHash === input.previewHash
       && stored.preview.configHash === input.configHash
       && stored.preview.catalogVersion === input.catalogVersion) {
@@ -421,7 +424,7 @@ function createToolSnapshot(tool: McpCatalogToolInput | McpServerTool): JsonSafe
 }
 
 function createConfirmKey(input: McpCatalogConfirmInput): string {
-  return [input.serverId, input.previewHash, input.configHash, input.catalogVersion].join('\u001f')
+  return [input.serverId, input.previewId ?? '', input.previewHash, input.configHash, input.catalogVersion].join('\u001f')
 }
 
 function assertCatalogVersion(value: string): string {

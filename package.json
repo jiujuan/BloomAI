@@ -29,6 +29,7 @@
     "test:skills:migration:offline": "npm run typecheck:skills && npm run verify:skills-legacy-migration-offline",
     "test:skills:migration:smoke": "npm run test:skills:migration:offline",
     "test:mcp-spike": "vitest run src/server/mcp/mastra-adapter.contract.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
+    "test:mcp-http": "vitest run src/server/http/routes/mcp.test.ts src/server/http/routes/mcp.e2e.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-security": "vitest run src/server/mcp/security --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-contracts": "vitest run src/server/mcp/types.contract.test.ts src/server/mcp/errors.contract.test.ts src/server/mcp/result-normalizer.contract.test.ts src/server/mcp/schema-support.contract.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
     "test:mcp-db": "vitest run scripts/migrations/048-mcp-client.test.ts src/server/db/mcp-schema-contract.test.ts src/server/db/repositories/mcp.repo.test.ts --pool=forks --maxWorkers=1 --minWorkers=1",
