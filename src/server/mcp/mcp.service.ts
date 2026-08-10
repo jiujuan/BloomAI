@@ -683,7 +683,7 @@ function normalizeServerTransport(kind: McpTransportKind, config: JsonSafeObject
       env: config.env === undefined ? {} : asStringRecord(config.env),
     }
     try {
-      const validated = validateStdioTransport(transport)
+      const validated = validateStdioTransport(transport, { validateCwd: false })
       return {
         kind: 'stdio',
         command: validated.command,

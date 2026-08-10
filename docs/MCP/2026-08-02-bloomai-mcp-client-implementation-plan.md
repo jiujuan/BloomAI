@@ -2,12 +2,12 @@
 
 > **执行规则**：本计划是 `docs/MCP/2026-08-02-bloomai-mcp-client-design.md` 的可执行版本。两份文档必须保持同一范围、同一 API、同一数据模型、同一状态机和同一 Mastra Adapter 契约。未通过当前 Task 的验收，不得开始其后置 Task。
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7、Task 8、Task 9 已通过，Task 10 尚未开始
+- **状态**：Gate 0、Task 0～Task 10 已通过 Release Gate
 - **日期**：2026-08-10
 - **目标**：让 BloomAI 以受控 MCP Client 方式连接外部 `stdio` / Streamable HTTP MCP Server，发现、确认、启用、审批、执行和审计远端 Tools，并按 Agent Role 将允许的 Tool 提供给现有 Mastra Agent。
 - **设计来源**：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
 - **后续能力路线图**：`docs/MCP/mcp-roadmap.md`
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试；Task 9 已完成 MCP Server 管理 UI、Server/Catalog/Approval/Run 管理、前端 Secret/Approval 安全边界、Feature Flag fail-closed 及 renderer API/store/UI 测试，并通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`。Task 10 尚未开始。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定；Task 0 Spike、真实 stdio/Streamable HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成。Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试；Task 9 已完成 MCP Server 管理 UI、Server/Catalog/Approval/Run 管理、前端 Secret/Approval 安全边界、Feature Flag fail-closed 及 renderer API/store/UI 测试，并通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`。Task 10 已完成真实 stdio/Streamable HTTP 协议闭环、SSRF/DNS rebinding/redirect 和 stdio 进程边界攻防、Secret/Header/Approval Token/原始 input-output 日志脱敏、Approval replay/stale/Role/Catalog 版本校验、Prompt Injection 不可信内容边界、timeout/AbortSignal/非幂等 Tool 不自动重试，并通过 `npm run test:mcp`、`npm run typecheck`、`npm run test:architecture`、`npm run build`、`git diff --check` 和 `npm test`。
 
 ---
 
@@ -828,29 +828,29 @@ npm run build
 
 ### 13.1 真实协议闭环
 
-- [ ] stdio Server 测试连接、Refresh、Preview、Confirm、Enable、Tool Test；
-- [ ] Streamable HTTP Server 完成同样闭环；
-- [ ] Tool 成功、结构化结果、远端错误、协议错误、延迟和大结果均覆盖；
-- [ ] disconnect、reconnect、timeout、AbortSignal 和应用退出清理通过；
-- [ ] 明确 legacy SSE 处理结果与文档一致。
+- [x] stdio Server 测试连接、Refresh、Preview、Confirm、Enable、Tool Test；
+- [x] Streamable HTTP Server 完成同样闭环；
+- [x] Tool 成功、结构化结果、远端错误、协议错误、延迟和大结果均覆盖；
+- [x] disconnect、reconnect、timeout、AbortSignal 和应用退出清理通过；
+- [x] 明确 legacy SSE 处理结果与文档一致。
 
 ### 13.2 安全攻防
 
-- [ ] SSRF 私网、link-local、metadata、DNS rebinding、redirect 测试；
-- [ ] stdio shell 注入、cwd 越界、环境继承和孤儿进程测试；
-- [ ] Secret、Header、Approval Token、原始 input/output 泄露测试；
-- [ ] Approval replay、stale input、Role mismatch、Catalog version mismatch 测试；
-- [ ] Tool description/schema/content Prompt Injection 样例测试；
-- [ ] 非幂等 Tool timeout 后不会自动重试。
+- [x] SSRF 私网、link-local、metadata、DNS rebinding、redirect 测试；
+- [x] stdio shell 注入、cwd 越界、环境继承和孤儿进程测试；
+- [x] Secret、Header、Approval Token、原始 input/output 泄露测试；
+- [x] Approval replay、stale input、Role mismatch、Catalog version mismatch 测试；
+- [x] Tool description/schema/content Prompt Injection 样例测试；
+- [x] 非幂等 Tool timeout 后不会自动重试。
 
 ### 13.3 文档和命令同步
 
-- [ ] Design、Implementation Plan、Spike Result、Roadmap 的范围和版本一致；
-- [ ] 所有 API 使用 `/api/v1/mcp`；
-- [ ] 所有 Migration 使用 `048-mcp-client.sql`；
-- [ ] `package.json`、lockfile 和 Spike Result 使用相同精确包版本；
-- [ ] `npm run test:mcp` 覆盖 MCP 单元、集成、HTTP、UI 和安全测试；
-- [ ] Task checkbox 和实际提交状态一致。
+- [x] Design、Implementation Plan、Spike Result、Roadmap 的范围和版本一致；
+- [x] 所有 API 使用 `/api/v1/mcp`；
+- [x] 所有 Migration 使用 `048-mcp-client.sql`；
+- [x] `package.json`、lockfile 和 Spike Result 使用相同精确包版本；
+- [x] `npm run test:mcp` 覆盖 MCP 单元、集成、HTTP、UI 和安全测试；
+- [x] Task checkbox 和实际提交状态一致。
 
 ### 13.4 Release Gate
 
@@ -877,6 +877,26 @@ npm test
 ```
 
 **Dependencies**：Task 9、Task 0～Task 8 全部通过。
+
+### 13.5 Task 10 实现摘要和证据
+
+- `package.json` 新增聚合命令 `npm run test:mcp`，顺序执行真实 Spike、HTTP route/e2e、MCP security、contracts、Migration/Repository、Catalog、Adapter/Connection Manager、Broker、Agent 和 UI 测试；`test:mcp-security` 明确包含 `tests/security/mcp-transport.security.test.ts`；
+- 生产 `MastraMcpAdapter` 在 stdio spawn 边界解析并校验真实 cwd，默认限制在 `process.cwd()` 允许根内；shell 固定为 `false`，环境变量仍使用 allowlist；HTTP 每次请求重新做 DNS 校验，强制 `redirect: manual`，校验 redirect 目标，并将 Streamable HTTP 非 2xx 转为字符串错误码以阻止 Mastra legacy SSE fallback；
+- 创建真实 `MCPClient` 后安装 `noopLogger`，HTTP Server Definition 关闭 `enableServerLogs`，因此 Mastra 默认日志不会写入原始 `toolArgs`、Secret、Authorization/Bearer 或 Approval Token；
+- `listToolsWithErrors()` 的真实发现错误不再被静默转换为空 Catalog，统一映射到 BloomAI 稳定错误码；
+- Task 10 安全证据覆盖私网、link-local、metadata、DNS rebinding、redirect、stdio cwd/shell/环境/孤儿进程、Secret/Header/Approval Token/原始输入输出、Approval replay/stale/Role/Catalog 版本、Prompt Injection、timeout/AbortSignal 和非幂等 Tool 不重试；
+- 真实协议证据固定为 `@mastra/core@1.51.0`、`@mastra/mcp@1.15.1`、`@modelcontextprotocol/sdk@1.30.0`，API 前缀为 `/api/v1/mcp`，Migration 为 `scripts/migrations/048-mcp-client.sql`；legacy SSE 目前不支持，检测到 fallback 时 fail closed；
+- Release Gate 命令：
+
+```powershell
+npm run test:mcp
+npm run typecheck
+npm run test:architecture
+npm run build
+git diff --check
+npm test
+```
+
 
 ---
 
@@ -947,26 +967,26 @@ pending_approval
 - [x] 没有 `getTools/callTool/close` 等未验证假设；
 - [x] Task 1 已通过 Secret、stdio、HTTP SSRF、Approval Store 和一次性 Token 测试；
 - [x] Task 2 已锁定错误码、状态机、`NormalizedMcpResult` 和 Schema 子集；
-- [x] `048-mcp-client.sql`、Repository、Adapter、Connection Manager、Catalog Preview/Confirm 已有实现和测试；Broker、Agent、API 留待后续 Task；
-- [ ] 客户端无法伪造批准、风险、信任、Role 或 Tool enablement。
+- [x] `048-mcp-client.sql`、Repository、Adapter、Connection Manager、Catalog Preview/Confirm、Broker、Agent、API 和 UI 均有实现与测试；
+- [x] 客户端无法伪造批准、风险、信任、Role 或 Tool enablement。
 
 ### P1 必须全部关闭
 
 - [x] 新 Tool 默认 disabled；
 - [x] Schema/description 变化触发 review/disabled；
 - [x] 远端删除保留历史 Run；
-- [ ] Agent Surface 不在每次聊天请求建连或刷新 Catalog；
-- [ ] Test/Refresh/Preview/Confirm/Enable/Approve/Deny/Run 全链路可用；
+- [x] Agent Surface 不在每次聊天请求建连或刷新 Catalog；
+- [x] Test/Refresh/Preview/Confirm/Enable/Approve/Deny/Run 全链路可用；
 - [x] timeout、AbortSignal、client invalidate、disconnectAll 和孤儿进程清理有证据；
-- [ ] Agent Role Scope 和服务端策略一致。
+- [x] Agent Role Scope 和服务端策略一致。
 
 ### P2 必须全部关闭
 
-- [ ] MCP 管理 UI 完成；
-- [ ] 指标、日志、Safe DTO、截断和 Prompt Injection 防护覆盖；
-- [ ] Design、Plan、Spike Result、Roadmap、package lock 和测试命令一致；
-- [ ] Feature Flag 可以关闭 MCP 且不影响既有功能；
-- [ ] `npm run test:mcp` 已存在并通过。
+- [x] MCP 管理 UI 完成；
+- [x] 指标、日志、Safe DTO、截断和 Prompt Injection 防护覆盖；
+- [x] Design、Plan、Spike Result、Roadmap、package lock 和测试命令一致；
+- [x] Feature Flag 可以关闭 MCP 且不影响既有功能；
+- [x] `npm run test:mcp` 已存在并通过。
 
 ---
 

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { lookup as dnsLookup } from 'node:dns/promises'
+import { realpathSync, statSync } from 'node:fs'
 import { isIP } from 'node:net'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, relative } from 'node:path'
 import { createSecretResolver, parseSecretReference, type SecretResolver } from './secret-resolver'
 import type {
   McpStdioTransportConfig,
@@ -56,6 +57,13 @@ export type StdioSpawnEnvironmentOptions = {
   processEnv?: Readonly<Record<string, string | undefined>>
   secretResolver?: SecretResolver
   inheritEnvNames?: readonly string[]
+  allowedCwdRoots?: readonly string[]
+}
+
+export type StdioTransportPolicyOptions = {
+  allowedCwdRoots?: readonly string[]
+  /** Resolve and enforce cwd only at the process-spawn boundary. */
+  validateCwd?: boolean
 }
 
 const DEFAULT_INHERITED_ENV_NAMES = [
@@ -107,7 +115,10 @@ export function updateTransportSecurityState(
   }
 }
 
-export function validateStdioTransport(config: McpStdioTransportConfig): ValidatedStdioTransport {
+export function validateStdioTransport(
+  config: McpStdioTransportConfig,
+  options: StdioTransportPolicyOptions = {},
+): ValidatedStdioTransport {
   if (!config || config.kind !== 'stdio') throw new McpSecurityError('MCP_CONFIG_INVALID')
   assertSafeText(config.command)
   if (!config.command.trim() || isUrlLikeCommand(config.command) || isPackageInstaller(config.command)) {
@@ -121,9 +132,12 @@ export function validateStdioTransport(config: McpStdioTransportConfig): Validat
     if (arg.includes('${') && !parseSecretReference(arg)) throw new McpSecurityError('MCP_CONFIG_INVALID')
   }
 
+  let cwd: string | undefined
   if (config.cwd !== undefined) {
     assertSafeText(config.cwd)
     if (!isAbsolute(config.cwd)) throw new McpSecurityError('MCP_CONFIG_INVALID')
+    cwd = options.validateCwd === false ? config.cwd : resolveExistingDirectory(config.cwd)
+    if (options.validateCwd !== false) assertCwdWithinAllowedRoots(cwd, options.allowedCwdRoots)
   }
 
   const env: Record<string, string> = {}
@@ -140,7 +154,7 @@ export function validateStdioTransport(config: McpStdioTransportConfig): Validat
     kind: 'stdio',
     command: config.command,
     args,
-    ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
+    ...(cwd === undefined ? {} : { cwd }),
     env,
     shell: false,
   }
@@ -150,7 +164,10 @@ export function createStdioSpawnOptions(
   config: McpStdioTransportConfig,
   options: StdioSpawnEnvironmentOptions = {},
 ): StdioSpawnOptions {
-  const validated = validateStdioTransport(config)
+  const validated = validateStdioTransport(config, {
+    allowedCwdRoots: options.allowedCwdRoots,
+    validateCwd: true,
+  })
   const processEnv = options.processEnv ?? process.env
   const inheritedNames = options.inheritEnvNames ?? DEFAULT_INHERITED_ENV_NAMES
   const inherited: Record<string, string> = {}
@@ -346,7 +363,7 @@ async function assertSafeHttpHost(
 function canonicalizeTransportConfig(config: McpTransportConfig): Record<string, unknown> {
   if (!config || typeof config !== 'object') throw new McpSecurityError('MCP_CONFIG_INVALID')
   if (config.kind === 'stdio') {
-    const validated = validateStdioTransport(config)
+    const validated = validateStdioTransport(config, { validateCwd: false })
     return {
       kind: 'stdio',
       command: validated.command,
@@ -427,6 +444,32 @@ function assertSafeText(value: string): void {
   if (typeof value !== 'string' || !value || CONTROL_CHARACTER_PATTERN.test(value)) {
     throw new McpSecurityError('MCP_CONFIG_INVALID')
   }
+}
+
+function resolveExistingDirectory(value: string): string {
+  try {
+    const resolved = realpathSync(value)
+    if (!statSync(resolved).isDirectory()) throw new Error('not a directory')
+    return resolved
+  } catch {
+    throw new McpSecurityError('MCP_CONFIG_INVALID')
+  }
+}
+
+function assertCwdWithinAllowedRoots(cwd: string, allowedRoots: readonly string[] | undefined): void {
+  if (allowedRoots === undefined) return
+  if (allowedRoots.length === 0) throw new McpSecurityError('MCP_CONFIG_INVALID')
+
+  const isAllowed = allowedRoots.some((root) => {
+    try {
+      const resolvedRoot = resolveExistingDirectory(root)
+      const pathFromRoot = relative(resolvedRoot, cwd)
+      return pathFromRoot === '' || (!pathFromRoot.startsWith('..') && !isAbsolute(pathFromRoot))
+    } catch {
+      return false
+    }
+  })
+  if (!isAllowed) throw new McpSecurityError('MCP_CONFIG_INVALID')
 }
 
 function isBlockedIpv4(value: string): boolean {

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { MCPClient, type MastraMCPServerDefinition } from '@mastra/mcp'
+import { noopLogger } from '@mastra/core/logger'
+import { MCPClient, type MastraFetchLike, type MastraMCPServerDefinition } from '@mastra/mcp'
 import { normalizeMcpResult } from './result-normalizer'
 import { analyzeMcpSchema } from './schema-support'
 import { assertMcpClientEnabled, type EnvironmentLike } from './feature-flag'
@@ -7,6 +8,8 @@ import { createSecretResolver, resolveSecretReferences, type SecretResolver } fr
 import {
   createHttpRequestOptions,
   createStdioSpawnOptions,
+  validateHttpRedirectTarget,
+  validateHttpTransport,
   type DnsLookup,
   type McpHttpEnvironment,
 } from './transport-policy'
@@ -14,6 +17,8 @@ import { McpError } from './errors'
 import {
   createMcpToolId,
   McpSecurityError,
+  MCP_ERROR_CODES,
+  type McpErrorCode,
   type DiscoveredMcpTool,
   type JsonSafeValue,
   type McpServerConnectionConfig,
@@ -35,7 +40,12 @@ export type MastraMcpToolLike = {
 
 export interface MastraMcpClientLike {
   listTools(): Promise<Record<string, MastraMcpToolLike>>
+  listToolsWithErrors?: () => Promise<{
+    tools: Record<string, MastraMcpToolLike>
+    errors: Record<string, string>
+  }>
   disconnect(): Promise<void>
+  __setLogger?: (logger: unknown) => void
 }
 
 export type MastraMcpClientOptions = {
@@ -53,6 +63,8 @@ export type MastraMcpAdapterOptions = {
   lookup?: DnsLookup
   timeoutMs?: number
   clientFactory?: MastraMcpClientFactory
+  allowedCwdRoots?: readonly string[]
+  httpFetch?: MastraFetchLike
 }
 
 /**
@@ -69,6 +81,8 @@ export class MastraMcpAdapter implements McpProviderAdapter {
   private readonly lookup?: DnsLookup
   private readonly timeoutMs?: number
   private readonly clientFactory: MastraMcpClientFactory
+  private readonly allowedCwdRoots: readonly string[]
+  private readonly httpFetch?: MastraFetchLike
 
   constructor(options: MastraMcpAdapterOptions = {}) {
     this.env = options.env ?? process.env
@@ -76,6 +90,8 @@ export class MastraMcpAdapter implements McpProviderAdapter {
     this.httpEnvironment = options.httpEnvironment
     this.lookup = options.lookup
     this.timeoutMs = validateTimeout(options.timeoutMs)
+    this.allowedCwdRoots = Object.freeze([...(options.allowedCwdRoots ?? [process.cwd()])])
+    this.httpFetch = options.httpFetch
     this.clientFactory = options.clientFactory ?? ((clientOptions) => (
       new MCPClient(clientOptions) as unknown as MastraMcpClientLike
     ))
@@ -99,6 +115,7 @@ export class MastraMcpAdapter implements McpProviderAdapter {
         servers: { [serverName]: definition },
         ...(this.timeoutMs === undefined ? {} : { timeout: this.timeoutMs }),
       })
+      client.__setLogger?.(noopLogger)
       return new MastraMcpConnection({
         client,
         serverId: config.serverId,
@@ -116,6 +133,7 @@ export class MastraMcpAdapter implements McpProviderAdapter {
       const spawnOptions = createStdioSpawnOptions(transport, {
         processEnv: this.env,
         secretResolver: this.secretResolver,
+        allowedCwdRoots: this.allowedCwdRoots,
       })
       const args = resolveSecretReferences(spawnOptions.args, this.secretResolver)
       // Mastra's public definition does not expose shell, but the validated
@@ -143,7 +161,45 @@ export class MastraMcpAdapter implements McpProviderAdapter {
         headers: request.headers,
         redirect: request.redirect,
       },
+      fetch: this.createSecureHttpFetch(),
+      enableServerLogs: false,
       onToolError: 'return',
+    }
+  }
+
+  private createSecureHttpFetch(): MastraFetchLike {
+    const baseFetch: MastraFetchLike = this.httpFetch ?? ((url, init) => globalThis.fetch(url, init))
+    return async (requestUrl, init, requestContext) => {
+      const request = await validateHttpTransport({ kind: 'streamable_http', url: requestUrl }, {
+        environment: this.httpEnvironment,
+        lookup: this.lookup,
+        secretResolver: this.secretResolver,
+      })
+      const secureInit: RequestInit = {
+        ...init,
+        redirect: 'manual',
+      }
+      const response = await baseFetch(request.url, secureInit, requestContext)
+      if (!response || typeof response.status !== 'number' || !response.headers) {
+        throw createHttpProtocolError('MCP_HTTP_RESPONSE_INVALID')
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location')
+        if (location) {
+          await validateHttpRedirectTarget(request.url, location, {
+            environment: this.httpEnvironment,
+            lookup: this.lookup,
+            secretResolver: this.secretResolver,
+          })
+        }
+        throw createHttpProtocolError('MCP_HTTP_REDIRECT_UNSUPPORTED')
+      }
+
+      if (response.status < 200 || response.status >= 300) {
+        throw createHttpProtocolError('MCP_STREAMABLE_HTTP_ONLY', response.status)
+      }
+      return response
     }
   }
 }
@@ -226,7 +282,18 @@ class MastraMcpConnection implements McpProviderConnection {
   private async discoverTools(): Promise<DiscoveredMcpTool[]> {
     let rawTools: Record<string, MastraMcpToolLike>
     try {
-      rawTools = await this.client.listTools()
+      if (this.client.listToolsWithErrors) {
+        const result = await this.client.listToolsWithErrors()
+        if (!isRecord(result) || !isRecord(result.tools) || !isRecord(result.errors)) {
+          throw new McpError('MCP_PROTOCOL_ERROR')
+        }
+        if (Object.keys(result.errors).length > 0) {
+          throw mapMastraDiscoveryError(Object.values(result.errors)[0])
+        }
+        rawTools = result.tools as Record<string, MastraMcpToolLike>
+      } else {
+        rawTools = await this.client.listTools()
+      }
     } catch (error) {
       if (error instanceof McpError || error instanceof McpSecurityError) throw error
       throw new McpError('MCP_CONNECTION_FAILED')
@@ -392,6 +459,29 @@ function isAbortLike(error: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null
+}
+
+function mapMastraDiscoveryError(error: unknown): McpError | McpSecurityError {
+  const message = typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : String(error)
+  const code = MCP_ERROR_CODES.find((candidate) => message.includes(candidate)) as McpErrorCode | undefined
+  if (code === 'MCP_DISABLED'
+    || code === 'MCP_CONFIG_INVALID'
+    || code === 'MCP_APPROVAL_REQUIRED'
+    || code === 'MCP_APPROVAL_INVALID'
+    || code === 'MCP_APPROVAL_EXPIRED') {
+    return new McpSecurityError(code)
+  }
+  return new McpError(code ?? 'MCP_CONNECTION_FAILED')
+}
+
+function createHttpProtocolError(code: string, status?: number): Error & { code: string } {
+  const error = new Error(status === undefined ? 'MCP HTTP response rejected' : `MCP HTTP response rejected (${status})`) as Error & { code: string }
+  error.code = code
+  return error
 }
 
 function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

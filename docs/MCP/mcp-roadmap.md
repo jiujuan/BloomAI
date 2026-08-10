@@ -1,11 +1,13 @@
 # BloomAI MCP 后续能力路线图
 
-- **状态**：规划文档；Task 0 已通过，一期仍未进入生产实现
-- **日期**：2026-08-09
+- **状态**：Task 0～Task 10 已通过 Release Gate；路线图后续能力尚未启动
+- **日期**：2026-08-10
 - **前置文档**：
   - 设计方案：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
   - 一期实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
-- **路线图基线**：Task 0 Spike 已通过并冻结当前 Mastra Adapter 事实；只有一期 MCP Client MVP 的 Task 0～Task 10 全部通过 Release Gate 后，才允许启动本路线图中的后续能力。
+- **路线图基线**：一期 MCP Client MVP 的 Task 0～Task 10 已全部通过 Release Gate；本文件只规划后续能力，尚未启动 R1～R7 的实现。
+- **一期证据基线**：`@mastra/core@1.51.0`、`@mastra/mcp@1.15.1`、`@modelcontextprotocol/sdk@1.30.0`；HTTP API 前缀为 `/api/v1/mcp`；Migration 为 `scripts/migrations/048-mcp-client.sql`；聚合回归入口为 `npm run test:mcp`。
+- **Transport 决策**：一期支持 stdio 和 Streamable HTTP；legacy SSE 不公开支持，检测到 Mastra fallback 时 fail closed，只有 R5 的独立兼容性扩展可能重新评估。
 
 ---
 
@@ -56,14 +58,16 @@ BloomAI
 
 ## 3. Roadmap 前置 Gate
 
-R0 是一期完成后的安全和可观测性复核，不新增协议能力，但必须在启动 R1 之前完成：
+R0 是一期完成后的安全和可观测性复核，不新增协议能力；Task 10 已完成该复核，R1 之前不得跳过这些结论：
 
-- [ ] 重新执行一期真实 stdio/HTTP、SSRF、Secret、Approval、Timeout 和 Feature Flag 回归；
-- [ ] 核对指标、日志、Run 审计、Safe DTO 和输出截断；
-- [ ] 核对 Design、Implementation Plan、Spike Result 与实际实现一致；
-- [ ] 确认后续能力不会修改一期 Tools 的默认安全策略。
+- [x] 已重新执行一期真实 stdio/HTTP、SSRF、Secret、Approval、Timeout 和 Feature Flag 回归；
+- [x] 已核对指标、日志、Run 审计、Safe DTO 和输出截断；
+- [x] 已核对 Design、Implementation Plan、Spike Result 与实际实现一致；
+- [x] 已确认后续能力不会修改一期 Tools 的默认安全策略。
 
-每个 Roadmap 阶段开始前必须满足：
+证据：`docs/MCP/mcp-mastra-spike-result.md` 的 Task 0/Task 10 验收对应关系，以及 `npm run test:mcp`、`npm run typecheck`、`npm run test:architecture`、`npm run build`、`git diff --check` 和 `npm test`。
+
+每个 Roadmap 阶段开始前必须再次确认以下条件；当前 R1～R7 尚未启动，因此这些是后续阶段的准入清单，而不是已完成的阶段交付：
 
 - [ ] 一期 `MCP_CLIENT_ENABLED`、Server、Tool、Catalog、Broker 和 Run 状态机已稳定；
 - [ ] `@mastra/mcp` 精确版本和 Adapter 契约已经有 Spike 结果；
@@ -316,7 +320,7 @@ src/renderer/pages/McpServers/OAuth*.tsx
 
 ### 8.1 目标
 
-Task 0 已确认 Mastra HTTP 运行时具备 legacy HTTP+SSE fallback 能力，但 BloomAI MVP 检测并拒绝未明确允许的 fallback。只有真实生态验证证明需要时，才增加独立 legacy SSE 支持；SSE 不能因为 Mastra HTTP fallback 而被隐式纳入产品。
+Task 0 已确认 Mastra HTTP 运行时具备 legacy HTTP+SSE fallback 能力，Task 10 又验证 BloomAI 生产 Adapter 对 fallback 采用 fail-closed：检测到 deprecated fallback 日志或不符合 Streamable HTTP 会话证据的 legacy SSE 初始 GET 时拒绝连接。只有真实生态验证证明需要时，才增加独立 legacy SSE 支持；SSE 不能因为 Mastra HTTP fallback 而被隐式纳入产品。
 
 建议 Feature Flag：
 
@@ -492,7 +496,18 @@ MCP_SECRET_VAULT_ENABLED
 
 ---
 
-## 12. 每个 Roadmap 阶段的统一交付物
+## 12. 一期 Release Gate 证据
+
+Task 0～Task 10 已完成，后续阶段仍必须以一期稳定基线为前提：
+
+- 真实 stdio 和 Streamable HTTP Fixture 已覆盖 discovery、Tool call、结构化结果、远端/协议错误、延迟、大结果、AbortSignal、timeout、disconnect 和 reconnect；
+- stdio cwd/shell/环境边界、HTTP SSRF/DNS rebinding/redirect、Secret/Header/Approval Token/原始 input-output 脱敏、Approval replay/stale/Role/Catalog 版本校验和 Prompt Injection 不可信内容边界均有测试；
+- `MCP_CLIENT_ENABLED=false` 时 MCP 能力 fail closed，既有功能回归由 MCP 聚合测试和全量测试共同守护；
+- 生产 Adapter 只公开一期 Tools-first 语义，Resources、Prompts、Elicitation、OAuth、Registry、Secret Vault、沙箱和独立 legacy SSE 仍是后续路线图能力。
+
+---
+
+## 13. 每个 Roadmap 阶段的统一交付物
 
 每个阶段至少要有：
 
@@ -511,7 +526,7 @@ MCP_SECRET_VAULT_ENABLED
 
 ---
 
-## 13. Roadmap 发布阻断条件
+## 14. Roadmap 发布阻断条件
 
 以下情况必须停止后续能力发布：
 

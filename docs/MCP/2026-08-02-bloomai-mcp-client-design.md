@@ -1,9 +1,9 @@
 # BloomAI 外部 MCP Server 接入（MCP Client）设计方案
 
-- **状态**：Gate 0、Task 0、Task 1、Task 2、Task 3、Task 4、Task 5、Task 6、Task 7、Task 8、Task 9 已通过，Task 10 尚未开始
+- **状态**：Gate 0、Task 0～Task 10 已通过 Release Gate
 - **日期**：2026-08-10
 - **产品目标**：BloomAI 作为 MCP Client，受控连接用户配置的外部 MCP Server，并将远程 Tools 安全地纳入现有 Mastra Agent 工具治理体系。
-- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试；Task 9 已完成 MCP Server 管理 UI、Server/Catalog/Approval/Run 管理、前端 Secret/Approval 安全边界、Feature Flag fail-closed 及 renderer API/store/UI 测试，并通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`。Task 10 尚未开始。本设计记录当前实现基线和后续目标。
+- **当前基线**：`@mastra/mcp@1.15.1` 已以精确版本安装并锁定，Task 0 Spike、真实 stdio/HTTP Fixture、Task 1 安全边界契约和测试、Task 2 领域类型/错误协议/结果规范化/JSON Schema 边界契约和测试、Task 3 Migration 048/Schema Contract/Repository 及数据库安全边界测试、Task 4 经过验证的 Mastra Adapter/Connection Manager 及其 Fake/真实 Fixture/并发与生命周期测试已完成；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除，并通过专项、Repository 集成及类型测试；Task 6 已完成服务端 Capability Broker、Approval、统一 Agent/手工 Test Tool Adapter、超时/取消、结果规范化和 Run Audit，并通过专项、类型和全量测试；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先和 Agent 构建不建连/不刷新 Catalog，并通过 Agent、Broker、架构、MCP 回归、类型和全量测试；Task 8 已完成 `McpService`、`/api/v1/mcp` HTTP API、共享错误映射、Safe DTO、Server/Catalog/Approval/Run 全链路和 route/e2e 测试；Task 9 已完成 MCP Server 管理 UI、Server/Catalog/Approval/Run 管理、前端 Secret/Approval 安全边界、Feature Flag fail-closed 及 renderer API/store/UI 测试，并通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`。Task 10 已完成真实 stdio/Streamable HTTP 协议闭环、传输层安全攻防、日志脱敏、Prompt Injection 不可信内容边界和 Release Gate，并通过 `npm run test:mcp`、`npm run typecheck`、`npm run test:architecture`、`npm run build`、`git diff --check` 和 `npm test`。本设计记录当前生产实现基线和后续目标。
 - **关联文档**：
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
   - 后续能力路线图：`docs/MCP/mcp-roadmap.md`
@@ -498,16 +498,21 @@ mcpConnectionManager.disconnectAll()
 - 只允许 allowlist 中的环境变量；
 - command、args、cwd 变更后 Server 回到 `untrusted` 并禁用；
 - 不支持从 URL、Registry 或 Skill Package 自动下载可执行文件；
-- 应用退出和 timeout 后清理子进程。
+- 应用退出和 timeout 后清理子进程；
+- spawn 边界解析真实 cwd，默认限制在 `process.cwd()` 允许根内，拒绝不存在目录、文件路径、符号链接逃逸和根目录外路径；
+- 仅在 spawn 时做 cwd 存在性校验，配置展示/Hash 边界不通过读取配置触发进程启动。
 
 #### Streamable HTTP
 
 - 生产环境要求 HTTPS；
+- 解析后的环境变量只在 stdio spawn 或 HTTP request 内存路径短暂存在，禁止进入持久化、Safe DTO、前端 state 和默认 Mastra 日志；
 - 仅允许开发环境的 `localhost` 和 `127.0.0.1` HTTP；
 - 校验 hostname、DNS 解析结果、redirect 目标；
 - 拦截私网、link-local 和云 metadata 地址；
 - Header 只接受安全模板引用；
-- 不记录认证 Header 值。
+- 不记录认证 Header 值；
+- 每次请求重新执行 DNS 校验，强制 `redirect: manual`，显式校验 redirect 目标；
+- Streamable HTTP 非 2xx 被转换为字符串错误码，阻止 Mastra legacy SSE fallback；legacy SSE 一期不支持并 fail closed。
 
 ### 7.2 信任和风险
 
@@ -554,7 +559,8 @@ Tool description、input schema、content、structuredContent 和错误信息均
 - 不向远端发送全量对话、系统提示、文件列表或秘密；
 - 递归脱敏 `authorization`、`token`、`secret`、`password`、`api_key` 等字段；
 - 输出限制为 128 KiB，超出部分返回截断标记；
-- 只允许 JSON-safe 值进入 Safe Result。
+- 只允许 JSON-safe 值进入 Safe Result；
+- Tool description 前置不可信数据告警，schema 只转换受支持子集，content/structuredContent 只作为结果数据，不提升为系统指令。
 
 ---
 
@@ -736,7 +742,7 @@ mcp_approval_total{status}
 
 ### 11.5 真实协议和安全回归
 
-CI 不允许依赖任意 `npx` 下载。使用仓库内固定 Fixture，并在发布前执行真实 stdio/HTTP smoke、SSRF 攻击样例、进程清理和 secret 泄露检查。
+CI 不允许依赖任意 `npx` 下载。使用仓库内固定 Fixture，并在发布前执行真实 stdio/HTTP smoke、SSRF 攻击样例、进程清理和 secret 泄露检查。聚合入口为 `npm run test:mcp`，覆盖 Spike、HTTP route/e2e、MCP security、contracts、Migration/Repository、Catalog、Adapter/Connection Manager、Broker、Agent 和 UI。
 
 ---
 
@@ -766,7 +772,7 @@ Gate 0
 - 本文与实施计划使用同一范围、Transport、状态机、错误码、API 路径和 Migration 编号；
 - 本文与 `mcp-roadmap.md` 的后续能力边界一致；
 - `docs/MCP/mcp-mastra-spike-result.md` 已记录 Task 0 的精确版本、执行路径和 SSE fail-closed 决策；
-- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先以及不建连/不刷新 Catalog 的 Agent 构建边界；Task 8 的 MCP 路由和 Task 9 的管理 UI 已完成，Task 10 的真实协议、安全攻防、回归和 Release Gate 仍待执行；
+- Task 3 已完成 Migration 048、Drizzle Schema Contract、MCP Server/Tool/Run Repository 及数据库安全边界测试；Task 4 已完成经过验证的 Mastra Adapter、Connection Manager、Provider 边界以及 Fake/真实 Fixture、并发、超时、取消、重连和清理测试；Task 5 已完成 Catalog Preview、Diff、稳定 Hash、Confirm、stale 校验和 Tool 软删除；Task 6 已完成 Capability Broker、服务端 Approval、统一 Tool Adapter、超时/取消和 Run Audit；Task 7 已完成 Agent Role Scope、MCP Tool Surface、Chat/Writer/Coder 注入、Feature Flag fail-closed、内置 Tool 优先以及不建连/不刷新 Catalog 的 Agent 构建边界；Task 8 的 MCP 路由、Task 9 的管理 UI 以及 Task 10 的真实协议、安全攻防、回归和 Release Gate 均已完成；
 - 确认一期为 Tools-first；
 - 确认 Task 0 为 Mastra API 的唯一事实来源。
 
@@ -827,15 +833,27 @@ Task 9 已通过 `npm run test:mcp-ui`、`npm run typecheck` 和 `npm run build`
 
 ### Task 10：发布 Gate
 
-以下任一项失败都不能发布：
+已完成并通过以下发布阻断项：
 
-1. 真实协议 Fixture 未通过；
-2. 存在任何 resolved secret、Header、Approval Token 或敏感 output 泄露；
-3. 客户端可通过布尔值、重放或篡改 input 绕过审批；
-4. Mastra Tool 与远端 Tool 映射不确定；
-5. timeout 后对非幂等 Tool 自动重试；
-6. Migration、typecheck、build 或既有回归测试失败；
-7. Feature Flag 关闭后现有 Chat、Tools、Skills、Deep Research 不可用。
+1. 真实 stdio 和 Streamable HTTP Fixture 均覆盖 discovery、成功/结构化/远端错误/协议错误/延迟/大结果、AbortSignal、timeout、disconnect、reconnect；
+2. stdio cwd/shell/最小环境/孤儿进程和 HTTP SSRF、DNS rebinding、redirect 均有安全测试；
+3. Secret、Header、Approval Token、原始 toolArgs、原始 input/output 不进入日志、Safe DTO、前端 state 或持久化；真实 `MCPClient` 使用 `noopLogger`，HTTP Server Definition 关闭 `enableServerLogs`；
+4. Approval 绑定 input/config/catalog/session/role 并一次性消费，replay、stale input、Role mismatch、Catalog version mismatch 均 fail closed；
+5. Mastra namespaced Tool 到 BloomAI `remoteName` 映射由 Adapter 独立维护，未使用未经验证的旧 API 假设；
+6. timeout 后通过 client invalidate/显式 reconnect 恢复，Broker 不对非幂等 Tool 自动重试；
+7. `048-mcp-client.sql`、typecheck、build、architecture、全量回归和 Feature Flag fail-closed 均通过；
+8. Design、Implementation Plan、Spike Result、Roadmap 与 `package.json`/lockfile 的 `/api/v1/mcp`、migration 编号、精确版本和 legacy SSE fail-closed 结论一致。
+
+发布前固定执行：
+
+```powershell
+npm run test:mcp
+npm run typecheck
+npm run test:architecture
+npm run build
+git diff --check
+npm test
+```
 
 ---
 

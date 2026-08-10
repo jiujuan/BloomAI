@@ -309,4 +309,34 @@ describe('MastraMcpAdapter', () => {
     expect(JSON.stringify(result)).not.toContain('Authorization')
     await connection.disconnect()
   })
+
+  it('does not expose sensitive tool input through Mastra logging', async () => {
+    const methods = ['debug', 'info', 'warn', 'error'] as const
+    const spies = methods.map((method) => vi.spyOn(console, method).mockImplementation(() => undefined))
+    const secretInput = 'task-10-secret-input'
+    const approvalToken = 'approval-token-never-log'
+    const adapter = new MastraMcpAdapter({
+      env: { MCP_CLIENT_ENABLED: 'true' },
+    })
+    const connection = await adapter.createConnection(config())
+
+    try {
+      await connection.listTools()
+      await connection.executeTool('echo', {
+        text: secretInput,
+        authorization: `Bearer ${approvalToken}`,
+      })
+    } finally {
+      await connection.disconnect()
+      for (const spy of spies) spy.mockRestore()
+    }
+
+    const logged = spies.flatMap((spy) => spy.mock.calls)
+      .map((args) => JSON.stringify(args))
+      .join('\n')
+    expect(logged).not.toContain(secretInput)
+    expect(logged).not.toContain(approvalToken)
+    expect(logged).not.toContain('Bearer')
+  })
+
 })

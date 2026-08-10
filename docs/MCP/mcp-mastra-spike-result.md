@@ -1,8 +1,8 @@
 # Mastra MCP Client Spike 结果
 
-- **状态**：Task 0 已通过；Task 1 及后续生产实现尚未开始
-- **日期**：2026-08-09
-- **用途**：本文件是当前锁定 Mastra 版本的 API、运行时和协议证据来源。它冻结 BloomAI 后续生产 Adapter 必须遵守的边界，但不表示 MCP Client 产品功能已经完成。
+- **状态**：Task 0 Spike、Task 1～Task 10 生产实现及 Release Gate 已通过
+- **日期**：2026-08-10
+- **用途**：本文件是当前锁定 Mastra 版本的 API、运行时和协议证据来源，也是 Task 10 发布 Gate 的真实协议基线。它冻结 BloomAI 生产 Adapter 必须遵守的边界，并记录一期 MVP 的 fail-closed 安全收口。
 - **关联文档**：
   - 设计方案：`docs/MCP/2026-08-02-bloomai-mcp-client-design.md`
   - 实施计划：`docs/MCP/2026-08-02-bloomai-mcp-client-implementation-plan.md`
@@ -32,6 +32,14 @@ tests/fixtures/mcp/stdio-server.mjs
 tests/fixtures/mcp/http-server.mjs
 src/server/mcp/mastra-adapter.contract.test.ts
 ```
+
+Task 10 的聚合入口为：
+
+```powershell
+npm run test:mcp
+```
+
+该命令在真实 Spike 之后执行 HTTP route/e2e、Transport 安全、领域契约、Migration/Repository、Catalog、Adapter/Connection Manager、Broker、Agent 和 UI 回归。
 
 Fixture 只使用固定本地脚本和合成测试数据；结果文档不记录任何真实环境变量、Token、Authorization Header、随机 session id 或未脱敏敏感 input/output。
 
@@ -135,7 +143,7 @@ Fixture 和 `onToolError: 'return'` 下观察到的结果形态如下：
 | Fixture Tool | 运行时观察 | Adapter 约束 |
 |---|---|---|
 | `echo` | 返回 MCP result object，包含 `content` 文本块 | 保留 `content`，交给后续 `NormalizedMcpResult` 规范化 |
-| `structured` | Tool 执行结果直接是结构化对象 `{ value, length }`，不是外层完整 MCP wrapper | 不把结构化对象误当作文本；Task 2 再定义统一结果模型 |
+| `structured` | Tool 执行结果直接是结构化对象 `{ value, length }`，不是外层完整 MCP wrapper | 不把结构化对象误当作文本；由 Task 2 已定义的统一结果模型规范化 |
 | `error` | `isError: true` 仍可观察到，且错误结果不被静默转换为成功 | 保留 in-band MCP error 事实 |
 | `large` | 固定 4096 字符内容完整到达，Transport 未截断 | 生产边界仍必须由 BloomAI 自己执行大小限制和脱敏 |
 
@@ -173,7 +181,7 @@ stdio Fixture 通过 `process.execPath` 直接启动固定的 `tests/fixtures/mc
 
 1. 当前锁定版本可以完成一期所需的 stdio Tool discovery 和 execution；
 2. Spike 不依赖远程下载、任意 `npx` 或用户真实 Token；
-3. Task 1 仍必须在生产 Adapter 外层落实 `shell: false`、参数数组、最小化环境和 secret policy；本 Spike 不把 Mastra 内部子进程实现当作 BloomAI 安全策略的替代品。
+3. Task 10 已在生产 Adapter 外层落实 `shell: false`、参数数组、最小化环境、真实 cwd 校验和 secret policy；本 Spike 不把 Mastra 内部子进程实现当作 BloomAI 安全策略的替代品。
 
 ---
 
@@ -190,11 +198,21 @@ HTTP Fixture 使用 stateful `StreamableHTTPServerTransport`，通过 JSON respo
 5. 不能把所有 GET 都判定为 fallback，因为 Streamable HTTP 可能产生带 session id 的合法 GET。本次检测因此同时使用 Mastra fallback 日志、GET 是否缺少 session id，以及 trace 中已有 POST/session 的证据；
 6. 本次 HTTP Fixture 完成时没有检测到 fallback。独立 legacy SSE 不进入一期公共 Transport，延后到 `mcp-roadmap.md` 的 R5，并要求独立的真实 Fixture、认证、SSRF、重连和幂等性验证。
 
+### 7.1 生产 Adapter 安全收口
+
+Task 10 在真实协议 Spike 之外验证了生产边界：
+
+- stdio 只在 spawn 边界解析并校验真实 `cwd`，使用 `realpath`/目录检查和允许根目录（默认 `process.cwd()`）；`shell` 固定为 `false`，参数保持数组，环境变量继续使用 allowlist；
+- Streamable HTTP 每次请求重新做 DNS 校验，强制 `redirect: 'manual'`，对 `Location` 目标重新执行 SSRF 校验；非 2xx 被转换为稳定字符串错误码，不能触发 Mastra 的 legacy SSE fallback；
+- 真实 `MCPClient` 安装 `noopLogger`，HTTP Server Definition 关闭 `enableServerLogs`，防止 Mastra 默认日志记录原始 `toolArgs`、Secret、Authorization/Bearer 或 Approval Token；
+- 真实 `listToolsWithErrors()` 的发现错误会映射到 BloomAI 稳定错误码，不会被静默转换成空 Catalog；
+- 一期不公开 legacy SSE；检测到 fallback 时 fail closed，独立兼容性支持保留在路线图 R5。
+
 ---
 
 ## 8. 最终 Adapter 契约
 
-Task 0 冻结的是 BloomAI 内部边界，而不是要求后续代码复制 Spike helper：
+Task 0 冻结的是 BloomAI 内部边界；Task 10 进一步验证生产 Adapter 仍遵守该边界，而不是要求业务层复制 Spike helper：
 
 ```ts
 interface McpProviderConnection {
@@ -213,7 +231,7 @@ interface McpProviderAdapter {
 
 实现约束：
 
-- Task 4 的正式实现可以缓存 Mastra Tool，但必须通过独立 `remoteName` 映射执行；
+- Task 4 的正式实现已缓存 Mastra Tool，但通过独立 `remoteName` 映射执行；
 - 只有 `src/server/mcp/mastra-adapter.ts` 可以直接导入 `@mastra/mcp`；
 - 正式 Adapter 不依赖未经验证的旧 discovery/execute/close 方法名；
 - `listTools(signal?)` 的取消参数是 BloomAI 边界。当前 Mastra public `listTools()` 本身没有 signal 参数，因此本 Spike 只验证了 discovery 前置 abort 检查，未宣称 discovery 在网络请求中途可被取消；
@@ -224,23 +242,48 @@ interface McpProviderAdapter {
 
 ## 9. 已知限制和后续影响
 
-1. Task 0 没有创建生产 `mastra-adapter.ts`、Connection Manager、Catalog、Broker、API 或 UI；这些工作严格留给后续 Task。
+1. 一期生产 Adapter、Connection Manager、Catalog、Broker、API 和 UI 已完成，但公共能力仍然是 Tools-first；Resources、Prompts、OAuth、Elicitation、MCP Registry 和独立 legacy SSE 不进入一期契约。
 2. HTTP fallback 的检测是 fail-closed 观测策略；本次 Fixture 成功路径没有故意制造失败后 fallback 的服务端兼容场景，因此 R5 仍需真实 legacy SSE Fixture。
-3. `resources`、`prompts`、OAuth、Elicitation、MCP Registry 和独立 legacy SSE 虽然在 Mastra 类型/运行时中存在部分能力，但不属于一期公共契约。
-4. Mastra Tool 的结果、description、schema、content、structuredContent 和错误信息都视为不可信外部输入；本 Spike 不替代 Task 1/Task 2 的 SSRF、secret、schema、脱敏、截断和结果规范化策略。
-5. `onToolError: 'return'` 下的 in-band `isError` 保留是运行时证据，不等于 BloomAI 的最终错误码；Task 2 必须定义稳定错误协议。
-6. timeout 后的恢复路径必须显式 reconnect；生产执行不得因为 timeout 自动重试非幂等 Tool。
+3. Mastra Tool 的结果、description、schema、content、structuredContent 和错误信息都视为不可信外部输入；生产代码仍必须经过 Schema 边界、脱敏、截断和 `NormalizedMcpResult`。
+4. `onToolError: 'return'` 下的 in-band `isError` 保留是运行时事实，不等于 BloomAI 的最终错误码；稳定错误码由 BloomAI Adapter/Broker 边界负责。
+5. timeout 后的恢复路径必须显式 invalidate/reconnect；生产执行不得因为 timeout 自动重试非幂等 Tool。
+6. `listTools(signal?)` 是 BloomAI 边界；当前 Mastra public `listTools()` 没有 signal 参数，因此 discovery 取消在网络请求中途不作超出事实的保证。
 
 ---
 
-## 10. Task 0 验收对应关系
+## 10. Task 0 Spike 与 Task 10 Release Gate 验收对应关系
+
+### 10.1 Task 0 Spike
 
 - [x] 当前精确版本完成 stdio 和 Streamable HTTP MVP discovery/execution 验证；
 - [x] `mastra-adapter.contract.test.ts` 覆盖真实 Fixture 和运行时契约；
 - [x] Fixture 提供成功、结构化、错误、延迟和大结果 Tool；
 - [x] AbortSignal、timeout、disconnect、reconnect 有运行时断言；
 - [x] SSE fallback 有可执行的 fail-closed 检测和明确结论；
-- [x] 结果文档已被设计方案和实施计划引用；
-- [x] 没有在 Task 0 阶段创建生产 Adapter 或绕过证据实现后续 Task。
+- [x] 结果文档已被设计方案和实施计划引用。
 
-Task 1 及后续 Task 必须在本结果文档基础上继续，并重新验证任何 Mastra 版本升级。
+### 10.2 Task 10 Release Gate
+
+- [x] 真实 stdio 和 Streamable HTTP 覆盖 discovery、成功/结构化/远端错误/协议错误/延迟/大结果、AbortSignal、timeout、disconnect、reconnect 和应用退出清理；
+- [x] SSRF 私网、link-local、metadata、DNS rebinding、redirect 以及 stdio cwd/shell/环境继承/孤儿进程攻击样例通过；
+- [x] Secret、Header、Approval Token、原始 toolArgs 和敏感 input/output 不进入日志、Safe DTO、前端 state 或持久化；
+- [x] Approval replay、stale input、Role mismatch 和 Catalog version mismatch 均 fail closed；
+- [x] Tool description、schema、content 和 structured result 中的 Prompt Injection 只作为不可信数据处理；
+- [x] timeout 后不自动重试非幂等 Tool，恢复通过连接失效和显式 reconnect；
+- [x] 生产 `MastraMcpAdapter` 使用 `listToolsWithErrors()`、稳定错误映射、stdio cwd 校验、HTTP DNS/redirect 校验、`noopLogger` 和 `enableServerLogs: false`；
+- [x] 版本基线为 `@mastra/core@1.51.0`、`@mastra/mcp@1.15.1`、`@modelcontextprotocol/sdk@1.30.0`；API 前缀为 `/api/v1/mcp`，Migration 为 `scripts/migrations/048-mcp-client.sql`；
+- [x] legacy SSE 当前不属于一期公共 Transport，Mastra fallback 检测到时 fail closed，并在路线图 R5 单独跟踪；
+- [x] Design、Implementation Plan、Spike Result、Roadmap、`package.json`/lockfile 的范围、精确版本、API、Migration 和安全决策已同步。
+
+发布前固定执行：
+
+```powershell
+npm run test:mcp
+npm run typecheck
+npm run test:architecture
+npm run build
+git diff --check
+npm test
+```
+
+Task 10 完成后，任何 Mastra 版本升级或新增 Transport 都必须重新执行独立 Spike，并更新本文件、设计方案、实施计划和路线图。
