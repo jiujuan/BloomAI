@@ -2,8 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { Archive, ExternalLink, FileCode2, History, LoaderCircle, Play, Power, RotateCcw, ShieldAlert, Trash2, X } from 'lucide-react'
 import { useSkillRuntimeStore } from './skill-runtime.store'
 import { formatDate, parseJson } from './skill-runtime.types'
-import type { CapabilityGrant, PackageDetail, PackageManifest, SkillInstallation, SkillRun, SkillVersion } from './skill-runtime.types'
-import { SkillCapabilityPanel } from './SkillCapabilityPanel'
+import type { PackageDetail, PackageManifest, SkillInstallation, SkillRun, SkillVersion } from './skill-runtime.types'
 import { getVersionSelection, SkillVersionPanel } from './SkillVersionPanel'
 import { SkillEditor, type VersionImpactAction } from './SkillEditor'
 
@@ -19,7 +18,7 @@ export type PackageDetailDrawerProps = {
 }
 
 export function PackageDetailDrawer({ detail, runs, selectedVersionId, onClose, onRun, onOpenRun, onSelectVersion, onCreateVersion }: PackageDetailDrawerProps) {
-  const { setInstallationEnabled, uninstallPackage, rollbackInstallation, deletePackage: deletePackageAction, approve, reject, revokeCapabilityGrant } = useSkillRuntimeStore()
+  const { setInstallationEnabled, uninstallPackage, rollbackInstallation, deletePackage: deletePackageAction } = useSkillRuntimeStore()
   const [busy, setBusy] = useState<string | null>(null)
   const [versionEditor, setVersionEditor] = useState<{ action: VersionImpactAction; target: SkillVersion } | null>(null)
   const currentInstallation = detail.installations[0]
@@ -31,7 +30,6 @@ export function PackageDetailDrawer({ detail, runs, selectedVersionId, onClose, 
   const manifest = parseVersionManifest(selectedVersion)
   const snapshot = parseVersionSnapshot(selectedVersion)
   const selectedRuns = runs.filter((run) => run.skillVersionId === selectedVersion?.id).slice(0, 5)
-  const selectedGrants = detail.capabilityGrants.filter((grant) => (grant.skillVersionId || grant.skill_version_id) === selectedVersion?.id)
   const packageDeleted = Boolean(detail.package.deletedAt ?? detail.package.deleted_at)
   const installationRetired = currentInstallation?.status === 'uninstalled' || currentInstallation?.status === 'deleted'
   const lifecycleLocked = packageDeleted || installationRetired
@@ -73,21 +71,6 @@ export function PackageDetailDrawer({ detail, runs, selectedVersionId, onClose, 
     setBusy('delete-package')
     try { await deletePackageAction(detail.package.id, { reason }); onClose() } finally { setBusy(null) }
   }
-  const approveGrant = async (grant: CapabilityGrant) => {
-    if (!window.confirm(`批准 ${grant.capability} 将允许当前版本使用以下 scope：${JSON.stringify(grant.scope)}。是否继续？`)) return
-    setBusy(grant.id)
-    try { await approve(grant.id, { actor: 'skills-detail' }) } finally { setBusy(null) }
-  }
-  const rejectGrant = async (grant: CapabilityGrant) => {
-    if (!window.confirm(`拒绝 ${grant.capability} 后，相关 Run 可能保持 waiting_approval。是否继续？`)) return
-    setBusy(grant.id)
-    try { await reject(grant.id, { actor: 'skills-detail', reason: 'Rejected from Skill Detail' }) } finally { setBusy(null) }
-  }
-  const revoke = async (grant: CapabilityGrant) => {
-    if (!window.confirm('撤销此权限后，后续运行将再次请求授权。是否继续？')) return
-    setBusy(grant.id)
-    try { await revokeCapabilityGrant(grant.id, { actor: 'skills-detail', reason: 'Revoked from Skill Detail' }) } finally { setBusy(null) }
-  }
   const confirmVersionAction = async () => {
     if (!versionEditor) return
     const editor = versionEditor
@@ -112,8 +95,6 @@ export function PackageDetailDrawer({ detail, runs, selectedVersionId, onClose, 
       <section className="skills-detail-section"><div className="skills-detail-heading"><h3>来源与快照</h3><span className="skills-status info">server snapshot</span></div><dl className="skills-detail-kv"><div><dt>来源</dt><dd>{detail.package.sourceUri || detail.package.source_uri || detail.package.sourceType || detail.package.source_type || '—'}</dd></div><div><dt>固定 ref</dt><dd>{String(snapshot.sourceCommit || snapshot.sourceRef || detail.package.sourceRef || detail.package.source_ref || '—')}</dd></div><div><dt>快照哈希</dt><dd className="skills-mono">{String(snapshot.sourceSha256 || selectedVersion?.snapshotHash || selectedVersion?.snapshot_hash || selectedVersion?.manifestHash || selectedVersion?.manifest_hash || '—')}</dd></div><div><dt>Package 路径</dt><dd className="skills-mono">{selectedVersion?.packagePath || selectedVersion?.package_path || '—'}</dd></div></dl></section>
 
       <section className="skills-detail-section"><div className="skills-detail-heading"><h3>版本、文件和 Diff</h3><span className="skills-muted">当前：v{currentVersion?.version || '—'}</span></div><SkillVersionPanel versions={detail.versions} currentVersionId={currentVersionId} selectedVersionId={selectedVersion?.id} onSelect={onSelectVersion} onPreviewRollback={(version) => setVersionEditor({ action: 'rollback', target: version })} onPreviewUpdate={onCreateVersion ? (version) => setVersionEditor({ action: 'update', target: version }) : undefined} /></section>
-
-      <section className="skills-detail-section"><SkillCapabilityPanel manifest={manifest} grants={selectedGrants} versionId={selectedVersion?.id} versionLabel={`v${selectedVersion?.version || '—'} · ${selectedIsCurrent ? '当前版本' : '历史版本'}`} readOnly={!selectedIsCurrent || lifecycleLocked} onApprove={(grant) => void approveGrant(grant)} onReject={(grant) => void rejectGrant(grant)} onRevoke={(grant) => void revoke(grant)} /></section>
 
       <section className="skills-detail-section"><div className="skills-detail-heading"><h3>Installations</h3><span className="skills-count">{detail.installations.length}</span></div>{detail.installations.length === 0 ? <p className="skills-muted">当前 Workspace 没有 Installation。</p> : <div className="skills-installation-list">{detail.installations.map((installation) => <InstallationRow key={installation.id} installation={installation} isCurrent={installation.id === currentInstallation?.id} />)}</div>}</section>
 

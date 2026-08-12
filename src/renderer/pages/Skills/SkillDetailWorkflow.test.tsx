@@ -95,6 +95,18 @@ describe('P3-007 detail workflow contracts', () => {
     expect(workbenchSource).not.toContain('rejectGrant')
   })
 
+  it('removes Package Grant operations from Package Detail Drawer', () => {
+    const drawerSource = readFileSync(new URL('./PackageDetailDrawer.tsx', import.meta.url), 'utf8')
+    expect(drawerSource).toMatch(/import \{[^}]*SkillVersionPanel[^}]*\} from '\.\/SkillVersionPanel'/)
+    expect(drawerSource).toContain('Installations')
+    expect(drawerSource).toContain('最近 Runs')
+    expect(drawerSource).toContain('Manifest')
+    expect(drawerSource).not.toContain('SkillCapabilityPanel')
+    expect(drawerSource).not.toContain('approveGrant')
+    expect(drawerSource).not.toContain('rejectGrant')
+    expect(drawerSource).not.toContain('revokeCapabilityGrant')
+  })
+
   it('formats scopes and distinguishes grant lifecycle states', () => {
     expect(formatCapabilityScope({ allowedDomains: ['example.com'], maxCalls: 10 })).toContain('允许域名：example.com')
     expect(formatCapabilityScope({ allowedRoots: ['C:/workspace'], maxCalls: 0 })).toContain('允许目录：C:/workspace')
