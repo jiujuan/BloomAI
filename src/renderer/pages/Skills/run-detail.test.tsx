@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ArtifactList } from './ArtifactList'
 import { CapabilityApprovalCard } from './CapabilityApprovalCard'
@@ -86,6 +87,42 @@ describe('Run Detail workbench', () => {
     expect(input).toContain('type="text"')
   })
 
+  it('renders waiting approval details and keeps distinct approve/reject/cancel actions', () => {
+    const markup = renderToStaticMarkup(<>
+      <CapabilityApprovalCard action={run.requiredAction!} />
+      <RunActionPanel run={run} onAction={() => undefined} />
+    </>)
+    expect(markup).toContain('Capability approval')
+    expect(markup).toContain('image.generate')
+    expect(markup).toContain('data-run-action="approve"')
+    expect(markup).toContain('data-run-action="reject"')
+    expect(markup).toContain('data-run-action="cancel"')
+    expect(markup).toContain('拒绝原因（可选）')
+    expect(markup).toContain('取消 Run')
+    expect(markup).toContain('data-expected-revision="7"')
+    expect(markup.indexOf('data-run-action="reject"')).not.toBe(markup.indexOf('data-run-action="cancel"'))
+  })
+
+  it('keeps Run Detail approval actions on the runtime command path without permissions navigation', () => {
+    const drawerSource = readFileSync(new URL('./RunDetailDrawer.tsx', import.meta.url), 'utf8')
+    const actionSource = readFileSync(new URL('./RunActionPanel.tsx', import.meta.url), 'utf8')
+    const storeSource = readFileSync(new URL('./skill-runtime.store.ts', import.meta.url), 'utf8')
+    const sidebarSource = readFileSync(new URL('./SkillsSidebar.tsx', import.meta.url), 'utf8')
+
+    expect(drawerSource).toContain("run.status === 'waiting_approval' && run.requiredAction && <CapabilityApprovalCard action={run.requiredAction} />")
+    expect(drawerSource).toContain('await dispatchCommand(runId, action)')
+    expect(drawerSource).not.toContain('approveCapabilityGrant')
+    expect(drawerSource).not.toContain('rejectCapabilityGrant')
+    expect(drawerSource).not.toContain('onOpenGrant')
+    expect(drawerSource).not.toContain('openGrantContext')
+    expect(actionSource).toContain("type === 'reject' ? action(type, { reason: reason.trim() || undefined })")
+    expect(actionSource).toContain('data-run-action={type}')
+    expect(storeSource).toContain('platform.dispatchSkillRunCommand(id, command)')
+    expect(storeSource).toContain("type: 'approve'")
+    expect(storeSource).toContain("type: 'reject'")
+    expect(storeSource).toContain('platform.cancelSkillRun')
+    expect(sidebarSource).not.toMatch(/\bid:\s*['"]permissions['"]/)
+  })
   it('shows Artifact metadata, safe preview/export controls and Image Studio navigation', () => {
     const markup = renderToStaticMarkup(<ArtifactList runId="run-1" artifacts={[artifact]} onExport={() => undefined} />)
     expect(markup).toContain('image-reference')
