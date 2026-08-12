@@ -7,7 +7,8 @@ import { PackageDetailDrawer } from './PackageDetailDrawer'
 import { PackageInstallDialog } from './PackageInstallDialog'
 import { RunDetailDrawer, RunSkillDialog } from './RunDetailDrawer'
 import { SkillCapabilityPanel } from './SkillCapabilityPanel'
-import { paginateCatalogRows, shouldConfirmCatalogUninstall, SkillOverviewPanel } from './SkillOverviewPanel'
+import { filterCatalogRowsByTab, paginateCatalogRows, shouldConfirmCatalogUninstall, SkillOverviewPanel, sortCatalogRows } from './SkillOverviewPanel'
+import type { CatalogSortKey, CatalogTabKey } from './SkillOverviewPanel'
 import { SkillVersionPanel } from './SkillVersionPanel'
 import { getSkillsBreadcrumb, normalizeSkillsView, SkillsSidebar } from './SkillsSidebar'
 import type { SkillsCenterTab as SkillsRouteTab, SkillsRuntimeView } from './SkillsSidebar'
@@ -114,6 +115,9 @@ export function SkillsCenterWorkbench() {
   const [showInstaller, setShowInstaller] = useState(false)
   const [runVersion, setRunVersion] = useState<SkillVersion | null>(null)
   const [catalogPage, setCatalogPage] = useState(0)
+  const [catalogTab, setCatalogTab] = useState<CatalogTabKey>('all')
+  const [catalogSort, setCatalogSort] = useState<CatalogSortKey>('recent')
+  const [catalogFiltersOpen, setCatalogFiltersOpen] = useState(false)
   const creatorEnabled = runtime.featureFlags?.creatorEnabled ?? runtime.featureFlags?.creator_enabled ?? true
 
   const tab = normalizeSkillsView(route.tab || 'center')
@@ -143,16 +147,17 @@ export function SkillsCenterWorkbench() {
   }, [route])
   useEffect(() => {
     setCatalogPage(0)
-  }, [filters.query, filters.source, filters.runtime, filters.status])
+  }, [catalogSort, catalogTab, filters.query, filters.source, filters.runtime, filters.status])
 
   const packageRows = useMemo(() => buildSkillRows(runtime.packages, runtime.installations, runtime.runs), [runtime.packages, runtime.installations, runtime.runs])
   const catalogRows = useMemo(() => filterSkillRows(packageRows, { ...filters, source: 'package', runtime: 'package' }), [packageRows, filters])
+  const catalogTabRows = useMemo(() => sortCatalogRows(filterCatalogRowsByTab(catalogRows, catalogTab), catalogSort), [catalogRows, catalogSort, catalogTab])
   const rows = useMemo(() => {
-    if (tab === 'center') return paginateCatalogRows(catalogRows, catalogPage, SKILLS_CATALOG_PAGE_SIZE)
+    if (tab === 'center') return paginateCatalogRows(catalogTabRows, catalogPage, SKILLS_CATALOG_PAGE_SIZE)
     if (tab === 'import') return filterSkillRows(packageRows, filters)
     if (tab === 'runs') return filterSkillRows(packageRows.filter((row) => row.run), filters)
     return packageRows
-  }, [catalogPage, catalogRows, filters, packageRows, tab])
+  }, [catalogPage, catalogRows, catalogTabRows, filters, packageRows, tab])
   const selectTab = (next: SkillsCenterTab) => {
     const nextView = normalizeSkillsView(next)
     setRoute({ tab: nextView, selectedPackageId: ['detail', 'permissions'].includes(nextView) ? route.selectedPackageId : undefined, selectedRunId: nextView === 'run-detail' ? route.selectedRunId : undefined, draftId: nextView === 'creator' ? route.draftId : undefined })
@@ -276,7 +281,7 @@ export function SkillsCenterWorkbench() {
   }
 
   const breadcrumb = getSkillsBreadcrumb(tab)
-  const showCatalogFilters = tab === 'center' || tab === 'import'
+  const showCatalogFilters = tab === 'import' || (tab === 'center' && catalogFiltersOpen)
   return <div className="skills-center skills-admin-shell skills-runtime-page" data-testid="skills-admin-shell" data-testid-secondary="skills-center-workbench">
     <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><span className="skills-runtime-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy · Worker</span><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
     {canManageRuntime && <SkillRuntimeDiagnostics diagnostics={runtime.diagnostics} loading={runtime.diagnosticsLoading} error={runtime.diagnosticsError} onRefresh={() => void runtime.loadDiagnostics().catch(() => undefined)} />}
@@ -291,7 +296,7 @@ export function SkillsCenterWorkbench() {
           setRoute((current) => ({ ...current, tab: 'center', draftId: undefined }))
         }
       }} />}
-      {(tab === 'center' || tab === 'import') && <SkillOverviewPanel rows={rows} tab={tab === 'center' ? 'center' : 'import'} loading={runtime.loading} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} />}
+      {(tab === 'center' || tab === 'import') && <SkillOverviewPanel rows={rows} allRows={tab === 'center' ? catalogRows : packageRows} tab={tab === 'center' ? 'center' : 'import'} loading={runtime.loading} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogTabRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} catalogSearch={filters.query} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={handleGlobalSearch} onCatalogSortChange={setCatalogSort} onCatalogTabChange={setCatalogTab} onCatalogFilterClick={() => setCatalogFiltersOpen((current) => !current)} />}
       {tab === 'runs' && <RunsWorkbench runs={runtime.runs} artifactCounts={artifactCounts} loading={runtime.loading} error={runtime.error} onOpenRun={openRun} onRefresh={() => void runtime.loadRuns()} />}
       {tab === 'artifacts' && <ArtifactsWorkbench records={artifactRecords} loading={runtime.loading} error={runtime.error} onOpenRun={openRun} onExport={exportArtifact} />}
       {tab === 'settings' && <SkillRuntimeSettingsPanel settings={runtime.settings} featureFlags={runtime.featureFlags} diagnostics={runtime.diagnostics} onSaveSettings={runtime.updateSettings} onSaveFeatureFlags={runtime.updateFeatureFlags} onRollback={runtime.rollbackSettings} />}

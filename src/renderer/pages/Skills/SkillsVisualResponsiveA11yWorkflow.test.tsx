@@ -59,6 +59,16 @@ describe('P3-010 visual, responsive and accessibility contract', () => {
     expect(skillsGlobalCss).toContain('.skills-center-sidebar { width: 220px;')
   })
 
+  it('keeps the catalog KPI and status language sections in a responsive layout', () => {
+    expect(skillsGlobalCss).toMatch(/\.skills-catalog\s*\{[^}]*display:\s*grid/s)
+    expect(skillsGlobalCss).toMatch(/\.skills-catalog-kpis\s*\{[^}]*grid-template-columns:\s*repeat\(4,/s)
+    expect(skillsGlobalCss).toMatch(/\.skills-kpi-card\s*\{[^}]*display:\s*flex/s)
+    expect(skillsGlobalCss).toMatch(/\.skills-status-language\s*\{[^}]*display:\s*flex/s)
+    expect(skillsGlobalCss).toMatch(/\.skills-status-language-list\s*\{[^}]*display:\s*flex/s)
+    expect(skillsGlobalCss).toMatch(/@media\s*\(max-width:\s*860px\)[\s\S]*\.skills-catalog-kpis[^}]*grid-template-columns:\s*repeat\(2,/s)
+    expect(skillsGlobalCss).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*\.skills-catalog-kpis[^}]*grid-template-columns:\s*1fr/s)
+  })
+
   it('renders keyboard-addressable navigation and labeled search/action controls', () => {
     const sidebar = renderToStaticMarkup(<SkillsSidebar view="center" counts={{}} onChange={() => undefined} />)
     expect(sidebar).toContain('<nav aria-label="Skills Runtime 页面">')

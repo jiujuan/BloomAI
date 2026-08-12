@@ -9,14 +9,17 @@ import {
   Clock3,
   Edit3,
   Eye,
+  Filter,
   History,
   Info,
   PackageCheck,
   PauseCircle,
   PlayCircle,
+  Search,
   ShieldAlert,
   XCircle,
 } from 'lucide-react'
+import { cn } from '@renderer/utils'
 import type { SkillListRow } from './SkillsCenterWorkbench'
 import type { SkillRun, SkillRunStatus } from './skill-runtime.types'
 import { formatDate } from './skill-runtime.types'
@@ -26,6 +29,56 @@ export type CatalogMetrics = {
   enabledSkills: number
   weeklyRuns: number
   pendingItems: number
+}
+
+export type CatalogTabKey = 'all' | 'enabled' | 'installed' | 'pending' | 'running' | 'failed' | 'draft' | 'quarantine'
+export type CatalogSortKey = 'recent' | 'name' | 'status'
+
+export const CATALOG_TAB_DEFINITIONS: Array<{ key: CatalogTabKey; label: string }> = [
+  { key: 'all', label: '全部 Skills' },
+  { key: 'enabled', label: '已启用' },
+  { key: 'installed', label: '已安装' },
+  { key: 'pending', label: '待审批' },
+  { key: 'running', label: '运行中' },
+  { key: 'failed', label: '失败' },
+  { key: 'draft', label: '草稿' },
+  { key: 'quarantine', label: '隔离区' },
+]
+
+function catalogRowText(row: SkillListRow) {
+  return `${row.statusLabel} ${row.riskLabel} ${row.version}`.toLowerCase()
+}
+
+export function matchesCatalogTab(row: SkillListRow, tab: CatalogTabKey) {
+  const text = catalogRowText(row)
+  const runStatus = row.run?.status
+  if (tab === 'all') return true
+  if (tab === 'enabled') return row.enabled || text.includes('启用')
+  if (tab === 'installed') return Boolean(row.installationId) || (row.version !== '未安装' && !text.includes('未安装'))
+  if (tab === 'pending') return runStatus === 'waiting_approval' || runStatus === 'waiting_input' || text.includes('待审批') || text.includes('待处理')
+  if (tab === 'running') return runStatus === 'created' || runStatus === 'validating' || runStatus === 'running' || text.includes('运行中')
+  if (tab === 'failed') return runStatus === 'failed' || runStatus === 'cancelled' || runStatus === 'interrupted' || text.includes('失败')
+  if (tab === 'draft') return text.includes('draft') || text.includes('草稿')
+  return text.includes('quarantine') || text.includes('隔离')
+}
+
+export function getCatalogTabCounts(rows: SkillListRow[]): Record<CatalogTabKey, number> {
+  return CATALOG_TAB_DEFINITIONS.reduce((counts, tab) => {
+    counts[tab.key] = tab.key === 'all' ? rows.length : rows.filter((row) => matchesCatalogTab(row, tab.key)).length
+    return counts
+  }, {} as Record<CatalogTabKey, number>)
+}
+
+export function filterCatalogRowsByTab(rows: SkillListRow[], tab: CatalogTabKey) {
+  return tab === 'all' ? rows : rows.filter((row) => matchesCatalogTab(row, tab))
+}
+
+export function sortCatalogRows(rows: SkillListRow[], sort: CatalogSortKey) {
+  return [...rows].sort((left, right) => {
+    if (sort === 'name') return left.name.localeCompare(right.name)
+    if (sort === 'status') return left.statusLabel.localeCompare(right.statusLabel)
+    return (right.lastRunAt ?? -Infinity) - (left.lastRunAt ?? -Infinity)
+  })
 }
 
 export type SkillStatusVisual = {
@@ -83,6 +136,7 @@ export function paginateCatalogRows(rows: SkillListRow[], page: number, pageSize
 
 export type SkillsCenterCatalogProps = {
   rows: SkillListRow[]
+  allRows?: SkillListRow[]
   runs: SkillRun[]
   loading: boolean
   error?: string | null
@@ -96,10 +150,19 @@ export type SkillsCenterCatalogProps = {
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
+  catalogSearch?: string
+  catalogSort?: CatalogSortKey
+  catalogTab?: CatalogTabKey
+  catalogFiltersOpen?: boolean
+  onCatalogSearchChange?: (query: string) => void
+  onCatalogSortChange?: (sort: CatalogSortKey) => void
+  onCatalogTabChange?: (tab: CatalogTabKey) => void
+  onCatalogFilterClick?: () => void
 }
 
 export function SkillsCenterCatalog({
   rows,
+  allRows,
   runs,
   loading,
   error,
@@ -113,8 +176,18 @@ export function SkillsCenterCatalog({
   onToggleInstallation = () => undefined,
   onCreateVersion = () => undefined,
   onUninstallInstallation = () => undefined,
+  catalogSearch = '',
+  catalogSort = 'recent',
+  catalogTab = 'all',
+  catalogFiltersOpen = false,
+  onCatalogSearchChange = () => undefined,
+  onCatalogSortChange = () => undefined,
+  onCatalogTabChange = () => undefined,
+  onCatalogFilterClick = () => undefined,
 }: SkillsCenterCatalogProps) {
-  const metrics = useMemo(() => buildCatalogMetrics(rows, runs), [rows, runs])
+  const catalogSourceRows = allRows ?? rows
+  const tabCounts = useMemo(() => getCatalogTabCounts(catalogSourceRows), [catalogSourceRows])
+  const metrics = useMemo(() => buildCatalogMetrics(catalogSourceRows, runs), [catalogSourceRows, runs])
   const pendingRuns = useMemo(() => runs.filter((run) => run.status === 'waiting_approval' || run.requiredAction?.type === 'approve').sort((a, b) => b.updatedAt - a.updatedAt), [runs])
   const recentRuns = useMemo(() => [...runs].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5), [runs])
   const totalPages = Math.max(1, Math.ceil(totalRows / Math.max(1, pageSize)))
@@ -134,12 +207,26 @@ export function SkillsCenterCatalog({
     </section>
 
     <section className="skills-center-panel skills-catalog-panel" aria-labelledby="skills-catalog-title">
-      <div className="skills-center-panel-head"><div><div className="skills-eyebrow"><Box size={14} /> Package Runtime</div><h2 id="skills-catalog-title">Skill Catalog</h2><p>当前列表只展示 Package Skill；详情、运行和 Capability 审批共享同一 Package 上下文。</p></div><span className="skills-catalog-count">{totalRows} 个 Package</span></div>
-      {error && <div className="skills-page-message" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{error}</span></div>}
-      {loading && <div className="skills-center-state" role="status"><Activity size={18} aria-hidden="true" /><div><strong>正在加载 Package Catalog</strong><p>正在读取 Package、Installation 和 Runtime 状态。</p></div></div>}
-      {!loading && !error && rows.length === 0 && <div className="skills-center-state"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Skill</strong><p>当前筛选没有匹配的 Package；可以调整搜索条件或进入“导入 Skill”。</p></div></div>}
-      {!loading && !error && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
-      {!loading && !error && totalRows > pageSize && <Pagination page={currentPage} totalPages={totalPages} onPageChange={onPageChange} />}
+      <div className="skills-catalog-panel-head">
+        <div className="skills-catalog-heading">
+          <div className="skills-eyebrow"><Box size={14} /> Package Runtime</div>
+          <div className="skills-catalog-title-row"><h2 id="skills-catalog-title">Skill Catalog</h2><span className="skills-catalog-result-count">{totalRows} 个结果</span></div>
+          <p>当前列表只展示 Package Skill；详情、运行和 Capability 审批共享同一 Package 上下文。</p>
+        </div>
+        <div className="skills-catalog-tools">
+          <label className="skills-catalog-search"><Search size={16} aria-hidden="true" /><span className="sr-only">搜索 Skill Catalog</span><input aria-label="搜索 Skill Catalog" value={catalogSearch} onChange={(event) => onCatalogSearchChange(event.target.value)} placeholder="搜索名称、Slug 或描述" /></label>
+          <label className="skills-catalog-sort"><span className="sr-only">Skill Catalog 排序</span><select aria-label="Skill Catalog 排序" value={catalogSort} onChange={(event) => onCatalogSortChange(event.target.value as CatalogSortKey)}><option value="recent">最近更新</option><option value="name">名称</option><option value="status">状态</option></select></label>
+          <button type="button" className={cn('skills-catalog-filter-button', catalogFiltersOpen && 'active')} aria-label="打开 Skill Catalog 筛选" aria-pressed={catalogFiltersOpen} onClick={onCatalogFilterClick}><Filter size={15} aria-hidden="true" />筛选</button>
+        </div>
+      </div>
+      <div className="skills-catalog-tabs" role="tablist" aria-label="Skill Catalog 状态">{CATALOG_TAB_DEFINITIONS.map((tab) => <button key={tab.key} type="button" role="tab" aria-selected={catalogTab === tab.key} className={cn('skills-catalog-tab', catalogTab === tab.key && 'active')} onClick={() => onCatalogTabChange(tab.key)}><span>{tab.label}</span><strong>{tabCounts[tab.key]}</strong></button>)}</div>
+      <div id="skills-catalog-content">
+        {error && <div className="skills-page-message" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{error}</span></div>}
+        {loading && <div className="skills-center-state" role="status"><Activity size={18} aria-hidden="true" /><div><strong>正在加载 Package Catalog</strong><p>正在读取 Package、Installation 和 Runtime 状态。</p></div></div>}
+        {!loading && !error && rows.length === 0 && <div className="skills-center-state skills-catalog-empty"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Skill</strong><p>当前筛选没有匹配的 Package；可以调整搜索条件或进入“导入 Skill”。</p></div></div>}
+        {!loading && !error && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
+        {!loading && !error && totalRows > pageSize && <Pagination page={currentPage} totalPages={totalPages} onPageChange={onPageChange} />}
+      </div>
     </section>
 
     <div className="skills-catalog-secondary-grid">
@@ -197,6 +284,7 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
 
 type SkillOverviewPanelProps = {
   rows: SkillListRow[]
+  allRows?: SkillListRow[]
   tab: 'center' | 'import' | 'runs'
   loading: boolean
   error?: string | null
@@ -212,11 +300,19 @@ type SkillOverviewPanelProps = {
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
+  catalogSearch?: string
+  catalogSort?: CatalogSortKey
+  catalogTab?: CatalogTabKey
+  catalogFiltersOpen?: boolean
+  onCatalogSearchChange?: (query: string) => void
+  onCatalogSortChange?: (sort: CatalogSortKey) => void
+  onCatalogTabChange?: (tab: CatalogTabKey) => void
+  onCatalogFilterClick?: () => void
 }
 
-export function SkillOverviewPanel({ rows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onOpenGrant = () => undefined, onToggleInstallation = () => undefined, onCreateVersion = () => undefined, onUninstallInstallation = () => undefined, onInstall }: SkillOverviewPanelProps) {
+export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onOpenGrant = () => undefined, onToggleInstallation = () => undefined, onCreateVersion = () => undefined, onUninstallInstallation = () => undefined, onInstall, catalogSearch, catalogSort, catalogTab, catalogFiltersOpen, onCatalogSearchChange, onCatalogSortChange, onCatalogTabChange, onCatalogFilterClick }: SkillOverviewPanelProps) {
   if (tab === 'runs') return <RunOverview rows={rows} loading={loading} onOpenRun={onOpenRun} />
-  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onOpenGrant={onOpenGrant} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />
+  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onOpenGrant={onOpenGrant} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
 }
 
 function RunOverview({ rows, loading, onOpenRun }: { rows: SkillListRow[]; loading: boolean; onOpenRun: (runId: string) => void }) {
