@@ -1,4 +1,5 @@
 import React from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { SkillInstallation, SkillPackage } from './skill-runtime.types'
@@ -39,7 +40,6 @@ describe('Skills Center inline catalog actions', () => {
       onPageChange={() => undefined}
       onOpenPackage={() => undefined}
       onOpenRun={() => undefined}
-      onOpenGrant={() => undefined}
       onToggleInstallation={() => undefined}
       onCreateVersion={() => undefined}
       onUninstallInstallation={() => undefined}
@@ -64,4 +64,11 @@ describe('Skills Center inline catalog actions', () => {
   it('keeps installation id and revision available to action handlers', () => {
     expect(buildSkillRows([packageItem], [installation], []).find((row) => row.id === 'pkg-1')).toMatchObject({ installationId: 'installation-1', installationRevision: 7 })
   })
+  it('routes Pending Approval rows directly to Run Detail', () => {
+    const source = readFileSync(new URL('./SkillOverviewPanel.tsx', import.meta.url), 'utf8')
+    expect(source).not.toContain('onOpenGrant')
+    expect(source).not.toContain('openGrantContext')
+    expect(source).toContain('onClick={() => onOpenRun(run.id)}')
+  })
+
 })

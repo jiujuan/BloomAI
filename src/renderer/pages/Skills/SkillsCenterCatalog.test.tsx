@@ -62,7 +62,6 @@ describe('Skills Center Package Catalog', () => {
       onPageChange={() => undefined}
       onOpenPackage={() => undefined}
       onOpenRun={() => undefined}
-      onOpenGrant={() => undefined}
     />)
     expect(markup).toContain('全部 Skills')
     expect(markup).toContain('已启用')
@@ -88,7 +87,6 @@ describe('Skills Center Package Catalog', () => {
       onPageChange={() => undefined}
       onOpenPackage={() => undefined}
       onOpenRun={() => undefined}
-      onOpenGrant={() => undefined}
     />)
     expect(markup).toContain('Skill Catalog')
     expect(markup).toContain('0 个结果')

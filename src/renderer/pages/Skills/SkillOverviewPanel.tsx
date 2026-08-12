@@ -146,7 +146,6 @@ export type SkillsCenterCatalogProps = {
   onPageChange: (page: number) => void
   onOpenPackage: (packageId: string) => void
   onOpenRun: (runId: string) => void
-  onOpenGrant: (packageOrRunId: string) => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
@@ -172,7 +171,6 @@ export function SkillsCenterCatalog({
   onPageChange,
   onOpenPackage,
   onOpenRun,
-  onOpenGrant,
   onToggleInstallation = () => undefined,
   onCreateVersion = () => undefined,
   onUninstallInstallation = () => undefined,
@@ -231,7 +229,7 @@ export function SkillsCenterCatalog({
 
     <div className="skills-catalog-secondary-grid">
       <section className="skills-center-panel" aria-labelledby="skills-recent-runs-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><History size={14} /> Observe / Runtime</div><h2 id="skills-recent-runs-title">最近运行</h2><p>Run 状态与 Package Catalog 使用同一套状态语言。</p></div><button type="button" className="skills-text-button" onClick={() => onOpenRun(recentRuns[0]?.id || '')} disabled={recentRuns.length === 0}>查看运行记录 <ChevronRight size={13} aria-hidden="true" /></button></div>{recentRuns.length === 0 ? <EmptyNotice title="暂无最近 Run" body="Package 安装并运行后，最近运行会显示在这里。" /> : <div className="skills-center-run-list">{recentRuns.map((run) => <RunSummary key={run.id} run={run} onOpenRun={onOpenRun} />)}</div>}</section>
-      <section className="skills-center-panel" aria-labelledby="skills-pending-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><ShieldAlert size={14} /> Review queue</div><h2 id="skills-pending-title">待处理事项</h2><p>需要人工审批的 Run 会保留原始上下文和审计入口。</p></div><span className="skills-status warning">{pendingRuns.length} Pending</span></div>{pendingRuns.length === 0 ? <EmptyNotice title="没有待处理事项" body="当前没有等待 Capability 审批的 Package Run。" /> : <div className="skills-pending-list">{pendingRuns.map((run) => <button type="button" className="skills-pending-row" key={run.id} onClick={() => onOpenGrant(run.id)}><span className="skills-status-icon warning"><Clock3 size={14} aria-hidden="true" /></span><span><strong>Pending Approval</strong><small>{run.id} · {run.requiredAction?.capability || run.waitingReason || 'Capability 请求'}</small></span><ChevronRight size={14} aria-hidden="true" /></button>)}</div>}</section>
+      <section className="skills-center-panel" aria-labelledby="skills-pending-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><ShieldAlert size={14} /> Review queue</div><h2 id="skills-pending-title">待处理事项</h2><p>需要人工审批的 Run 会保留原始上下文和审计入口。</p></div><span className="skills-status warning">{pendingRuns.length} Pending</span></div>{pendingRuns.length === 0 ? <EmptyNotice title="没有待处理事项" body="当前没有等待 Capability 审批的 Package Run。" /> : <div className="skills-pending-list">{pendingRuns.map((run) => <button type="button" className="skills-pending-row" key={run.id} onClick={() => onOpenRun(run.id)}><span className="skills-status-icon warning"><Clock3 size={14} aria-hidden="true" /></span><span><strong>Pending Approval</strong><small>{run.id} · {run.requiredAction?.capability || run.waitingReason || 'Capability 请求'}</small></span><ChevronRight size={14} aria-hidden="true" /></button>)}</div>}</section>
     </div>
   </div>
 }
@@ -295,7 +293,6 @@ type SkillOverviewPanelProps = {
   onPageChange?: (page: number) => void
   onOpenPackage: (packageId: string) => void
   onOpenRun: (runId: string) => void
-  onOpenGrant?: (packageOrRunId: string) => void
   onInstall: () => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
@@ -310,9 +307,9 @@ type SkillOverviewPanelProps = {
   onCatalogFilterClick?: () => void
 }
 
-export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onOpenGrant = () => undefined, onToggleInstallation = () => undefined, onCreateVersion = () => undefined, onUninstallInstallation = () => undefined, onInstall, catalogSearch, catalogSort, catalogTab, catalogFiltersOpen, onCatalogSearchChange, onCatalogSortChange, onCatalogTabChange, onCatalogFilterClick }: SkillOverviewPanelProps) {
+export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onToggleInstallation = () => undefined, onCreateVersion = () => undefined, onUninstallInstallation = () => undefined, onInstall, catalogSearch, catalogSort, catalogTab, catalogFiltersOpen, onCatalogSearchChange, onCatalogSortChange, onCatalogTabChange, onCatalogFilterClick }: SkillOverviewPanelProps) {
   if (tab === 'runs') return <RunOverview rows={rows} loading={loading} onOpenRun={onOpenRun} />
-  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onOpenGrant={onOpenGrant} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
+  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
 }
 
 function RunOverview({ rows, loading, onOpenRun }: { rows: SkillListRow[]; loading: boolean; onOpenRun: (runId: string) => void }) {
