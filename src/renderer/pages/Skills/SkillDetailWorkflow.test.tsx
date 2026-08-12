@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -79,6 +80,19 @@ describe('P3-007 detail workflow contracts', () => {
     expect(markup).toContain('Diff')
     expect(markup).toContain('references/old.md')
     expect(markup).not.toContain('v1 · current')
+  })
+
+  it('keeps Workbench detail focused on version content instead of Package Grant management', () => {
+    const workbenchSource = readFileSync(new URL('./SkillsCenterWorkbench.tsx', import.meta.url), 'utf8')
+    expect(workbenchSource).toContain("import { SkillVersionPanel } from './SkillVersionPanel'")
+    expect(workbenchSource).toContain("tab === 'detail' && selectedPackage")
+    expect(workbenchSource).toContain('<SkillVersionPanel')
+    expect(workbenchSource).not.toContain("import { SkillCapabilityPanel } from './SkillCapabilityPanel'")
+    expect(workbenchSource).not.toContain('<SkillCapabilityPanel')
+    expect(workbenchSource).not.toContain('openGrantContext')
+    expect(workbenchSource).not.toContain('selectedVersionGrants')
+    expect(workbenchSource).not.toContain('approveGrant')
+    expect(workbenchSource).not.toContain('rejectGrant')
   })
 
   it('formats scopes and distinguishes grant lifecycle states', () => {

@@ -6,7 +6,6 @@ import type { InspectedPackage, PackageManifest, SkillArtifact, SkillInstallatio
 import { PackageDetailDrawer } from './PackageDetailDrawer'
 import { PackageInstallDialog } from './PackageInstallDialog'
 import { RunDetailDrawer, RunSkillDialog } from './RunDetailDrawer'
-import { SkillCapabilityPanel } from './SkillCapabilityPanel'
 import { filterCatalogRowsByTab, paginateCatalogRows, shouldConfirmCatalogUninstall, SkillOverviewPanel, sortCatalogRows } from './SkillOverviewPanel'
 import type { CatalogSortKey, CatalogTabKey } from './SkillOverviewPanel'
 import { SkillVersionPanel } from './SkillVersionPanel'
@@ -173,14 +172,6 @@ export function SkillsCenterWorkbench() {
     try { await runtime.loadPackage(packageId) } catch { /* store exposes the actionable error */ }
   }
   const openRun = (runId: string) => setRoute((current) => ({ ...current, tab: 'run-detail', selectedRunId: runId }))
-  const openGrantContext = async (packageOrRunId: string) => {
-    if (runtime.packages.some((item) => item.id === packageOrRunId)) {
-      setRoute((current) => ({ ...current, tab: 'permissions', selectedPackageId: packageOrRunId, selectedRunId: undefined }))
-      try { await runtime.loadPackage(packageOrRunId) } catch { /* store exposes the actionable error */ }
-      return
-    }
-    setRoute((current) => ({ ...current, tab: 'run-detail', selectedRunId: packageOrRunId }))
-  }
   const startRun = (version: SkillVersion) => setRunVersion(version)
   const openCreator = () => { if (!creatorEnabled) return; setRoute((current) => ({ ...current, tab: 'creator', selectedPackageId: undefined, selectedRunId: undefined })) }
   const createDraft = async () => {
@@ -266,20 +257,10 @@ export function SkillsCenterWorkbench() {
 
   const selectedPackage = runtime.selectedPackage?.package.id === route.selectedPackageId ? runtime.selectedPackage : null
   const selectedVersion = (runtime.selectedVersion && selectedPackage?.versions.some((version) => version.id === runtime.selectedVersion?.id) ? runtime.selectedVersion : undefined) || selectedPackage?.versions.find((version) => version.id === (selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id)) || selectedPackage?.versions[0]
-  const manifest = selectedVersion?.manifest as PackageManifest | undefined
-  const selectedVersionGrants = selectedPackage?.capabilityGrants.filter((grant) => (grant.skillVersionId || grant.skill_version_id) === selectedVersion?.id) ?? []
   const artifactRecords = useMemo(() => buildArtifactExplorerRecords(runtime.runs, runtime.artifactsByRun), [runtime.artifactsByRun, runtime.runs])
   const artifactCounts = useMemo(() => Object.fromEntries(runtime.runs.map((run) => [run.id, runtime.artifactsByRun[run.id]?.length ?? 0])), [runtime.artifactsByRun, runtime.runs])
-  const counts = { center: catalogRows.length, import: packageRows.length, creator: Object.keys(runtime.drafts).length, detail: selectedPackage ? 1 : 0, permissions: selectedPackage?.capabilityGrants.length ?? 0, runs: runtime.runs.length, 'run-detail': route.selectedRunId ? 1 : 0, artifacts: artifactRecords.length, settings: runtime.diagnostics ? 1 : 0 }
+  const counts = { center: catalogRows.length, import: packageRows.length, creator: Object.keys(runtime.drafts).length, detail: selectedPackage ? 1 : 0, runs: runtime.runs.length, 'run-detail': route.selectedRunId ? 1 : 0, artifacts: artifactRecords.length, settings: runtime.diagnostics ? 1 : 0 }
 
-  const approveGrant = async (grant: NonNullable<typeof selectedPackage>['capabilityGrants'][number]) => {
-    if (typeof window !== 'undefined' && !window.confirm(`批准 ${grant.capability} 将允许当前 Package 使用以下 scope：${JSON.stringify(grant.scope)}。是否继续？`)) return
-    await runtime.approve(grant.id, { actor: 'skills-center' })
-  }
-  const rejectGrant = async (grant: NonNullable<typeof selectedPackage>['capabilityGrants'][number]) => {
-    if (typeof window !== 'undefined' && !window.confirm(`拒绝 ${grant.capability} 后，相关 Run 可能保持 waiting_approval。是否继续？`)) return
-    await runtime.reject(grant.id, { actor: 'skills-center', reason: 'Rejected from Skills Center' })
-  }
   const exportArtifact = async (artifact: SkillArtifact) => {
     const destinationDir = typeof window !== 'undefined' ? window.prompt('输入导出目录（服务端会校验权限）：', '')?.trim() : ''
     if (!destinationDir || (typeof window !== 'undefined' && !window.confirm(`确认将 ${artifact.path} 导出到 ${destinationDir}？此操作会记录审计事件。`))) return
@@ -302,11 +283,11 @@ export function SkillsCenterWorkbench() {
           setRoute((current) => ({ ...current, tab: 'center', draftId: undefined }))
         }
       }} />}
-      {(tab === 'center' || tab === 'import') && <SkillOverviewPanel rows={rows} allRows={tab === 'center' ? catalogRows : packageRows} tab={tab === 'center' ? 'center' : 'import'} loading={runtime.loading} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogTabRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onOpenGrant={openGrantContext} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} catalogSearch={filters.query} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={handleGlobalSearch} onCatalogSortChange={setCatalogSort} onCatalogTabChange={setCatalogTab} onCatalogFilterClick={() => setCatalogFiltersOpen((current) => !current)} />}
+      {(tab === 'center' || tab === 'import') && <SkillOverviewPanel rows={rows} allRows={tab === 'center' ? catalogRows : packageRows} tab={tab === 'center' ? 'center' : 'import'} loading={runtime.loading} error={runtime.error} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogTabRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} catalogSearch={filters.query} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={handleGlobalSearch} onCatalogSortChange={setCatalogSort} onCatalogTabChange={setCatalogTab} onCatalogFilterClick={() => setCatalogFiltersOpen((current) => !current)} />}
       {tab === 'runs' && <RunsWorkbench runs={runtime.runs} artifactCounts={artifactCounts} loading={runtime.loading} error={runtime.error} onOpenRun={openRun} onRefresh={() => void runtime.loadRuns()} />}
       {tab === 'artifacts' && <ArtifactsWorkbench records={artifactRecords} loading={runtime.loading} error={runtime.error} onOpenRun={openRun} onExport={exportArtifact} />}
       {tab === 'settings' && <SkillRuntimeSettingsPanel settings={runtime.settings} featureFlags={runtime.featureFlags} diagnostics={runtime.diagnostics} onSaveSettings={runtime.updateSettings} onSaveFeatureFlags={runtime.updateFeatureFlags} onRollback={runtime.rollbackSettings} />}
-      {(tab === 'detail' || tab === 'permissions') && selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id} selectedVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} onPreviewUpdate={createVersionFromVersion} /><SkillCapabilityPanel manifest={manifest} grants={selectedVersionGrants} versionId={selectedVersion?.id} versionLabel={`v${selectedVersion?.version || '—'} · ${selectedVersion?.id === (selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id) ? '当前版本' : '历史版本'}`} onApprove={approveGrant} onReject={rejectGrant} /></div>}
+      {tab === 'detail' && selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id} selectedVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} onPreviewUpdate={createVersionFromVersion} /></div>}
     </main></div>
     {showInstaller && <PackageInstallDialog onClose={() => setShowInstaller(false)} onOpenCreator={openCreatorFromInspection} onInstalled={(context) => { if (context.packageId) void openPackage(context.packageId) }} />}
     {selectedPackage && <PackageDetailDrawer detail={selectedPackage} runs={runtime.runs} selectedVersionId={selectedVersion?.id} onSelectVersion={runtime.selectVersion} onCreateVersion={createVersionFromVersion} onClose={() => setRoute((current) => ({ ...current, selectedPackageId: undefined }))} onRun={startRun} onOpenRun={openRun} />}
