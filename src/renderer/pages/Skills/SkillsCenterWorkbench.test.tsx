@@ -51,6 +51,7 @@ describe('Skills Center workbench contract', () => {
     const creatorEncoded = encodeSkillsCenterState({ tab: 'creator', draftId: 'draft-1' })
     expect(creatorEncoded).toBe('#skills/tab=creator&draft=draft-1')
     expect(decodeSkillsCenterState(creatorEncoded)).toEqual({ tab: 'creator', draftId: 'draft-1' })
+    expect(decodeSkillsCenterState('#skills/tab=permissions&package=pkg-1')).toMatchObject({ tab: 'detail', selectedPackageId: 'pkg-1' })
     expect(encoded).not.toContain('token')
     expect(encoded).not.toContain('secret')
   })

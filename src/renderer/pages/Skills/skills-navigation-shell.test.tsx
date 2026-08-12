@@ -7,12 +7,13 @@ import { SKILLS_RUNTIME_NAV_ITEMS, SkillsSidebar, getSkillsBreadcrumb, normalize
 const counts = Object.fromEntries(SKILLS_RUNTIME_NAV_ITEMS.map((item) => [item.id, 0]))
 
 describe('Skills Runtime navigation shell', () => {
-  it('defines the nine Package Runtime views and stable breadcrumb labels', () => {
+  it('defines the eight public Package Runtime views without the permissions page', () => {
     expect(SKILLS_RUNTIME_NAV_ITEMS.map((item) => item.id)).toEqual([
-      'center', 'import', 'creator', 'detail', 'permissions', 'runs', 'run-detail', 'artifacts', 'settings',
+      'center', 'import', 'creator', 'detail', 'runs', 'run-detail', 'artifacts', 'settings',
     ])
+    expect(SKILLS_RUNTIME_NAV_ITEMS.some((item) => (item.id as string) === 'permissions')).toBe(false)
     expect(SKILLS_RUNTIME_NAV_ITEMS.map((item) => item.label)).toEqual([
-      'Skills Center', '导入 Skill', 'Skills Creator', 'Skill 详情', '权限与安装', '运行记录', 'Run 详情', 'Artifacts', '系统设置',
+      'Skills Center', '导入 Skill', 'Skills Creator', 'Skill 详情', '运行记录', 'Run 详情', 'Artifacts', '系统设置',
     ])
     expect(getSkillsBreadcrumb('run-detail')).toEqual(['Skills Center', '运行记录', 'Run 详情'])
     expect(normalizeSkillsView(undefined)).toBe('center')
@@ -22,7 +23,7 @@ describe('Skills Runtime navigation shell', () => {
     const markup = renderToStaticMarkup(<SkillsSidebar view="center" counts={counts} onChange={() => undefined} />)
     expect(markup).toContain('Skills Center')
     expect(markup).toContain('导入 Skill')
-    expect(markup).toContain('权限与安装')
+    expect(markup).not.toContain('权限与安装')
     expect(markup).toContain('系统设置')
     expect(markup).toContain('aria-current="page"')
     expect(markup).not.toContain('Installed')

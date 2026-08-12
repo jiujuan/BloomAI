@@ -89,11 +89,17 @@ export function encodeSkillsCenterState(state: SkillsCenterRouteState) {
   return `#skills/${parts.join('&')}`
 }
 
+type LegacySkillsCenterTab = SkillsCenterTab | 'permissions'
+
+function isSkillsCenterTab(value: string | null): value is SkillsCenterTab {
+  return value === 'runs' || value === 'creator' || value === 'center' || value === 'import' || value === 'detail' || value === 'run-detail' || value === 'artifacts' || value === 'settings'
+}
+
 export function decodeSkillsCenterState(hash: string): SkillsCenterRouteState {
   if (!hash.startsWith('#skills/')) return {}
   const values = new URLSearchParams(hash.slice('#skills/'.length))
-  const rawTab = values.get('tab')
-  const tab = rawTab === 'runs' || rawTab === 'creator' || rawTab === 'center' || rawTab === 'import' || rawTab === 'detail' || rawTab === 'permissions' || rawTab === 'run-detail' || rawTab === 'artifacts' || rawTab === 'settings' ? rawTab as SkillsCenterTab : undefined
+  const rawTab = values.get('tab') as LegacySkillsCenterTab | null
+  const tab: SkillsCenterTab | undefined = rawTab === 'permissions' ? 'detail' : isSkillsCenterTab(rawTab) ? rawTab : undefined
   return { tab, selectedPackageId: values.get('package') || undefined, selectedRunId: values.get('run') || undefined, draftId: values.get('draft') || undefined }
 }
 
@@ -160,7 +166,7 @@ export function SkillsCenterWorkbench() {
   }, [catalogPage, catalogRows, catalogTabRows, filters, packageRows, tab])
   const selectTab = (next: SkillsCenterTab) => {
     const nextView = normalizeSkillsView(next)
-    setRoute({ tab: nextView, selectedPackageId: ['detail', 'permissions'].includes(nextView) ? route.selectedPackageId : undefined, selectedRunId: nextView === 'run-detail' ? route.selectedRunId : undefined, draftId: nextView === 'creator' ? route.draftId : undefined })
+    setRoute({ tab: nextView, selectedPackageId: nextView === 'detail' ? route.selectedPackageId : undefined, selectedRunId: nextView === 'run-detail' ? route.selectedRunId : undefined, draftId: nextView === 'creator' ? route.draftId : undefined })
   }
   const openPackage = async (packageId: string) => {
     setRoute((current) => ({ ...current, tab: 'detail', selectedPackageId: packageId }))

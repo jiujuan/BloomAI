@@ -1,9 +1,9 @@
 import React from 'react'
-import { Archive, FilePlus2, FileSearch, LayoutDashboard, LockKeyhole, PackageOpen, PlayCircle, Settings2, Sparkles, Upload } from 'lucide-react'
+import { Archive, FilePlus2, FileSearch, LayoutDashboard, PackageOpen, PlayCircle, Settings2, Sparkles, Upload } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/utils'
 
-export type SkillsRuntimeView = 'center' | 'import' | 'creator' | 'detail' | 'permissions' | 'runs' | 'run-detail' | 'artifacts' | 'settings'
+export type SkillsRuntimeView = 'center' | 'import' | 'creator' | 'detail' | 'runs' | 'run-detail' | 'artifacts' | 'settings'
 export type SkillsCenterTab = SkillsRuntimeView
 
 export type SkillsRuntimeNavItem = {
@@ -18,7 +18,6 @@ export const SKILLS_RUNTIME_NAV_ITEMS: SkillsRuntimeNavItem[] = [
   { id: 'import', label: '导入 Skill', icon: Upload, group: 'workspace' },
   { id: 'creator', label: 'Skills Creator', icon: Sparkles, group: 'create' },
   { id: 'detail', label: 'Skill 详情', icon: FileSearch, group: 'workspace' },
-  { id: 'permissions', label: '权限与安装', icon: LockKeyhole, group: 'workspace' },
   { id: 'runs', label: '运行记录', icon: PlayCircle, group: 'workspace' },
   { id: 'run-detail', label: 'Run 详情', icon: FilePlus2, group: 'workspace' },
   { id: 'artifacts', label: 'Artifacts', icon: PackageOpen, group: 'workspace' },
@@ -33,7 +32,7 @@ export function getSkillsBreadcrumb(view: SkillsRuntimeView): string[] {
   const item = SKILLS_RUNTIME_NAV_ITEMS.find((candidate) => candidate.id === view)
   if (!item || view === 'center') return ['Skills Center']
   if (view === 'run-detail') return ['Skills Center', '运行记录', item.label]
-  if (view === 'detail' || view === 'permissions' || view === 'artifacts') return ['Skills Center', 'Skill 详情', item.label]
+  if (view === 'detail' || view === 'artifacts') return ['Skills Center', 'Skill 详情', item.label]
   return ['Skills Center', item.label]
 }
 
