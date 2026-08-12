@@ -52,7 +52,11 @@ const artifact = {
   sha256: 'sha256:abc123', metadata: { imageSessionId: 'image-session-1', previewUrl: '/preview.png' }, createdAt: 120,
 } satisfies SkillArtifact
 
-describe('Run Detail workbench', () => {
+// Run Detail is the v1 manual approval entry. The retained capability and
+// installation component contracts live in other tests and do not imply a public
+// `permissions` route.
+
+describe('Run Detail workbench approval and runtime contracts', () => {
   it('merges SSE and afterSeq events in sequence order without duplicate rendering', () => {
     const merged = mergeRunEvents([event(2), event(1)], [event(3), event(2, 'event-2-duplicate')])
     expect(merged.map((item) => item.seq)).toEqual([1, 2, 3])
@@ -73,7 +77,7 @@ describe('Run Detail workbench', () => {
     expect(markup).toContain('medium')
   })
 
-  it('offers server-declared approve/reject/cancel actions and safe waiting-input fields', () => {
+  it('keeps waiting_approval Run Detail actions and safe waiting-input fields', () => {
     const approval = renderToStaticMarkup(<RunActionPanel run={run} onAction={() => undefined} />)
     expect(approval).toContain('批准')
     expect(approval).toContain('拒绝')
@@ -87,7 +91,7 @@ describe('Run Detail workbench', () => {
     expect(input).toContain('type="text"')
   })
 
-  it('renders waiting approval details and keeps distinct approve/reject/cancel actions', () => {
+  it('renders waiting_approval details as the Run Detail manual approval entry with distinct approve/reject/cancel actions', () => {
     const markup = renderToStaticMarkup(<>
       <CapabilityApprovalCard action={run.requiredAction!} />
       <RunActionPanel run={run} onAction={() => undefined} />

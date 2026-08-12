@@ -48,7 +48,11 @@ const grant = {
   status: 'approved', grantMode: 'persistent', grantedBy: 'admin', grantedAt: 100,
 } as CapabilityGrant
 
-describe('P3-007 detail workflow contracts', () => {
+// Version/detail tests and retained capability-component tests are intentionally
+// independent from public navigation: keeping SkillCapabilityPanel here does not
+// restore a `permissions` view.
+
+describe('P3-007 detail workflow and retained component contracts', () => {
   it('keeps the installation current version separate from a selected historical version', () => {
     const selection = getVersionSelection([history, current], installation.currentVersionId, history.id)
     expect(selection.current?.id).toBe('v2')
@@ -107,7 +111,7 @@ describe('P3-007 detail workflow contracts', () => {
     expect(drawerSource).not.toContain('revokeCapabilityGrant')
   })
 
-  it('formats scopes and distinguishes grant lifecycle states', () => {
+  it('retains capability scope formatting and grant lifecycle contracts without requiring a permissions navigation view', () => {
     expect(formatCapabilityScope({ allowedDomains: ['example.com'], maxCalls: 10 })).toContain('允许域名：example.com')
     expect(formatCapabilityScope({ allowedRoots: ['C:/workspace'], maxCalls: 0 })).toContain('允许目录：C:/workspace')
     expect(formatCapabilityScope({})).toBe('未限定 scope')
