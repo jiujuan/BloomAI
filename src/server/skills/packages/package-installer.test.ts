@@ -403,6 +403,24 @@ capabilities:
     expect(fs.existsSync(path.join(result.packages[0].packagePath, 'scripts'))).toBe(false)
   })
 
+  it('preserves explicit npx provenance for a single root SKILL.md artifact', async () => {
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'true'
+    writeFile('SKILL.md', '# Root Skill\n')
+
+    const { PackageInstaller } = await loadInstaller()
+    const inspected = await new PackageInstaller().inspect({
+      kind: 'local-directory',
+      directory: fixtureDir,
+      metadata: { origin: 'npx-artifact' },
+    })
+
+    expect(inspected.packages[0].sourceSnapshot).toMatchObject({
+      source_origin: 'npx-artifact',
+      detected_layout: 'single-skill',
+      execution_disclaimer: expect.stringContaining('does not execute npx'),
+    })
+  })
+
   it('rejects unsafe GitHub refs before any network request', async () => {
     const fetchSpy = vi.fn()
     globalThis.fetch = fetchSpy as typeof fetch

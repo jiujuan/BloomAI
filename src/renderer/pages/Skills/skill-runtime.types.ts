@@ -254,6 +254,10 @@ export type InspectedPackage = {
     sourceSha256: string
     sourceCommit?: string
     sourceRef?: string
+    sourceOrigin?: string
+    detectedLayout?: string
+    ignoredPaths?: string[]
+    executionDisclaimer?: string
     files: Array<{ path: string; sha256: string; sizeBytes: number }>
   }
 }

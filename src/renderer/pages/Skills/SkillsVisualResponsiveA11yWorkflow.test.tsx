@@ -9,7 +9,7 @@ const skillsGlobalCss = readFileSync(new URL('../../styles/global.css', import.m
 
 const hasRule = (selector: string, declaration: RegExp) => {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = skillsGlobalCss.match(new RegExp(`${escapedSelector}[^\\{]*\\{([^}]*)\\}`, 's'))
+  const match = skillsGlobalCss.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 's'))
   return match ? declaration.test(match[1]) : false
 }
 
@@ -57,6 +57,12 @@ describe('P3-010 visual, responsive and accessibility contract', () => {
     expect(skillsGlobalCss).toContain('.skills-table-scroll')
     expect(skillsGlobalCss).toMatch(/\.skills-center-main \{[^}]*padding:\s*14px 18px 24px/s)
     expect(skillsGlobalCss).toContain('.skills-center-sidebar { width: 220px;')
+    expect(hasRule('.skills-import-tabs', /display:\s*flex/)).toBe(true)
+    expect(hasRule('.skills-import-tabs', /overflow-x:\s*auto/)).toBe(true)
+    expect(hasRule('.skills-import-tabs > button', /border-bottom:\s*2px solid transparent/)).toBe(true)
+    expect(hasRule('.skills-import-tabs > button', /border-radius:\s*0/)).toBe(true)
+    expect(skillsGlobalCss).toContain('.skills-import-tabs > button:focus-visible')
+    expect(skillsGlobalCss).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*\.skills-import-audit-grid[^}]*grid-template-columns:\s*1fr/s)
   })
 
   it('keeps the catalog KPI and status language sections in a responsive layout', () => {
@@ -69,18 +75,25 @@ describe('P3-010 visual, responsive and accessibility contract', () => {
     expect(skillsGlobalCss).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*\.skills-catalog-kpis[^}]*grid-template-columns:\s*1fr/s)
   })
 
-  it('renders keyboard-addressable navigation and labeled search/action controls', () => {
+  it('keeps keyboard-addressable navigation and labeled search/action controls', () => {
     const sidebar = renderToStaticMarkup(<SkillsSidebar view="center" counts={{}} onChange={() => undefined} />)
     expect(sidebar).toContain('<nav aria-label="Skills Runtime 页面">')
     expect(sidebar).toContain('type="button"')
     expect(sidebar).toContain('aria-current="page"')
     expect(sidebar).toContain('title="运行记录"')
+    expect(sidebar).not.toContain('Run 详情')
+    expect(sidebar).not.toContain('Runtime Diagnostics')
+    expect(sidebar).not.toContain('run-detail')
 
     const workbench = renderToStaticMarkup(<SkillsCenterWorkbench />)
     expect(workbench).toContain('aria-label="搜索 Skills"')
     expect(workbench).toContain('aria-label="刷新 Skills Runtime"')
     expect(workbench).toContain('aria-label="Skills 面包屑"')
     expect(workbench).toContain('skills-runtime-page')
+    expect(workbench).toContain('导入 Skill')
+    expect(workbench).not.toContain('导入 Package')
+    expect(workbench).not.toContain('Run 详情')
+    expect(workbench).not.toContain('Runtime Diagnostics')
   })
 
   it('keeps status meaning in text and icon markup instead of color alone', () => {

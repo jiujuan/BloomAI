@@ -148,8 +148,8 @@ type RuntimeActions = {
   selectVersion: (version: SkillVersion | null) => void
   inspectPackage: (source: PackageSource) => Promise<PackageInspectionResult>
   getImportReview: (reviewId: string) => Promise<PackageImportReview>
-  approveImportReview: (reviewId: string, reviewer?: string) => Promise<PackageImportReview>
-  rejectImportReview: (reviewId: string, reviewer?: string, reason?: string) => Promise<PackageImportReview>
+  approveImportReview: (reviewId: string) => Promise<PackageImportReview>
+  rejectImportReview: (reviewId: string, reason?: string) => Promise<PackageImportReview>
   installPackage: (input: PackageInstallInput) => Promise<PackageDetail | Record<string, unknown>>
   setInstallationEnabled: (id: string, enabled: boolean, expectedRevision: number) => Promise<SkillInstallation>
   enableInstallation: (id: string, input: { expectedRevision: number; idempotencyKey: string }) => Promise<SkillInstallation>
@@ -456,8 +456,8 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     selectVersion: (version) => set({ selectedVersion: version }),
     inspectPackage: (source) => withMutation('inspect', () => platform.inspectSkillPackage(source)),
     getImportReview: (reviewId) => platform.getImportReview(reviewId),
-    approveImportReview: (reviewId, reviewer = 'local-user') => withMutation(`import-review:${reviewId}`, () => platform.approveImportReview(reviewId, reviewer), { successTitle: 'Import Review 已批准', successMessage: '现在可以提交明确的安装确认。' }),
-    rejectImportReview: (reviewId, reviewer = 'local-user', reason) => withMutation(`import-review:${reviewId}`, () => platform.rejectImportReview(reviewId, reviewer, reason), { successTitle: 'Import Review 已拒绝', successMessage: 'Rejected review 保持不可安装。' }),
+    approveImportReview: (reviewId) => withMutation(`import-review:${reviewId}`, () => platform.approveImportReview(reviewId), { successTitle: 'Import Review 已批准', successMessage: '现在可以提交明确的安装确认。' }),
+    rejectImportReview: (reviewId, reason) => withMutation(`import-review:${reviewId}`, () => platform.rejectImportReview(reviewId, reason), { successTitle: 'Import Review 已拒绝', successMessage: 'Rejected review 保持不可安装。' }),
     installPackage: async (input) => {
       const result = await withMutation('install', async () => platform.installSkillPackage(input), { successTitle: 'Skill 已安装', successMessage: 'Package Runtime 已完成安装并保留审计记录。' })
       if (result && typeof result === 'object' && 'package' in result) {

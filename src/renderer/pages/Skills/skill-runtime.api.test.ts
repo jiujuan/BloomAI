@@ -179,24 +179,24 @@ describe('Package Runtime renderer API', () => {
 
   it('encodes dynamic ids, converts inspection DTOs and wires import review decisions', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { review_id: 'review-1', source_fingerprint: 'fingerprint-1', packages: [{ source_type: 'github', relative_skill_path: 'skills/demo', manifest_hash: 'sha', source_fingerprint: 'fingerprint-1', diagnostics: [{ severity: 'warning', message: 'Review required' }], import_review_required: true, manifest: { name: 'Demo', runtime: 'package-runtime', requested_capabilities: [] }, source_snapshot: { source_sha256: 'source-sha', files: [] } }] } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { review_id: 'review-1', source_fingerprint: 'fingerprint-1', packages: [{ source_type: 'github', relative_skill_path: 'skills/demo', manifest_hash: 'sha', source_fingerprint: 'fingerprint-1', diagnostics: [{ severity: 'warning', message: 'Review required' }], import_review_required: true, manifest: { name: 'Demo', runtime: 'package-runtime', requested_capabilities: [] }, source_snapshot: { source_sha256: 'source-sha', source_origin: 'npx-artifact', detected_layout: 'single-skill', ignored_paths: [], execution_disclaimer: 'BloomAI does not execute npx', files: [] } }] } }))
       .mockResolvedValueOnce(jsonResponse({ data: { id: 'draft/1', content: { name: 'Demo', slug: 'demo', skillMd: '# Demo' }, revision: 2, status: 'draft' } }))
       .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'pending', reviewer: null, decision: null, created_at: 10, updated_at: 11 } }))
       .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'approved', reviewer: 'local-user', decision: { action: 'approve' }, created_at: 10, updated_at: 12 } }))
       .mockResolvedValueOnce(jsonResponse({ data: { id: 'review/1', source: 'github', source_sha: 'source-sha', source_ref: 'main', security_findings: {}, status: 'rejected', reviewer: 'local-user', decision: { action: 'reject', reason: 'unsafe' }, created_at: 10, updated_at: 13 } }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(platform.inspectSkillPackage({ kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })).resolves.toMatchObject({ reviewId: 'review-1', sourceFingerprint: 'fingerprint-1', packages: [expect.objectContaining({ sourceType: 'github', manifestHash: 'sha', sourceFingerprint: 'fingerprint-1', importReviewRequired: true, sourceSnapshot: { sourceSha256: 'source-sha', files: [] } })] })
+    await expect(platform.inspectSkillPackage({ kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })).resolves.toMatchObject({ reviewId: 'review-1', sourceFingerprint: 'fingerprint-1', packages: [expect.objectContaining({ sourceType: 'github', manifestHash: 'sha', sourceFingerprint: 'fingerprint-1', importReviewRequired: true, sourceSnapshot: expect.objectContaining({ sourceSha256: 'source-sha', sourceOrigin: 'npx-artifact', detectedLayout: 'single-skill', ignoredPaths: [], executionDisclaimer: 'BloomAI does not execute npx', files: [] }) })] })
     await platform.getSkillDraft('draft/1')
     await expect(platform.getImportReview('review/1')).resolves.toMatchObject({ id: 'review/1', status: 'pending' })
-    await expect(platform.approveImportReview('review/1', 'local-user')).resolves.toMatchObject({ status: 'approved', reviewer: 'local-user' })
-    await expect(platform.rejectImportReview('review/1', 'local-user', 'unsafe')).resolves.toMatchObject({ status: 'rejected', reviewer: 'local-user' })
+    await expect(platform.approveImportReview('review/1')).resolves.toMatchObject({ status: 'approved', reviewer: 'local-user' })
+    await expect(platform.rejectImportReview('review/1', 'unsafe')).resolves.toMatchObject({ status: 'rejected', reviewer: 'local-user' })
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, `${API_BASE}/skill-packages/inspect`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ source: { kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' } }) }))
     expect(fetchMock).toHaveBeenNthCalledWith(2, `${API_BASE}/skill-drafts/draft%2F1`, expect.any(Object))
     expect(fetchMock).toHaveBeenNthCalledWith(3, `${API_BASE}/skill-import-reviews/review%2F1`, expect.any(Object))
-    expect(fetchMock).toHaveBeenNthCalledWith(4, `${API_BASE}/skill-import-reviews/review%2F1/approve`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewer: 'local-user' }) }))
-    expect(fetchMock).toHaveBeenNthCalledWith(5, `${API_BASE}/skill-import-reviews/review%2F1/reject`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewer: 'local-user', reason: 'unsafe' }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `${API_BASE}/skill-import-reviews/review%2F1/approve`, expect.objectContaining({ method: 'POST', body: JSON.stringify({}) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `${API_BASE}/skill-import-reviews/review%2F1/reject`, expect.objectContaining({ method: 'POST', body: JSON.stringify({ reason: 'unsafe' }) }))
   })
 
   it('normalizes creator drafts to Package Runtime and maps publish relations from the server', async () => {

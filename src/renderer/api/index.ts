@@ -134,6 +134,10 @@ function toInspectedPackage(value: unknown): InspectedPackage {
       sourceSha256: String(readValue(snapshot, 'sourceSha256', 'source_sha256', '')),
       sourceCommit: readValue(snapshot, 'sourceCommit', 'source_commit', undefined),
       sourceRef: readValue(snapshot, 'sourceRef', 'source_ref', undefined),
+      sourceOrigin: readValue(snapshot, 'sourceOrigin', 'source_origin', undefined),
+      detectedLayout: readValue(snapshot, 'detectedLayout', 'detected_layout', undefined),
+      ignoredPaths: asStringArray(readValue(snapshot, 'ignoredPaths', 'ignored_paths', [])),
+      executionDisclaimer: readValue(snapshot, 'executionDisclaimer', 'execution_disclaimer', undefined),
       files: asArray(snapshot.files).map((item) => { const file = asRecord(item); return { path: String(file.path ?? ''), sha256: String(file.sha256 ?? ''), sizeBytes: asNumber(readValue(file, 'sizeBytes', 'size_bytes', 0)) } }),
     },
   }
@@ -643,12 +647,12 @@ export const platform = {
     const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}`)
     return toPackageImportReview(data)
   },
-  async approveImportReview(reviewId: string, reviewer: string): Promise<PackageImportReview> {
-    const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/approve`, { method: 'POST', body: JSON.stringify({ reviewer }) })
+  async approveImportReview(reviewId: string): Promise<PackageImportReview> {
+    const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/approve`, { method: 'POST', body: JSON.stringify({}) })
     return toPackageImportReview(data)
   },
-  async rejectImportReview(reviewId: string, reviewer: string, reason?: string): Promise<PackageImportReview> {
-    const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/reject`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) })
+  async rejectImportReview(reviewId: string, reason?: string): Promise<PackageImportReview> {
+    const { data } = await apiFetch(`/skill-import-reviews/${encodeURIComponent(reviewId)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) })
     return toPackageImportReview(data)
   },
   async createSkillDraft(input: { content: SkillDraftContent; baseVersionId?: string }): Promise<DraftDto> {

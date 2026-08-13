@@ -10,7 +10,7 @@ import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observabil
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
 import { assertArchiveEntryPath, isAllowedSnapshotPath, type PackagePathPolicy } from './package-path-policy'
 import { SkillPackageReader } from './package-reader'
-import { detectNpxSkillsArtifact, isIgnoredArtifactPath, type NpxArtifactLayout } from './npx-artifact-detector'
+import { detectNpxSkillsArtifact, isIgnoredArtifactPath, NPX_EXECUTION_DISCLAIMER, type NpxArtifactLayout } from './npx-artifact-detector'
 import { packageInstallReviewService } from './package-install-review.service'
 import { downloadGitHubArchive, GitHubSourceError, parseGitHubSource, resolveGitHubCommit } from './github-source'
 import { assertPackageLimits, validateExternalSource, SkillSecurityError } from '../security/skill-security-checklist'
@@ -436,7 +436,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
     const directory = securedSource.directory
     if (!fs.statSync(directory).isDirectory()) throw new PackageInstallError(`Local package directory not found: ${directory}`)
     copySafeDirectory(directory, target)
-    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target, securedSource.metadata?.origin === 'npx-artifact')
     return { sourceSha256: hashDirectory(target), sourceRef: directory, source_origin: artifactMetadata.source_origin ?? 'local', ...artifactMetadata }
   }
   if (securedSource.kind === 'zip') {
@@ -444,7 +444,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
     if (!fs.statSync(zipPath).isFile()) throw new PackageInstallError(`ZIP package not found: ${zipPath}`)
     const archive = fs.readFileSync(zipPath)
     extractZip(archive, target)
-    const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    const artifactMetadata = detectAndSanitizeNpxArtifact(target, securedSource.metadata?.origin === 'npx-artifact')
     return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, source_origin: artifactMetadata.source_origin ?? 'zip', ...artifactMetadata }
   }
   let parsedSource
@@ -481,7 +481,10 @@ async function materializeSource(source: PackageInstallSource, target: string): 
   }
 }
 
-function detectAndSanitizeNpxArtifact(root: string): Pick<PackageSourceSnapshot, 'source_origin' | 'detected_layout' | 'ignored_paths' | 'execution_disclaimer'> {
+function detectAndSanitizeNpxArtifact(
+  root: string,
+  declaredNpxArtifact = false,
+): Pick<PackageSourceSnapshot, 'source_origin' | 'detected_layout' | 'ignored_paths' | 'execution_disclaimer'> {
   const limits = getPackageLimits()
   const reader = new SkillPackageReader(root, {
     ...limits,
@@ -489,14 +492,14 @@ function detectAndSanitizeNpxArtifact(root: string): Pick<PackageSourceSnapshot,
     maxFilesPerRun: limits.maxFileCount,
   })
   const detection = detectNpxSkillsArtifact(reader)
-  if (!detection.isNpxArtifact) return {}
+  if (!detection.isNpxArtifact && !declaredNpxArtifact) return {}
   assertPackageFeatureEnabled('npxImportEnabled')
   pruneIgnoredArtifactPaths(root, detection.ignoredPaths)
   return {
     source_origin: 'npx-artifact',
     detected_layout: detection.layout,
     ignored_paths: detection.ignoredPaths,
-    execution_disclaimer: detection.executionDisclaimer,
+    execution_disclaimer: detection.executionDisclaimer ?? NPX_EXECUTION_DISCLAIMER,
   }
 }
 

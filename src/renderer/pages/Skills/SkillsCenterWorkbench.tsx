@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Filter, Github, Plus, Puzzle, Search, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, Filter, Plus, Puzzle, Search, SlidersHorizontal, Upload } from 'lucide-react'
 import { useSkillRuntimeStore } from './skill-runtime.store'
 import { getPublishedPackageId } from './skill-runtime.types'
 import type { InspectedPackage, PackageManifest, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRuntimeCapabilities, SkillRuntimeFilterStatus, SkillRuntimeSourceFilter, SkillVersion } from './skill-runtime.types'
 import { PackageDetailDrawer } from './PackageDetailDrawer'
-import { PackageInstallDialog } from './PackageInstallDialog'
+import { PackageImportWorkbench } from './PackageInstallDialog'
 import { RunSkillDialog } from './RunSkillDialog'
 import { filterCatalogRowsByTab, paginateCatalogRows, shouldConfirmCatalogUninstall, shouldHideSkillsAdminAccessError, SkillOverviewPanel, sortCatalogRows } from './SkillOverviewPanel'
 import type { CatalogSortKey, CatalogTabKey } from './SkillOverviewPanel'
@@ -115,7 +115,6 @@ export function SkillsCenterWorkbench() {
   const runtime = useSkillRuntimeStore()
   const [route, setRoute] = useState<SkillsCenterRouteState>(() => typeof window === 'undefined' ? {} : decodeSkillsCenterState(window.location.hash))
   const [filters, setFilters] = useState<SkillsCenterFilters>({ query: '', source: 'all', runtime: 'all', status: 'all' })
-  const [showInstaller, setShowInstaller] = useState(false)
   const [runVersion, setRunVersion] = useState<SkillVersion | null>(null)
   const [catalogPage, setCatalogPage] = useState(0)
   const [catalogTab, setCatalogTab] = useState<CatalogTabKey>('all')
@@ -167,6 +166,7 @@ export function SkillsCenterWorkbench() {
     try { await runtime.loadPackage(packageId) } catch { /* store exposes the actionable error */ }
   }
   const openRun = () => setRoute((current) => ({ ...current, tab: 'runs', selectedPackageId: undefined }))
+  const openImport = () => setRoute((current) => ({ ...current, tab: 'import', selectedPackageId: undefined, draftId: undefined }))
   const startRun = (version: SkillVersion) => setRunVersion(version)
   const openCreator = () => { if (!creatorEnabled) return; setRoute((current) => ({ ...current, tab: 'creator', selectedPackageId: undefined })) }
   const createDraft = async () => {
@@ -192,7 +192,6 @@ export function SkillsCenterWorkbench() {
         capabilities: manifest.requestedCapabilities,
         visibility: 'private',
       } })
-      setShowInstaller(false)
       setRoute({ tab: 'creator', draftId: draft.id })
     } catch { /* store exposes the actionable error */ }
   }
@@ -263,10 +262,10 @@ export function SkillsCenterWorkbench() {
   }
 
   const breadcrumb = getSkillsBreadcrumb(tab)
-  const showCatalogFilters = tab === 'import' || (tab === 'center' && catalogFiltersOpen)
+  const showCatalogFilters = tab === 'center' && catalogFiltersOpen
   const visibleRuntimeError = shouldHideSkillsAdminAccessError(runtime.error) ? null : runtime.error
   return <div className="skills-center skills-admin-shell skills-runtime-page" data-testid="skills-admin-shell" data-testid-secondary="skills-center-workbench">
-    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><span className="skills-runtime-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy · Worker</span><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={() => setShowInstaller(true)}><Github size={13} aria-hidden="true" />导入 Package</button></header>
+    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><span className="skills-runtime-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy · Worker</span><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={openImport}><Upload size={13} aria-hidden="true" />导入 Skill</button></header>
     <div className="skills-center-layout"><SkillsSidebar view={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main">
       {showCatalogFilters && <div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={tab === 'center' ? 'package' : filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option></select></label><label>Runtime<select value={tab === 'center' ? 'package' : filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option></select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>}
       {visibleRuntimeError && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{visibleRuntimeError}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}
@@ -278,13 +277,13 @@ export function SkillsCenterWorkbench() {
           setRoute((current) => ({ ...current, tab: 'center', draftId: undefined }))
         }
       }} />}
-      {(tab === 'center' || tab === 'import') && <SkillOverviewPanel rows={rows} allRows={tab === 'center' ? catalogRows : packageRows} tab={tab === 'center' ? 'center' : 'import'} loading={runtime.loading} error={visibleRuntimeError} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={tab === 'center' ? catalogTabRows.length : undefined} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={() => setShowInstaller(true)} catalogSearch={filters.query} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={handleGlobalSearch} onCatalogSortChange={setCatalogSort} onCatalogTabChange={setCatalogTab} onCatalogFilterClick={() => setCatalogFiltersOpen((current) => !current)} />}
+      {tab === 'import' && <PackageImportWorkbench onOpenCreator={openCreatorFromInspection} onInstalled={(context) => { if (context.packageId) void openPackage(context.packageId) }} onCancel={() => selectTab('center')} />}
+      {tab === 'center' && <SkillOverviewPanel rows={rows} allRows={catalogRows} tab="center" loading={runtime.loading} error={visibleRuntimeError} runs={runtime.runs} page={catalogPage} pageSize={SKILLS_CATALOG_PAGE_SIZE} totalRows={catalogTabRows.length} onPageChange={setCatalogPage} onOpenPackage={openPackage} onOpenRun={openRun} onToggleInstallation={toggleInstallation} onCreateVersion={createVersion} onUninstallInstallation={uninstallInstallation} onInstall={openImport} catalogSearch={filters.query} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={handleGlobalSearch} onCatalogSortChange={setCatalogSort} onCatalogTabChange={setCatalogTab} onCatalogFilterClick={() => setCatalogFiltersOpen((current) => !current)} />}
       {tab === 'runs' && <RunsWorkbench runs={runtime.runs} artifactCounts={artifactCounts} loading={runtime.loading} error={visibleRuntimeError} onOpenRun={openRun} onRefresh={() => void runtime.loadRuns()} />}
       {tab === 'artifacts' && <ArtifactsWorkbench records={artifactRecords} loading={runtime.loading} error={visibleRuntimeError} onOpenRun={openRun} onExport={exportArtifact} />}
       {tab === 'settings' && <SkillRuntimeSettingsPanel settings={runtime.settings} featureFlags={runtime.featureFlags} diagnostics={runtime.diagnostics} onSaveSettings={runtime.updateSettings} onSaveFeatureFlags={runtime.updateFeatureFlags} onRollback={runtime.rollbackSettings} />}
       {tab === 'detail' && selectedPackage && <div className="skills-center-detail-grid"><SkillVersionPanel versions={selectedPackage.versions} currentVersionId={selectedPackage.installations[0]?.currentVersionId || selectedPackage.installations[0]?.current_version_id} selectedVersionId={selectedVersion?.id} onSelect={runtime.selectVersion} onPreviewUpdate={createVersionFromVersion} /></div>}
     </main></div>
-    {showInstaller && <PackageInstallDialog onClose={() => setShowInstaller(false)} onOpenCreator={openCreatorFromInspection} onInstalled={(context) => { if (context.packageId) void openPackage(context.packageId) }} />}
     {selectedPackage && <PackageDetailDrawer detail={selectedPackage} runs={runtime.runs} selectedVersionId={selectedVersion?.id} onSelectVersion={runtime.selectVersion} onCreateVersion={createVersionFromVersion} onClose={() => setRoute((current) => ({ ...current, selectedPackageId: undefined }))} onRun={startRun} onOpenRun={openRun} />}
     {runVersion && <RunSkillDialog version={runVersion} onClose={() => setRunVersion(null)} onStarted={() => openRun()} />}
   </div>

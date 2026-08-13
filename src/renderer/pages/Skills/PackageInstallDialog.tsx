@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, FileArchive, FolderOpen, Github, Info, LoaderCircle, PackageOpen, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Code2, FolderOpen, Github, Info, LoaderCircle, PackageOpen, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
 import type { InspectedPackage, PackageImportReview, PackageImportReviewStatus, PackageInspectionResult, PackageInstallInput, PackageSource } from './skill-runtime.types'
 
@@ -11,7 +12,6 @@ export type PackageSourceInput = {
   subdirectory?: string
   directory?: string
   artifactPath?: string
-  packageName?: string
 }
 
 export type PackageImportAuditContext = {
@@ -45,15 +45,13 @@ function trim(value: unknown) {
 function isGithubRepositoryUrl(value: string) {
   try {
     const url = new URL(value)
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) return false
     const parts = url.pathname.split('/').filter(Boolean)
-    return (url.protocol === 'https:' || url.protocol === 'http:') && (url.hostname === 'github.com' || url.hostname === 'www.github.com') && parts.length >= 2
+    if (parts.length !== 2) return false
+    return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(parts[0]) && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(parts[1].replace(/\.git$/, ''))
   } catch {
     return false
   }
-}
-
-function isNpxPackageName(value: string) {
-  return /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(value)
 }
 
 export function validatePackageSourceInput(kind: ImportSourceKind, input: PackageSourceInput): string[] {
@@ -65,10 +63,7 @@ export function validatePackageSourceInput(kind: ImportSourceKind, input: Packag
   if (kind === 'local-directory' && !trim(input.directory)) errors.push('请输入本地目录路径。')
   if (kind === 'zip' && !trim(input.artifactPath)) errors.push('请输入 ZIP 产物路径。')
   if (kind === 'zip' && trim(input.artifactPath) && !/\.zip$/i.test(trim(input.artifactPath))) errors.push('ZIP 产物必须使用 .zip 扩展名。')
-  if (kind === 'npx') {
-    if (!isNpxPackageName(trim(input.packageName))) errors.push('请输入有效的 npx 包名。')
-    if (!trim(input.artifactPath)) errors.push('请输入已生成的 npx 产物路径。')
-  }
+  if (kind === 'npx' && !trim(input.artifactPath)) errors.push('请输入已生成的 npx 产物目录。')
   if (trim(input.subdirectory).split('/').some((segment) => segment === '..')) errors.push('Skill 子目录不能越过来源根目录。')
   return errors
 }
@@ -128,17 +123,44 @@ function asPackageId(result: PackageImportAuditContext['result']) {
   return first && typeof first === 'object' && typeof (first as { packageId?: unknown }).packageId === 'string' ? (first as { packageId: string }).packageId : undefined
 }
 
-export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, initialInspection, initialReview, reviewer = 'local-user' }: {
+export type PackageInstallDialogProps = {
   onClose: () => void
   onOpenCreator?: (item: InspectedPackage) => void
   onInstalled?: (context: PackageImportAuditContext) => void
   initialInspection?: PackageInspectionResult
   initialReview?: PackageImportReview
-  reviewer?: string
-}) {
+  mode?: 'dialog' | 'page'
+}
+
+const IMPORT_SOURCE_TABS: Array<{ kind: Exclude<ImportSourceKind, 'zip'>; label: string; description: string }> = [
+  { kind: 'github', label: 'GitHub Archive', description: '按 ref 生成不可变快照' },
+  { kind: 'local-directory', label: '本地目录', description: '导入真实 SKILL.md 目录' },
+  { kind: 'npx', label: 'npx skills 产物', description: '导入 --copy 生成的目录' },
+]
+
+function importSourceIcon(kind: Exclude<ImportSourceKind, 'zip'>) {
+  if (kind === 'github') return <Github size={16} aria-hidden="true" />
+  if (kind === 'local-directory') return <FolderOpen size={16} aria-hidden="true" />
+  return <Code2 size={16} aria-hidden="true" />
+}
+
+function directoryPathFromDrop(event: React.DragEvent<HTMLDivElement>) {
+  const file = event.dataTransfer.files[0] as (File & { path?: string; webkitRelativePath?: string }) | undefined
+  if (!file?.path) return ''
+  const filePath = file.path
+  const relativePath = file.webkitRelativePath?.replace(/^[\\/]+/, '')
+  if (!relativePath) return filePath
+  const normalizedFilePath = filePath.replace(/\\/g, '/')
+  const normalizedRelativePath = relativePath.replace(/\\/g, '/')
+  return normalizedFilePath.endsWith(`/${normalizedRelativePath}`)
+    ? normalizedFilePath.slice(0, -normalizedRelativePath.length).replace(/[\\/]$/, '')
+    : filePath
+}
+
+export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, initialInspection, initialReview, mode = 'dialog' }: PackageInstallDialogProps) {
   const { inspectPackage, getImportReview, approveImportReview, rejectImportReview, installPackage } = useSkillRuntimeStore()
   const [sourceKind, setSourceKind] = useState<ImportSourceKind>('github')
-  const [sourceInput, setSourceInput] = useState<PackageSourceInput>({ ref: 'main' })
+  const [sourceInput, setSourceInput] = useState<PackageSourceInput>({ repositoryUrl: 'https://github.com/jimliu/baoyu-skills', ref: 'main' })
   const [source, setSource] = useState<PackageSource | null>(null)
   const [inspection, setInspection] = useState<PackageInspectionResult | null>(initialInspection ?? null)
   const [review, setReview] = useState<PackageImportReview | null>(initialReview ?? null)
@@ -161,6 +183,37 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
       setReview(null)
       setSource(null)
     }
+  }
+
+  const switchSource = (nextKind: Exclude<ImportSourceKind, 'zip'>) => {
+    setSourceKind(nextKind)
+    setError(null)
+    if (phase !== 'choose') {
+      setPhase('choose')
+      setInspection(null)
+      setReview(null)
+      setSource(null)
+    }
+  }
+
+  const chooseDirectory = async () => {
+    setError(null)
+    try {
+      const selected = await platform.selectDirectory()
+      if (!selected.canceled && selected.path) updateInput({ directory: selected.path })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法打开目录选择器。')
+    }
+  }
+
+  const handleDirectoryDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const directory = directoryPathFromDrop(event)
+    if (!directory) {
+      setError('无法读取拖入目录路径，请使用“选择目录”按钮。')
+      return
+    }
+    updateInput({ directory })
   }
 
   const inspect = async () => {
@@ -188,7 +241,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
     setError(null)
     setPhase('approving')
     try {
-      setReview(await approveImportReview(review.id, reviewer))
+      setReview(await approveImportReview(review.id))
       setPhase('review')
     } catch (cause) {
       setPhase('review')
@@ -203,7 +256,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
     setError(null)
     setPhase('rejecting')
     try {
-      setReview(await rejectImportReview(review.id, reviewer, decisionReason))
+      setReview(await rejectImportReview(review.id, decisionReason))
       setPhase('review')
     } catch (cause) {
       setPhase('review')
@@ -222,7 +275,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
       const context: PackageImportAuditContext = { packageId: asPackageId(result as Record<string, unknown>), reviewId: inspection.reviewId, sourceFingerprint: inspection.sourceFingerprint, source, result: result as Record<string, unknown> }
       setPhase('completed')
       onInstalled?.(context)
-      onClose()
+      if (mode === 'dialog') onClose()
     } catch (cause) {
       setPhase('review')
       setError(cause instanceof Error ? cause.message : '安装 Package 失败。')
@@ -230,54 +283,85 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
   }
 
   const activeStatus = review?.status
-  return (
-    <div className="skills-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="skills-modal skills-install-modal skills-import-workflow" role="dialog" aria-modal="true" aria-labelledby="package-install-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="skills-modal-head">
-          <div><div className="skills-eyebrow"><PackageOpen size={14} /> Package Import</div><h2 id="package-install-title">导入 Skill</h2><p className="skills-muted">导入、扫描和安装始终分阶段完成，安装请求必须绑定 review 和 source fingerprint。</p></div>
-          <button type="button" className="skills-icon-button" onClick={onClose} aria-label="关闭导入窗口" title="关闭导入窗口"><X size={16} /></button>
-        </header>
-        <ol className="skills-import-stepper" aria-label="Skill 导入流程">
-          {PHASES.map((item, index) => <li key={item.id} className={index < currentStep ? 'complete' : index === currentStep ? 'active' : 'pending'}><span aria-hidden="true">{index < currentStep ? '✓' : index + 1}</span><strong>{item.label}</strong>{index === 1 && phase === 'inspecting' && <small>长任务进行中</small>}</li>)}
-        </ol>
-        <div className="skills-modal-body">
-          <section className="skills-import-source-panel" aria-labelledby="import-source-title">
-            <div className="skills-section-head"><div><div className="skills-eyebrow">Step 1</div><h3 id="import-source-title">选择来源</h3><p>支持 GitHub、本地目录、ZIP 和已生成的 npx 产物；Renderer 不会直接执行任意 npx 命令。</p></div><span className="skills-status info"><Info size={13} /> source allowlist</span></div>
-            <label className="skills-field"><span>来源类型</span><select aria-label="导入来源类型" value={sourceKind} onChange={(event) => { setSourceKind(event.target.value as ImportSourceKind); updateInput({}) }} disabled={busy}><option value="github">GitHub</option><option value="local-directory">本地目录</option><option value="zip">ZIP</option><option value="npx">npx 产物</option></select></label>
-            {sourceKind === 'github' && <><label className="skills-field"><span>GitHub 仓库 URL</span><input autoFocus value={sourceInput.repositoryUrl || ''} onChange={(event) => updateInput({ repositoryUrl: event.target.value })} placeholder="https://github.com/owner/repository" disabled={busy} /></label><div className="skills-field-grid"><label className="skills-field"><span>Commit、tag 或 branch</span><input value={sourceInput.ref || ''} onChange={(event) => updateInput({ ref: event.target.value })} placeholder="main" disabled={busy} /></label><SubdirectoryField value={sourceInput.subdirectory} onChange={(value) => updateInput({ subdirectory: value })} disabled={busy} /></div></>}
-            {sourceKind === 'local-directory' && <><label className="skills-field"><span>本地目录路径</span><input autoFocus value={sourceInput.directory || ''} onChange={(event) => updateInput({ directory: event.target.value })} placeholder="C:\\skills\\my-skill" disabled={busy} /></label><SubdirectoryField value={sourceInput.subdirectory} onChange={(value) => updateInput({ subdirectory: value })} disabled={busy} /></>}
-            {sourceKind === 'zip' && <><label className="skills-field"><span>ZIP 产物路径</span><input autoFocus value={sourceInput.artifactPath || ''} onChange={(event) => updateInput({ artifactPath: event.target.value })} placeholder="C:\\artifacts\\skill.zip" disabled={busy} /></label><SubdirectoryField value={sourceInput.subdirectory} onChange={(value) => updateInput({ subdirectory: value })} disabled={busy} /></>}
-            {sourceKind === 'npx' && <><div className="skills-field-grid"><label className="skills-field"><span>npx 包名</span><input autoFocus value={sourceInput.packageName || ''} onChange={(event) => updateInput({ packageName: event.target.value })} placeholder="@scope/skill-package" disabled={busy} /></label><label className="skills-field"><span>已生成产物路径</span><input value={sourceInput.artifactPath || ''} onChange={(event) => updateInput({ artifactPath: event.target.value })} placeholder="C:\\artifacts\\skill.zip 或目录" disabled={busy} /></label></div><div className="skills-message info"><PackageOpen size={14} />npx 仅作为来源审计标签；请先在受控环境生成目录或 ZIP，再交给 Runtime inspect。</div></>}
-            {validationErrors.length > 0 && <div className="skills-message warning"><AlertTriangle size={14} /><span>{validationErrors[0]}</span></div>}
-            <button type="button" className="skills-button primary" onClick={() => void inspect()} disabled={busy || validationErrors.length > 0}><ShieldCheck size={14} />检查并扫描来源</button>
-          </section>
+  const stepper = <ol className="skills-import-stepper" aria-label="Skill 导入流程">
+    {PHASES.map((item, index) => <li key={item.id} className={index < currentStep ? 'complete' : index === currentStep ? 'active' : 'pending'}><span aria-hidden="true">{index < currentStep ? '✓' : index + 1}</span><strong>{item.label}</strong>{index === 1 && phase === 'inspecting' && <small>长任务进行中</small>}</li>)}
+  </ol>
 
-          <section className="skills-import-review-panel" aria-labelledby="import-review-title">
-            <div className="skills-section-head"><div><div className="skills-eyebrow">Step 2</div><h3 id="import-review-title">解析和扫描</h3><p>Manifest、Capability、诊断和安全发现会与 review 一起保存。</p></div>{activeStatus && <span className={`skills-status ${getImportReviewTone(activeStatus)}`}><ReviewIcon status={activeStatus} />{statusLabel(activeStatus)}</span>}</div>
-            {phase === 'inspecting' && <div className="skills-message info" role="status"><LoaderCircle className="spin" size={14} />Runtime 正在读取 source snapshot、解析 manifest 并生成 Import Review…</div>}
-            {!inspection && phase !== 'inspecting' && <div className="skills-empty-state"><Info size={16} /><p>提交来源后，这里会显示 manifest、Capability、风险和 review 状态。</p></div>}
-            {inspection && <>
-              <div className="skills-import-audit-grid"><div><dt>review ID</dt><dd>{inspection.reviewId || '未返回'}</dd></div><div><dt>source fingerprint</dt><dd>{inspection.sourceFingerprint || '未返回'}</dd></div><div><dt>resolved commit</dt><dd>{inspection.resolvedCommitSha || '—'}</dd></div><div><dt>source</dt><dd>{sourceDescription(source)}</dd></div></div>
-              {packages.map((item) => <InspectionCard key={`${item.manifestHash}-${item.relativeSkillPath}`} item={item} onOpenCreator={onOpenCreator} />)}
-              {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} /><span>Rejected 后不可安装。请修复来源并重新 inspect，不能绕过当前 review。</span></div>}
-            </>}
-          </section>
+  const workflow = <div className={mode === 'page' ? 'skills-import-page-body' : 'skills-modal-body'}>
+    <section className="skills-import-source-panel" aria-labelledby="import-source-title">
+      <div className="skills-section-head"><div><div className="skills-eyebrow">Step 1</div><h3 id="import-source-title">选择导入方式</h3><p>不会直接执行 Skill；先读取、解析和扫描，再由 Import Review 决定是否安装。</p></div><span className="skills-status info"><Info size={13} /> source allowlist</span></div>
+      <div className="skills-import-tabs" role="tablist" aria-label="Skill 导入方式">
+        {IMPORT_SOURCE_TABS.map((item) => <button key={item.kind} type="button" role="tab" aria-selected={sourceKind === item.kind} aria-controls={`import-source-panel-${item.kind}`} className={sourceKind === item.kind ? 'active' : ''} onClick={() => switchSource(item.kind)} disabled={busy}>
+          <span className="skills-import-tab-icon">{importSourceIcon(item.kind)}</span><span><strong>{item.label}</strong><small>{item.description}</small></span>
+        </button>)}
+      </div>
+      <div id={`import-source-panel-${sourceKind}`} role="tabpanel" className="skills-import-source-form">
+        {sourceKind === 'github' && <>
+          <label className="skills-field"><span>Repository URL *</span><input autoFocus value={sourceInput.repositoryUrl || ''} onChange={(event) => updateInput({ repositoryUrl: event.target.value })} placeholder="https://github.com/owner/repository" disabled={busy} /></label>
+          <div className="skills-field-grid"><label className="skills-field"><span>Ref / Commit *</span><input value={sourceInput.ref || ''} onChange={(event) => updateInput({ ref: event.target.value })} placeholder="main" disabled={busy} /></label><SubdirectoryField value={sourceInput.subdirectory} onChange={(value) => updateInput({ subdirectory: value })} disabled={busy} /></div>
+        </>}
+        {sourceKind === 'local-directory' && <>
+          <div className="skills-import-directory-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={handleDirectoryDrop}>
+            <span className="skills-import-dropzone-icon"><FolderOpen size={18} aria-hidden="true" /></span><strong>拖入 Skill 根目录，或选择本地目录</strong><p>必须包含 SKILL.md；支持 references、assets、scripts 和 templates。</p><button type="button" className="skills-button secondary" onClick={() => void chooseDirectory()} disabled={busy}><FolderOpen size={14} />选择目录</button>
+            {sourceInput.directory && <span className="skills-import-selected-path" title={sourceInput.directory}>{sourceInput.directory}</span>}
+          </div>
+          <label className="skills-field"><span>目录路径</span><input autoFocus={!sourceInput.directory} value={sourceInput.directory || ''} onChange={(event) => updateInput({ directory: event.target.value })} placeholder="D:/skills/my-skill" disabled={busy} /></label>
+        </>}
+        {sourceKind === 'npx' && <>
+          <label className="skills-field"><span>产物目录 *</span><input autoFocus value={sourceInput.artifactPath || ''} onChange={(event) => updateInput({ artifactPath: event.target.value })} placeholder="D:/skills/baoyu-skills/article-illustrator" disabled={busy} /></label>
+          <div className="skills-message info"><PackageOpen size={14} />请先在受控环境执行 npx skills add ... --copy，再选择生成的产物目录。后台不会执行 npx，只读取、扫描和安装静态文件。</div>
+        </>}
+      </div>
+      {validationErrors.length > 0 && <div className="skills-message warning"><AlertTriangle size={14} /><span>{validationErrors[0]}</span></div>}
+      <div className="skills-import-safety-note"><ShieldCheck size={15} /><div><strong>导入与执行分离</strong><p>导入阶段只读取、扫描和计算内容哈希；任何 web、image、filesystem 或 command 能力都必须在运行时重新授权。</p></div></div>
+      <div className="skills-import-actions"><button type="button" className="skills-button primary" onClick={() => void inspect()} disabled={busy || validationErrors.length > 0}><ShieldCheck size={14} />开始扫描</button>{mode === 'page' && <button type="button" className="skills-button secondary" onClick={onClose} disabled={busy}>取消</button>}</div>
+    </section>
 
-          <section className="skills-import-confirm-panel" aria-labelledby="import-confirm-title">
-            <div className="skills-section-head"><div><div className="skills-eyebrow">Step 3</div><h3 id="import-confirm-title">确认安装</h3><p>只有 approved review 才能提交一次明确的 `confirm: true` 安装请求。</p></div>{review && <span className={`skills-status ${getImportReviewTone(review.status)}`}><ReviewIcon status={review.status} />{statusLabel(review.status)}</span>}</div>
-            {review && review.status !== 'approved' && review.status !== 'installed' && review.status !== 'rejected' && <div className="skills-import-decision-grid"><label className="skills-field"><span>拒绝原因（仅用于 Reject）</span><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明风险或缺少的修复" disabled={busy} /></label><div className="skills-button-row"><button type="button" className="skills-button secondary" onClick={() => void approve()} disabled={busy || !review.id}><ShieldCheck size={14} />Approve Review</button><button type="button" className="skills-button danger" onClick={() => void reject()} disabled={busy || !review.id || !reason.trim()}><ShieldAlert size={14} />Reject Review</button></div></div>}
-            {review?.status === 'approved' && <div className="skills-message success"><CheckCircle2 size={14} />Review 已批准；安装仍会携带 source fingerprint 和审计上下文。</div>}
-            {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} />当前 review 已拒绝，安装按钮保持禁用。</div>}
-            {phase === 'installing' && <div className="skills-message info" role="status"><LoaderCircle className="spin" size={14} />安装长任务进行中：正在写入 Package、Version 和 Installation 关系…</div>}
-            {phase === 'completed' && <div className="skills-message success" role="status"><CheckCircle2 size={14} />安装完成，正在返回 Skills Center 或打开 Package Detail。</div>}
-            <div className="skills-import-confirm-actions"><button type="button" className="skills-button primary" onClick={() => void install()} disabled={busy || !canInstall}><CheckCircle2 size={14} />安装已批准的 Skill</button><span className="skills-muted">{canInstall ? '可安装：review 已批准。' : 'Rejected 后不可安装。warning 或未审批的 review 也不能安装。'}</span></div>
-          </section>
-          {error && <div className="skills-message error" role="alert"><AlertTriangle size={14} />{error}</div>}
-        </div>
-        <footer className="skills-modal-foot"><button type="button" className="skills-button secondary" onClick={onClose} disabled={busy}>取消</button><span className="skills-muted">状态、review ID 和 source fingerprint 会保留在审计上下文中。</span></footer>
-      </section>
-    </div>
-  )
+    <section className="skills-import-review-panel" aria-labelledby="import-review-title">
+      <div className="skills-section-head"><div><div className="skills-eyebrow">Step 2</div><h3 id="import-review-title">解析和扫描</h3><p>Manifest、Capability、诊断和安全发现会与 review 一起保存。</p></div>{activeStatus && <span className={`skills-status ${getImportReviewTone(activeStatus)}`}><ReviewIcon status={activeStatus} />{statusLabel(activeStatus)}</span>}</div>
+      {phase === 'inspecting' && <div className="skills-message info" role="status"><LoaderCircle className="spin" size={14} />Runtime 正在读取 source snapshot、解析 manifest 并生成 Import Review…</div>}
+      {!inspection && phase !== 'inspecting' && <div className="skills-empty-state"><Info size={16} /><p>提交来源后，这里会显示 manifest、Capability、风险和 review 状态。</p></div>}
+      {inspection && <>
+        <div className="skills-import-audit-grid"><div><dt>review ID</dt><dd>{inspection.reviewId || '未返回'}</dd></div><div><dt>source fingerprint</dt><dd>{inspection.sourceFingerprint || '未返回'}</dd></div><div><dt>resolved commit</dt><dd>{inspection.resolvedCommitSha || '—'}</dd></div><div><dt>source</dt><dd>{sourceDescription(source)}</dd></div></div>
+        {packages.map((item) => <InspectionCard key={`${item.manifestHash}-${item.relativeSkillPath}`} item={item} onOpenCreator={onOpenCreator} />)}
+        {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} /><span>Rejected 后不可安装。请修复来源并重新 inspect，不能绕过当前 review。</span></div>}
+      </>}
+    </section>
+
+    <section className="skills-import-confirm-panel" aria-labelledby="import-confirm-title">
+      <div className="skills-section-head"><div><div className="skills-eyebrow">Step 3</div><h3 id="import-confirm-title">确认安装</h3><p>只有 approved review 才能提交一次明确的 `confirm: true` 安装请求。</p></div>{review && <span className={`skills-status ${getImportReviewTone(review.status)}`}><ReviewIcon status={review.status} />{statusLabel(review.status)}</span>}</div>
+      {review && review.status !== 'approved' && review.status !== 'installed' && review.status !== 'rejected' && <div className="skills-import-decision-grid"><label className="skills-field"><span>拒绝原因（仅用于 Reject）</span><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明风险或缺少的修复" disabled={busy} /></label><div className="skills-button-row"><button type="button" className="skills-button secondary" onClick={() => void approve()} disabled={busy || !review.id}><ShieldCheck size={14} />Approve Review</button><button type="button" className="skills-button danger" onClick={() => void reject()} disabled={busy || !review.id || !reason.trim()}><ShieldAlert size={14} />Reject Review</button></div></div>}
+      {review?.status === 'approved' && <div className="skills-message success"><CheckCircle2 size={14} />Review 已批准；安装仍会携带 source fingerprint 和审计上下文。</div>}
+      {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} />当前 review 已拒绝，安装按钮保持禁用。</div>}
+      {phase === 'installing' && <div className="skills-message info" role="status"><LoaderCircle className="spin" size={14} />安装长任务进行中：正在写入 Package、Version 和 Installation 关系…</div>}
+      {phase === 'completed' && <div className="skills-message success" role="status"><CheckCircle2 size={14} />安装完成，正在返回 Skills Center 或打开 Package Detail。</div>}
+      <div className="skills-import-confirm-actions"><button type="button" className="skills-button primary" onClick={() => void install()} disabled={busy || !canInstall}><CheckCircle2 size={14} />安装已批准的 Skill</button><span className="skills-muted">{canInstall ? '可安装：review 已批准。' : 'Rejected 后不可安装。warning 或未审批的 review 也不能安装。'}</span></div>
+    </section>
+    {error && <div className="skills-message error" role="alert"><AlertTriangle size={14} />{error}</div>}
+  </div>
+
+  if (mode === 'page') {
+    return <section className="skills-import-page" aria-labelledby="package-import-page-title">
+      <div className="skills-import-page-heading"><div className="skills-eyebrow">MANAGE / IMPORT</div><h1 id="package-import-page-title">导入 Skill</h1><p>把本地目录、GitHub Archive 或 npx skills 产物转换为可审核的 Skill Version。</p></div>
+      {stepper}
+      <div className="skills-import-page-card"><div className="skills-import-page-card-head"><div><h2>选择导入方式</h2><p>不会直接执行 Skill</p></div></div>{workflow}</div>
+    </section>
+  }
+
+  return <div className="skills-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <section className="skills-modal skills-install-modal skills-import-workflow" role="dialog" aria-modal="true" aria-labelledby="package-install-title" onMouseDown={(event) => event.stopPropagation()}>
+      <header className="skills-modal-head"><div><div className="skills-eyebrow"><PackageOpen size={14} /> Package Import</div><h2 id="package-install-title">导入 Skill</h2><p className="skills-muted">导入、扫描和安装始终分阶段完成，安装请求必须绑定 review 和 source fingerprint。</p></div><button type="button" className="skills-icon-button" onClick={onClose} aria-label="关闭导入窗口" title="关闭导入窗口"><X size={16} /></button></header>
+      {stepper}
+      {workflow}
+      <footer className="skills-modal-foot"><button type="button" className="skills-button secondary" onClick={onClose} disabled={busy}>取消</button><span className="skills-muted">状态、review ID 和 source fingerprint 会保留在审计上下文中。</span></footer>
+    </section>
+  </div>
+}
+
+export type PackageImportWorkbenchProps = Omit<PackageInstallDialogProps, 'onClose' | 'mode'> & { onCancel?: () => void }
+
+export function PackageImportWorkbench({ onCancel, ...props }: PackageImportWorkbenchProps) {
+  return <PackageInstallDialog {...props} mode="page" onClose={onCancel ?? (() => undefined)} />
 }
 
 function SubdirectoryField({ value, onChange, disabled }: { value?: string; onChange: (value: string) => void; disabled: boolean }) {
