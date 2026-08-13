@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { SkillListRow } from './SkillsCenterWorkbench'
 import type { SkillRun } from './skill-runtime.types'
-import { buildCatalogMetrics, getCatalogTabCounts, getSkillStatusVisual, paginateCatalogRows, SkillsCenterCatalog } from './SkillOverviewPanel'
+import { buildCatalogMetrics, getCatalogTabCounts, getSkillStatusVisual, paginateCatalogRows, shouldHideSkillsAdminAccessError, SkillsCenterCatalog } from './SkillOverviewPanel'
 
 const packageRow = (overrides: Partial<SkillListRow> = {}): SkillListRow => ({
   id: 'pkg-1', kind: 'package', name: 'Research Analysis', description: 'Package skill', sourceLabel: 'Package · github', runtime: 'Package Runtime', version: '0.9.7', enabled: true,
@@ -17,6 +17,11 @@ const run = (overrides: Partial<SkillRun> = {}): SkillRun => ({
 })
 
 describe('Skills Center Package Catalog', () => {
+  it('hides only the administrator access notice', () => {
+    expect(shouldHideSkillsAdminAccessError('Skills operation requires administrator access')).toBe(true)
+    expect(shouldHideSkillsAdminAccessError('Network request failed')).toBe(false)
+    expect(shouldHideSkillsAdminAccessError(null)).toBe(false)
+  })
   it('uses icon, text and semantic tone for every catalog status', () => {
     expect(getSkillStatusVisual(packageRow({ statusLabel: '已启用', statusTone: 'success' }))).toMatchObject({ label: '已启用', tone: 'success' })
     expect(getSkillStatusVisual(packageRow({ statusLabel: '已禁用', statusTone: 'muted' }))).toMatchObject({ label: '已禁用', tone: 'muted' })
@@ -74,13 +79,13 @@ describe('Skills Center Package Catalog', () => {
     expect(markup).not.toContain('Legacy-only')
   })
 
-  it('keeps the catalog title, tools and status tabs when the result list is empty', () => {
+  it('hides the administrator notice while preserving the empty catalog state', () => {
     const markup = renderToStaticMarkup(<SkillsCenterCatalog
       rows={[]}
       allRows={[]}
       runs={[]}
       loading={false}
-      error={null}
+      error="Skills operation requires administrator access"
       page={0}
       pageSize={10}
       totalRows={0}
@@ -88,6 +93,8 @@ describe('Skills Center Package Catalog', () => {
       onOpenPackage={() => undefined}
       onOpenRun={() => undefined}
     />)
+    expect(markup).not.toContain('Skills operation requires administrator access')
+    expect(markup).toContain('暂无 Package Skill')
     expect(markup).toContain('Skill Catalog')
     expect(markup).toContain('0 个结果')
     expect(markup).toContain('搜索名称、Slug 或描述')

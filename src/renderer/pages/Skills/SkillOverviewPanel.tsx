@@ -134,6 +134,10 @@ export function paginateCatalogRows(rows: SkillListRow[], page: number, pageSize
   return rows.slice(safePage * safePageSize, (safePage + 1) * safePageSize)
 }
 
+export function shouldHideSkillsAdminAccessError(error?: string | null) {
+  return error === 'Skills operation requires administrator access'
+}
+
 export type SkillsCenterCatalogProps = {
   rows: SkillListRow[]
   allRows?: SkillListRow[]
@@ -190,6 +194,7 @@ export function SkillsCenterCatalog({
   const recentRuns = useMemo(() => [...runs].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5), [runs])
   const totalPages = Math.max(1, Math.ceil(totalRows / Math.max(1, pageSize)))
   const currentPage = Math.min(Math.max(0, page), totalPages - 1)
+  const visibleError = shouldHideSkillsAdminAccessError(error) ? null : error
 
   return <div className="skills-catalog" data-testid="skills-center-catalog">
     <section className="skills-catalog-kpis" aria-label="Skills Center 指标">
@@ -219,11 +224,11 @@ export function SkillsCenterCatalog({
       </div>
       <div className="skills-catalog-tabs" role="tablist" aria-label="Skill Catalog 状态">{CATALOG_TAB_DEFINITIONS.map((tab) => <button key={tab.key} type="button" role="tab" aria-selected={catalogTab === tab.key} className={cn('skills-catalog-tab', catalogTab === tab.key && 'active')} onClick={() => onCatalogTabChange(tab.key)}><span>{tab.label}</span><strong>{tabCounts[tab.key]}</strong></button>)}</div>
       <div id="skills-catalog-content">
-        {error && <div className="skills-page-message" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{error}</span></div>}
+        {visibleError && <div className="skills-page-message" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{visibleError}</span></div>}
         {loading && <div className="skills-center-state" role="status"><Activity size={18} aria-hidden="true" /><div><strong>正在加载 Package Catalog</strong><p>正在读取 Package、Installation 和 Runtime 状态。</p></div></div>}
-        {!loading && !error && rows.length === 0 && <div className="skills-center-state skills-catalog-empty"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Skill</strong><p>当前筛选没有匹配的 Package；可以调整搜索条件或进入“导入 Skill”。</p></div></div>}
-        {!loading && !error && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
-        {!loading && !error && totalRows > pageSize && <Pagination page={currentPage} totalPages={totalPages} onPageChange={onPageChange} />}
+        {!loading && !visibleError && rows.length === 0 && <div className="skills-center-state skills-catalog-empty"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Skill</strong><p>当前筛选没有匹配的 Package；可以调整搜索条件或进入“导入 Skill”。</p></div></div>}
+        {!loading && !visibleError && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
+        {!loading && !visibleError && totalRows > pageSize && <Pagination page={currentPage} totalPages={totalPages} onPageChange={onPageChange} />}
       </div>
     </section>
 
