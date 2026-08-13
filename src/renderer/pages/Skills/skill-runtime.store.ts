@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { platform, SkillRuntimeApiError } from '@renderer/api'
-import type { CapabilityDto, DraftDto, DraftListInput, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RuntimeMutationState, RuntimeToast, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate } from './skill-runtime.types'
+import type { CapabilityDto, DraftDto, DraftListInput, DraftPreview, DraftValidation, InspectedPackage, PackageDetail, PackageImportReview, PackageInspectionResult, PackageInstallInput, PackageListInput, PackageSource, Page, PaginationInput, RuntimeError, RuntimeErrorScope, RuntimeMutationState, RuntimeToast, RunAction, SkillArtifact, SkillInstallation, SkillPackage, SkillRun, SkillRunEvent, SkillRuntimeCapabilities, SkillRuntimeDiagnosticsSnapshot, SkillRuntimeFeatureFlags, SkillRuntimeSettings, SkillVersion, VersionCandidate } from './skill-runtime.types'
 
 function makeIdempotencyKey(operation: string) {
   return `${operation}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -124,6 +124,7 @@ type RuntimeState = {
   loading: boolean
   error: string | null
   errorDetails: RuntimeError | null
+  errorScope: RuntimeErrorScope | null
   /** @deprecated Compatibility projection for the pre-v1.1 Run detail drawer. */
   runEvents: SkillRunEvent[]
   /** @deprecated Compatibility projection for the pre-v1.1 Run detail drawer. */
@@ -214,13 +215,14 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     set((state) => ({ loadingByResource: { ...(state.loadingByResource ?? {}), [key]: value } }))
   }
 
-  const withMutation = async <T>(key: string, action: () => Promise<T>, options: { successTitle?: string; successMessage?: string; rollback?: () => void } = {}): Promise<T> => {
+  const withMutation = async <T>(key: string, action: () => Promise<T>, options: { successTitle?: string; successMessage?: string; rollback?: () => void; errorScope?: RuntimeErrorScope } = {}): Promise<T> => {
     const startedAt = Date.now()
     set((state) => ({
       pendingMutations: { ...(state.pendingMutations ?? {}), [key]: true },
       mutationStates: { ...(state.mutationStates ?? {}), [key]: { status: 'pending', startedAt } },
       error: null,
       errorDetails: null,
+      errorScope: null,
     }))
     try {
       const result = await action()
@@ -245,6 +247,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
           mutationStates: { ...(state.mutationStates ?? {}), [key]: { status: 'error', startedAt, finishedAt: Date.now(), error: details } },
           error: details.message,
           errorDetails: details,
+          errorScope: options.errorScope ?? 'global',
         }
       })
       addToast('error', 'Skill Runtime 操作失败', details.message)
@@ -314,9 +317,9 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
 
   return {
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [], installationPage: null, runs: [], runPage: null, selectedRun: null,
-    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, draftPage: null, pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
+    eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, runCapabilitiesByRun: {}, drafts: {}, draftPage: null, pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null, errorScope: null,
     runEvents: [], runArtifacts: [],
-    clearError: () => set({ error: null, errorDetails: null }),
+    clearError: () => set({ error: null, errorDetails: null, errorScope: null }),
     dismissToast: (id) => set((state) => ({ toasts: (state.toasts ?? []).filter((toast) => toast.id !== id) })),
     clearToasts: () => set({ toasts: [] }),
     loadCapabilities: async () => {
@@ -326,7 +329,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         return capabilities
       } catch (error) {
         const details = asRuntimeError(error)
-        set({ error: details.message, errorDetails: details })
+        set({ error: details.message, errorDetails: details, errorScope: 'global' })
         throw error
       }
     },
@@ -338,7 +341,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         return diagnostics
       } catch (error) {
         const details = asRuntimeError(error)
-        set({ diagnosticsLoading: false, diagnosticsError: details.message, error: details.message, errorDetails: details })
+        set({ diagnosticsLoading: false, diagnosticsError: details.message, error: details.message, errorDetails: details, errorScope: 'settings' })
         throw error
       }
     },
@@ -370,7 +373,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     loadPackages: async (input = {}) => {
       const requestKey = 'packages'
       const requestRevision = beginRequest(requestKey)
-      set({ loading: true, error: null, errorDetails: null })
+      set({ loading: true, error: null, errorDetails: null, errorScope: null })
       setResourceLoading(requestKey, true)
       try {
         const result = await platform.getSkillPackages(input)
@@ -392,7 +395,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     loadInstallations: async (input = {}) => {
       const requestKey = 'installations'
       const requestRevision = beginRequest(requestKey)
-      set({ loading: true, error: null, errorDetails: null })
+      set({ loading: true, error: null, errorDetails: null, errorScope: null })
       setResourceLoading(requestKey, true)
       try {
         const result = await platform.getSkillInstallations(input)
@@ -425,7 +428,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ error: details.message, errorDetails: details })
+          set({ error: details.message, errorDetails: details, errorScope: 'global' })
           setResourceLoading(requestKey, false)
         }
         throw error
@@ -447,19 +450,19 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ error: details.message, errorDetails: details })
+          set({ error: details.message, errorDetails: details, errorScope: 'global' })
           setResourceLoading(requestKey, false)
         }
         throw error
       }
     },
     selectVersion: (version) => set({ selectedVersion: version }),
-    inspectPackage: (source) => withMutation('inspect', () => platform.inspectSkillPackage(source)),
+    inspectPackage: (source) => withMutation('inspect', () => platform.inspectSkillPackage(source), { errorScope: 'import' }),
     getImportReview: (reviewId) => platform.getImportReview(reviewId),
-    approveImportReview: (reviewId) => withMutation(`import-review:${reviewId}`, () => platform.approveImportReview(reviewId), { successTitle: 'Import Review 已批准', successMessage: '现在可以提交明确的安装确认。' }),
-    rejectImportReview: (reviewId, reason) => withMutation(`import-review:${reviewId}`, () => platform.rejectImportReview(reviewId, reason), { successTitle: 'Import Review 已拒绝', successMessage: 'Rejected review 保持不可安装。' }),
+    approveImportReview: (reviewId) => withMutation(`import-review:${reviewId}`, () => platform.approveImportReview(reviewId), { errorScope: 'import', successTitle: 'Import Review 已批准', successMessage: '现在可以提交明确的安装确认。' }),
+    rejectImportReview: (reviewId, reason) => withMutation(`import-review:${reviewId}`, () => platform.rejectImportReview(reviewId, reason), { errorScope: 'import', successTitle: 'Import Review 已拒绝', successMessage: 'Rejected review 保持不可安装。' }),
     installPackage: async (input) => {
-      const result = await withMutation('install', async () => platform.installSkillPackage(input), { successTitle: 'Skill 已安装', successMessage: 'Package Runtime 已完成安装并保留审计记录。' })
+      const result = await withMutation('install', async () => platform.installSkillPackage(input), { errorScope: 'import', successTitle: 'Skill 已安装', successMessage: 'Package Runtime 已完成安装并保留审计记录。' })
       if (result && typeof result === 'object' && 'package' in result) {
         set({ selectedPackage: toLegacyPackageDetail(result as PackageDetail) })
       }
@@ -543,7 +546,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     loadRuns: async (input = {}) => {
       const requestKey = 'runs'
       const requestRevision = beginRequest(requestKey)
-      set({ loading: true, error: null, errorDetails: null })
+      set({ loading: true, error: null, errorDetails: null, errorScope: null })
       setResourceLoading(requestKey, true)
       try {
         const result = await platform.listSkillRuns(input)
@@ -575,7 +578,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ error: details.message, errorDetails: details })
+          set({ error: details.message, errorDetails: details, errorScope: 'global' })
           setResourceLoading(requestKey, false)
         }
         throw error
@@ -589,7 +592,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         return events
       } catch (error) {
         const details = asRuntimeError(error)
-        set({ error: details.message, errorDetails: details })
+        set({ error: details.message, errorDetails: details, errorScope: 'global' })
         throw error
       }
     },
@@ -600,7 +603,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         return capabilities
       } catch (error) {
         const details = asRuntimeError(error)
-        set({ error: details.message, errorDetails: details })
+        set({ error: details.message, errorDetails: details, errorScope: 'global' })
         throw error
       }
     },
@@ -624,7 +627,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
             },
             onError: (error) => {
               if (entry.closed) return
-              set((state) => ({ error: error.message, errorDetails: error, streamStatusByRun: { ...(state.streamStatusByRun ?? {}), [id]: attempt < 3 ? 'reconnecting' : 'error' }, streamReconnectAttemptsByRun: { ...(state.streamReconnectAttemptsByRun ?? {}), [id]: attempt + 1 }, streamErrorsByRun: { ...(state.streamErrorsByRun ?? {}), [id]: error } }))
+              set((state) => ({ error: error.message, errorDetails: error, errorScope: 'runs', streamStatusByRun: { ...(state.streamStatusByRun ?? {}), [id]: attempt < 3 ? 'reconnecting' : 'error' }, streamReconnectAttemptsByRun: { ...(state.streamReconnectAttemptsByRun ?? {}), [id]: attempt + 1 }, streamErrorsByRun: { ...(state.streamErrorsByRun ?? {}), [id]: error } }))
               addToast('warning', 'Run 事件流已断开', `正在从 cursor ${get().eventCursorByRun[id] ?? 0} 重连。`)
               if (attempt < 3) {
                 entry.timer = setTimeout(() => {
@@ -648,7 +651,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
           }
         } catch (error) {
           const details = asRuntimeError(error)
-          set((state) => ({ error: details.message, errorDetails: details, streamStatusByRun: { ...(state.streamStatusByRun ?? {}), [id]: 'error' }, streamErrorsByRun: { ...(state.streamErrorsByRun ?? {}), [id]: details } }))
+          set((state) => ({ error: details.message, errorDetails: details, errorScope: 'runs', streamStatusByRun: { ...(state.streamStatusByRun ?? {}), [id]: 'error' }, streamErrorsByRun: { ...(state.streamErrorsByRun ?? {}), [id]: details } }))
           return () => undefined
         }
       }
@@ -752,7 +755,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ error: details.message, errorDetails: details })
+          set({ error: details.message, errorDetails: details, errorScope: 'global' })
           setResourceLoading(requestKey, false)
         }
         throw error
@@ -772,7 +775,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       } catch (error) {
         const details = asRuntimeError(error)
         if (isCurrentRequest(requestKey, requestRevision)) {
-          set({ error: details.message, errorDetails: details })
+          set({ error: details.message, errorDetails: details, errorScope: 'global' })
           setResourceLoading(requestKey, false)
         }
         throw error

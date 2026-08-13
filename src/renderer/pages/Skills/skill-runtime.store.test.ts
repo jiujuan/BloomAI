@@ -29,7 +29,7 @@ beforeEach(() => {
   useSkillRuntimeStore.setState({
     packages: [], packagePage: null, selectedPackage: null, selectedVersion: null, installations: [],
     runs: [], runPage: null, selectedRun: null, eventsByRun: {}, eventCursorByRun: {}, artifactsByRun: {}, drafts: {},
-    pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null,
+    pendingMutations: {}, mutationStates: {}, toasts: [], loadingByResource: {}, requestRevisions: {}, streamStatusByRun: {}, streamReconnectAttemptsByRun: {}, streamErrorsByRun: {}, capabilities: null, settings: null, featureFlags: null, diagnostics: null, diagnosticsLoading: false, diagnosticsError: null, loading: false, error: null, errorDetails: null, errorScope: null,
   })
 })
 
@@ -40,6 +40,16 @@ afterEach(() => {
 })
 
 describe('Package Runtime Zustand store', () => {
+  it('scopes import inspection failures to the import workflow', async () => {
+    const failure = { code: 'FEATURE_DISABLED', message: 'Skill Runtime feature is disabled: importEnabled', status: 403, retryable: false }
+    vi.spyOn(platform, 'inspectSkillPackage').mockRejectedValue(failure)
+
+    await expect(useSkillRuntimeStore.getState().inspectPackage({ kind: 'local-directory', directory: 'D:/skills/example' })).rejects.toEqual(failure)
+    expect(useSkillRuntimeStore.getState().error).toBe(failure.message)
+    expect(useSkillRuntimeStore.getState().errorDetails).toEqual(failure)
+    expect(useSkillRuntimeStore.getState().errorScope).toBe('import')
+  })
+
   it('loads runtime diagnostics and tracks a failed refresh without losing the last snapshot', async () => {
     const diagnostics = {
       health: { liveness: true, readiness: true, status: 'ready', checks: [] },

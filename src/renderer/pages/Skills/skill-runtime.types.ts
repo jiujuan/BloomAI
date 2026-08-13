@@ -15,6 +15,8 @@ export type SkillRuntimeFilterStatus = 'all' | 'enabled' | 'disabled' | 'attenti
 export type PaginationMeta = { limit: number; offset: number; total: number; hasMore: boolean; nextOffset: number | null }
 export type Page<T> = { data: T[]; meta: PaginationMeta }
 
+export type RuntimeErrorScope = 'global' | 'center' | 'import' | 'creator' | 'detail' | 'runs' | 'artifacts' | 'settings'
+
 export type RuntimeErrorCode =
   | 'FEATURE_DISABLED'
   | 'VALIDATION_ERROR'

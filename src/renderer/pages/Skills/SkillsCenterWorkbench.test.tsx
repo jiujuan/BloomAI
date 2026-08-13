@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import './skills-center.e2e'
 import type { SkillPackage, SkillRun, SkillInstallation } from './skill-runtime.types'
-import { SkillsCenterWorkbench, buildSkillRows, filterSkillRows, encodeSkillsCenterState, decodeSkillsCenterState, hasRuntimeManagementCapability } from './SkillsCenterWorkbench'
+import { SkillsCenterWorkbench, buildSkillRows, filterSkillRows, encodeSkillsCenterState, decodeSkillsCenterState, getVisibleSkillsRuntimeError, hasRuntimeManagementCapability } from './SkillsCenterWorkbench'
 
 const packageItem: SkillPackage = {
   id: 'pkg-1', name: 'Research Package', description: 'Package description', sourceType: 'github', sourceUri: 'https://github.com/acme/research', sourceRef: 'abc123',
@@ -25,6 +25,17 @@ describe('Skills Center workbench contract', () => {
     expect(markup).not.toContain('导入 Package')
     expect(markup).toContain('打开 Creator')
     expect(markup).toContain('aria-label="搜索 Skills"')
+  })
+
+  it('only exposes a scoped runtime error to its active page and keeps import errors local', () => {
+    const message = 'Skill Runtime feature is disabled: importEnabled'
+    expect(getVisibleSkillsRuntimeError(message, 'import', 'center')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(message, 'import', 'runs')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(message, 'import', 'artifacts')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(message, 'import', 'settings')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(message, 'import', 'import')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(message, 'center', 'center')).toBe(message)
+    expect(getVisibleSkillsRuntimeError(message, 'center', 'runs')).toBeNull()
   })
 
   it('projects Package Runtime rows and filters source/runtime/status', () => {
