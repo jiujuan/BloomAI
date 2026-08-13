@@ -64,11 +64,11 @@ describe('Skills Center inline catalog actions', () => {
   it('keeps installation id and revision available to action handlers', () => {
     expect(buildSkillRows([packageItem], [installation], []).find((row) => row.id === 'pkg-1')).toMatchObject({ installationId: 'installation-1', installationRevision: 7 })
   })
-  it('routes Pending Approval rows directly to Run Detail', () => {
+  it('routes Pending Approval rows to the run history list', () => {
     const source = readFileSync(new URL('./SkillOverviewPanel.tsx', import.meta.url), 'utf8')
     expect(source).not.toContain('onOpenGrant')
     expect(source).not.toContain('openGrantContext')
-    expect(source).toContain('onClick={() => onOpenRun(run.id)}')
+    expect(source).toContain('onClick={onOpenRun}')
   })
 
 })

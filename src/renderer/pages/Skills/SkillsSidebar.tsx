@@ -1,9 +1,9 @@
 import React from 'react'
-import { Archive, FilePlus2, FileSearch, LayoutDashboard, PackageOpen, PlayCircle, Settings2, Sparkles, Upload } from 'lucide-react'
+import { Archive, FileSearch, LayoutDashboard, PackageOpen, PlayCircle, Settings2, Sparkles, Upload } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/utils'
 
-export type SkillsRuntimeView = 'center' | 'import' | 'creator' | 'detail' | 'runs' | 'run-detail' | 'artifacts' | 'settings'
+export type SkillsRuntimeView = 'center' | 'import' | 'creator' | 'detail' | 'runs' | 'artifacts' | 'settings'
 export type SkillsCenterTab = SkillsRuntimeView
 
 export type SkillsRuntimeNavItem = {
@@ -19,7 +19,6 @@ export const SKILLS_RUNTIME_NAV_ITEMS: SkillsRuntimeNavItem[] = [
   { id: 'creator', label: 'Skills Creator', icon: Sparkles, group: 'create' },
   { id: 'detail', label: 'Skill 详情', icon: FileSearch, group: 'workspace' },
   { id: 'runs', label: '运行记录', icon: PlayCircle, group: 'workspace' },
-  { id: 'run-detail', label: 'Run 详情', icon: FilePlus2, group: 'workspace' },
   { id: 'artifacts', label: 'Artifacts', icon: PackageOpen, group: 'workspace' },
   { id: 'settings', label: '系统设置', icon: Settings2, group: 'system' },
 ]
@@ -31,7 +30,6 @@ export function normalizeSkillsView(view: SkillsCenterTab | undefined): SkillsRu
 export function getSkillsBreadcrumb(view: SkillsRuntimeView): string[] {
   const item = SKILLS_RUNTIME_NAV_ITEMS.find((candidate) => candidate.id === view)
   if (!item || view === 'center') return ['Skills Center']
-  if (view === 'run-detail') return ['Skills Center', '运行记录', item.label]
   if (view === 'detail' || view === 'artifacts') return ['Skills Center', 'Skill 详情', item.label]
   return ['Skills Center', item.label]
 }

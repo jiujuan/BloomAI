@@ -9,7 +9,7 @@ import { SkillPermissionsPanel } from './SkillPermissionsPanel'
 
 // These tests intentionally retain the lower-level Capability, Installation, and
 // permissions-component contracts. They do not assert that `permissions` remains
-// a public Skills navigation target; public approval is covered by Run Detail tests.
+// a public Skills navigation target; public approval is covered by runtime approval tests.
 
 const grantBase: CapabilityGrant = {
   id: 'grant-1', skillVersionId: 'version-1', capability: 'network.fetch',

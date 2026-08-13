@@ -7,15 +7,15 @@ import { SKILLS_RUNTIME_NAV_ITEMS, SkillsSidebar, getSkillsBreadcrumb, normalize
 const counts = Object.fromEntries(SKILLS_RUNTIME_NAV_ITEMS.map((item) => [item.id, 0]))
 
 describe('Skills Runtime navigation shell', () => {
-  it('defines the eight public Package Runtime views without the permissions page', () => {
+  it('defines the seven public Package Runtime views without Run detail or permissions pages', () => {
     expect(SKILLS_RUNTIME_NAV_ITEMS.map((item) => item.id)).toEqual([
-      'center', 'import', 'creator', 'detail', 'runs', 'run-detail', 'artifacts', 'settings',
+      'center', 'import', 'creator', 'detail', 'runs', 'artifacts', 'settings',
     ])
     expect(SKILLS_RUNTIME_NAV_ITEMS.some((item) => (item.id as string) === 'permissions')).toBe(false)
     expect(SKILLS_RUNTIME_NAV_ITEMS.map((item) => item.label)).toEqual([
-      'Skills Center', '导入 Skill', 'Skills Creator', 'Skill 详情', '运行记录', 'Run 详情', 'Artifacts', '系统设置',
+      'Skills Center', '导入 Skill', 'Skills Creator', 'Skill 详情', '运行记录', 'Artifacts', '系统设置',
     ])
-    expect(getSkillsBreadcrumb('run-detail')).toEqual(['Skills Center', '运行记录', 'Run 详情'])
+    expect(getSkillsBreadcrumb('runs')).toEqual(['Skills Center', '运行记录'])
     expect(normalizeSkillsView(undefined)).toBe('center')
   })
 

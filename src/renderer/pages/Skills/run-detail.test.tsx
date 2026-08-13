@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ArtifactList } from './ArtifactList'
 import { CapabilityApprovalCard } from './CapabilityApprovalCard'
@@ -52,11 +51,10 @@ const artifact = {
   sha256: 'sha256:abc123', metadata: { imageSessionId: 'image-session-1', previewUrl: '/preview.png' }, createdAt: 120,
 } satisfies SkillArtifact
 
-// Run Detail is the v1 manual approval entry. The retained capability and
-// installation component contracts live in other tests and do not imply a public
-// `permissions` route.
+// Runtime approval controls remain covered as reusable components; the standalone
+// Run detail page is no longer a public navigation target.
 
-describe('Run Detail workbench approval and runtime contracts', () => {
+describe('Runtime approval and run artifact contracts', () => {
   it('merges SSE and afterSeq events in sequence order without duplicate rendering', () => {
     const merged = mergeRunEvents([event(2), event(1)], [event(3), event(2, 'event-2-duplicate')])
     expect(merged.map((item) => item.seq)).toEqual([1, 2, 3])
@@ -77,7 +75,7 @@ describe('Run Detail workbench approval and runtime contracts', () => {
     expect(markup).toContain('medium')
   })
 
-  it('keeps waiting_approval Run Detail actions and safe waiting-input fields', () => {
+  it('keeps waiting_approval runtime actions and safe waiting-input fields', () => {
     const approval = renderToStaticMarkup(<RunActionPanel run={run} onAction={() => undefined} />)
     expect(approval).toContain('批准')
     expect(approval).toContain('拒绝')
@@ -91,7 +89,7 @@ describe('Run Detail workbench approval and runtime contracts', () => {
     expect(input).toContain('type="text"')
   })
 
-  it('renders waiting_approval details as the Run Detail manual approval entry with distinct approve/reject/cancel actions', () => {
+  it('renders waiting_approval details as the runtime approval entry with distinct approve/reject/cancel actions', () => {
     const markup = renderToStaticMarkup(<>
       <CapabilityApprovalCard action={run.requiredAction!} />
       <RunActionPanel run={run} onAction={() => undefined} />
@@ -107,26 +105,6 @@ describe('Run Detail workbench approval and runtime contracts', () => {
     expect(markup.indexOf('data-run-action="reject"')).not.toBe(markup.indexOf('data-run-action="cancel"'))
   })
 
-  it('keeps Run Detail approval actions on the runtime command path without permissions navigation', () => {
-    const drawerSource = readFileSync(new URL('./RunDetailDrawer.tsx', import.meta.url), 'utf8')
-    const actionSource = readFileSync(new URL('./RunActionPanel.tsx', import.meta.url), 'utf8')
-    const storeSource = readFileSync(new URL('./skill-runtime.store.ts', import.meta.url), 'utf8')
-    const sidebarSource = readFileSync(new URL('./SkillsSidebar.tsx', import.meta.url), 'utf8')
-
-    expect(drawerSource).toContain("run.status === 'waiting_approval' && run.requiredAction && <CapabilityApprovalCard action={run.requiredAction} />")
-    expect(drawerSource).toContain('await dispatchCommand(runId, action)')
-    expect(drawerSource).not.toContain('approveCapabilityGrant')
-    expect(drawerSource).not.toContain('rejectCapabilityGrant')
-    expect(drawerSource).not.toContain('onOpenGrant')
-    expect(drawerSource).not.toContain('openGrantContext')
-    expect(actionSource).toContain("type === 'reject' ? action(type, { reason: reason.trim() || undefined })")
-    expect(actionSource).toContain('data-run-action={type}')
-    expect(storeSource).toContain('platform.dispatchSkillRunCommand(id, command)')
-    expect(storeSource).toContain("type: 'approve'")
-    expect(storeSource).toContain("type: 'reject'")
-    expect(storeSource).toContain('platform.cancelSkillRun')
-    expect(sidebarSource).not.toMatch(/\bid:\s*['"]permissions['"]/)
-  })
   it('shows Artifact metadata, safe preview/export controls and Image Studio navigation', () => {
     const markup = renderToStaticMarkup(<ArtifactList runId="run-1" artifacts={[artifact]} onExport={() => undefined} />)
     expect(markup).toContain('image-reference')

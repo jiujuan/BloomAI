@@ -149,7 +149,7 @@ export type SkillsCenterCatalogProps = {
   totalRows?: number
   onPageChange: (page: number) => void
   onOpenPackage: (packageId: string) => void
-  onOpenRun: (runId: string) => void
+  onOpenRun: () => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
@@ -233,8 +233,8 @@ export function SkillsCenterCatalog({
     </section>
 
     <div className="skills-catalog-secondary-grid">
-      <section className="skills-center-panel" aria-labelledby="skills-recent-runs-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><History size={14} /> Observe / Runtime</div><h2 id="skills-recent-runs-title">最近运行</h2><p>Run 状态与 Package Catalog 使用同一套状态语言。</p></div><button type="button" className="skills-text-button" onClick={() => onOpenRun(recentRuns[0]?.id || '')} disabled={recentRuns.length === 0}>查看运行记录 <ChevronRight size={13} aria-hidden="true" /></button></div>{recentRuns.length === 0 ? <EmptyNotice title="暂无最近 Run" body="Package 安装并运行后，最近运行会显示在这里。" /> : <div className="skills-center-run-list">{recentRuns.map((run) => <RunSummary key={run.id} run={run} onOpenRun={onOpenRun} />)}</div>}</section>
-      <section className="skills-center-panel" aria-labelledby="skills-pending-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><ShieldAlert size={14} /> Review queue</div><h2 id="skills-pending-title">待处理事项</h2><p>需要人工审批的 Run 会保留原始上下文和审计入口。</p></div><span className="skills-status warning">{pendingRuns.length} Pending</span></div>{pendingRuns.length === 0 ? <EmptyNotice title="没有待处理事项" body="当前没有等待 Capability 审批的 Package Run。" /> : <div className="skills-pending-list">{pendingRuns.map((run) => <button type="button" className="skills-pending-row" key={run.id} onClick={() => onOpenRun(run.id)}><span className="skills-status-icon warning"><Clock3 size={14} aria-hidden="true" /></span><span><strong>Pending Approval</strong><small>{run.id} · {run.requiredAction?.capability || run.waitingReason || 'Capability 请求'}</small></span><ChevronRight size={14} aria-hidden="true" /></button>)}</div>}</section>
+      <section className="skills-center-panel" aria-labelledby="skills-recent-runs-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><History size={14} /> Observe / Runtime</div><h2 id="skills-recent-runs-title">最近运行</h2><p>Run 状态与 Package Catalog 使用同一套状态语言。</p></div><button type="button" className="skills-text-button" onClick={onOpenRun} disabled={recentRuns.length === 0}>查看运行记录 <ChevronRight size={13} aria-hidden="true" /></button></div>{recentRuns.length === 0 ? <EmptyNotice title="暂无最近 Run" body="Package 安装并运行后，最近运行会显示在这里。" /> : <div className="skills-center-run-list">{recentRuns.map((run) => <RunSummary key={run.id} run={run} onOpenRun={onOpenRun} />)}</div>}</section>
+      <section className="skills-center-panel" aria-labelledby="skills-pending-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><ShieldAlert size={14} /> Review queue</div><h2 id="skills-pending-title">待处理事项</h2><p>需要人工审批的 Run 会保留原始上下文和审计入口。</p></div><span className="skills-status warning">{pendingRuns.length} Pending</span></div>{pendingRuns.length === 0 ? <EmptyNotice title="没有待处理事项" body="当前没有等待 Capability 审批的 Package Run。" /> : <div className="skills-pending-list">{pendingRuns.map((run) => <button type="button" className="skills-pending-row" key={run.id} onClick={onOpenRun}><span className="skills-status-icon warning"><Clock3 size={14} aria-hidden="true" /></span><span><strong>Pending Approval</strong><small>{run.id} · {run.requiredAction?.capability || run.waitingReason || 'Capability 请求'}</small></span><ChevronRight size={14} aria-hidden="true" /></button>)}</div>}</section>
     </div>
   </div>
 }
@@ -264,9 +264,9 @@ function CatalogRow({ row, onOpenPackage, onToggleInstallation, onCreateVersion,
   return <tr><td><div className="skills-center-skill-cell"><span className="skills-center-kind-icon package" aria-hidden="true"><Box size={15} /></span><div><strong>{row.name}</strong><small>{row.description || '未提供描述'}</small><span className="skills-center-source-label">{row.sourceLabel}</span></div></div></td><td className="skills-center-mono">{row.version}</td><td><StatusBadge visual={visual} /></td><td><span className={`skills-status ${row.riskTone}`}><ShieldAlert size={13} aria-hidden="true" />{row.riskLabel}</span></td><td><div className="skills-capability-list">{row.capabilities.length > 0 ? row.capabilities.map((capability) => <span key={capability}>{capability}</span>) : <small>无额外能力</small>}</div></td><td>{row.lastRunAt ? formatDate(row.lastRunAt) : '—'}</td><td className="skills-center-actions">{actions.map((action) => { const Icon = icons[action.key]; return <button key={action.key} type="button" className={`skills-icon-button skills-catalog-action-button${action.danger ? ' danger' : ''}`} aria-label={action.label} title={action.label} data-tooltip={action.label} disabled={(action.key === 'toggle' || action.key === 'uninstall') && !row.installationId} onClick={() => void handlers[action.key]()}><Icon size={14} aria-hidden="true" /></button> })}</td></tr>
 }
 
-function RunSummary({ run, onOpenRun }: { run: SkillRun; onOpenRun: (runId: string) => void }) {
+function RunSummary({ run, onOpenRun }: { run: SkillRun; onOpenRun: () => void }) {
   const visual = getRunStatusVisual(run.status)
-  return <button type="button" className="skills-center-run-row" onClick={() => onOpenRun(run.id)}><div><strong className="skills-center-mono">{run.id}</strong><span>{run.skillVersionId} · {run.surface || 'skills'}</span></div><div><span className={`skills-status ${visual.tone}`}><StatusIcon icon={visual.icon} />{visual.label}</span><time>{formatDate(run.updatedAt)}</time><ChevronRight size={14} aria-hidden="true" /></div></button>
+  return <button type="button" className="skills-center-run-row" onClick={onOpenRun}><div><strong className="skills-center-mono">{run.id}</strong><span>{run.skillVersionId} · {run.surface || 'skills'}</span></div><div><span className={`skills-status ${visual.tone}`}><StatusIcon icon={visual.icon} />{visual.label}</span><time>{formatDate(run.updatedAt)}</time><ChevronRight size={14} aria-hidden="true" /></div></button>
 }
 
 function getRunStatusVisual(status: SkillRunStatus): SkillStatusVisual {
@@ -297,7 +297,7 @@ type SkillOverviewPanelProps = {
   totalRows?: number
   onPageChange?: (page: number) => void
   onOpenPackage: (packageId: string) => void
-  onOpenRun: (runId: string) => void
+  onOpenRun: () => void
   onInstall: () => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
   onCreateVersion?: (packageId: string) => void | Promise<void>
@@ -317,7 +317,7 @@ export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = 
   return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
 }
 
-function RunOverview({ rows, loading, onOpenRun }: { rows: SkillListRow[]; loading: boolean; onOpenRun: (runId: string) => void }) {
+function RunOverview({ rows, loading, onOpenRun }: { rows: SkillListRow[]; loading: boolean; onOpenRun: () => void }) {
   const runs = rows.flatMap((row) => row.run ? [row.run] : [])
   return <section className="skills-center-panel" aria-labelledby="skills-runs-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow"><History size={14} /> Observe / Runtime</div><h2 id="skills-runs-title">Runs</h2><p>查看状态、审批、事件和 Artifact；停止新 Run 不会删除既有审计记录。</p></div></div>{loading && <div className="skills-center-state" role="status">正在加载 Runs…</div>}{!loading && runs.length === 0 && <div className="skills-center-state"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Run</strong><p>从已安装 Package 的详情页发起运行后，这里会保留可查询的审计记录。</p></div></div>}{!loading && runs.length > 0 && <div className="skills-center-run-list">{runs.map((run) => <RunSummary key={run.id} run={run} onOpenRun={onOpenRun} />)}</div>}</section>
 }

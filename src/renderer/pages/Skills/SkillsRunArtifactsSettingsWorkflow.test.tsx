@@ -9,7 +9,7 @@ import { ArtifactsWorkbench } from './ArtifactsWorkbench'
 import { SkillRuntimeSettingsPanel } from './SkillRuntimeSettingsPanel'
 import { SkillsCenterWorkbench } from './SkillsCenterWorkbench'
 import { RunActionPanel } from './RunActionPanel'
-import { serializeRunEvents } from './RunDetailDrawer'
+import { serializeRunEvents } from './run-runtime.utils'
 import type { SkillArtifact, SkillRun, SkillRunEvent, SkillRuntimeFeatureFlags, SkillRuntimeSettings } from './skill-runtime.types'
 
 const skillsGlobalCss = readFileSync(new URL('../../styles/global.css', import.meta.url), 'utf8')
@@ -137,7 +137,7 @@ describe('P3-009 Runs, Artifacts and Settings workflow', () => {
     const markup = renderToStaticMarkup(<ArtifactsWorkbench records={[{ artifact, skillLabel: 'Research Package · v1.2.0' }]} onOpenRun={() => undefined} onExport={() => undefined} />)
     expect(markup).toContain('Artifacts')
     expect(markup).toContain('Research Package · v1.2.0')
-    expect(markup).toContain('查看 Run')
+    expect(markup).toContain('查看运行记录')
     expect(markup).toContain('导出')
   })
 

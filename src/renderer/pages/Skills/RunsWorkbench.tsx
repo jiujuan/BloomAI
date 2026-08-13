@@ -100,7 +100,7 @@ export function RunsWorkbench({ runs, artifactCounts = {}, loading = false, erro
 }
 
 function RunRow({ run, artifactCount, onOpenRun }: { run: SkillRun; artifactCount: number; onOpenRun: (runId: string) => void }) {
-  return <tr data-run-id={run.id}><td><button type="button" className="skills-run-id-button" onClick={() => onOpenRun(run.id)} aria-label={`查看 Run ${run.id}`} title="查看 Run 详情">{run.id}</button></td><td><strong>{run.version?.version ? `v${run.version.version}` : run.skillVersionId}</strong><small className="skills-table-subtext">{run.skillVersionId}</small></td><td><RunStatusBadge status={run.status} /></td><td className="skills-center-mono">{formatRunDuration(run)}</td><td>{artifactCount}</td><td><span className="skills-table-source">{run.source || run.version?.source || 'Package Runtime'}</span></td><td><time dateTime={new Date(run.updatedAt).toISOString()}>{formatDateShort(run.updatedAt)}</time></td></tr>
+  return <tr data-run-id={run.id}><td><button type="button" className="skills-run-id-button" onClick={() => onOpenRun(run.id)} aria-label={`查看 Run ${run.id}`} title="打开运行记录">{run.id}</button></td><td><strong>{run.version?.version ? `v${run.version.version}` : run.skillVersionId}</strong><small className="skills-table-subtext">{run.skillVersionId}</small></td><td><RunStatusBadge status={run.status} /></td><td className="skills-center-mono">{formatRunDuration(run)}</td><td>{artifactCount}</td><td><span className="skills-table-source">{run.source || run.version?.source || 'Package Runtime'}</span></td><td><time dateTime={new Date(run.updatedAt).toISOString()}>{formatDateShort(run.updatedAt)}</time></td></tr>
 }
 
 function FilterIcon() { return <Search size={12} aria-hidden="true" /> }

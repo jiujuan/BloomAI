@@ -45,13 +45,15 @@ describe('Skills Center workbench contract', () => {
   })
 
   it('serializes only non-secret selected resource state for refresh recovery', () => {
-    const encoded = encodeSkillsCenterState({ tab: 'runs', selectedPackageId: 'pkg-1', selectedRunId: 'run-1' })
-    expect(encoded).toBe('#skills/tab=runs&package=pkg-1&run=run-1')
-    expect(decodeSkillsCenterState(encoded)).toEqual({ tab: 'runs', selectedPackageId: 'pkg-1', selectedRunId: 'run-1' })
+    const encoded = encodeSkillsCenterState({ tab: 'runs', selectedPackageId: 'pkg-1' })
+    expect(encoded).toBe('#skills/tab=runs&package=pkg-1')
+    expect(decodeSkillsCenterState(encoded)).toEqual({ tab: 'runs', selectedPackageId: 'pkg-1' })
     const creatorEncoded = encodeSkillsCenterState({ tab: 'creator', draftId: 'draft-1' })
     expect(creatorEncoded).toBe('#skills/tab=creator&draft=draft-1')
     expect(decodeSkillsCenterState(creatorEncoded)).toEqual({ tab: 'creator', draftId: 'draft-1' })
     expect(decodeSkillsCenterState('#skills/tab=permissions&package=pkg-1')).toMatchObject({ tab: 'detail', selectedPackageId: 'pkg-1' })
+    expect(decodeSkillsCenterState('#skills/tab=run-detail&run=run-1')).toMatchObject({ tab: 'runs' })
+    expect(decodeSkillsCenterState('#skills/tab=run-detail&run=run-1')).not.toHaveProperty('selectedRunId')
     expect(encoded).not.toContain('token')
     expect(encoded).not.toContain('secret')
   })

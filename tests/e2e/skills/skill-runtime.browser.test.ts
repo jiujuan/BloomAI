@@ -58,8 +58,8 @@ const browserHarnessHtml = String.raw`<!doctype html>
       </div>
     </section>
 
-    <section id="run-detail" data-screen-panel hidden>
-      <h1>Run Detail</h1>
+    <section id="runs" data-screen-panel hidden>
+      <h1>运行记录</h1>
       <p data-testid="run-id">No Run</p>
       <p class="status" data-testid="run-status">created</p>
       <div class="row">
@@ -112,8 +112,7 @@ const browserHarnessHtml = String.raw`<!doctype html>
   const publishDraft = document.querySelector('#publish-draft');
 
   function show(screen) {
-    panels.forEach((panel) => { panel.hidden = panel.id !== screen && !(screen === 'run-detail' && panel.id === 'run-detail'); });
-    if (screen === 'run-detail') document.querySelector('#center').hidden = true;
+    panels.forEach((panel) => { panel.hidden = panel.id !== screen; });
     if (screen === 'center') document.querySelector('#center').hidden = false;
     if (screen === 'creator') document.querySelector('#creator').hidden = false;
   }
@@ -147,7 +146,7 @@ const browserHarnessHtml = String.raw`<!doctype html>
     runId.textContent = 'Run ID: ' + state.runId;
     setRunStatus('waiting_approval');
     approve.disabled = false;
-    show('run-detail');
+    show('runs');
   });
   approve.addEventListener('click', () => {
     setRunStatus('running');
@@ -215,7 +214,7 @@ afterAll(() => {
 })
 
 describe('Skills Runtime browser acceptance (offline harness)', () => {
-  it('covers Skills Center → Run Detail → approve → artifact → export and Creator publish', async () => {
+  it('covers Skills Center → run history → approve → artifact → export and Creator publish', async () => {
     if (!browserExecutable) {
       throw new Error(`Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH; checked: ${browserExecutableCandidates.join(', ')}`)
     }
@@ -249,7 +248,7 @@ describe('Skills Runtime browser acceptance (offline harness)', () => {
       await expectText(page.getByTestId('center-status'), 'install:committed · version:1.0.0')
       await page.getByRole('button', { name: 'Enable installation' }).click()
       await page.getByRole('button', { name: 'Run skill' }).click()
-      await expectVisible(page.getByRole('heading', { name: 'Run Detail' }))
+      await expectVisible(page.getByRole('heading', { name: '运行记录' }))
       await expectText(page.getByTestId('run-id'), 'Run ID: run-offline-001')
       await expectText(page.getByTestId('run-status'), 'waiting_approval')
 

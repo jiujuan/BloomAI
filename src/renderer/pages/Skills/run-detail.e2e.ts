@@ -14,7 +14,7 @@ const imageArtifact: SkillArtifact = {
   sha256: 'sha256:e2e', metadata: { imageSessionId: 'image-42', title: '<script>alert(1)</script>' }, createdAt: 1,
 }
 
-describe('Run Detail browser contract', () => {
+describe('Run runtime browser contract', () => {
   it('reconnects after refresh using the last sequence and preserves server event order', () => {
     const first = [makeEvent(1, { title: 'started' }), makeEvent(3, { title: 'completed' })]
     const afterSeq = mergeRunEvents(first, [makeEvent(2, { title: 'progress' }), makeEvent(3, { title: 'completed' })])

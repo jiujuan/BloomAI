@@ -57,7 +57,7 @@ export function SkillRuntimeSettingsPanel({ settings, featureFlags, diagnostics,
       <SettingsGroup title={GROUP_LABELS.artifacts} description="输出文件的保留、预览和导出策略。" entries={entriesForGroup(draftSettings.artifacts)} onChange={(key, value) => updateSetting('artifacts', key, value)} />
       <FeatureFlagsGroup flags={draftFlags} onChange={updateFlag} />
     </div>
-    <div className="skills-settings-health" aria-label="Runtime health"><div><div className="skills-eyebrow"><Activity size={14} aria-hidden="true" /> Runtime health</div><strong>{healthLabel}</strong><p>{diagnostics ? `${diagnostics.queue.depth} 个队列任务 · ${diagnostics.worker.activeRuns ?? 0} 个活动 Run` : '正在等待 Runtime diagnostics。'}</p></div><span className={`skills-status ${healthTone}`}><HealthIcon tone={healthTone} />{healthLabel}</span></div>
+    <div className="skills-settings-health" aria-label="Runtime health"><div><div className="skills-eyebrow"><Activity size={14} aria-hidden="true" /> Runtime health</div><strong>{healthLabel}</strong><p>{diagnostics ? `${diagnostics.queue.depth} 个队列任务 · ${diagnostics.worker.activeRuns ?? 0} 个活动 Run` : '正在检查 Runtime 状态。'}</p></div><span className={`skills-status ${healthTone}`}><HealthIcon tone={healthTone} />{healthLabel}</span></div>
   </section>
 }
 

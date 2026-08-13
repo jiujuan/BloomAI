@@ -22,7 +22,7 @@ type SkillPermissionsPanelProps = {
 }
 
 export function SkillPermissionsPanel({ detail, installations, runs = [], readOnly = false, busyGrantIds, busyInstallationIds, onApprove, onReject, onRevoke, onToggleInstallation, onRollbackInstallation, onUninstallInstallation, onOpenRun }: SkillPermissionsPanelProps) {
-  if (!detail) return <section className="skills-center-panel skills-permissions-panel" aria-labelledby="skills-permissions-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow">Package Runtime</div><h2 id="skills-permissions-title">权限与安装</h2><p>选择一个 Package 后查看 Capability Grant、Installation 和 waiting_approval Run。</p></div></div><div className="skills-empty-state"><ShieldCheck size={18} aria-hidden="true" /><div><strong>等待选择 Package</strong><p>从 Skills Center、待审批事项或 Run Detail 进入权限上下文。</p></div></div></section>
+  if (!detail) return <section className="skills-center-panel skills-permissions-panel" aria-labelledby="skills-permissions-title"><div className="skills-center-panel-head"><div><div className="skills-eyebrow">Package Runtime</div><h2 id="skills-permissions-title">权限与安装</h2><p>选择一个 Package 后查看 Capability Grant、Installation 和 waiting_approval Run。</p></div></div><div className="skills-empty-state"><ShieldCheck size={18} aria-hidden="true" /><div><strong>等待选择 Package</strong><p>从 Skills Center、待审批事项或运行记录进入权限上下文。</p></div></div></section>
 
   const packageInstallations = installations.filter((installation) => (installation.packageId || installation.package_id) === detail.package.id)
   const visibleInstallations = packageInstallations.length > 0 ? packageInstallations : detail.installations
