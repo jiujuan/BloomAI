@@ -62,6 +62,7 @@ describe('P3-010 visual, responsive and accessibility contract', () => {
     expect(hasRule('.skills-import-tabs > button', /border-bottom:\s*2px solid transparent/)).toBe(true)
     expect(hasRule('.skills-import-tabs > button', /border-radius:\s*0/)).toBe(true)
     expect(skillsGlobalCss).toContain('.skills-import-tabs > button:focus-visible')
+    expect(skillsGlobalCss).toMatch(/\.skills-import-page \.skills-field input:focus,[\s\S]*?outline:\s*none;[\s\S]*?border-color:\s*var\(--border-secondary\)/)
     expect(skillsGlobalCss).toMatch(/@media\s*\(max-width:\s*620px\)[\s\S]*\.skills-import-audit-grid[^}]*grid-template-columns:\s*1fr/s)
   })
 

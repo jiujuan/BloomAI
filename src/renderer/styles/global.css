@@ -1648,6 +1648,15 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .skills-field input, .skills-code-input { width: 100%; box-sizing: border-box; border: 0.5px solid var(--border-secondary); border-radius: var(--radius-md); outline: none; background: var(--bg-primary); color: var(--text-primary); font: inherit; }
 .skills-field input { height: 32px; padding: 0 9px; font-size: 12px; }
 .skills-field input:focus, .skills-code-input:focus { border-color: var(--border-info); }
+.skills-import-page .skills-field input:focus,
+.skills-import-page .skills-field input:focus-visible,
+.skills-import-page .skills-code-input:focus,
+.skills-import-page .skills-code-input:focus-visible {
+  outline: none;
+  outline-offset: 0;
+  box-shadow: none;
+  border-color: var(--border-secondary);
+}
 .skills-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .skills-code-input { min-height: 170px; padding: 10px; font-family: var(--font-mono); font-size: 11px; line-height: 1.55; resize: vertical; }
 .skills-message { display: flex; align-items: flex-start; gap: 7px; padding: 8px 9px; border-radius: var(--radius-md); font-size: 11px; line-height: 1.45; }
