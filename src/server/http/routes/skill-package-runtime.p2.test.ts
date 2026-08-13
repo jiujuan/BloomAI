@@ -50,11 +50,12 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     fs.rmSync(fixtureDir, { recursive: true, force: true })
   })
 
-  it('allows catalog reads for users but denies every package/import/installation write', async () => {
+  it('allows user package lifecycle operations while keeping installation management restricted', async () => {
     const { app, skillPackageRepo } = await loadApi()
     const pkg = skillPackageRepo.createPackage({ name: 'Readable Package', description: '', sourceType: 'local-directory' })
     const version = skillPackageRepo.createVersion({ packageId: pkg.id, version: '1.0.0', manifest: {}, manifestHash: 'readable-hash', packagePath: fixtureDir, securityStatus: 'verified' })
     const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: version.id, status: 'installed', enabled: true })
+    const deletable = skillPackageRepo.createPackage({ name: 'Deletable Package', description: '', sourceType: 'local-directory' })
 
     const read = await requestJson(app, '/skill-packages?search=Readable')
     expect(read.response.status).toBe(200)
@@ -62,17 +63,39 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
 
     const userHeaders = { 'x-bloom-role': 'user' }
     const inspect = await requestJson(app, '/skill-packages/inspect', { method: 'POST', headers: userHeaders, body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }) })
-    const install = await requestJson(app, '/skill-packages/install', { method: 'POST', headers: userHeaders, body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir }, reviewId: 'review', sourceFingerprint: 'a'.repeat(64), confirm: true }) })
+    const approved = await requestJson(app, `/skill-import-reviews/${inspect.body.data.reviewId}/approve`, {
+      method: 'POST',
+      headers: { 'x-bloom-role': 'admin', 'x-bloom-actor': 'operator-1' },
+      body: JSON.stringify({}),
+    })
+    const install = await requestJson(app, '/skill-packages/install', { method: 'POST', headers: userHeaders, body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir }, reviewId: inspect.body.data.reviewId, sourceFingerprint: inspect.body.data.sourceFingerprint, confirm: true }) })
+    const update = await requestJson(app, `/skill-packages/${pkg.id}/update`, {
+      method: 'POST',
+      headers: userHeaders,
+      body: JSON.stringify({
+        version: '2.0.0',
+        manifest: { name: 'Readable Package', description: 'updated' },
+        manifestHash: 'readable-v2-hash',
+        packagePath: fixtureDir,
+        sourceSnapshot: { sourceSha256: 'readable-v2-source', files: [] },
+        securityStatus: 'verified',
+        confirm: true,
+      }),
+    })
     const disable = await requestJson(app, `/skill-installations/${installation.id}`, { method: 'PATCH', headers: userHeaders, body: JSON.stringify({ enabled: false, expectedRevision: 0, idempotencyKey: 'p2-user-disable' }) })
-    const remove = await requestJson(app, `/skill-packages/${pkg.id}`, { method: 'DELETE', headers: userHeaders, body: JSON.stringify({ confirm: true, idempotencyKey: 'p2-user-delete', reason: 'not allowed' }) })
+    const remove = await requestJson(app, `/skill-packages/${deletable.id}`, { method: 'DELETE', headers: userHeaders, body: JSON.stringify({ confirm: true, idempotencyKey: 'p2-user-delete', reason: 'retire package' }) })
 
     expect(inspect.response.status).toBe(200)
     expect(inspect.body.data).toMatchObject({ reviewId: expect.any(String), sourceFingerprint: expect.any(String) })
-
-    for (const result of [install, disable, remove]) {
-      expect(result.response.status).toBe(403)
-      expect(result.body.error).toMatchObject({ code: 'FORBIDDEN', requestId: expect.any(String) })
-    }
+    expect(approved.response.status).toBe(200)
+    expect(install.response.status).toBe(201)
+    expect(install.body.data.status).toBe('awaiting_permission_review')
+    expect(update.response.status).toBe(201)
+    expect(update.body.data).toMatchObject({ packageId: pkg.id, duplicate: false })
+    expect(disable.response.status).toBe(403)
+    expect(disable.body.error).toMatchObject({ code: 'FORBIDDEN', requestId: expect.any(String) })
+    expect(remove.response.status).toBe(200)
+    expect(remove.body.data).toMatchObject({ id: deletable.id, deletedAt: expect.any(Number) })
   })
 
   it('filters archived packages, applies stable sorting, and reports the filtered total', async () => {
