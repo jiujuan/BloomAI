@@ -29,6 +29,7 @@ export type SkillOperation =
 const USER_OPERATIONS = new Set<SkillOperation>([
   'runtime.read',
   'package.read',
+  'package.inspect',
   'installation.read',
   'import.read',
   'grant.read',

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -85,6 +86,17 @@ describe('Package import workflow contract', () => {
     expect(pageMarkup).not.toContain('skills-modal-backdrop')
     expect(pageMarkup).not.toContain('role="dialog"')
     expect(pageMarkup).not.toContain('ZIP')
+  })
+
+  it('keeps scan errors in the import actions area beside the scan button', () => {
+    const source = readFileSync(new URL('./PackageInstallDialog.tsx', import.meta.url), 'utf8')
+    const actionsStart = source.indexOf('<div className="skills-import-actions">')
+    const actionsEnd = source.indexOf('</div>', actionsStart)
+    const workflowEnd = source.indexOf('{error && <div className="skills-message error" role="alert">')
+
+    expect(actionsStart).toBeGreaterThanOrEqual(0)
+    expect(source.slice(actionsStart, actionsEnd)).toContain('skills-import-action-error')
+    expect(workflowEnd).toBe(-1)
   })
 
   it('uses semantic review tones and only allows approved or installed reviews to install', () => {

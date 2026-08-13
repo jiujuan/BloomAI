@@ -66,7 +66,10 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     const disable = await requestJson(app, `/skill-installations/${installation.id}`, { method: 'PATCH', headers: userHeaders, body: JSON.stringify({ enabled: false, expectedRevision: 0, idempotencyKey: 'p2-user-disable' }) })
     const remove = await requestJson(app, `/skill-packages/${pkg.id}`, { method: 'DELETE', headers: userHeaders, body: JSON.stringify({ confirm: true, idempotencyKey: 'p2-user-delete', reason: 'not allowed' }) })
 
-    for (const result of [inspect, install, disable, remove]) {
+    expect(inspect.response.status).toBe(200)
+    expect(inspect.body.data).toMatchObject({ reviewId: expect.any(String), sourceFingerprint: expect.any(String) })
+
+    for (const result of [install, disable, remove]) {
       expect(result.response.status).toBe(403)
       expect(result.body.error).toMatchObject({ code: 'FORBIDDEN', requestId: expect.any(String) })
     }

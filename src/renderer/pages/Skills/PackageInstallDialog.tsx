@@ -314,7 +314,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
       </div>
       {validationErrors.length > 0 && <div className="skills-message warning"><AlertTriangle size={14} /><span>{validationErrors[0]}</span></div>}
       <div className="skills-import-safety-note"><ShieldCheck size={15} /><div><strong>导入与执行分离</strong><p>导入阶段只读取、扫描和计算内容哈希；任何 web、image、filesystem 或 command 能力都必须在运行时重新授权。</p></div></div>
-      <div className="skills-import-actions"><button type="button" className="skills-button primary" onClick={() => void inspect()} disabled={busy || validationErrors.length > 0}><ShieldCheck size={14} />开始扫描</button>{mode === 'page' && <button type="button" className="skills-button secondary" onClick={onClose} disabled={busy}>取消</button>}</div>
+      <div className="skills-import-actions"><button type="button" className="skills-button primary" onClick={() => void inspect()} disabled={busy || validationErrors.length > 0}><ShieldCheck size={14} />开始扫描</button>{mode === 'page' && <button type="button" className="skills-button secondary" onClick={onClose} disabled={busy}>取消</button>}{error && <div className="skills-message error skills-import-action-error" role="alert"><AlertTriangle size={14} />{error}</div>}</div>
     </section>
 
     <section className="skills-import-review-panel" aria-labelledby="import-review-title">
@@ -337,7 +337,6 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
       {phase === 'completed' && <div className="skills-message success" role="status"><CheckCircle2 size={14} />安装完成，正在返回 Skills Center 或打开 Package Detail。</div>}
       <div className="skills-import-confirm-actions"><button type="button" className="skills-button primary" onClick={() => void install()} disabled={busy || !canInstall}><CheckCircle2 size={14} />安装已批准的 Skill</button><span className="skills-muted">{canInstall ? '可安装：review 已批准。' : 'Rejected 后不可安装。warning 或未审批的 review 也不能安装。'}</span></div>
     </section>
-    {error && <div className="skills-message error" role="alert"><AlertTriangle size={14} />{error}</div>}
   </div>
 
   if (mode === 'page') {

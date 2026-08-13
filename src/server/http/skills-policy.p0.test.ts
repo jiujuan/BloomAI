@@ -12,6 +12,7 @@ describe('Skills Admin P0 authorization boundary', () => {
     expect(getSkillRole('superuser')).toBe('user')
     expect(isSkillOperationAllowed('user', 'package.install')).toBe(false)
     expect(isSkillOperationAllowed('user', 'package.read')).toBe(true)
+    expect(isSkillOperationAllowed('user', 'package.inspect')).toBe(true)
     expect(isSkillOperationAllowed('user', 'run.create')).toBe(true)
   })
 
