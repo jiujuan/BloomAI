@@ -97,9 +97,11 @@ describe('P3-010 visual, responsive and accessibility contract', () => {
     expect(workbench).not.toContain('Runtime Diagnostics')
   })
 
-  it('keeps status meaning in text and icon markup instead of color alone', () => {
+  it('removes runtime health labels from the shared Skills page chrome', () => {
     const workbench = renderToStaticMarkup(<SkillsCenterWorkbench />)
-    expect(workbench).toContain('Runtime Healthy')
+    expect(workbench).not.toContain('Runtime Healthy')
+    expect(workbench).not.toContain('Runtime Checking')
+    expect(workbench).not.toContain('· Worker')
     expect(workbench).toContain('Package Runtime')
     expect(workbench).toMatch(/skills-status[^>]*>[^<]*<svg/)
   })

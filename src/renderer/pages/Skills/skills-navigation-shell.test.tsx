@@ -33,8 +33,9 @@ describe('Skills Runtime navigation shell', () => {
   it('mounts the App Skills entry on the Runtime shell', () => {
     const markup = renderToStaticMarkup(<SkillsAdminShell />)
     expect(markup).toContain('data-testid="skills-admin-shell"')
-    expect(markup).toContain('Runtime Healthy')
-    expect(markup).toContain('Worker')
+    expect(markup).not.toContain('Runtime Healthy')
+    expect(markup).not.toContain('Runtime Checking')
+    expect(markup).not.toContain('· Worker')
     expect(markup).toContain('面包屑')
   })
 })

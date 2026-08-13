@@ -100,13 +100,6 @@ export function decodeSkillsCenterState(hash: string): SkillsCenterRouteState {
   return { tab, selectedPackageId: values.get('package') || undefined, draftId: values.get('draft') || undefined }
 }
 
-export function getRuntimeStatusLabel(capabilities: Pick<SkillRuntimeCapabilities, 'operationalStatus'> | null) {
-  if (!capabilities) return 'Runtime Checking'
-  if (capabilities.operationalStatus === 'ready') return 'Runtime Ready'
-  if (capabilities.operationalStatus === 'disabled') return 'Runtime Disabled'
-  return 'Runtime Degraded'
-}
-
 export function hasRuntimeManagementCapability(capabilities: Pick<SkillRuntimeCapabilities, 'canManage'> | null) {
   return capabilities?.canManage === true
 }
@@ -124,8 +117,6 @@ export function SkillsCenterWorkbench() {
 
   const tab = normalizeSkillsView(route.tab || 'center')
   const canManageRuntime = hasRuntimeManagementCapability(runtime.capabilities)
-  const runtimeStatus = runtime.capabilities?.operationalStatus ?? 'degraded'
-  const runtimeStatusLabel = getRuntimeStatusLabel(runtime.capabilities)
   useEffect(() => {
     void Promise.allSettled([runtime.loadPackages(), runtime.loadInstallations(), runtime.loadRuns(), runtime.loadFeatureFlags()])
   }, [])
@@ -265,7 +256,7 @@ export function SkillsCenterWorkbench() {
   const showCatalogFilters = tab === 'center' && catalogFiltersOpen
   const visibleRuntimeError = shouldHideSkillsAdminAccessError(runtime.error) ? null : runtime.error
   return <div className="skills-center skills-admin-shell skills-runtime-page" data-testid="skills-admin-shell" data-testid-secondary="skills-center-workbench">
-    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><span className="skills-runtime-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy · Worker</span><span className={cn('skills-runtime-status', runtimeStatus === 'ready' ? 'success' : runtimeStatus === 'disabled' ? 'muted' : 'warning')} role="status" aria-label={runtimeStatusLabel}>{runtimeStatusLabel}</span><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={openImport}><Upload size={13} aria-hidden="true" />导入 Skill</button></header>
+    <header className="skills-center-topbar"><div className="skills-page-title"><Puzzle size={17} /><div><span className="skills-title">Skills Center</span><span className="skills-subtitle">Package Runtime 管理与审计</span></div></div><nav className="skills-breadcrumbs" aria-label="Skills 面包屑">{breadcrumb.map((item, index) => <React.Fragment key={`${item}-${index}`}><span>{item}</span>{index < breadcrumb.length - 1 && <span aria-hidden="true">/</span>}</React.Fragment>)}</nav><div className="skills-center-topbar-tools"><div className="skills-center-search skills-search"><Search size={13} aria-hidden="true" /><input aria-label="搜索 Skills" value={filters.query} onChange={(event) => handleGlobalSearch(event.target.value)} placeholder="搜索名称、来源、运行状态…" /></div><button type="button" className="skills-icon-button" aria-label="刷新 Skills Runtime" title="刷新 Skills Runtime" onClick={() => void refreshRuntime()}><SlidersHorizontal size={14} aria-hidden="true" /></button></div><button type="button" className="skills-tbtn" disabled={!creatorEnabled} onClick={openCreator}><Plus size={13} aria-hidden="true" />打开 Creator</button><button type="button" className="skills-tbtn primary" onClick={openImport}><Upload size={13} aria-hidden="true" />导入 Skill</button></header>
     <div className="skills-center-layout"><SkillsSidebar view={tab} counts={counts} onChange={selectTab} /><main className="skills-center-main">
       {showCatalogFilters && <div className="skills-center-filterbar" aria-label="Skills 筛选"><SlidersHorizontal size={14} aria-hidden="true" /><label>来源<select value={tab === 'center' ? 'package' : filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value as SkillsCenterFilters['source'] }))}><option value="all">全部</option><option value="package">Package</option></select></label><label>Runtime<select value={tab === 'center' ? 'package' : filters.runtime} onChange={(event) => setFilters((current) => ({ ...current, runtime: event.target.value as SkillsCenterFilters['runtime'] }))}><option value="all">全部</option><option value="package">Package</option></select></label><label>状态<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as SkillsCenterFilters['status'] }))}><option value="all">全部</option><option value="enabled">已启用</option><option value="disabled">已禁用</option><option value="attention">需关注</option></select></label><Filter size={14} aria-hidden="true" /><span>{rows.length} 条结果</span></div>}
       {visibleRuntimeError && <div className="skills-page-message"><AlertTriangle size={14} aria-hidden="true" />{visibleRuntimeError}<button type="button" onClick={runtime.clearError} aria-label="关闭提示">×</button></div>}

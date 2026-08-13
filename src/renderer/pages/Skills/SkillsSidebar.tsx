@@ -44,7 +44,6 @@ export function SkillsSidebar({ view, counts, onChange }: SkillsSidebarProps) {
   const activeView = normalizeSkillsView(view)
   return <aside className="skills-center-sidebar" aria-label="Skills Runtime 导航">
     <div className="skills-center-brand"><span className="skills-center-brand-mark" aria-hidden="true">S</span><span><strong>Skills Center</strong><small>Package Runtime control plane</small></span></div>
-    <div className="skills-center-nav-context"><span className="skills-runtime-context-dot" aria-hidden="true" />Runtime Healthy <span>· Worker</span></div>
     <div className="skills-center-nav-label">Workspace</div>
     <nav aria-label="Skills Runtime 页面">
       {SKILLS_RUNTIME_NAV_ITEMS.filter((item) => item.group === 'workspace').map((item) => <NavItem key={item.id} item={item} activeView={activeView} counts={counts} onChange={onChange} />)}

@@ -2532,8 +2532,7 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .skills-runtime-page .skills-toggle-control.on {
   background: var(--text-success);
 }
-.skills-runtime-page .skills-status,
-.skills-runtime-page .skills-runtime-status {
+.skills-runtime-page .skills-status {
   border: .5px solid color-mix(in srgb, currentColor 28%, transparent);
 }
 .skills-runtime-page .skills-message,
@@ -2561,9 +2560,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 }
 
 @media (max-width: 1120px) {
-  .skills-runtime-page .skills-runtime-context {
-    display: none;
-  }
   .skills-runtime-page .skills-center-main {
     padding-inline: 18px;
   }
