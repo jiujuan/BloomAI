@@ -48,11 +48,21 @@ describe('skill runtime config', () => {
     expect(config.packageDataRoot).toBe(path.join(os.homedir(), 'bloomai-skills-config-test'))
   })
 
+  it('uses SKILLS_DATA_DIR_DL as the Skill import download root', () => {
+    const configured = path.join('~', 'bloomai-skills-download-test')
+    const config = loadSkillRuntimeConfig({
+      SKILLS_DATA_DIR_DL: configured,
+    }, fsAdapter)
+
+    expect(config.downloadRoot).toBe(path.join(os.homedir(), 'bloomai-skills-download-test'))
+  })
+
   it('keeps default runtime roots separate from SKILLS_DATA_DIR', () => {
     const configured = path.join(os.homedir(), '.bloomai', 'skills-config-test')
     const config = loadSkillRuntimeConfig({ SKILLS_DATA_DIR: configured }, fsAdapter)
 
     expect(config.packageDataRoot).toBe(configured)
+    expect(config.downloadRoot).toBe(path.join(os.homedir(), '.bloomai', 'staging'))
     expect(config.artifactRoot).toBe(path.join(os.homedir(), '.bloomai', 'runs'))
     expect(config.exportRoot).toBe(path.join(os.homedir(), '.bloomai', 'exports'))
   })

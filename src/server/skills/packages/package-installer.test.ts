@@ -9,10 +9,11 @@ let fixtureDir: string
 let originalEnv: NodeJS.ProcessEnv
 let originalFetch: typeof fetch
 
-async function loadInstaller(options: { skillsDataDir?: string } = {}) {
+async function loadInstaller(options: { skillsDataDir?: string; skillsDownloadDir?: string } = {}) {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
   process.env.SKILLS_DATA_DIR = options.skillsDataDir ?? path.join(dataDir, 'skills', 'packages')
+  process.env.SKILLS_DATA_DIR_DL = options.skillsDownloadDir ?? path.join(dataDir, 'skills', 'staging')
   process.env.SKILL_PACKAGE_RUNTIME_ENABLED = 'true'
   const client = await import('../../db/client')
   await client.runMigrations()
@@ -165,6 +166,25 @@ describe('PackageInstaller', () => {
     )
   })
 
+  it('uses SKILLS_DATA_DIR_DL for import staging and downloads', async () => {
+    const skillsDataDir = path.join(dataDir, 'configured-skills', 'packages')
+    const skillsDownloadDir = path.join(dataDir, 'configured-downloads')
+    writeFile('article/SKILL.md', '# Article Illustrator\n')
+
+    const { PackageInstaller } = await loadInstaller({ skillsDataDir, skillsDownloadDir })
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(fs.readdirSync(skillsDownloadDir)).toEqual([])
+    expect(fs.existsSync(path.join(path.dirname(skillsDataDir), 'staging'))).toBe(false)
+  })
+
   it('imports local packages when package import feature flags are disabled', async () => {
     process.env.SKILL_PACKAGE_IMPORT_ENABLED = 'false'
     process.env.SKILL_GITHUB_IMPORT_ENABLED = 'false'
@@ -290,6 +310,35 @@ capabilities:
     expect(result.packages[0]).toMatchObject({ relativeSkillPath: 'illustrator', sourceType: 'zip' })
     expect(result.packages[0].sourceSnapshot.sourceSha256).toBe(crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex'))
     expect(fs.existsSync(path.join(result.packages[0].packagePath, '.env'))).toBe(false)
+  })
+
+  it('ignores ZIP symbolic links without materializing them and records ignored paths', async () => {
+    const zipPath = path.join(fixtureDir, 'symbolic-link.zip')
+    writeStoredZip(zipPath, [
+      { name: 'repo-main/', content: '', unixMode: 0o040755 },
+      { name: 'repo-main/AGENTS.md', content: 'CLAUDE.md', unixMode: 0o120777 },
+      { name: 'repo-main/skills/', content: '', unixMode: 0o040755 },
+      { name: 'repo-main/skills/demo/', content: '', unixMode: 0o040755 },
+      { name: 'repo-main/skills/demo/SKILL.md', content: '# Demo\n' },
+    ])
+
+    const { PackageInstaller } = await loadInstaller()
+    const inspected = await new PackageInstaller().inspect({ kind: 'zip', zipPath, subdirectory: 'repo-main/skills' })
+
+    expect(inspected.packages).toHaveLength(1)
+    expect(inspected.packages[0].sourceSnapshot.ignored_paths).toEqual(['repo-main/AGENTS.md'])
+  })
+
+  it('still rejects ZIP special files other than symbolic links', async () => {
+    const zipPath = path.join(fixtureDir, 'special-file.zip')
+    writeStoredZip(zipPath, [
+      { name: 'repo-main/skills/demo/SKILL.md', content: '# Demo\n' },
+      { name: 'repo-main/skills/demo/pipe', content: '', unixMode: 0o010644 },
+    ])
+
+    const { PackageInstaller } = await loadInstaller()
+
+    await expect(new PackageInstaller().inspect({ kind: 'zip', zipPath })).rejects.toThrow('Archive contains a non-regular file: repo-main/skills/demo/pipe')
   })
 
   it('pins GitHub archive installation to the resolved commit SHA even when import flags are disabled', async () => {

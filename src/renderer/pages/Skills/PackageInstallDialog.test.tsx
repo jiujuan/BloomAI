@@ -135,6 +135,20 @@ describe('Package import workflow contract', () => {
     expect(markup).toContain('source fingerprint')
   })
 
+  it('shows ignored archive paths once in the active review panel', () => {
+    const ignoredInspection: PackageInspectionResult = {
+      ...inspection,
+      packages: inspection.packages.map((item) => ({
+        ...item,
+        sourceSnapshot: { ...item.sourceSnapshot, ignoredPaths: ['skills-main/AGENTS.md'] },
+      })),
+    }
+    const markup = renderToStaticMarkup(<PackageInstallDialog onClose={() => undefined} initialInspection={ignoredInspection} />)
+
+    expect(markup).toContain('已安全忽略 1 个不参与 Skill 导入的来源文件：')
+    expect((markup.match(/skills-main\/AGENTS\.md/g) ?? [])).toHaveLength(1)
+  })
+
   it('does not label an inspection without an Import Review as validated', () => {
     const markup = renderToStaticMarkup(<PackageInstallDialog onClose={() => undefined} initialInspection={inspection} />)
     expect(markup).not.toContain('已验证')

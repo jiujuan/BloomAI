@@ -403,8 +403,8 @@ export function normalizePackageInstallSource(source: unknown): PackageInstallSo
 }
 
 function getPackageRoots() {
-  const root = getSkillRuntimeConfig().packageDataRoot
-  return { root: path.dirname(root), packages: root, staging: path.join(path.dirname(root), 'staging') }
+  const config = getSkillRuntimeConfig()
+  return { root: path.dirname(config.packageDataRoot), packages: config.packageDataRoot, staging: config.downloadRoot }
 }
 
 function getPackageLimits() {
@@ -432,9 +432,16 @@ async function materializeSource(source: PackageInstallSource, target: string): 
     const zipPath = securedSource.zipPath
     if (!fs.statSync(zipPath).isFile()) throw new PackageInstallError(`ZIP package not found: ${zipPath}`)
     const archive = fs.readFileSync(zipPath)
-    extractZip(archive, target)
+    const ignoredArchivePaths = extractZip(archive, target)
     const artifactMetadata = detectAndSanitizeNpxArtifact(target, securedSource.metadata?.origin === 'npx-artifact')
-    return { sourceSha256: hashBuffer(archive), sourceRef: zipPath, source_origin: artifactMetadata.source_origin ?? 'zip', ...artifactMetadata }
+    const ignoredPaths = mergeIgnoredPaths(ignoredArchivePaths, artifactMetadata.ignored_paths)
+    return {
+      sourceSha256: hashBuffer(archive),
+      sourceRef: zipPath,
+      source_origin: artifactMetadata.source_origin ?? 'zip',
+      ...artifactMetadata,
+      ...(ignoredPaths.length > 0 ? { ignored_paths: ignoredPaths } : {}),
+    }
   }
   let parsedSource
   try {
@@ -449,8 +456,9 @@ async function materializeSource(source: PackageInstallSource, target: string): 
       maxArchiveBytes: config.githubMaxArchiveBytes,
       allowedHosts: config.githubAllowedHosts,
     })
-    extractZip(downloaded.archive, target)
+    const ignoredArchivePaths = extractZip(downloaded.archive, target)
     const artifactMetadata = detectAndSanitizeNpxArtifact(target)
+    const ignoredPaths = mergeIgnoredPaths(ignoredArchivePaths, artifactMetadata.ignored_paths)
     return {
       sourceSha256: downloaded.archiveSha256,
       sourceCommit: downloaded.resolvedCommitSha,
@@ -463,6 +471,7 @@ async function materializeSource(source: PackageInstallSource, target: string): 
       resolvedCommitSha: downloaded.resolvedCommitSha,
       source_origin: artifactMetadata.source_origin ?? 'github',
       ...artifactMetadata,
+      ...(ignoredPaths.length > 0 ? { ignored_paths: ignoredPaths } : {}),
     }
   } catch (error) {
     if (error instanceof GitHubSourceError) throw new PackageInstallError(error.message, error.code)
@@ -509,13 +518,14 @@ function pruneIgnoredArtifactPaths(root: string, ignoredPaths: string[]): void {
   }
 }
 
-function extractZip(archive: Buffer, target: string): void {
+function extractZip(archive: Buffer, target: string): string[] {
   if (archive.length > getPackageLimits().maxArchiveBytes) throw new PackageInstallError('Archive exceeds the maximum allowed size')
   const limits = getPackageLimits()
   const entries = parseZipEntries(archive)
   if (entries.length > limits.maxFileCount) throw new PackageInstallError('Archive contains too many files')
   let totalBytes = 0
   const seen = new Set<string>()
+  const ignoredPaths: string[] = []
   for (const entry of entries) {
     const isDirectory = entry.name.endsWith('/')
     const name = normalizeArchivePath(entry.name)
@@ -525,7 +535,11 @@ function extractZip(archive: Buffer, target: string): void {
     catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Archive entry exceeds package limits: ${name}`, error instanceof SkillSecurityError ? error.code : 'PACKAGE_INSTALL_ERROR') }
     totalBytes += entry.uncompressedSize
     const unixType = (entry.externalAttributes >>> 16) & 0o170000
-    if (unixType === 0o120000 || unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new PackageInstallError(`Archive contains a non-regular file: ${name}`)
+    if (unixType === 0o120000) {
+      ignoredPaths.push(name)
+      continue
+    }
+    if (unixType !== 0 && unixType !== 0o100000 && unixType !== 0o040000) throw new PackageInstallError(`Archive contains a non-regular file: ${name}`)
     if (isDirectory) continue
     const destination = safeDestination(target, name)
     if (isSensitivePath(name)) continue
@@ -533,6 +547,7 @@ function extractZip(archive: Buffer, target: string): void {
     fs.mkdirSync(path.dirname(destination), { recursive: true })
     fs.writeFileSync(destination, data, { mode: 0o600 })
   }
+  return [...new Set(ignoredPaths)].sort((a, b) => a.localeCompare(b))
 }
 
 function parseZipEntries(archive: Buffer): ZipEntry[] {
@@ -664,6 +679,10 @@ function safeDestination(root: string, relative: string): string {
   const resolvedRoot = path.resolve(root)
   if (!destination.startsWith(`${resolvedRoot}${path.sep}`)) throw new PackageInstallError(`Package path escapes the destination root: ${relative}`)
   return destination
+}
+
+function mergeIgnoredPaths(...groups: Array<readonly string[] | undefined>): string[] {
+  return [...new Set(groups.flatMap((group) => group ?? []))].sort((a, b) => a.localeCompare(b))
 }
 
 function normalizeRelative(relative: string): string { return relative ? relative.split(path.sep).join('/') : '.' }

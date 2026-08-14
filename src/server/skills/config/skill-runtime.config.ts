@@ -54,6 +54,7 @@ export type SkillRuntimeConfig = {
   eventRetentionDays: number
   artifactRetentionDays: number
   packageDataRoot: string
+  downloadRoot: string
   artifactRoot: string
   exportRoot: string
   maxPackageBytes: number
@@ -222,18 +223,26 @@ function envPath(env: SkillRuntimeConfigEnv, key: string, fallback: string): str
   return raw || fallback
 }
 
-function configuredSkillsDataDir(env: SkillRuntimeConfigEnv): string | undefined {
-  const configured = env.SKILLS_DATA_DIR?.trim()
+function configuredPath(env: SkillRuntimeConfigEnv, key: string): string | undefined {
+  const configured = env[key]?.trim()
   if (configured) return expandPath(configured)
 
   // Explicit env objects are used by tests and migration tooling and must stay
   // deterministic. The normal process environment also falls back to .env.
   if (env === process.env) {
-    const fromDotEnv = readConfigValue('SKILLS_DATA_DIR').value.trim()
+    const fromDotEnv = readConfigValue(key).value.trim()
     if (fromDotEnv) return expandPath(fromDotEnv)
   }
 
   return undefined
+}
+
+function configuredSkillsDataDir(env: SkillRuntimeConfigEnv): string | undefined {
+  return configuredPath(env, 'SKILLS_DATA_DIR')
+}
+
+function configuredSkillsDownloadDir(env: SkillRuntimeConfigEnv): string | undefined {
+  return configuredPath(env, 'SKILLS_DATA_DIR_DL')
 }
 
 function isWithin(parent: string, child: string): boolean {
@@ -271,10 +280,12 @@ export function assertSkillRuntimeConfig(config: SkillRuntimeConfig, fsAdapter: 
     }
   }
   validateRoot(config.packageDataRoot, 'packageDataRoot', fsAdapter)
+  validateRoot(config.downloadRoot, 'downloadRoot', fsAdapter)
   validateRoot(config.artifactRoot, 'artifactRoot', fsAdapter)
   validateRoot(config.exportRoot, 'exportRoot', fsAdapter)
   const roots = [
     ['packageDataRoot', config.packageDataRoot],
+    ['downloadRoot', config.downloadRoot],
     ['artifactRoot', config.artifactRoot],
     ['exportRoot', config.exportRoot],
   ] as const
@@ -328,6 +339,8 @@ function loadSkillRuntimeConfigFromEnv(
   const configuredSkillsDataRoot = explicitPackageDataRoot ? undefined : configuredSkillsDataDir(env)
   const configuredPackageDataRoot = explicitPackageDataRoot || configuredSkillsDataRoot
   const packageDataRoot = configuredPackageDataRoot || defaultRoot('packages')
+  const configuredSkillsDownloadRoot = configuredSkillsDownloadDir(env)
+  const downloadRoot = configuredSkillsDownloadRoot || path.join(path.dirname(packageDataRoot), 'staging')
   // SKILLS_DATA_DIR is the package root itself. Keep generated run/export
   // data beside it so the runtime's root-isolation invariant remains intact.
   const defaultArtifactRoot = configuredSkillsDataRoot
@@ -356,6 +369,7 @@ function loadSkillRuntimeConfigFromEnv(
     eventRetentionDays: envInt(env, 'SKILL_EVENT_RETENTION_DAYS', 30, HARD_LIMITS.eventRetentionDays),
     artifactRetentionDays: envInt(env, 'SKILL_ARTIFACT_RETENTION_DAYS', 90, HARD_LIMITS.artifactRetentionDays),
     packageDataRoot,
+    downloadRoot,
     artifactRoot: envPath(env, 'SKILL_ARTIFACT_ROOT', defaultArtifactRoot),
     exportRoot: envPath(env, 'SKILL_EXPORT_ROOT', defaultExportRoot),
     maxPackageBytes: envInt(env, 'SKILL_MAX_PACKAGE_BYTES', 100 * 1024 * 1024, HARD_LIMITS.maxPackageBytes),
@@ -468,7 +482,7 @@ function runtimeEnvFingerprint(): string {
     'SKILL_PACKAGE_IMPORT_ENABLED', 'SKILL_GITHUB_IMPORT_ENABLED', 'SKILL_NPX_IMPORT_ENABLED',
     'SKILL_CREATOR_ENABLED', 'SKILL_CREATOR_PUBLISH_ENABLED', 'SKILL_WORKER_CONCURRENCY',
     'SKILL_LEASE_TIMEOUT_MS', 'SKILL_MAX_ATTEMPTS', 'SKILL_EVENT_RETENTION_DAYS',
-    'SKILL_ARTIFACT_RETENTION_DAYS', 'SKILL_PACKAGE_DATA_ROOT', 'SKILLS_DATA_DIR', 'SKILL_ARTIFACT_ROOT',
+    'SKILL_ARTIFACT_RETENTION_DAYS', 'SKILL_PACKAGE_DATA_ROOT', 'SKILLS_DATA_DIR', 'SKILLS_DATA_DIR_DL', 'SKILL_ARTIFACT_ROOT',
     'SKILL_EXPORT_ROOT', 'SKILL_MAX_PACKAGE_BYTES', 'SKILL_MAX_PACKAGE_FILES',
     'SKILL_MAX_FILE_BYTES', 'SKILL_MAX_RUN_DURATION_MS', 'SKILL_GITHUB_REQUEST_TIMEOUT_MS',
     'SKILL_GITHUB_MAX_ARCHIVE_BYTES', 'SKILL_GITHUB_ALLOWED_HOSTS', 'DATA_DIR',

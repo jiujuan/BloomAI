@@ -168,6 +168,7 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
   const [phase, setPhase] = useState<ImportPhase>(initialInspection ? 'review' : 'choose')
 
   const packages = inspection?.packages ?? []
+  const ignoredPaths = useMemo(() => [...new Set(packages.flatMap((item) => item.sourceSnapshot.ignoredPaths ?? []).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [packages])
   const busy = phase === 'inspecting' || phase === 'approving' || phase === 'rejecting' || phase === 'installing'
   const validationErrors = useMemo(() => validatePackageSourceInput(sourceKind, sourceInput), [sourceInput, sourceKind])
   const canInstall = Boolean(source && inspection?.reviewId && inspection.sourceFingerprint && canInstallImportReview(review))
@@ -322,6 +323,7 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
       {!inspection && phase !== 'inspecting' && <div className="skills-empty-state"><Info size={16} /><p>提交来源后，这里会显示 manifest、Capability、风险和 review 状态。</p></div>}
       {inspection && <>
         <div className="skills-import-audit-grid"><div><dt>review ID</dt><dd>{inspection.reviewId || '未返回'}</dd></div><div><dt>source fingerprint</dt><dd>{inspection.sourceFingerprint || '未返回'}</dd></div><div><dt>resolved commit</dt><dd>{inspection.resolvedCommitSha || '—'}</dd></div><div><dt>source</dt><dd>{sourceDescription(source)}</dd></div></div>
+        {ignoredPaths.length > 0 && <div className="skills-message warning" role="status"><ShieldAlert size={14} /><span>已安全忽略 {ignoredPaths.length} 个不参与 Skill 导入的来源文件：{ignoredPaths.join('、')}</span></div>}
         {packages.map((item) => <InspectionCard key={`${item.manifestHash}-${item.relativeSkillPath}`} item={item} />)}
         {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} /><span>Rejected 后不可安装。请修复来源并重新 inspect，不能绕过当前 review。</span></div>}
       </>}
