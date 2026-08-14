@@ -421,7 +421,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         const detail = toLegacyPackageDetail(await platform.getSkillPackage(id))
         if (isCurrentRequest(requestKey, requestRevision)) {
           const currentVersionId = detail.installations[0]?.currentVersionId || detail.installations[0]?.current_version_id
-          set({ selectedPackage: detail, selectedVersion: detail.versions.find((version) => version.id === currentVersionId) ?? detail.versions[0] ?? null, installations: detail.installations })
+          set({ selectedPackage: detail, selectedVersion: detail.versions.find((version) => version.id === currentVersionId) ?? detail.versions[0] ?? null })
           setResourceLoading(requestKey, false)
         }
         return detail

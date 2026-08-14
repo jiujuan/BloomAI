@@ -106,6 +106,26 @@ describe('Package Runtime Zustand store', () => {
     expect(useSkillRuntimeStore.getState().loadingByResource.packages).toBe(false)
   })
 
+  it('keeps the complete installation collection when loading package detail', async () => {
+    const catalogInstallations: SkillInstallation[] = [
+      { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'installed', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null },
+      { id: 'install-2', packageId: 'pkg-2', currentVersionId: 'version-2', revision: 1, status: 'installed', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null },
+    ]
+    const detail: PackageDetail = {
+      package: { id: 'pkg-1', name: 'First Skill', description: '', sourceType: 'github', sourceUri: null, sourceRef: 'main', createdAt: 1, updatedAt: 1, deletedAt: null, deleteReason: null },
+      versions: [],
+      installations: [catalogInstallations[0]],
+      capabilityGrants: [],
+    }
+    useSkillRuntimeStore.setState({ installations: catalogInstallations })
+    vi.spyOn(platform, 'getSkillPackage').mockResolvedValue(detail)
+
+    await useSkillRuntimeStore.getState().loadPackage('pkg-1')
+
+    expect(useSkillRuntimeStore.getState().installations).toEqual(catalogInstallations)
+    expect(useSkillRuntimeStore.getState().selectedPackage?.installations).toHaveLength(1)
+  })
+
   it('optimistically toggles an installation and restores the snapshot with an error toast on failure', async () => {
     const installation: SkillInstallation = { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'enabled', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null }
     useSkillRuntimeStore.setState({ installations: [installation] })
