@@ -38,6 +38,25 @@ describe('skill runtime config', () => {
     expect(getSkillRuntimeCapabilities(config)).not.toHaveProperty('packageDataRoot')
   })
 
+  it('uses SKILLS_DATA_DIR as the default imported skill package root', () => {
+    const configured = path.join('~', 'bloomai-skills-config-test')
+    const config = loadSkillRuntimeConfig({
+      SKILLS_DATA_DIR: configured,
+      SKILL_EXPORT_ROOT: root(),
+    }, fsAdapter)
+
+    expect(config.packageDataRoot).toBe(path.join(os.homedir(), 'bloomai-skills-config-test'))
+  })
+
+  it('keeps default runtime roots separate from SKILLS_DATA_DIR', () => {
+    const configured = path.join(os.homedir(), '.bloomai', 'skills-config-test')
+    const config = loadSkillRuntimeConfig({ SKILLS_DATA_DIR: configured }, fsAdapter)
+
+    expect(config.packageDataRoot).toBe(configured)
+    expect(config.artifactRoot).toBe(path.join(os.homedir(), '.bloomai', 'runs'))
+    expect(config.exportRoot).toBe(path.join(os.homedir(), '.bloomai', 'exports'))
+  })
+
   it('accepts explicit boolean and numeric settings', () => {
     const config = loadSkillRuntimeConfig({
       SKILL_RUNTIME_ENABLED: 'true',

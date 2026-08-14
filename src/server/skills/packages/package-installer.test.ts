@@ -9,9 +9,10 @@ let fixtureDir: string
 let originalEnv: NodeJS.ProcessEnv
 let originalFetch: typeof fetch
 
-async function loadInstaller() {
+async function loadInstaller(options: { skillsDataDir?: string } = {}) {
   vi.resetModules()
   process.env.DATA_DIR = dataDir
+  process.env.SKILLS_DATA_DIR = options.skillsDataDir ?? path.join(dataDir, 'skills', 'packages')
   process.env.SKILL_PACKAGE_RUNTIME_ENABLED = 'true'
   const client = await import('../../db/client')
   await client.runMigrations()
@@ -142,6 +143,26 @@ describe('PackageInstaller', () => {
     })
     expect(repeated).toEqual(result)
     expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
+  })
+
+  it('stores imported skills under SKILLS_DATA_DIR by default', async () => {
+    const skillsDataDir = path.join(dataDir, 'configured-skills')
+    delete process.env.SKILL_PACKAGE_DATA_ROOT
+    writeFile('article/SKILL.md', '# Article Illustrator\n')
+
+    const { PackageInstaller } = await loadInstaller({ skillsDataDir })
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.packages[0]?.packagePath).toBe(
+      path.join(skillsDataDir, inspected.packages[0].sourceFingerprint),
+    )
   })
 
   it('imports local packages when package import feature flags are disabled', async () => {
