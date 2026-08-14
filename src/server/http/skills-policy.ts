@@ -35,6 +35,7 @@ const USER_OPERATIONS = new Set<SkillOperation>([
   'package.delete',
   'installation.read',
   'import.read',
+  'import.review',
   'grant.read',
   'run.read',
   'run.create',

@@ -65,7 +65,7 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     const inspect = await requestJson(app, '/skill-packages/inspect', { method: 'POST', headers: userHeaders, body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }) })
     const approved = await requestJson(app, `/skill-import-reviews/${inspect.body.data.reviewId}/approve`, {
       method: 'POST',
-      headers: { 'x-bloom-role': 'admin', 'x-bloom-actor': 'operator-1' },
+      headers: userHeaders,
       body: JSON.stringify({}),
     })
     const install = await requestJson(app, '/skill-packages/install', { method: 'POST', headers: userHeaders, body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir }, reviewId: inspect.body.data.reviewId, sourceFingerprint: inspect.body.data.sourceFingerprint, confirm: true }) })
@@ -88,6 +88,7 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     expect(inspect.response.status).toBe(200)
     expect(inspect.body.data).toMatchObject({ reviewId: expect.any(String), sourceFingerprint: expect.any(String) })
     expect(approved.response.status).toBe(200)
+    expect(approved.body.data.reviewer).toBe('local-user')
     expect(install.response.status).toBe(201)
     expect(install.body.data.status).toBe('awaiting_permission_review')
     expect(update.response.status).toBe(201)

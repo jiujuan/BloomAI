@@ -97,6 +97,10 @@ function requireSkillActor(c: Context): string {
   return actor
 }
 
+function getSkillActorOrDefault(c: Context): string {
+  return getSkillActor(c) ?? 'local-user'
+}
+
 skillPackageRuntimeRoutes.get('/skill-runtime/capabilities', (c) => {
   return successResponse(c, getSkillRuntimeCapabilities())
 })
@@ -116,13 +120,15 @@ skillPackageRuntimeRoutes.get('/skill-import-reviews/:id', (c) => {
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/approve', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return successResponse(c, skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), requireSkillActor(c), { actor: getSkillActor(c), requestId: getRequestId(c) }))
+    const actor = getSkillActorOrDefault(c)
+    return successResponse(c, skillPackageRuntimeService.approveImportReview(idSchema.parse(c.req.param('id')), actor, { actor, requestId: getRequestId(c) }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.post('/skill-import-reviews/:id/reject', async (c) => {
   try {
     const input = await readValidated(c, importReviewDecisionSchema)
-    return successResponse(c, skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), requireSkillActor(c), input.reason, { actor: getSkillActor(c), requestId: getRequestId(c) }))
+    const actor = getSkillActorOrDefault(c)
+    return successResponse(c, skillPackageRuntimeService.rejectImportReview(idSchema.parse(c.req.param('id')), actor, input.reason, { actor, requestId: getRequestId(c) }))
   } catch (error) { return errorResponse(c, error) }
 })
 skillPackageRuntimeRoutes.get('/skill-packages', (c) => {

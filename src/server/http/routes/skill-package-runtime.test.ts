@@ -81,14 +81,20 @@ describe('Skill Package Runtime HTTP API', () => {
     fs.rmSync(exportDir, { recursive: true, force: true })
   })
 
-  it('returns FEATURE_DISABLED when package import is disabled', async () => {
-    const { app } = await loadApi({ SKILL_PACKAGE_RUNTIME_ENABLED: 'false', SKILL_PACKAGE_IMPORT_ENABLED: 'false' })
+  it('allows package import when package import feature flags are disabled', async () => {
+    writeFixture('local/SKILL.md', '# Local\n')
+    const { app } = await loadApi({
+      SKILL_PACKAGE_IMPORT_ENABLED: 'false',
+      SKILL_GITHUB_IMPORT_ENABLED: 'false',
+      SKILL_NPX_IMPORT_ENABLED: 'false',
+    })
     const result = await requestJson(app, '/skill-packages/inspect', {
       method: 'POST',
+      headers: { 'x-bloom-role': 'user' },
       body: JSON.stringify({ source: { kind: 'local-directory', directory: fixtureDir } }),
     })
-    expect(result.response.status).toBe(409)
-    expect(result.body.error).toMatchObject({ code: 'FEATURE_DISABLED' })
+    expect(result.response.status).toBe(200)
+    expect(result.body.data).toMatchObject({ reviewId: expect.any(String), packages: expect.arrayContaining([expect.objectContaining({ sourceType: 'local-directory' })]) })
   })
 
   it('rejects command-shaped source metadata instead of accepting arbitrary shell input', async () => {

@@ -15,6 +15,7 @@ describe('Skills Admin P0 authorization boundary', () => {
     expect(isSkillOperationAllowed('user', 'package.delete')).toBe(true)
     expect(isSkillOperationAllowed('user', 'package.read')).toBe(true)
     expect(isSkillOperationAllowed('user', 'package.inspect')).toBe(true)
+    expect(isSkillOperationAllowed('user', 'import.review')).toBe(true)
     expect(isSkillOperationAllowed('user', 'run.create')).toBe(true)
   })
 
@@ -34,6 +35,7 @@ describe('Skills Admin P0 authorization boundary', () => {
 
   it('maps destructive Skills requests to a stable operation name', () => {
     expect(getSkillOperationForRequest('POST', '/api/v1/skill-packages/install')).toBe('package.install')
+    expect(getSkillOperationForRequest('POST', '/api/v1/skill-import-reviews/review-1/approve')).toBe('import.review')
     expect(getSkillOperationForRequest('POST', '/api/v1/skill-packages/pkg-1/update/preview')).toBe('package.update')
     expect(getSkillOperationForRequest('POST', '/api/v1/skill-packages/pkg-1/update')).toBe('package.update')
     expect(getSkillOperationForRequest('DELETE', '/api/v1/skill-packages/pkg-1')).toBe('package.delete')

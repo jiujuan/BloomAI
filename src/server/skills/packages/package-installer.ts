@@ -4,7 +4,7 @@ import path from 'path'
 import { inflateRawSync } from 'zlib'
 import { runMigrations } from '../../db/client'
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
-import { assertSkillRuntimeFeature, getSkillRuntimeConfig } from '../config/skill-runtime.config'
+import { getSkillRuntimeConfig } from '../config/skill-runtime.config'
 import { getSkillCorrelation, withSkillCorrelation } from '../observability/skill-runtime.logger'
 import { SkillRuntimeMetrics, type SkillRuntimeCorrelation } from '../observability/skill-runtime.metrics'
 import { resolveSkillManifest, type SkillManifest } from './manifest-resolver'
@@ -127,7 +127,6 @@ export class PackageInstaller {
     return withSkillCorrelation(correlation, async () => {
       let stage: string | undefined
       try {
-        assertPackageImportEnabled()
         const securedSource = normalizePackageInstallSource(source)
         const roots = getPackageRoots()
         fs.mkdirSync(roots.staging, { recursive: true })
@@ -207,9 +206,7 @@ export class PackageInstaller {
         }
       }
       try {
-        assertPackageImportEnabled()
         const securedSource = normalizePackageInstallSource(source)
-        if (securedSource.kind === 'github-archive') assertPackageFeatureEnabled('githubImportEnabled')
         if (!options?.reviewId || !options.sourceFingerprint) throw new PackageInstallError('Package install requires reviewId and sourceFingerprint')
 
         const roots = getPackageRoots()
@@ -405,14 +402,6 @@ export function normalizePackageInstallSource(source: unknown): PackageInstallSo
   }
 }
 
-function assertPackageImportEnabled(): void {
-  try { assertSkillRuntimeFeature('importEnabled') } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : 'Skill Package import is disabled', 'FEATURE_DISABLED') }
-}
-
-function assertPackageFeatureEnabled(feature: 'githubImportEnabled' | 'npxImportEnabled'): void {
-  try { assertSkillRuntimeFeature(feature) } catch (error) { throw new PackageInstallError(error instanceof Error ? error.message : `Skill Runtime feature is disabled: ${feature}`, 'FEATURE_DISABLED') }
-}
-
 function getPackageRoots() {
   const root = getSkillRuntimeConfig().packageDataRoot
   return { root: path.dirname(root), packages: root, staging: path.join(path.dirname(root), 'staging') }
@@ -493,7 +482,6 @@ function detectAndSanitizeNpxArtifact(
   })
   const detection = detectNpxSkillsArtifact(reader)
   if (!detection.isNpxArtifact && !declaredNpxArtifact) return {}
-  assertPackageFeatureEnabled('npxImportEnabled')
   pruneIgnoredArtifactPaths(root, detection.ignoredPaths)
   return {
     source_origin: 'npx-artifact',

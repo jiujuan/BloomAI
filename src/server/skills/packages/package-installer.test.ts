@@ -144,12 +144,21 @@ describe('PackageInstaller', () => {
     expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
   })
 
-  it('does not install while the package runtime feature flag is disabled', async () => {
-    const { PackageInstaller, PackageInstallError } = await loadInstaller()
-    process.env.SKILL_PACKAGE_RUNTIME_ENABLED = 'false'
+  it('imports local packages when package import feature flags are disabled', async () => {
+    process.env.SKILL_PACKAGE_IMPORT_ENABLED = 'false'
+    process.env.SKILL_GITHUB_IMPORT_ENABLED = 'false'
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
+    writeFile('local/SKILL.md', '# Local\n')
 
-    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toBeInstanceOf(PackageInstallError)
-    expect(fs.existsSync(path.join(dataDir, 'skills', 'packages'))).toBe(false)
+    const { PackageInstaller } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    const result = await installer.install(source, { reviewId: inspected.reviewId, sourceFingerprint: inspected.sourceFingerprint, confirm: true })
+
+    expect(inspected.packages).toHaveLength(1)
+    expect(result.packages).toHaveLength(1)
+    expect(result.packages[0].sourceType).toBe('local-directory')
   })
 
   it('normalizes local and GitHub sources through one security boundary', async () => {
@@ -262,7 +271,10 @@ capabilities:
     expect(fs.existsSync(path.join(result.packages[0].packagePath, '.env'))).toBe(false)
   })
 
-  it('pins GitHub archive installation to the resolved commit SHA', async () => {
+  it('pins GitHub archive installation to the resolved commit SHA even when import flags are disabled', async () => {
+    process.env.SKILL_PACKAGE_IMPORT_ENABLED = 'false'
+    process.env.SKILL_GITHUB_IMPORT_ENABLED = 'false'
+    process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
     const archivePath = path.join(fixtureDir, 'archive.zip')
     writeStoredZip(archivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote\n' }])
     const archive = fs.readFileSync(archivePath)
@@ -437,16 +449,22 @@ capabilities:
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('rejects detected npx artifacts when npx import is disabled', async () => {
+  it('imports detected npx artifacts when npx import is disabled', async () => {
+    process.env.SKILL_PACKAGE_IMPORT_ENABLED = 'false'
     process.env.SKILL_NPX_IMPORT_ENABLED = 'false'
+    process.env.SKILL_GITHUB_IMPORT_ENABLED = 'false'
     writeFile('skills/illustrator/SKILL.md', '# Illustrator\n')
     writeFile('package.json', '{}')
 
-    const { PackageInstaller, PackageInstallError } = await loadInstaller()
-    await expect(new PackageInstaller().inspect({ kind: 'local-directory', directory: fixtureDir })).rejects.toMatchObject({
-      constructor: PackageInstallError,
-      code: 'FEATURE_DISABLED',
-    })
+    const { PackageInstaller } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const inspected = await installer.inspect(source)
+    const result = await installer.install(source, { reviewId: inspected.reviewId, sourceFingerprint: inspected.sourceFingerprint, confirm: true })
+
+    expect(inspected.packages).toHaveLength(1)
+    expect(inspected.packages[0].sourceSnapshot.source_origin).toBe('npx-artifact')
+    expect(result.packages).toHaveLength(1)
   })
 
 
