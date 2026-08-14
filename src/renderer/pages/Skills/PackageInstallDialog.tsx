@@ -125,7 +125,6 @@ function asPackageId(result: PackageImportAuditContext['result']) {
 
 export type PackageInstallDialogProps = {
   onClose: () => void
-  onOpenCreator?: (item: InspectedPackage) => void
   onInstalled?: (context: PackageImportAuditContext) => void
   initialInspection?: PackageInspectionResult
   initialReview?: PackageImportReview
@@ -157,7 +156,7 @@ function directoryPathFromDrop(event: React.DragEvent<HTMLDivElement>) {
     : filePath
 }
 
-export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, initialInspection, initialReview, mode = 'dialog' }: PackageInstallDialogProps) {
+export function PackageInstallDialog({ onClose, onInstalled, initialInspection, initialReview, mode = 'dialog' }: PackageInstallDialogProps) {
   const { inspectPackage, getImportReview, approveImportReview, rejectImportReview, installPackage } = useSkillRuntimeStore()
   const [sourceKind, setSourceKind] = useState<ImportSourceKind>('github')
   const [sourceInput, setSourceInput] = useState<PackageSourceInput>({ repositoryUrl: 'https://github.com/jimliu/baoyu-skills', ref: 'main' })
@@ -323,7 +322,7 @@ export function PackageInstallDialog({ onClose, onOpenCreator, onInstalled, init
       {!inspection && phase !== 'inspecting' && <div className="skills-empty-state"><Info size={16} /><p>提交来源后，这里会显示 manifest、Capability、风险和 review 状态。</p></div>}
       {inspection && <>
         <div className="skills-import-audit-grid"><div><dt>review ID</dt><dd>{inspection.reviewId || '未返回'}</dd></div><div><dt>source fingerprint</dt><dd>{inspection.sourceFingerprint || '未返回'}</dd></div><div><dt>resolved commit</dt><dd>{inspection.resolvedCommitSha || '—'}</dd></div><div><dt>source</dt><dd>{sourceDescription(source)}</dd></div></div>
-        {packages.map((item) => <InspectionCard key={`${item.manifestHash}-${item.relativeSkillPath}`} item={item} onOpenCreator={onOpenCreator} />)}
+        {packages.map((item) => <InspectionCard key={`${item.manifestHash}-${item.relativeSkillPath}`} item={item} />)}
         {review?.status === 'rejected' && <div className="skills-message error"><ShieldAlert size={14} /><span>Rejected 后不可安装。请修复来源并重新 inspect，不能绕过当前 review。</span></div>}
       </>}
     </section>
@@ -373,7 +372,7 @@ function ReviewIcon({ status }: { status: PackageImportReviewStatus }) {
   return <Info size={13} />
 }
 
-function InspectionCard({ item, onOpenCreator }: { item: InspectedPackage; onOpenCreator?: (item: InspectedPackage) => void }) {
+function InspectionCard({ item }: { item: InspectedPackage }) {
   const manifest = item.manifest
   const findings: Array<{ code?: string; severity: string; message: string; path?: string }> = [...item.diagnostics, ...manifest.unsupported.map((message) => ({ severity: 'warning', message }))]
   return <article className="skills-inspection-card">
@@ -382,6 +381,5 @@ function InspectionCard({ item, onOpenCreator }: { item: InspectedPackage; onOpe
     <div className="skills-section-label">Capability</div><div className="skills-chip-row">{manifest.requestedCapabilities.map((capability) => <span key={`${capability.capability}-${JSON.stringify(capability.scope)}`} className="skills-chip" title={`scope: ${JSON.stringify(capability.scope)}`}>{capability.capability}<small>{JSON.stringify(capability.scope)}</small></span>)}{manifest.requestedCapabilities.length === 0 && <span className="skills-muted">未声明额外能力</span>}</div>
     {findings.length > 0 ? <div className="skills-import-findings"><strong><AlertTriangle size={13} />风险和诊断 · {findings.length}</strong><ul>{findings.map((finding, index) => <li key={`${finding.code || finding.message}-${index}`}><span className={`skills-status ${finding.severity === 'error' || finding.severity === 'critical' ? 'danger' : finding.severity === 'warning' ? 'warning' : 'info'}`}>{finding.severity}</span>{finding.message}{finding.path ? ` · ${finding.path}` : ''}</li>)}</ul></div> : <div className="skills-message success"><CheckCircle2 size={14} />未发现阻断性诊断；Capability 仍按默认拒绝策略处理。</div>}
     {item.importReviewRequired && <div className="skills-message warning"><ShieldAlert size={14} />此来源需要 Import Review 批准后才能安装。</div>}
-    {onOpenCreator && <button type="button" className="skills-text-button" onClick={() => onOpenCreator(item)}>在 Creator 中编辑此检查结果</button>}
   </article>
 }

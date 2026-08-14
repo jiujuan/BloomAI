@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import './skills-center.e2e'
 import type { SkillPackage, SkillRun, SkillInstallation } from './skill-runtime.types'
 import { SkillsCenterWorkbench, buildSkillRows, filterSkillRows, encodeSkillsCenterState, decodeSkillsCenterState, getVisibleSkillsRuntimeError, hasRuntimeManagementCapability } from './SkillsCenterWorkbench'
+import { normalizeSkillsView } from './SkillsSidebar'
 
 const packageItem: SkillPackage = {
   id: 'pkg-1', name: 'Research Package', description: 'Package description', sourceType: 'github', sourceUri: 'https://github.com/acme/research', sourceRef: 'abc123',
@@ -23,7 +24,8 @@ describe('Skills Center workbench contract', () => {
     expect(markup).toContain('导入 Skill')
     expect(markup).toContain('Runs')
     expect(markup).not.toContain('导入 Package')
-    expect(markup).toContain('打开 Creator')
+    expect(markup).not.toContain('打开 Creator')
+    expect(markup).not.toContain('Skills Creator')
     expect(markup).toContain('aria-label="搜索 Skills"')
   })
 
@@ -65,6 +67,7 @@ describe('Skills Center workbench contract', () => {
     const creatorEncoded = encodeSkillsCenterState({ tab: 'creator', draftId: 'draft-1' })
     expect(creatorEncoded).toBe('#skills/tab=creator&draft=draft-1')
     expect(decodeSkillsCenterState(creatorEncoded)).toEqual({ tab: 'creator', selectedPackageId: undefined, draftId: 'draft-1' })
+    expect(normalizeSkillsView('creator')).toBe('center')
     expect(decodeSkillsCenterState('#skills/tab=permissions&package=pkg-1')).toMatchObject({ tab: 'detail', selectedPackageId: 'pkg-1' })
 
     const legacyRunRoute = decodeSkillsCenterState('#skills/tab=run-detail&run=run-1')

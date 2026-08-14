@@ -1,5 +1,5 @@
 import React from 'react'
-import { Archive, FileSearch, LayoutDashboard, PackageOpen, PlayCircle, Settings2, Sparkles, Upload } from 'lucide-react'
+import { Archive, FileSearch, LayoutDashboard, PackageOpen, PlayCircle, Settings2, Upload } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@renderer/utils'
 
@@ -10,13 +10,12 @@ export type SkillsRuntimeNavItem = {
   id: SkillsRuntimeView
   label: string
   icon: LucideIcon
-  group: 'workspace' | 'create' | 'system'
+  group: 'workspace' | 'system'
 }
 
 export const SKILLS_RUNTIME_NAV_ITEMS: SkillsRuntimeNavItem[] = [
   { id: 'center', label: 'Skills Center', icon: LayoutDashboard, group: 'workspace' },
   { id: 'import', label: '导入 Skill', icon: Upload, group: 'workspace' },
-  { id: 'creator', label: 'Skills Creator', icon: Sparkles, group: 'create' },
   { id: 'detail', label: 'Skill 详情', icon: FileSearch, group: 'workspace' },
   { id: 'runs', label: '运行记录', icon: PlayCircle, group: 'workspace' },
   { id: 'artifacts', label: 'Artifacts', icon: PackageOpen, group: 'workspace' },
@@ -24,7 +23,7 @@ export const SKILLS_RUNTIME_NAV_ITEMS: SkillsRuntimeNavItem[] = [
 ]
 
 export function normalizeSkillsView(view: SkillsCenterTab | undefined): SkillsRuntimeView {
-  return view || 'center'
+  return !view || view === 'creator' ? 'center' : view
 }
 
 export function getSkillsBreadcrumb(view: SkillsRuntimeView): string[] {
@@ -47,10 +46,6 @@ export function SkillsSidebar({ view, counts, onChange }: SkillsSidebarProps) {
     <div className="skills-center-nav-label">Workspace</div>
     <nav aria-label="Skills Runtime 页面">
       {SKILLS_RUNTIME_NAV_ITEMS.filter((item) => item.group === 'workspace').map((item) => <NavItem key={item.id} item={item} activeView={activeView} counts={counts} onChange={onChange} />)}
-    </nav>
-    <div className="skills-center-nav-label">Create</div>
-    <nav aria-label="Skills Creator 页面">
-      {SKILLS_RUNTIME_NAV_ITEMS.filter((item) => item.group === 'create').map((item) => <NavItem key={item.id} item={item} activeView={activeView} counts={counts} onChange={onChange} />)}
     </nav>
     <div className="skills-center-nav-label">System</div>
     <nav aria-label="Skills Runtime 系统页面">
