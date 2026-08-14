@@ -17,11 +17,11 @@ describe('Skills Admin P0 authorization boundary', () => {
     expect(isSkillOperationAllowed('user', 'package.inspect')).toBe(true)
     expect(isSkillOperationAllowed('user', 'import.review')).toBe(true)
     expect(isSkillOperationAllowed('user', 'run.create')).toBe(true)
+    expect(isSkillOperationAllowed('user', 'installation.manage')).toBe(true)
   })
 
-  it('keeps runtime, installation, grant, run and export management restricted', () => {
+  it('keeps runtime, grant, run and export management restricted', () => {
     const restricted: SkillOperation[] = [
-      'installation.manage',
       'grant.manage',
       'run.manage',
       'artifact.export',

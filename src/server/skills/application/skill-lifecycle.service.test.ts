@@ -59,15 +59,34 @@ describe('skill lifecycle service', () => {
     expect(dependencies.audit.append).toHaveBeenCalledWith(expect.objectContaining({ action: 'skill.installation.enabled', resourceId: 'installation-1' }))
   })
 
-  it('refuses to enable an installation whose current version is unreviewed or not runnable', () => {
+  it('allows an imported runnable version to be enabled before security review', () => {
+    const dependencies = makeDependencies()
+    dependencies.installation.status = 'awaiting_permission_review'
+    dependencies.installation.enabled = false
+    dependencies.packages.getVersion.mockImplementation((id: string) => id === version2.id
+      ? { ...version2, securityStatus: 'unreviewed' }
+      : id === version1.id ? version1 : undefined)
+    const service = createSkillLifecycleService({ ...dependencies, clock: { now: () => 10 } } as any)
+
+    expect(service.enableInstallation('installation-1', { expectedRevision: 4, idempotencyKey: 'enable-unreviewed' }))
+      .toMatchObject({ enabled: true, status: 'installed', revision: 5 })
+    expect(dependencies.packages.setInstallationEnabledCas).toHaveBeenCalledWith({
+      installationId: 'installation-1',
+      enabled: true,
+      expectedRevision: 4,
+      idempotencyKey: 'enable-unreviewed',
+    })
+  })
+
+  it('still refuses to enable an incompatible or non-runnable version', () => {
     const dependencies = makeDependencies()
     dependencies.packages.getVersion.mockImplementation((id: string) => id === version2.id
       ? { ...version2, status: 'awaiting_permission_review', securityStatus: 'unreviewed' }
       : id === version1.id ? version1 : undefined)
     const service = createSkillLifecycleService({ ...dependencies, clock: { now: () => 10 } } as any)
 
-    expect(() => service.enableInstallation('installation-1', { expectedRevision: 4, idempotencyKey: 'enable-unreviewed' }))
-      .toThrowError(new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can be enabled'))
+    expect(() => service.enableInstallation('installation-1', { expectedRevision: 4, idempotencyKey: 'enable-incompatible' }))
+      .toThrowError(new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a runnable compatible version can be enabled'))
     expect(dependencies.packages.setInstallationEnabledCas).not.toHaveBeenCalled()
   })
 

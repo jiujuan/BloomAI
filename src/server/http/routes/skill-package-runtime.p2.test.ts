@@ -50,7 +50,7 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     fs.rmSync(fixtureDir, { recursive: true, force: true })
   })
 
-  it('allows user package lifecycle operations while keeping installation management restricted', async () => {
+  it('allows user package and installation lifecycle operations', async () => {
     const { app, skillPackageRepo } = await loadApi()
     const pkg = skillPackageRepo.createPackage({ name: 'Readable Package', description: '', sourceType: 'local-directory' })
     const version = skillPackageRepo.createVersion({ packageId: pkg.id, version: '1.0.0', manifest: {}, manifestHash: 'readable-hash', packagePath: fixtureDir, securityStatus: 'verified' })
@@ -93,8 +93,8 @@ describe('SKL12-P2-001 Package/Import/Installation HTTP contract', () => {
     expect(install.body.data.status).toBe('awaiting_permission_review')
     expect(update.response.status).toBe(201)
     expect(update.body.data).toMatchObject({ packageId: pkg.id, duplicate: false })
-    expect(disable.response.status).toBe(403)
-    expect(disable.body.error).toMatchObject({ code: 'FORBIDDEN', requestId: expect.any(String) })
+    expect(disable.response.status).toBe(200)
+    expect(disable.body.data).toMatchObject({ id: installation.id, enabled: 0, status: 'disabled' })
     expect(remove.response.status).toBe(200)
     expect(remove.body.data).toMatchObject({ id: deletable.id, deletedAt: expect.any(Number) })
   })

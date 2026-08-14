@@ -11,7 +11,7 @@ const packageItem: SkillPackage = {
   createdAt: 1, updatedAt: 2, deletedAt: null, deleteReason: null,
 }
 const installation: SkillInstallation = {
-  id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', status: 'active', enabled: true, installedAt: 1, updatedAt: 2, revision: 3,
+  id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', status: 'installed', enabled: 1, installedAt: 1, updatedAt: 2, revision: 3,
 }
 const run: SkillRun = {
   id: 'run-1', skillVersionId: 'version-1', status: 'completed', revision: 1, input: {}, output: {}, context: {}, surface: 'skills', sessionId: null, imageSessionId: null,
@@ -44,6 +44,7 @@ describe('Skills Center workbench contract', () => {
     const rows = buildSkillRows([packageItem], [installation], [run])
     expect(rows.map((row) => row.kind)).toEqual(['package'])
     expect(rows[0].sourceLabel).toContain('Package')
+    expect(rows[0]).toMatchObject({ enabled: true, statusLabel: '已启用' })
     expect(filterSkillRows(rows, { query: '', source: 'package', runtime: 'package', status: 'all' }).map((row) => row.id)).toEqual(['pkg-1'])
     expect(filterSkillRows(rows, { query: '', source: 'all', runtime: 'all', status: 'disabled' })).toEqual([])
   })

@@ -260,7 +260,7 @@ describe('skillPackageRepo', () => {
     expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: second.id, expectedRevision: 0, idempotencyKey: 'switch-v2' })).toMatchObject({ current_version_id: second.id, revision: 1 })
   })
 
-  it('rejects unreviewed version switches, protects enable CAS, and resolves no version after disable', async () => {
+  it('keeps version switches reviewed while allowing imported versions to enable and resolve', async () => {
     const { skillPackageRepo } = await loadRepo()
     const pkg = skillPackageRepo.createPackage({ name: 'Lifecycle Pkg', description: '', sourceType: 'local-directory' })
     const verified = skillPackageRepo.createVersion({
@@ -291,15 +291,16 @@ describe('skillPackageRepo', () => {
       status: 'runnable',
       securityStatus: 'verified',
     })
-    const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: verified.id, status: 'installed' })
+    const installation = skillPackageRepo.createInstallation({ packageId: pkg.id, currentVersionId: unreviewed.id, status: 'awaiting_permission_review', enabled: false })
 
     expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: unreviewed.id, expectedRevision: 0, idempotencyKey: 'switch-unreviewed' })).toBeUndefined()
     expect(skillPackageRepo.switchCurrentVersion({ installationId: installation.id, versionId: otherVersion.id, expectedRevision: 0, idempotencyKey: 'switch-cross-package' })).toBeUndefined()
-    expect(skillPackageRepo.setInstallationEnabledCas({ installationId: installation.id, enabled: true, expectedRevision: 0, idempotencyKey: 'enable-valid' })).toMatchObject({ revision: 1, enabled: 1 })
+    expect(skillPackageRepo.setInstallationEnabledCas({ installationId: installation.id, enabled: true, expectedRevision: 0, idempotencyKey: 'enable-imported' })).toMatchObject({ revision: 1, enabled: 1, status: 'installed' })
+    expect(skillPackageRepo.resolveRunnableVersion(`package:${installation.id}`)).toMatchObject({ id: unreviewed.id, security_status: 'unreviewed' })
 
     const disabled = skillPackageRepo.setInstallationEnabledCas({ installationId: installation.id, enabled: false, expectedRevision: 1, idempotencyKey: 'disable-valid' })
     expect(disabled).toMatchObject({ revision: 2, enabled: 0, status: 'disabled' })
-    expect(skillPackageRepo.resolveRunnableVersion(installation.id)).toBeUndefined()
+    expect(skillPackageRepo.resolveRunnableVersion(`package:${installation.id}`)).toBeUndefined()
     expect(skillPackageRepo.resolveRunnableVersion(pkg.id)).toBeUndefined()
   })
 

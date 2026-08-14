@@ -53,7 +53,7 @@ export function buildSkillRows(packages: SkillPackage[], installations: SkillIns
   return packages.map((item) => {
     const installation = installationByPackage.get(item.id)
     const currentRun = runs.filter((run) => run.skillVersionId === installation?.currentVersionId).sort((a, b) => b.updatedAt - a.updatedAt)[0]
-    const enabled = Boolean(installation && (installation.enabled === true || installation.enabled === 1) && installation.status === 'active')
+    const enabled = Boolean(installation && (installation.enabled === true || installation.enabled === 1) && (installation.status === 'installed' || installation.status === 'active'))
     const retired = installation?.status === 'uninstalled' || installation?.status === 'deleted' || Boolean(item.deletedAt)
     return {
       id: item.id, kind: 'package' as const, name: item.name, description: item.description, sourceLabel: `Package · ${item.sourceType || 'unknown'}`,

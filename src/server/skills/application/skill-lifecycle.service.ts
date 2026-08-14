@@ -213,8 +213,8 @@ export function createSkillLifecycleService(dependencies: LifecycleDependencies)
 }
 
 function assertActivatableVersion(target: VersionSnapshot | undefined, packageId: string): asserts target is VersionSnapshot {
-  if (!target || target.packageId !== packageId || !target.isCompatible || target.status !== 'runnable' || !['verified', 'approved'].includes(target.securityStatus ?? '')) {
-    throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a verified runnable compatible version can be enabled')
+  if (!target || target.packageId !== packageId || !target.isCompatible || target.status !== 'runnable') {
+    throw new ServiceError('SKILL_VERSION_INCOMPATIBLE', 'Only a runnable compatible version can be enabled')
   }
 }
 

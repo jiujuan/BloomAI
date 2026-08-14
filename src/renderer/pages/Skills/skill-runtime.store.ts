@@ -311,7 +311,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
     const current = get().installations.find((item) => item.id === id)
       ?? get().selectedPackage?.installations.find((item) => item.id === id)
     if (!current) return
-    replaceInstallation({ ...current, enabled, status: enabled ? 'enabled' : 'disabled', updatedAt: Date.now() })
+    replaceInstallation({ ...current, enabled, status: enabled ? 'installed' : 'disabled', updatedAt: Date.now() })
   }
 
 
