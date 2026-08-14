@@ -342,7 +342,7 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
     return <section className="skills-import-page" aria-labelledby="package-import-page-title">
       <div className="skills-import-page-heading"><div className="skills-eyebrow">MANAGE / IMPORT</div><h1 id="package-import-page-title">导入 Skill</h1><p>把本地目录、GitHub Archive 或 npx skills 产物转换为可审核的 Skill Version。</p></div>
       {stepper}
-      <div className="skills-import-page-card"><div className="skills-import-page-card-head"><div><h2>选择导入方式</h2><p>不会直接执行 Skill</p></div></div>{workflow}</div>
+      <div className="skills-import-page-card">{workflow}</div>
     </section>
   }
 

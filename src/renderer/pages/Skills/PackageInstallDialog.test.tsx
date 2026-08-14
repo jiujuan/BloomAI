@@ -83,6 +83,8 @@ describe('Package import workflow contract', () => {
     expect(pageMarkup).toContain('导入 --copy 生成的目录')
     expect(pageMarkup).toContain('class="skills-import-page"')
     expect(pageMarkup).toContain('id="package-import-page-title"')
+    expect(pageMarkup).not.toContain('skills-import-page-card-head')
+    expect(pageMarkup).toContain('skills-eyebrow">Step 1</div><h3 id="import-source-title">选择导入方式</h3>')
     expect(pageMarkup).not.toContain('skills-modal-backdrop')
     expect(pageMarkup).not.toContain('role="dialog"')
     expect(pageMarkup).not.toContain('ZIP')

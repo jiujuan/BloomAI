@@ -1588,9 +1588,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .skills-import-stepper li.complete > span { border-color: var(--text-success); background: var(--text-success); color: #fff; }
 .skills-import-stepper li small { color: var(--text-tertiary); font-size: 10px; }
 .skills-import-page-card { overflow: hidden; border: .5px solid var(--skills-border-tertiary); border-radius: var(--radius-lg); background: var(--skills-bg-primary); box-shadow: var(--shadow-sm); }
-.skills-import-page-card-head { display: flex; align-items: baseline; gap: 10px; padding: 16px 18px; border-bottom: .5px solid var(--skills-border-tertiary); }
-.skills-import-page-card-head h2 { color: var(--skills-text-primary); font-size: 16px; font-weight: 650; }
-.skills-import-page-card-head p { color: var(--text-tertiary); font-size: 11px; }
 .skills-import-page-body { display: flex; flex-direction: column; gap: 0; padding: 0 18px 18px; }
 .skills-import-source-panel, .skills-import-review-panel, .skills-import-confirm-panel { display: flex; flex-direction: column; gap: 13px; padding: 18px 0; }
 .skills-import-source-panel:not(:last-child), .skills-import-review-panel:not(:last-child) { border-bottom: .5px solid var(--skills-border-tertiary); }
