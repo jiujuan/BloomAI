@@ -331,11 +331,11 @@ capabilities:
 
     expect(requests).toEqual([
       'https://api.github.com/repos/owner/repo/commits/main',
-      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://github.com/owner/repo/archive/refs/heads/main.zip',
       'https://api.github.com/repos/owner/repo/commits/main',
-      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://github.com/owner/repo/archive/refs/heads/main.zip',
       'https://api.github.com/repos/owner/repo/commits/main',
-      `https://github.com/owner/repo/archive/${'a'.repeat(40)}.zip`,
+      'https://github.com/owner/repo/archive/refs/heads/main.zip',
     ])
     expect(result.packages[0].sourceSnapshot.sourceCommit).toBe('a'.repeat(40))
   })

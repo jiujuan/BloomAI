@@ -65,6 +65,77 @@ describe('github source', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the stable refs/heads archive URL before the SHA archive URL', async () => {
+    const archive = Buffer.from('branch-archive')
+    const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>().mockResolvedValue(response(archive, {
+      status: 200,
+      headers: { 'content-length': String(archive.length) },
+    }))
+
+    const result = await downloadGitHubArchive(source, sha, { fetchImpl })
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://github.com/acme/skills/archive/refs/heads/feature/issue-123.zip',
+      expect.objectContaining({ redirect: 'manual' }),
+    )
+    expect(result.archiveUrl).toBe('https://github.com/acme/skills/archive/refs/heads/feature/issue-123.zip')
+  })
+
+  it('accepts a GitHub refs/heads redirect to codeload without losing the requested ref', async () => {
+    const archive = Buffer.from('redirected-branch-archive')
+    const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>()
+      .mockResolvedValueOnce(response(null, {
+        status: 302,
+        headers: { location: 'https://codeload.github.com/acme/skills/zip/refs/heads/feature/issue-123' },
+      }))
+      .mockResolvedValueOnce(response(archive, {
+        status: 200,
+        headers: { 'content-length': String(archive.length) },
+      }))
+
+    const result = await downloadGitHubArchive(source, sha, { fetchImpl })
+
+    expect(result.archiveUrl).toBe('https://codeload.github.com/acme/skills/zip/refs/heads/feature/issue-123')
+  })
+
+  it('falls back from a missing branch archive to the refs/tags archive URL', async () => {
+    const tagSource = parseGitHubSource('https://github.com/acme/skills', 'v1.2.3')
+    const archive = Buffer.from('tag-archive')
+    const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>()
+      .mockResolvedValueOnce(response('missing branch', { status: 404 }))
+      .mockResolvedValueOnce(response(archive, {
+        status: 200,
+        headers: { 'content-length': String(archive.length) },
+      }))
+
+    const result = await downloadGitHubArchive(tagSource, sha, { fetchImpl })
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://github.com/acme/skills/archive/refs/heads/v1.2.3.zip',
+      expect.objectContaining({ redirect: 'manual' }),
+    )
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://github.com/acme/skills/archive/refs/tags/v1.2.3.zip',
+      expect.objectContaining({ redirect: 'manual' }),
+    )
+    expect(result.archiveUrl).toBe('https://github.com/acme/skills/archive/refs/tags/v1.2.3.zip')
+  })
+
+  it('rejects a ref archive redirect that changes the requested branch', async () => {
+    const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>().mockResolvedValue(response(null, {
+      status: 302,
+      headers: { location: 'https://codeload.github.com/acme/skills/zip/refs/heads/main' },
+    }))
+
+    await expect(downloadGitHubArchive(source, sha, { fetchImpl })).rejects.toMatchObject({
+      code: 'GITHUB_REDIRECT_BLOCKED',
+      message: 'GitHub archive redirect target is not the requested immutable archive',
+    })
+  })
+
   it('validates content length and actual response bytes', async () => {
     const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>().mockResolvedValue(response(Buffer.from('short'), {
       status: 200,

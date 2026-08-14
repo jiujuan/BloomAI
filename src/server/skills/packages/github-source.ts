@@ -79,6 +79,12 @@ const ALLOWED_HOSTS = new Set(['github.com', 'api.github.com', 'codeload.github.
 const ARCHIVE_HOSTS = new Set(['github.com', 'codeload.github.com'])
 const OWNER_OR_REPOSITORY = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
 const VALID_SHA = /^[a-f0-9]{40}$/i
+const ARCHIVE_REF_NAMESPACES = ['heads', 'tags'] as const
+
+type ArchiveCandidate = {
+  url: string
+  expectedPaths: readonly string[]
+}
 
 export function parseGitHubSource(repositoryUrl: string, ref: string, subdirectory?: string): ParsedGitHubSource {
   const validated = validateGitHubSource(repositoryUrl, ref, subdirectory)
@@ -182,51 +188,64 @@ export async function downloadGitHubArchive(
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
   const allowedHosts = normalizeAllowedHosts(options.allowedHosts)
   if (!allowedHosts.has('github.com')) throw new GitHubSourceError('GITHUB_SOURCE_INVALID', 'GitHub archive host is not enabled by the allowlist')
-  let archiveUrl = `https://github.com/${parsed.owner}/${parsed.repository}/archive/${resolvedCommitSha}.zip`
-  let response: Response | undefined
-  let redirects = 0
+  let lastNotFound: GitHubSourceError | undefined
 
-  while (true) {
-    try {
-      response = await fetchWithTimeout(archiveUrl, { fetchImpl: options.fetchImpl, timeoutMs: options.timeoutMs }, { redirect: 'manual' })
-    } catch (error) {
-      throw mapFetchError(error, 'GitHub archive download failed')
+  for (const candidate of buildArchiveCandidates(parsed, resolvedCommitSha)) {
+    let archiveUrl = candidate.url
+    let response: Response | undefined
+    let redirects = 0
+
+    while (true) {
+      try {
+        response = await fetchWithTimeout(archiveUrl, { fetchImpl: options.fetchImpl, timeoutMs: options.timeoutMs }, { redirect: 'manual' })
+      } catch (error) {
+        throw mapFetchError(error, 'GitHub archive download failed')
+      }
+      if (!isRedirect(response.status)) break
+      if (redirects >= maxRedirects) throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive exceeded the redirect limit')
+      const location = response.headers.get('location')
+      if (!location) throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect did not include a location')
+      const nextUrl = validateArchiveRedirect(location, archiveUrl, candidate.expectedPaths, allowedHosts)
+      archiveUrl = nextUrl
+      redirects += 1
     }
-    if (!isRedirect(response.status)) break
-    if (redirects >= maxRedirects) throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive exceeded the redirect limit')
-    const location = response.headers.get('location')
-    if (!location) throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect did not include a location')
-    const nextUrl = validateArchiveRedirect(location, archiveUrl, parsed, resolvedCommitSha, allowedHosts)
-    archiveUrl = nextUrl
-    redirects += 1
+
+    if (!response) throw new GitHubSourceError('GITHUB_ARCHIVE_ERROR', 'GitHub archive response was empty')
+    if (!response.ok) {
+      const error = mapGitHubStatus(response, 'GitHub archive could not be downloaded', 'archive')
+      if (error.code === 'GITHUB_ARCHIVE_NOT_FOUND') {
+        lastNotFound = error
+        continue
+      }
+      throw error
+    }
+
+    const contentLengthHeader = response.headers.get('content-length')
+    const contentLength = parseContentLength(contentLengthHeader)
+    if (contentLength !== undefined && contentLength > maxArchiveBytes) {
+      throw new GitHubSourceError('GITHUB_ARCHIVE_TOO_LARGE', 'GitHub archive exceeds the maximum allowed size', { maxArchiveBytes, contentLength })
+    }
+    const archive = await readResponseBuffer(response, maxArchiveBytes)
+    if (contentLength !== undefined && archive.length !== contentLength) {
+      throw new GitHubSourceError('GITHUB_CONTENT_LENGTH_MISMATCH', 'GitHub archive content-length does not match the response body', {
+        contentLength,
+        actualBytes: archive.length,
+      })
+    }
+
+    return {
+      archive,
+      sourceUrl: parsed.repositoryUrl,
+      archiveUrl,
+      sourceRef: parsed.ref,
+      resolvedCommitSha,
+      archiveSha256: crypto.createHash('sha256').update(archive).digest('hex'),
+      fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
+      ...(response.headers.get('etag') ? { etag: response.headers.get('etag') ?? undefined } : {}),
+    }
   }
 
-  if (!response) throw new GitHubSourceError('GITHUB_ARCHIVE_ERROR', 'GitHub archive response was empty')
-  if (!response.ok) throw mapGitHubStatus(response, 'GitHub archive could not be downloaded', 'archive')
-
-  const contentLengthHeader = response.headers.get('content-length')
-  const contentLength = parseContentLength(contentLengthHeader)
-  if (contentLength !== undefined && contentLength > maxArchiveBytes) {
-    throw new GitHubSourceError('GITHUB_ARCHIVE_TOO_LARGE', 'GitHub archive exceeds the maximum allowed size', { maxArchiveBytes, contentLength })
-  }
-  const archive = await readResponseBuffer(response, maxArchiveBytes)
-  if (contentLength !== undefined && archive.length !== contentLength) {
-    throw new GitHubSourceError('GITHUB_CONTENT_LENGTH_MISMATCH', 'GitHub archive content-length does not match the response body', {
-      contentLength,
-      actualBytes: archive.length,
-    })
-  }
-
-  return {
-    archive,
-    sourceUrl: parsed.repositoryUrl,
-    archiveUrl,
-    sourceRef: parsed.ref,
-    resolvedCommitSha,
-    archiveSha256: crypto.createHash('sha256').update(archive).digest('hex'),
-    fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
-    ...(response.headers.get('etag') ? { etag: response.headers.get('etag') ?? undefined } : {}),
-  }
+  throw lastNotFound ?? new GitHubSourceError('GITHUB_ARCHIVE_ERROR', 'GitHub archive response was empty')
 }
 
 function ensureParsedSource(source: GitHubSource | ParsedGitHubSource): ParsedGitHubSource {
@@ -242,16 +261,46 @@ function validateGitHubSource(repositoryUrl: string, ref: string, subdirectory?:
   }
 }
 
-function validateArchiveRedirect(location: string, currentUrl: string, source: ParsedGitHubSource, commitSha: string, allowedHosts: ReadonlySet<string>): string {
+function buildArchiveCandidates(source: ParsedGitHubSource, commitSha: string): ArchiveCandidate[] {
+  const encodedRef = encodeGitHubRef(source.ref)
+  // GitHub's public archive routes use refs/heads and refs/tags, and redirect
+  // those stable URLs to the matching codeload ref path. Keep the resolved SHA
+  // as a compatibility fallback for refs that are not exposed through either
+  // namespace.
+  const candidates: ArchiveCandidate[] = ARCHIVE_REF_NAMESPACES.map((namespace) => {
+    const githubPath = `/${source.owner}/${source.repository}/archive/refs/${namespace}/${encodedRef}.zip`
+    const codeloadPath = `/${source.owner}/${source.repository}/zip/refs/${namespace}/${encodedRef}`
+    return {
+      url: `https://github.com${githubPath}`,
+      expectedPaths: [
+        githubPath,
+        codeloadPath,
+        `/${source.owner}/${source.repository}/archive/${commitSha}.zip`,
+        `/${source.owner}/${source.repository}/zip/${commitSha}`,
+      ],
+    }
+  })
+  const githubArchivePath = `/${source.owner}/${source.repository}/archive/${commitSha}.zip`
+  const codeloadArchivePath = `/${source.owner}/${source.repository}/zip/${commitSha}`
+  candidates.push({
+    url: `https://github.com${githubArchivePath}`,
+    expectedPaths: [githubArchivePath, codeloadArchivePath],
+  })
+  return candidates
+}
+
+function encodeGitHubRef(ref: string): string {
+  return ref.split('/').map((segment) => encodeURIComponent(segment)).join('/')
+}
+
+function validateArchiveRedirect(location: string, currentUrl: string, expectedPaths: readonly string[], allowedHosts: ReadonlySet<string>): string {
   let nextUrl: URL
   try { nextUrl = new URL(location, currentUrl) } catch { throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect URL was invalid') }
   if (nextUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(nextUrl.hostname.toLowerCase()) || !allowedHosts.has(nextUrl.hostname.toLowerCase()) || !ARCHIVE_HOSTS.has(nextUrl.hostname.toLowerCase()) || nextUrl.port || nextUrl.username || nextUrl.password || nextUrl.search || nextUrl.hash) {
     throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect target is not an allowed GitHub host')
   }
   const pathName = nextUrl.pathname
-  const githubArchivePath = `/${source.owner}/${source.repository}/archive/${commitSha}.zip`
-  const codeloadArchivePath = `/${source.owner}/${source.repository}/zip/${commitSha}`
-  if (pathName !== githubArchivePath && pathName !== codeloadArchivePath) {
+  if (!expectedPaths.includes(pathName)) {
     throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect target is not the requested immutable archive')
   }
   return nextUrl.toString()
