@@ -300,10 +300,23 @@ function validateArchiveRedirect(location: string, currentUrl: string, expectedP
     throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect target is not an allowed GitHub host')
   }
   const pathName = nextUrl.pathname
-  if (!expectedPaths.includes(pathName)) {
+  if (!expectedPaths.some((expectedPath) => matchesGitHubArchivePath(pathName, expectedPath))) {
     throw new GitHubSourceError('GITHUB_REDIRECT_BLOCKED', 'GitHub archive redirect target is not the requested immutable archive')
   }
   return nextUrl.toString()
+}
+
+function matchesGitHubArchivePath(actualPath: string, expectedPath: string): boolean {
+  const actualSegments = actualPath.split('/')
+  const expectedSegments = expectedPath.split('/')
+  if (actualSegments.length !== expectedSegments.length) return false
+
+  return actualSegments.every((segment, index) => {
+    // GitHub canonicalizes owner/repository casing in redirects. Refs and
+    // archive identifiers remain exact to prevent changing the requested target.
+    if (index === 1 || index === 2) return segment.toLowerCase() === expectedSegments[index]?.toLowerCase()
+    return segment === expectedSegments[index]
+  })
 }
 
 async function fetchWithTimeout(

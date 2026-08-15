@@ -99,6 +99,24 @@ describe('github source', () => {
     expect(result.archiveUrl).toBe('https://codeload.github.com/acme/skills/zip/refs/heads/feature/issue-123')
   })
 
+  it('accepts GitHub canonical owner and repository casing in an otherwise exact archive redirect', async () => {
+    const baoyuSource = parseGitHubSource('https://github.com/jimliu/baoyu-skills', 'main')
+    const archive = Buffer.from('redirected-branch-archive')
+    const fetchImpl = vi.fn<[string | URL, RequestInit?], Promise<Response>>()
+      .mockResolvedValueOnce(response(null, {
+        status: 302,
+        headers: { location: 'https://codeload.github.com/JimLiu/baoyu-skills/zip/refs/heads/main' },
+      }))
+      .mockResolvedValueOnce(response(archive, {
+        status: 200,
+        headers: { 'content-length': String(archive.length) },
+      }))
+
+    const result = await downloadGitHubArchive(baoyuSource, sha, { fetchImpl })
+
+    expect(result.archiveUrl).toBe('https://codeload.github.com/JimLiu/baoyu-skills/zip/refs/heads/main')
+  })
+
   it('falls back from a missing branch archive to the refs/tags archive URL', async () => {
     const tagSource = parseGitHubSource('https://github.com/acme/skills', 'v1.2.3')
     const archive = Buffer.from('tag-archive')
