@@ -21,7 +21,7 @@ import {
   skill_drafts,
 } from '../schema'
 import { ServiceError } from '../../domain/errors'
-import { MAX_IMPORT_REVIEW_PAYLOAD_DEPTH, sanitizeSecurityPayload, type SecurityPayloadOptions } from '../../security/security-payload'
+import { MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS, MAX_IMPORT_REVIEW_PAYLOAD_DEPTH, sanitizeSecurityPayload, type SecurityPayloadOptions } from '../../security/security-payload'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
@@ -299,8 +299,8 @@ export const skillPackageRepo = {
       source: data.source,
       source_sha: data.sourceSha,
       source_ref: data.sourceRef ?? null,
-      inspection_json: stringifySecurityObject(data.inspection, 'inspection', { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH }),
-      security_findings_json: stringifySecurityFindings(data.securityFindings, { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH }),
+      inspection_json: stringifySecurityObject(data.inspection, 'inspection', importReviewPayloadOptions()),
+      security_findings_json: stringifySecurityFindings(data.securityFindings, importReviewPayloadOptions()),
       status: data.status ?? 'pending',
       reviewer: null,
       decision: null,
@@ -2064,6 +2064,13 @@ function parseAuditPayload(value: unknown): JsonObject {
       : {}
   } catch {
     return {}
+  }
+}
+
+function importReviewPayloadOptions(): SecurityPayloadOptions {
+  return {
+    maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH,
+    maxArrayItems: MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS,
   }
 }
 

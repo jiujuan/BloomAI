@@ -83,6 +83,36 @@ describe('PackageInstallReviewService security boundary', () => {
     expect(review.inspection).toEqual(inspection)
     expect(service.get(review.id).inspection).toEqual(inspection)
   })
+  it('persists an import inspection with more than the global array-item limit', async () => {
+    const { PackageInstallReviewService } = await loadReviewService()
+    const service = new PackageInstallReviewService()
+    const packages = Array.from({ length: 101 }, (_, index) => ({ name: `skill-${index}` }))
+
+    const review = service.create({
+      source: { kind: 'local-directory', directory: dataDir },
+      sourceFingerprint: 'd'.repeat(64),
+      inspection: { packages },
+      securityFindings: { diagnostics: packages },
+    })
+
+    expect(review.inspection).toEqual({ packages })
+    expect(service.get(review.id).inspection).toEqual({ packages })
+  })
+
+  it('rejects an import inspection exceeding the import-review array-item limit', async () => {
+    const { MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS } = await import('../../security/security-payload')
+    const { PackageInstallReviewService } = await loadReviewService()
+    const service = new PackageInstallReviewService()
+
+    expect(() => service.create({
+      source: { kind: 'local-directory', directory: dataDir },
+      sourceFingerprint: 'e'.repeat(64),
+      inspection: {
+        packages: Array.from({ length: MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS + 1 }, (_, index) => ({ name: `skill-${index}` })),
+      },
+    })).toThrowError(expect.objectContaining({ code: 'PAYLOAD_ARRAY_LIMIT' }))
+  })
+
   it('persists an install decision when the result reaches the payload depth limit', async () => {
     const { PackageInstallReviewService } = await loadReviewService()
     const service = new PackageInstallReviewService()

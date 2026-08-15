@@ -1,6 +1,6 @@
 import { skillPackageRepo } from '../../db/repositories/skill-package.repo'
 import type { PackageInstallSource } from './package-installer'
-import { MAX_IMPORT_REVIEW_PAYLOAD_DEPTH, sanitizeSecurityPayload, validateExternalSource } from '../security/skill-security-checklist'
+import { MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS, MAX_IMPORT_REVIEW_PAYLOAD_DEPTH, sanitizeSecurityPayload, validateExternalSource } from '../security/skill-security-checklist'
 
 export type PackageImportReviewStatus = 'scanning' | 'validated' | 'warning' | 'pending' | 'approved' | 'rejected' | 'installed'
 export type PackageImportReview = {
@@ -138,7 +138,10 @@ function sanitizeReviewDecision(value: Record<string, unknown>, fieldName: strin
 }
 
 function sanitizeReviewObject(value: Record<string, unknown>, fieldName: string): Record<string, unknown> {
-  const sanitized = sanitizeSecurityPayload(value, { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH })
+  const sanitized = sanitizeSecurityPayload(value, {
+    maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH,
+    maxArrayItems: MAX_IMPORT_REVIEW_PAYLOAD_ARRAY_ITEMS,
+  })
   if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) throw new Error(`${fieldName} must be a JSON object`)
   return sanitized as Record<string, unknown>
 }
