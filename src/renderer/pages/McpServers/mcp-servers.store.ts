@@ -6,6 +6,7 @@ import {
   createMcpServer,
   deleteMcpServer,
   getMcpServer,
+  getMcpStatus,
   listMcpRuns,
   listMcpServers,
   listMcpTools,
@@ -21,6 +22,7 @@ import {
 import { sanitizeMcpApprovalDetails, type JsonValue, type McpApprovalState, type McpDiscoveredTool, type McpPreview, type McpRun, type McpServer, type McpServerConfigInput, type McpServerPatch, type McpTool } from './mcp-servers.types'
 
 export type McpServersApi = {
+  getStatus: typeof getMcpStatus
   listServers: typeof listMcpServers
   getServer: typeof getMcpServer
   createServer: typeof createMcpServer
@@ -79,6 +81,7 @@ export type McpServersActions = {
 }
 
 const defaultApi: McpServersApi = {
+  getStatus: getMcpStatus,
   listServers: listMcpServers,
   getServer: getMcpServer,
   createServer: createMcpServer,
@@ -144,6 +147,25 @@ export const useMcpServersStore = create<McpServersState & McpServersActions>()(
     loadServers: async () => {
       set({ loading: true, error: null, busyAction: 'load-servers' })
       try {
+        const status = await get().api.getStatus()
+        if (!status.enabled) {
+          set({
+            servers: [],
+            selectedServerId: null,
+            tools: [],
+            toolCounts: {},
+            runs: [],
+            preview: null,
+            connectionTest: null,
+            pendingApproval: null,
+            lastTest: null,
+            featureDisabled: true,
+            loading: false,
+            busyAction: null,
+            error: null,
+          })
+          return
+        }
         const servers = await get().api.listServers()
         const currentId = get().selectedServerId
         const nextId = currentId && servers.some((server) => server.id === currentId) ? currentId : servers[0]?.id ?? null

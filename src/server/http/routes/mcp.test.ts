@@ -435,6 +435,10 @@ describe('MCP HTTP routes', () => {
   it('maps stable MCP failures, blocks cross-server approvals, and allows historical runs while disabled', async () => {
     const disabledFixture = createService({ enabled: false })
     const disabledApp = createRouteApp(disabledFixture.service)
+    const status = await disabledApp.request('/api/v1/mcp/status', { headers: headers() })
+    expect(status.status).toBe(200)
+    expect((await json(status)).data).toEqual({ enabled: false })
+
     const disabled = await disabledApp.request('/api/v1/mcp/servers', { headers: headers() })
     expect(disabled.status).toBe(409)
     expect((await json(disabled)).error).toMatchObject({ code: 'MCP_DISABLED' })

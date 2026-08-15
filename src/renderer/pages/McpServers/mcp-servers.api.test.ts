@@ -3,6 +3,7 @@ import { API_BASE } from '@shared/constants'
 import {
   McpApiError,
   createMcpServer,
+  getMcpStatus,
   listMcpServers,
   testMcpTool,
 } from './mcp-servers.api'
@@ -75,6 +76,15 @@ describe('MCP renderer API boundary', () => {
       expect(error).toBeInstanceOf(McpApiError)
       expect(JSON.stringify((error as McpApiError).details)).not.toContain('approvalToken')
     }
+  })
+
+  it('reads feature status before MCP management data', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: { enabled: false } }), { status: 200 }))
+
+    await expect(getMcpStatus()).resolves.toEqual({ enabled: false })
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/mcp/status`, expect.objectContaining({
+      headers: expect.objectContaining({ 'x-bloom-role': 'admin' }),
+    }))
   })
 
   it('lists servers through the same admin HTTP boundary', async () => {

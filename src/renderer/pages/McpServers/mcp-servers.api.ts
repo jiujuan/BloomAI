@@ -78,6 +78,12 @@ async function request<T>({ path, ...init }: RequestOptions): Promise<T> {
 
 function id(value: string): string { return encodeURIComponent(value) }
 
+export type McpFeatureStatus = { enabled: boolean }
+
+export function getMcpStatus(): Promise<McpFeatureStatus> {
+  return request<McpFeatureStatus>({ path: '/mcp/status' })
+}
+
 export function listMcpServers(): Promise<McpServer[]> {
   return request<McpServer[]>({ path: '/mcp/servers' })
 }

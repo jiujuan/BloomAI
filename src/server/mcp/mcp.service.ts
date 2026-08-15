@@ -196,6 +196,10 @@ export class McpService {
     this.clock = options.clock ?? (() => Date.now())
   }
 
+  getStatus(): { enabled: boolean } {
+    return { enabled: isMcpClientEnabled(this.env) }
+  }
+
   listServers(): McpServerRecord[] {
     this.assertEnabled()
     return this.repository.listServers()

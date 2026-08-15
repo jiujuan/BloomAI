@@ -284,7 +284,7 @@ function McpServerDetails({
 }
 
 function DisabledState() {
-  return <div className="mcp-page mcp-disabled-state" role="status"><div className="mcp-disabled-icon"><ShieldCheck size={28} /></div><div><div className="mcp-eyebrow">Safety gate</div><h1>MCP client is disabled</h1><p>The server feature flag <code>MCP_CLIENT_ENABLED</code> is not enabled. Management and execution controls are hidden until an administrator enables the MCP client.</p></div></div>
+  return <div className="mcp-page mcp-disabled-state" role="status"><div className="mcp-disabled-icon"><ShieldCheck size={28} /></div><div><div className="mcp-eyebrow">Safety gate</div><h1>MCP client is disabled</h1><p>Set <code>MCP_CLIENT_ENABLED=true</code> in BloomAI&apos;s <code>.env</code> file, then restart BloomAI. Management and execution controls stay hidden while the MCP client is disabled.</p></div></div>
 }
 
 function ConfirmDeleteModal({ server, busy, onClose, onConfirm }: { server: McpServer; busy: boolean; onClose: () => void; onConfirm: () => void }) {

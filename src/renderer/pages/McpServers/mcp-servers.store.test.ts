@@ -50,6 +50,18 @@ describe('MCP server store safety', () => {
     expect(useMcpServersStore.getState().tools[0]?.isEnabled).toBe(true)
   })
 
+  it('does not request MCP servers when feature status is disabled', async () => {
+    const getStatus = vi.fn().mockResolvedValue({ enabled: false })
+    const listServers = vi.fn()
+    useMcpServersStore.setState({ api: { getStatus, listServers } as never })
+
+    await useMcpServersStore.getState().loadServers()
+
+    expect(getStatus).toHaveBeenCalledOnce()
+    expect(listServers).not.toHaveBeenCalled()
+    expect(useMcpServersStore.getState()).toMatchObject({ featureDisabled: true, loading: false, busyAction: null, error: null })
+  })
+
   it('keeps approval state to request/run/safe preview/expiry only', async () => {
     const testTool = vi.fn().mockRejectedValue(Object.assign(new Error('approval'), {
       code: 'MCP_APPROVAL_REQUIRED',

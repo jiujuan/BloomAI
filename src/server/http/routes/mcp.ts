@@ -33,6 +33,8 @@ export function createMcpRoutes(service: McpService): Hono {
     await next()
   })
 
+  routes.get('/status', (context) => context.json({ data: service.getStatus() }))
+
   routes.get('/servers', (context) => context.json({
     data: service.listServers().map(toSafeMcpServer),
   }))

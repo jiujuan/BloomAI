@@ -60,6 +60,8 @@ describe('MCP management UI', () => {
     useMcpServersStore.setState({ featureDisabled: true })
     const markup = renderToStaticMarkup(<McpServersPage />)
     expect(markup).toContain('MCP client is disabled')
+    expect(markup).toContain('MCP_CLIENT_ENABLED=true')
+    expect(markup).toContain('restart BloomAI')
     expect(markup).not.toContain('Add server')
     expect(markup).not.toContain('Test tool')
   })
