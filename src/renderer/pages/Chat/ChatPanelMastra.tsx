@@ -19,6 +19,7 @@ import { WriterParams, defaultWritingConfig } from './WriterParams'
 import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, PasteMenu, useSelectionMenu } from './MessageActions'
 import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
 import { AttachmentChips, type ChipItem } from './parts/AttachmentChips'
+import { ChatSkillPicker } from './ChatSkillPicker'
 import { DeepResearchWorkbench } from './deepresearch/DeepResearchWorkbench'
 import { ResearchRunPart, type ResearchRunPartData } from './deepresearch/ResearchRunPart'
 import { SkillRunPart } from './parts/SkillRunPart'
@@ -828,20 +829,13 @@ export function ChatPanelMastra() {
                   <Plus size={17} />
                 </button>
                 {chatSkills.length > 0 && (
-                  <select
-                    className="chat-skill-picker"
-                    aria-label="选择 Package Skill"
-                    value={selectedChatSkillVersionId}
-                    onChange={(e) => setSelectedChatSkillVersionId(e.target.value)}
+                  <ChatSkillPicker
+                    skills={chatSkills}
+                    selectedSkillVersionId={selectedChatSkillVersionId}
+                    onSelect={setSelectedChatSkillVersionId}
+                    onRemove={() => setSelectedChatSkillVersionId('')}
                     disabled={isStreaming || skillRunSubmitting}
-                  >
-                    <option value="">普通聊天</option>
-                    {chatSkills.map((skill) => (
-                      <option key={skill.skillVersionId} value={skill.skillVersionId}>
-                        {skill.packageName} · v{skill.version}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 )}
                 <ModeMenu mode={mode} onSelect={handleModeChange} />
                 <ModelMenu model={model} models={textModels.filter(m => m.isEnabled)} onSelect={handleModelChange} up />
