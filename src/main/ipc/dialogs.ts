@@ -14,7 +14,7 @@ type IpcMainLike = {
   handle(channel: string, listener: () => Promise<DirectorySelection>): void
 }
 
-type ShowOpenDialog = (options: { properties: string[] }) => Promise<DirectoryDialogResult>
+type ShowOpenDialog = (options: { properties: ['openDirectory'] }) => Promise<DirectoryDialogResult>
 
 export function mapDirectorySelection(result: DirectoryDialogResult): DirectorySelection {
   if (result.canceled || !result.filePaths[0]) return { canceled: true }
