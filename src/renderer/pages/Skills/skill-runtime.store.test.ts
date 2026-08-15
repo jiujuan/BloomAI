@@ -118,6 +118,22 @@ describe('Package Runtime Zustand store', () => {
     expect(useSkillRuntimeStore.getState().loadingByResource.packages).toBe(false)
   })
 
+  it('loads every package page for the Skills Center catalog', async () => {
+    const packagePage = (id: string, offset: number, hasMore: boolean, nextOffset: number | null) => ({
+      data: [{ id, name: id, description: '', sourceType: 'github', sourceUri: null, sourceRef: 'main', createdAt: offset, updatedAt: offset, deletedAt: null, deleteReason: null }],
+      meta: { limit: 100, offset, total: 21, hasMore, nextOffset },
+    })
+    const packagesMock = vi.spyOn(platform, 'getSkillPackages')
+      .mockResolvedValueOnce(packagePage('first', 0, true, 1))
+      .mockResolvedValueOnce(packagePage('second', 1, false, null))
+
+    await useSkillRuntimeStore.getState().loadPackages()
+
+    expect(packagesMock).toHaveBeenNthCalledWith(1, { limit: 100, offset: 0 })
+    expect(packagesMock).toHaveBeenNthCalledWith(2, { limit: 100, offset: 1 })
+    expect(useSkillRuntimeStore.getState().packages.map((item) => item.id)).toEqual(['first', 'second'])
+    expect(useSkillRuntimeStore.getState().packagePage?.meta).toMatchObject({ offset: 0, total: 21, hasMore: false, nextOffset: null })
+  })
   it('keeps the complete installation collection when loading package detail', async () => {
     const catalogInstallations: SkillInstallation[] = [
       { id: 'install-1', packageId: 'pkg-1', currentVersionId: 'version-1', revision: 1, status: 'installed', enabled: true, installedAt: 1, updatedAt: 1, previousVersionId: null, changedAt: null, disabledAt: null, uninstalledAt: null, deletedAt: null, rollbackReason: null },

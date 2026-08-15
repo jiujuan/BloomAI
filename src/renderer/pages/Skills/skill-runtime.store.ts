@@ -12,6 +12,25 @@ function asRuntimeError(error: unknown): RuntimeError {
   return { code: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Skill Runtime request failed', status: 0, retryable: true }
 }
 
+const SKILLS_CATALOG_FETCH_LIMIT = 100
+
+async function loadAllPages<T>(loadPage: (input: PaginationInput) => Promise<Page<T>>): Promise<Page<T>> {
+  const data: T[] = []
+  let offset = 0
+  let total = 0
+
+  while (true) {
+    const page = await loadPage({ limit: SKILLS_CATALOG_FETCH_LIMIT, offset })
+    data.push(...page.data)
+    total = page.meta.total
+    const nextOffset = page.meta.nextOffset
+    if (!page.meta.hasMore || nextOffset === null || nextOffset <= offset) {
+      return { data, meta: { limit: data.length, offset: 0, total, hasMore: false, nextOffset: null } }
+    }
+    offset = nextOffset
+  }
+}
+
 function toLegacyPackage(item: SkillPackage): SkillPackage {
   return {
     ...item,
@@ -370,13 +389,15 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       set({ featureFlags })
       return featureFlags
     }, { successTitle: 'Runtime 能力开关已更新' }),
-    loadPackages: async (input = {}) => {
+    loadPackages: async (input) => {
       const requestKey = 'packages'
       const requestRevision = beginRequest(requestKey)
       set({ loading: true, error: null, errorDetails: null, errorScope: null })
       setResourceLoading(requestKey, true)
       try {
-        const result = await platform.getSkillPackages(input)
+        const result = input === undefined
+          ? await loadAllPages(platform.getSkillPackages)
+          : await platform.getSkillPackages(input)
         const legacyPage = { ...result, data: result.data.map(toLegacyPackage) }
         if (isCurrentRequest(requestKey, requestRevision)) {
           set({ packages: legacyPage.data, packagePage: legacyPage, loading: false })
@@ -392,13 +413,15 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
         throw error
       }
     },
-    loadInstallations: async (input = {}) => {
+    loadInstallations: async (input) => {
       const requestKey = 'installations'
       const requestRevision = beginRequest(requestKey)
       set({ loading: true, error: null, errorDetails: null, errorScope: null })
       setResourceLoading(requestKey, true)
       try {
-        const result = await platform.getSkillInstallations(input)
+        const result = input === undefined
+          ? await loadAllPages(platform.getSkillInstallations)
+          : await platform.getSkillInstallations(input)
         if (isCurrentRequest(requestKey, requestRevision)) {
           set({ installations: result.data, installationPage: result, loading: false })
           setResourceLoading(requestKey, false)
