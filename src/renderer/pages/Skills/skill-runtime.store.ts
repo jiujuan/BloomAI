@@ -713,7 +713,7 @@ export const useSkillRuntimeStore = create<SkillRuntimeStore>()(devtools((set, g
       const run = await platform.createSkillRun(input)
       set((state) => ({ selectedRun: run, runs: state.runs.some((item) => item.id === run.id) ? state.runs : [run, ...state.runs] }))
       return run
-    }),
+    }, { errorScope: 'runs' }),
     commandRun: (id, command) => get().dispatchCommand(id, { ...command, idempotencyKey: command.idempotencyKey || makeIdempotencyKey(command.type) } as RunAction),
     dispatchCommand: (id, command) => withMutation(`run:${id}`, async () => {
       const run = await platform.dispatchSkillRunCommand(id, command)

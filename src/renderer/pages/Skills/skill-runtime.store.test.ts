@@ -50,6 +50,18 @@ describe('Package Runtime Zustand store', () => {
     expect(useSkillRuntimeStore.getState().errorScope).toBe('import')
   })
 
+  it('scopes failed Package Skill starts to Runs instead of the Skill Catalog', async () => {
+    const failure = { code: 'NOT_FOUND', message: 'Installed and enabled Package Skill was not found', status: 404, retryable: false }
+    vi.spyOn(platform, 'createSkillRun').mockRejectedValue(failure)
+
+    await expect(useSkillRuntimeStore.getState().startRun({ skillVersionId: 'version-1', input: {} })).rejects.toEqual(failure)
+    expect(useSkillRuntimeStore.getState()).toMatchObject({
+      error: failure.message,
+      errorDetails: failure,
+      errorScope: 'runs',
+    })
+  })
+
   it('loads runtime diagnostics and tracks a failed refresh without losing the last snapshot', async () => {
     const diagnostics = {
       health: { liveness: true, readiness: true, status: 'ready', checks: [] },

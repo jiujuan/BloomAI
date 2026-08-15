@@ -38,6 +38,10 @@ describe('Skills Center workbench contract', () => {
     expect(getVisibleSkillsRuntimeError(message, 'import', 'import')).toBeNull()
     expect(getVisibleSkillsRuntimeError(message, 'center', 'center')).toBe(message)
     expect(getVisibleSkillsRuntimeError(message, 'center', 'runs')).toBeNull()
+
+    const startFailure = 'Installed and enabled Package Skill was not found'
+    expect(getVisibleSkillsRuntimeError(startFailure, 'runs', 'center')).toBeNull()
+    expect(getVisibleSkillsRuntimeError(startFailure, 'runs', 'runs')).toBe(startFailure)
   })
 
   it('projects Package Runtime rows and filters source/runtime/status', () => {
