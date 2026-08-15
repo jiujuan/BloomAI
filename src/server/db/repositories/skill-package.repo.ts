@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, lte, like, max, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lte, like, max, or, sql } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { resolvePackageSkillId } from '../../../shared/skill-references'
@@ -63,6 +63,25 @@ function stringifyJsonObject(value: unknown, fieldName: string): string {
   const parsed = jsonObjectSchema.safeParse(value)
   if (!parsed.success || Array.isArray(value)) throw new Error(`${fieldName} must be a JSON object`)
   return JSON.stringify(parsed.data)
+}
+
+function getInstalledReviewPackageIds(decision: string | null): string[] {
+  if (!decision) return []
+  try {
+    const parsed: unknown = JSON.parse(decision)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+    const result = (parsed as Record<string, unknown>).result
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return []
+    const packages = (result as Record<string, unknown>).packages
+    if (!Array.isArray(packages)) return []
+    return [...new Set(packages.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const packageId = (entry as Record<string, unknown>).packageId
+      return typeof packageId === 'string' && packageId.length > 0 ? [packageId] : []
+    }))]
+  } catch {
+    return []
+  }
 }
 
 export const skillPackageRepo = {
@@ -295,6 +314,14 @@ export const skillPackageRepo = {
     )).get()
     if (existing) {
       if (existing.status !== 'installed') return existing
+      const installedPackageIds = getInstalledReviewPackageIds(existing.decision)
+      if (installedPackageIds.length > 0) {
+        const activePackage = getOrmDb().select({ id: skill_packages.id }).from(skill_packages).where(and(
+          inArray(skill_packages.id, installedPackageIds),
+          isNull(skill_packages.deleted_at),
+        )).limit(1).get()
+        if (activePackage) return existing
+      }
       getOrmDb().update(skill_import_reviews).set({
         inspection_json: stringifySecurityObject(data.inspection, 'inspection', importReviewPayloadOptions()),
         security_findings_json: stringifySecurityFindings(data.securityFindings, importReviewPayloadOptions()),

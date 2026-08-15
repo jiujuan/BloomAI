@@ -146,6 +146,30 @@ describe('PackageInstaller', () => {
     expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
   })
 
+  it('reuses an installed review when the same active source is scanned and installed again', async () => {
+    writeFile('article/SKILL.md', '# Article Illustrator\n')
+
+    const { PackageInstaller, client } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const firstInspection = await installer.inspect(source)
+    const firstInstallation = await installer.install(source, {
+      reviewId: firstInspection.reviewId,
+      sourceFingerprint: firstInspection.sourceFingerprint,
+      confirm: true,
+    })
+
+    const secondInspection = await installer.inspect(source)
+    const secondInstallation = await installer.install(source, {
+      reviewId: secondInspection.reviewId,
+      sourceFingerprint: secondInspection.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(secondInstallation.packages[0]?.packageId).toBe(firstInstallation.packages[0]?.packageId)
+    expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
+  })
+
   it('reinstalls an archived package when its source is scanned again after the stored files were removed', async () => {
     writeFile('article/SKILL.md', '# Article Illustrator\n')
 

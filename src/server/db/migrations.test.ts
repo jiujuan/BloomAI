@@ -139,12 +139,12 @@ describe('database migrations', () => {
 
     const firstRun = runMigrationCli(dataDir)
     expect(firstRun.status).toBe(0)
-    expect(migrationVersions()).toHaveLength(48)
+    expect(migrationVersions()).toHaveLength(49)
 
     const secondRun = runMigrationCli(dataDir)
     expect(secondRun.status).toBe(0)
     expect(secondRun.stdout).toContain('up to date')
-    expect(migrationVersions()).toHaveLength(48)
+    expect(migrationVersions()).toHaveLength(49)
   })
 
   it('adds security audit and supply-chain columns with safe defaults and upgrades an existing database', async () => {
@@ -497,6 +497,7 @@ describe('database migrations', () => {
       '046-skill-draft-publish-idempotency',
       '047-legacy-migration-archive-and-gates',
       '048-mcp-client',
+      '049-deduplicate-active-skill-packages',
     ])
     const emptyDb = openRawDb()
     try {

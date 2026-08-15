@@ -31,9 +31,10 @@ describe('MCP migration 048', () => {
     const versions = migrations.map((migration) => migration.version)
     const prefixes = versions.map((version) => Number(/^\d+/.exec(version)?.[0]))
 
-    expect(migrations).toHaveLength(48)
-    expect(versions.at(-1)).toBe('048-mcp-client')
+    expect(migrations).toHaveLength(49)
+    expect(versions.at(-1)).toBe('049-deduplicate-active-skill-packages')
     expect(versions.indexOf('047-legacy-migration-archive-and-gates')).toBeLessThan(versions.indexOf('048-mcp-client'))
+    expect(versions.indexOf('048-mcp-client')).toBeLessThan(versions.indexOf('049-deduplicate-active-skill-packages'))
     expect(new Set(prefixes).size).toBe(prefixes.length)
   })
 
