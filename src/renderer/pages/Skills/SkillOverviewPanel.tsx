@@ -7,7 +7,6 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
-  Edit3,
   Eye,
   Filter,
   History,
@@ -94,14 +93,13 @@ const STATUS_LEGEND: Array<SkillStatusVisual & { description: string }> = [
   { label: '已隔离', tone: 'danger', icon: 'shield', description: '安全策略阻止执行' },
 ]
 
-export type CatalogActionDescriptor = { key: 'detail' | 'toggle' | 'version' | 'uninstall'; label: string; danger?: boolean }
+export type CatalogActionDescriptor = { key: 'detail' | 'toggle' | 'uninstall'; label: string; danger?: boolean }
 
 export function getCatalogActionDescriptors(row: { enabled: boolean; [key: string]: unknown }): CatalogActionDescriptor[] {
   return [
     { key: 'detail', label: '查看详情' },
-    { key: 'toggle', label: row.enabled ? '禁用 Installation' : '启用 Installation' },
-    { key: 'version', label: '创建新版本' },
-    { key: 'uninstall', label: '卸载 Installation', danger: true },
+    { key: 'toggle', label: row.enabled ? '禁用' : '启用' },
+    { key: 'uninstall', label: '卸载', danger: true },
   ]
 }
 
@@ -151,7 +149,6 @@ export type SkillsCenterCatalogProps = {
   onOpenPackage: (packageId: string) => void
   onOpenRun: () => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
-  onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
   catalogSearch?: string
   catalogSort?: CatalogSortKey
@@ -176,7 +173,6 @@ export function SkillsCenterCatalog({
   onOpenPackage,
   onOpenRun,
   onToggleInstallation = () => undefined,
-  onCreateVersion = () => undefined,
   onUninstallInstallation = () => undefined,
   catalogSearch = '',
   catalogSort = 'recent',
@@ -227,7 +223,7 @@ export function SkillsCenterCatalog({
         {visibleError && <div className="skills-page-message" role="alert"><CircleAlert size={14} aria-hidden="true" /><span>{visibleError}</span></div>}
         {loading && <div className="skills-center-state" role="status"><Activity size={18} aria-hidden="true" /><div><strong>正在加载 Package Catalog</strong><p>正在读取 Package、Installation 和 Runtime 状态。</p></div></div>}
         {!loading && !visibleError && rows.length === 0 && <div className="skills-center-state skills-catalog-empty"><CircleAlert size={18} aria-hidden="true" /><div><strong>暂无 Package Skill</strong><p>当前筛选没有匹配的 Package；可以调整搜索条件或进入“导入 Skill”。</p></div></div>}
-        {!loading && !visibleError && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
+        {!loading && !visibleError && rows.length > 0 && <div className="skills-center-table-wrap"><table className="skills-center-table skills-catalog-table"><caption className="sr-only">Package Skill Catalog</caption><thead><tr><th>Skill</th><th>Version</th><th>Status</th><th>Risk</th><th>Capabilities</th><th>最近运行</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>{rows.map((row) => <CatalogRow key={`package:${row.id}`} row={row} onOpenPackage={onOpenPackage} onToggleInstallation={onToggleInstallation} onUninstallInstallation={onUninstallInstallation} />)}</tbody></table></div>}
         {!loading && !visibleError && totalRows > pageSize && <Pagination page={currentPage} totalPages={totalPages} onPageChange={onPageChange} />}
       </div>
     </section>
@@ -256,11 +252,11 @@ function StatusIcon({ icon }: { icon: SkillStatusVisual['icon'] }) {
   return <Info size={13} aria-hidden="true" />
 }
 
-function CatalogRow({ row, onOpenPackage, onToggleInstallation, onCreateVersion, onUninstallInstallation }: { row: SkillListRow; onOpenPackage: (packageId: string) => void; onToggleInstallation: (row: SkillListRow) => void | Promise<void>; onCreateVersion: (packageId: string) => void | Promise<void>; onUninstallInstallation: (row: SkillListRow) => void | Promise<void> }) {
+function CatalogRow({ row, onOpenPackage, onToggleInstallation, onUninstallInstallation }: { row: SkillListRow; onOpenPackage: (packageId: string) => void; onToggleInstallation: (row: SkillListRow) => void | Promise<void>; onUninstallInstallation: (row: SkillListRow) => void | Promise<void> }) {
   const visual = getSkillStatusVisual(row)
   const actions = getCatalogActionDescriptors(row)
-  const icons = { detail: Eye, toggle: row.enabled ? PauseCircle : PlayCircle, version: Edit3, uninstall: XCircle } as const
-  const handlers = { detail: () => onOpenPackage(row.id), toggle: () => onToggleInstallation(row), version: () => onCreateVersion(row.id), uninstall: () => onUninstallInstallation(row) } as const
+  const icons = { detail: Eye, toggle: row.enabled ? PauseCircle : PlayCircle, uninstall: XCircle } as const
+  const handlers = { detail: () => onOpenPackage(row.id), toggle: () => onToggleInstallation(row), uninstall: () => onUninstallInstallation(row) } as const
   return <tr><td><div className="skills-center-skill-cell"><span className="skills-center-kind-icon package" aria-hidden="true"><Box size={15} /></span><div><strong>{row.name}</strong><small>{row.description || '未提供描述'}</small><span className="skills-center-source-label">{row.sourceLabel}</span></div></div></td><td className="skills-center-mono">{row.version}</td><td><StatusBadge visual={visual} /></td><td><span className={`skills-status ${row.riskTone}`}><ShieldAlert size={13} aria-hidden="true" />{row.riskLabel}</span></td><td><div className="skills-capability-list">{row.capabilities.length > 0 ? row.capabilities.map((capability) => <span key={capability}>{capability}</span>) : <small>无额外能力</small>}</div></td><td>{row.lastRunAt ? formatDate(row.lastRunAt) : '—'}</td><td className="skills-center-actions">{actions.map((action) => { const Icon = icons[action.key]; return <button key={action.key} type="button" className={`skills-icon-button skills-catalog-action-button${action.danger ? ' danger' : ''}`} aria-label={action.label} title={action.label} data-tooltip={action.label} disabled={(action.key === 'toggle' || action.key === 'uninstall') && !row.installationId} onClick={() => void handlers[action.key]()}><Icon size={14} aria-hidden="true" /></button> })}</td></tr>
 }
 
@@ -300,7 +296,6 @@ type SkillOverviewPanelProps = {
   onOpenRun: () => void
   onInstall: () => void
   onToggleInstallation?: (row: SkillListRow) => void | Promise<void>
-  onCreateVersion?: (packageId: string) => void | Promise<void>
   onUninstallInstallation?: (row: SkillListRow) => void | Promise<void>
   catalogSearch?: string
   catalogSort?: CatalogSortKey
@@ -312,9 +307,9 @@ type SkillOverviewPanelProps = {
   onCatalogFilterClick?: () => void
 }
 
-export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onToggleInstallation = () => undefined, onCreateVersion = () => undefined, onUninstallInstallation = () => undefined, onInstall, catalogSearch, catalogSort, catalogTab, catalogFiltersOpen, onCatalogSearchChange, onCatalogSortChange, onCatalogTabChange, onCatalogFilterClick }: SkillOverviewPanelProps) {
+export function SkillOverviewPanel({ rows, allRows, tab, loading, error, runs = [], page = 0, pageSize = 10, totalRows, onPageChange = () => undefined, onOpenPackage, onOpenRun, onToggleInstallation = () => undefined, onUninstallInstallation = () => undefined, onInstall, catalogSearch, catalogSort, catalogTab, catalogFiltersOpen, onCatalogSearchChange, onCatalogSortChange, onCatalogTabChange, onCatalogFilterClick }: SkillOverviewPanelProps) {
   if (tab === 'runs') return <RunOverview rows={rows} loading={loading} onOpenRun={onOpenRun} />
-  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onToggleInstallation={onToggleInstallation} onCreateVersion={onCreateVersion} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
+  return <SkillsCenterCatalog rows={rows.filter((row) => row.kind === 'package')} allRows={allRows?.filter((row) => row.kind === 'package')} runs={runs} loading={loading} error={error} page={page} pageSize={pageSize} totalRows={totalRows ?? rows.filter((row) => row.kind === 'package').length} onPageChange={onPageChange} onOpenPackage={onOpenPackage} onOpenRun={onOpenRun} onToggleInstallation={onToggleInstallation} onUninstallInstallation={onUninstallInstallation} catalogSearch={catalogSearch} catalogSort={catalogSort} catalogTab={catalogTab} catalogFiltersOpen={catalogFiltersOpen} onCatalogSearchChange={onCatalogSearchChange} onCatalogSortChange={onCatalogSortChange} onCatalogTabChange={onCatalogTabChange} onCatalogFilterClick={onCatalogFilterClick} />
 }
 
 function RunOverview({ rows, loading, onOpenRun }: { rows: SkillListRow[]; loading: boolean; onOpenRun: () => void }) {

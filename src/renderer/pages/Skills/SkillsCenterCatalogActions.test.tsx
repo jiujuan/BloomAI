@@ -22,14 +22,14 @@ const installation: SkillInstallation = {
 }
 
 describe('Skills Center inline catalog actions', () => {
-  it('keeps the four actions in the documented order and changes the toggle action by state', () => {
-    expect(getCatalogActionDescriptors(packageRow).map((action) => action.key)).toEqual(['detail', 'toggle', 'version', 'uninstall'])
-    expect(getCatalogActionDescriptors(packageRow).map((action) => action.label)).toEqual(['查看详情', '禁用 Installation', '创建新版本', '卸载 Installation'])
-    expect(getCatalogActionDescriptors({ ...packageRow, enabled: false, statusLabel: '已禁用', statusTone: 'muted' }).map((action) => action.label)).toEqual(['查看详情', '启用 Installation', '创建新版本', '卸载 Installation'])
-    expect(getCatalogActionDescriptors(packageRow)[3]).toMatchObject({ danger: true })
+  it('keeps the visible catalog actions in order and uses Chinese-only toggle labels', () => {
+    expect(getCatalogActionDescriptors(packageRow).map((action) => action.key)).toEqual(['detail', 'toggle', 'uninstall'])
+    expect(getCatalogActionDescriptors(packageRow).map((action) => action.label)).toEqual(['查看详情', '禁用', '卸载'])
+    expect(getCatalogActionDescriptors({ ...packageRow, enabled: false, statusLabel: '已禁用', statusTone: 'muted' }).map((action) => action.label)).toEqual(['查看详情', '启用', '卸载'])
+    expect(getCatalogActionDescriptors(packageRow)[2]).toMatchObject({ danger: true })
   })
 
-  it('renders four icon-only buttons with tooltip and keyboard-accessible attributes', () => {
+  it('renders visible icon-only buttons with Chinese-only toggle tooltips and accessible attributes', () => {
     const markup = renderToStaticMarkup(<SkillsCenterCatalog
       rows={[packageRow]}
       runs={[]}
@@ -41,14 +41,15 @@ describe('Skills Center inline catalog actions', () => {
       onOpenPackage={() => undefined}
       onOpenRun={() => undefined}
       onToggleInstallation={() => undefined}
-      onCreateVersion={() => undefined}
       onUninstallInstallation={() => undefined}
     />)
     const actionMarkup = markup.match(/<td class="skills-center-actions">([\s\S]*?)<\/td>/)?.[1] || ''
-    expect([...actionMarkup.matchAll(/aria-label="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用 Installation', '创建新版本', '卸载 Installation'])
-    expect([...actionMarkup.matchAll(/title="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用 Installation', '创建新版本', '卸载 Installation'])
-    expect([...actionMarkup.matchAll(/data-tooltip="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用 Installation', '创建新版本', '卸载 Installation'])
+    expect([...actionMarkup.matchAll(/aria-label="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用', '卸载'])
+    expect([...actionMarkup.matchAll(/title="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用', '卸载'])
+    expect([...actionMarkup.matchAll(/data-tooltip="([^"]+)"/g)].map((match) => match[1])).toEqual(['查看详情', '禁用', '卸载'])
     expect(actionMarkup).toContain('skills-catalog-action-button danger')
+    expect(actionMarkup).not.toContain('创建新版本')
+    expect(actionMarkup).not.toContain('Edit3')
     expect(actionMarkup).not.toContain('三点')
     expect(markup).not.toContain('Skill 操作')
   })
