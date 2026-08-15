@@ -1,5 +1,7 @@
 export const MAX_SECURITY_STRING_LENGTH = 4_096
 export const MAX_SECURITY_DEPTH = 8
+// Import reviews persist server-produced manifest and capability scan results. Keep this separate from the external-input limit above.
+export const MAX_IMPORT_REVIEW_PAYLOAD_DEPTH = 16
 export const MAX_SECURITY_FIELDS = 100
 export const MAX_SECURITY_ARRAY_ITEMS = 100
 

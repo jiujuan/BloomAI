@@ -53,6 +53,36 @@ describe('PackageInstallReviewService security boundary', () => {
     expect(JSON.stringify(rejected.decision)).not.toContain('do-not-persist')
   })
 
+  it('persists a deep package inspection without relaxing the global security payload limit', async () => {
+    const { PackageInstallReviewService } = await loadReviewService()
+    const service = new PackageInstallReviewService()
+    const inspection = {
+      package: {
+        manifest: {
+          requestedCapabilities: [{
+            scope: {
+              allowedModels: [{
+                provider: {
+                  name: {
+                    value: 'agnes-image-2.1-flash',
+                  },
+                },
+              }],
+            },
+          }],
+        },
+      },
+    }
+
+    const review = service.create({
+      source: { kind: 'local-directory', directory: dataDir },
+      sourceFingerprint: 'c'.repeat(64),
+      inspection,
+    })
+
+    expect(review.inspection).toEqual(inspection)
+    expect(service.get(review.id).inspection).toEqual(inspection)
+  })
   it('persists an install decision when the result reaches the payload depth limit', async () => {
     const { PackageInstallReviewService } = await loadReviewService()
     const service = new PackageInstallReviewService()

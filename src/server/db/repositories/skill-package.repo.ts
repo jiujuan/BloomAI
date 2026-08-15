@@ -21,7 +21,7 @@ import {
   skill_drafts,
 } from '../schema'
 import { ServiceError } from '../../domain/errors'
-import { sanitizeSecurityPayload } from '../../security/security-payload'
+import { MAX_IMPORT_REVIEW_PAYLOAD_DEPTH, sanitizeSecurityPayload, type SecurityPayloadOptions } from '../../security/security-payload'
 import type {
   ApplyRunChangeRequest,
   ArtifactRepository,
@@ -299,8 +299,8 @@ export const skillPackageRepo = {
       source: data.source,
       source_sha: data.sourceSha,
       source_ref: data.sourceRef ?? null,
-      inspection_json: stringifySecurityObject(data.inspection, 'inspection'),
-      security_findings_json: stringifySecurityFindings(data.securityFindings),
+      inspection_json: stringifySecurityObject(data.inspection, 'inspection', { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH }),
+      security_findings_json: stringifySecurityFindings(data.securityFindings, { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH }),
       status: data.status ?? 'pending',
       reviewer: null,
       decision: null,
@@ -325,7 +325,7 @@ export const skillPackageRepo = {
       ...(data.status === undefined ? {} : { status: data.status }),
       ...(data.reviewer === undefined ? {} : { reviewer: data.reviewer }),
       ...(data.decision === undefined ? {} : { decision: data.decision }),
-      ...(data.securityFindings === undefined ? {} : { security_findings_json: stringifySecurityFindings(data.securityFindings) }),
+      ...(data.securityFindings === undefined ? {} : { security_findings_json: stringifySecurityFindings(data.securityFindings, { maxDepth: MAX_IMPORT_REVIEW_PAYLOAD_DEPTH }) }),
       updated_at: Date.now(),
     }
     const result = getOrmDb().update(skill_import_reviews).set(patch).where(eq(skill_import_reviews.id, id)).run()
@@ -2067,13 +2067,13 @@ function parseAuditPayload(value: unknown): JsonObject {
   }
 }
 
-function stringifySecurityObject(value: unknown, fieldName: string): string {
-  const sanitized = sanitizeSecurityPayload(value)
+function stringifySecurityObject(value: unknown, fieldName: string, options: SecurityPayloadOptions = {}): string {
+  const sanitized = sanitizeSecurityPayload(value, options)
   return stringifyJsonObject(sanitized ?? {}, fieldName)
 }
 
-function stringifySecurityFindings(value: unknown): string {
-  return stringifySecurityObject(value ?? {}, 'security findings')
+function stringifySecurityFindings(value: unknown, options: SecurityPayloadOptions = {}): string {
+  return stringifySecurityObject(value ?? {}, 'security findings', options)
 }
 
 function isRunnableVersion(version: any, packageId: string): boolean {
