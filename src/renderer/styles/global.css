@@ -1683,6 +1683,14 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .skills-detail-section:last-child { border-bottom: 0; }
 .skills-detail-section h3 { margin: 0; color: var(--text-primary); font-size: 12px; font-weight: 600; }
 .skills-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-tertiary); }
+.skills-detail-heading h4 { margin: 0; color: var(--text-primary); font-size: 12px; font-weight: 600; }
+.skills-version-files { margin-top: 10px; }
+.skills-file-tree, .skills-file-tree ul { margin: 0; padding: 0; list-style: none; }
+.skills-file-tree { display: grid; gap: 4px; margin-top: 8px; }
+.skills-file-tree li { min-width: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.skills-file-tree li > span { display: inline-flex; min-width: 0; align-items: center; gap: 3px; }
+.skills-file-tree li > small { margin-left: 6px; color: var(--text-tertiary); }
+.skills-file-tree li > ul { display: grid; gap: 4px; margin-top: 4px; padding-left: 16px; }
 .skills-detail-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 12px 0 0; }
 .skills-detail-kv div { min-width: 0; }
 .skills-detail-kv dt { margin-bottom: 3px; color: var(--text-tertiary); font-size: 10px; }
