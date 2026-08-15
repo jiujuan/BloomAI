@@ -278,9 +278,11 @@ export class PackageInstaller {
     }
     const manifestHash = resolvedManifest.canonicalHash ?? hashJson(files)
     const sourceFingerprint = hashJson(files)
-    const finalPath = path.join(data.roots.packages, sourceFingerprint)
+    const packageDirectory = resolvedManifest.slug ?? 'unnamed-skill'
+    const finalPath = path.join(data.roots.packages, packageDirectory, sourceFingerprint)
     let createdPackagePath = false
     if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(path.dirname(finalPath), { recursive: true })
       const materializingRoot = fs.mkdtempSync(path.join(data.roots.staging, `package-${manifestHash}-`))
       const materializingPath = path.join(materializingRoot, 'package')
       try {

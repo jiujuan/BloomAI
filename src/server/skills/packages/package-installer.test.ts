@@ -162,7 +162,7 @@ describe('PackageInstaller', () => {
     })
 
     expect(result.packages[0]?.packagePath).toBe(
-      path.join(skillsDataDir, inspected.packages[0].sourceFingerprint),
+      path.join(skillsDataDir, 'article-illustrator', inspected.packages[0].sourceFingerprint),
     )
   })
 
@@ -392,8 +392,8 @@ capabilities:
   it('creates a new immutable version when a GitHub ref resolves to a new commit', async () => {
     const firstArchivePath = path.join(fixtureDir, 'archive-a.zip')
     const secondArchivePath = path.join(fixtureDir, 'archive-b.zip')
-    writeStoredZip(firstArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote A\n' }])
-    writeStoredZip(secondArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '# Remote B\n' }])
+    writeStoredZip(firstArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '---\nname: Illustrator\n---\n# Remote A\n' }])
+    writeStoredZip(secondArchivePath, [{ name: 'owner-repo-sha/skills/illustrator/SKILL.md', content: '---\nname: Illustrator\n---\n# Remote B\n' }])
     const archives = {
       ['a'.repeat(40)]: fs.readFileSync(firstArchivePath),
       ['b'.repeat(40)]: fs.readFileSync(secondArchivePath),
@@ -409,11 +409,14 @@ capabilities:
     const installer = new PackageInstaller()
     const source = { kind: 'github-archive' as const, repositoryUrl: 'https://github.com/owner/repo', ref: 'main', subdirectory: 'skills' }
     const first = await installer.inspect(source)
-    await installer.install(source, { reviewId: first.reviewId, sourceFingerprint: first.sourceFingerprint, confirm: true })
+    const firstInstalled = await installer.install(source, { reviewId: first.reviewId, sourceFingerprint: first.sourceFingerprint, confirm: true })
 
     currentSha = 'b'.repeat(40)
     const second = await installer.inspect(source)
-    await installer.install(source, { reviewId: second.reviewId, sourceFingerprint: second.sourceFingerprint, confirm: true })
+    const secondInstalled = await installer.install(source, { reviewId: second.reviewId, sourceFingerprint: second.sourceFingerprint, confirm: true })
+
+    expect(firstInstalled.packages[0]?.packagePath).toBe(path.join(dataDir, 'skills', 'packages', 'illustrator', first.packages[0]!.sourceFingerprint))
+    expect(secondInstalled.packages[0]?.packagePath).toBe(path.join(dataDir, 'skills', 'packages', 'illustrator', second.packages[0]!.sourceFingerprint))
 
     const { skill_versions } = await import('../../db/schema')
     const versions = client.getOrmDb().select().from(skill_versions).all()
