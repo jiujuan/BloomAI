@@ -146,6 +146,35 @@ describe('PackageInstaller', () => {
     expect(client.getOrmDb().select().from((await import('../../db/schema')).skill_packages).all()).toHaveLength(1)
   })
 
+  it('reinstalls an archived package when its source is scanned again after the stored files were removed', async () => {
+    writeFile('article/SKILL.md', '# Article Illustrator\n')
+
+    const { PackageInstaller, skillPackageRepo } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'local-directory' as const, directory: fixtureDir }
+    const firstInspection = await installer.inspect(source)
+    const firstInstallation = await installer.install(source, {
+      reviewId: firstInspection.reviewId,
+      sourceFingerprint: firstInspection.sourceFingerprint,
+      confirm: true,
+    })
+    const firstPackage = firstInstallation.packages[0]!
+
+    skillPackageRepo.softDeletePackage({ packageId: firstPackage.packageId, idempotencyKey: 'archive-first-package', reason: 'source files removed' })
+    fs.rmSync(firstPackage.packagePath, { recursive: true, force: true })
+    expect(fs.existsSync(firstPackage.packagePath)).toBe(false)
+
+    const secondInspection = await installer.inspect(source)
+    const secondInstallation = await installer.install(source, {
+      reviewId: secondInspection.reviewId,
+      sourceFingerprint: secondInspection.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(secondInstallation.packages[0]?.packageId).not.toBe(firstPackage.packageId)
+    expect(fs.existsSync(path.join(secondInstallation.packages[0]!.packagePath, 'SKILL.md'))).toBe(true)
+    expect(skillPackageRepo.listPackages({ limit: 10, offset: 0 }).data.map((entry) => entry.id)).toEqual([secondInstallation.packages[0]?.packageId])
+  })
   it('stores imported skills under SKILLS_DATA_DIR by default', async () => {
     const skillsDataDir = path.join(dataDir, 'configured-skills')
     delete process.env.SKILL_PACKAGE_DATA_ROOT

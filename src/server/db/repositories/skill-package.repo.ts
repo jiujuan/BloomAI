@@ -293,7 +293,19 @@ export const skillPackageRepo = {
         ? isNull(skill_import_reviews.source_ref)
         : eq(skill_import_reviews.source_ref, data.sourceRef),
     )).get()
-    if (existing) return existing
+    if (existing) {
+      if (existing.status !== 'installed') return existing
+      getOrmDb().update(skill_import_reviews).set({
+        inspection_json: stringifySecurityObject(data.inspection, 'inspection', importReviewPayloadOptions()),
+        security_findings_json: stringifySecurityFindings(data.securityFindings, importReviewPayloadOptions()),
+        status: data.status ?? 'pending',
+        reviewer: null,
+        decision: null,
+        updated_at: now,
+      }).where(eq(skill_import_reviews.id, existing.id)).run()
+      return this.getImportReview(existing.id)!
+    }
+
     const row = {
       id: uuidv4(),
       source: data.source,
