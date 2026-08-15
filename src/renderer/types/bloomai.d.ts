@@ -12,6 +12,7 @@ declare global {
       openExternal(url: string): Promise<void>
       saveImage(srcUrl: string, defaultName: string): Promise<boolean>
       selectDirectory(): Promise<{ canceled: boolean; path?: string }>
+      selectZipFile(): Promise<{ canceled: boolean; path?: string }>
       requestToolApproval(intent: {
         toolId: string
         sessionId: string

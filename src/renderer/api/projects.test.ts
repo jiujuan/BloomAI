@@ -55,4 +55,15 @@ describe('project platform API', () => {
     await expect(platform.selectDirectory()).resolves.toEqual({ canceled: false, path: 'D:/selected' })
     expect(selectDirectory).toHaveBeenCalledOnce()
   })
+
+  it('uses the Electron ZIP file bridge and safely cancels outside Electron', async () => {
+    await expect(platform.selectZipFile()).resolves.toEqual({ canceled: true })
+
+    const selectZipFile = vi.fn().mockResolvedValue({ canceled: false, path: 'D:/downloads/skills.zip' })
+    vi.stubGlobal('window', { bloomai: { selectZipFile } })
+
+    await expect(platform.selectZipFile()).resolves.toEqual({ canceled: false, path: 'D:/downloads/skills.zip' })
+    expect(selectZipFile).toHaveBeenCalledOnce()
+  })
+
 })

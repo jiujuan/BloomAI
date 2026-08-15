@@ -1,17 +1,17 @@
 import React, { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Code2, FolderOpen, Github, Info, LoaderCircle, PackageOpen, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FileArchive, FolderOpen, Github, Info, LoaderCircle, PackageOpen, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { platform } from '@renderer/api'
 import { useSkillRuntimeStore } from './skill-runtime.store'
 import type { InspectedPackage, PackageImportReview, PackageImportReviewStatus, PackageInspectionResult, PackageInstallInput, PackageSource } from './skill-runtime.types'
 
-export type ImportSourceKind = 'github' | 'local-directory' | 'zip' | 'npx'
+export type ImportSourceKind = 'github' | 'local-directory' | 'zip'
 
 export type PackageSourceInput = {
   repositoryUrl?: string
   ref?: string
   subdirectory?: string
   directory?: string
-  artifactPath?: string
+  zipPath?: string
 }
 
 export type PackageImportAuditContext = {
@@ -28,8 +28,7 @@ type StatusTone = 'success' | 'info' | 'warning' | 'danger' | 'muted'
 const SOURCE_LABELS: Record<ImportSourceKind, string> = {
   github: 'GitHub',
   'local-directory': '本地目录',
-  zip: 'ZIP',
-  npx: 'npx 产物',
+  zip: 'Skills ZIP',
 }
 
 const PHASES: Array<{ id: 'choose' | 'review' | 'confirm'; label: string }> = [
@@ -61,9 +60,8 @@ export function validatePackageSourceInput(kind: ImportSourceKind, input: Packag
     if (!trim(input.ref)) errors.push('请输入 Git ref、tag 或 commit。')
   }
   if (kind === 'local-directory' && !trim(input.directory)) errors.push('请输入本地目录路径。')
-  if (kind === 'zip' && !trim(input.artifactPath)) errors.push('请输入 ZIP 产物路径。')
-  if (kind === 'zip' && trim(input.artifactPath) && !/\.zip$/i.test(trim(input.artifactPath))) errors.push('ZIP 产物必须使用 .zip 扩展名。')
-  if (kind === 'npx' && !trim(input.artifactPath)) errors.push('请输入已生成的 npx 产物目录。')
+  if (kind === 'zip' && !trim(input.zipPath)) errors.push('请选择本地 ZIP 文件。')
+  if (kind === 'zip' && trim(input.zipPath) && !/\.zip$/i.test(trim(input.zipPath))) errors.push('ZIP 文件必须使用 .zip 扩展名。')
   if (trim(input.subdirectory).split('/').some((segment) => segment === '..')) errors.push('Skill 子目录不能越过来源根目录。')
   return errors
 }
@@ -74,13 +72,7 @@ export function buildPackageSource(kind: ImportSourceKind, input: PackageSourceI
   const subdirectory = trim(input.subdirectory)
   const withSubdirectory = <T extends PackageSource>(source: T) => subdirectory ? { ...source, subdirectory } as T : source
   if (kind === 'github') return withSubdirectory({ kind: 'github-archive', repositoryUrl: trim(input.repositoryUrl), ref: trim(input.ref) || 'main' })
-  if (kind === 'zip') return withSubdirectory({ kind: 'zip', zipPath: trim(input.artifactPath) })
-  if (kind === 'npx') {
-    const artifactPath = trim(input.artifactPath)
-    return withSubdirectory(/\.zip$/i.test(artifactPath)
-      ? { kind: 'zip', zipPath: artifactPath, metadata: { origin: 'npx-artifact' } }
-      : { kind: 'local-directory', directory: artifactPath, metadata: { origin: 'npx-artifact' } })
-  }
+  if (kind === 'zip') return withSubdirectory({ kind: 'zip', zipPath: trim(input.zipPath) })
   return withSubdirectory({ kind: 'local-directory', directory: trim(input.directory) })
 }
 
@@ -131,16 +123,16 @@ export type PackageInstallDialogProps = {
   mode?: 'dialog' | 'page'
 }
 
-const IMPORT_SOURCE_TABS: Array<{ kind: Exclude<ImportSourceKind, 'zip'>; label: string; description: string }> = [
+const IMPORT_SOURCE_TABS: Array<{ kind: ImportSourceKind; label: string; description: string }> = [
   { kind: 'github', label: 'GitHub Archive', description: '按 ref 生成不可变快照' },
   { kind: 'local-directory', label: '本地目录', description: '导入真实 SKILL.md 目录' },
-  { kind: 'npx', label: 'npx skills 产物', description: '导入 --copy 生成的目录' },
+  { kind: 'zip', label: '导入skills zip', description: '选择 ZIP 压缩包并扫描其中的 Skills' },
 ]
 
-function importSourceIcon(kind: Exclude<ImportSourceKind, 'zip'>) {
+function importSourceIcon(kind: ImportSourceKind) {
   if (kind === 'github') return <Github size={16} aria-hidden="true" />
   if (kind === 'local-directory') return <FolderOpen size={16} aria-hidden="true" />
-  return <Code2 size={16} aria-hidden="true" />
+  return <FileArchive size={16} aria-hidden="true" />
 }
 
 function directoryPathFromDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -185,7 +177,7 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
     }
   }
 
-  const switchSource = (nextKind: Exclude<ImportSourceKind, 'zip'>) => {
+  const switchSource = (nextKind: ImportSourceKind) => {
     setSourceKind(nextKind)
     setError(null)
     if (phase !== 'choose') {
@@ -214,6 +206,27 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
       return
     }
     updateInput({ directory })
+  }
+
+  const chooseZipFile = async () => {
+    setError(null)
+    try {
+      const selected = await platform.selectZipFile()
+      if (!selected.canceled && selected.path) updateInput({ zipPath: selected.path })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法打开 ZIP 文件选择器。')
+    }
+  }
+
+  const handleZipFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const file = event.dataTransfer.files[0] as (File & { path?: string }) | undefined
+    const zipPath = file?.path || ''
+    if (!zipPath || !/\.zip$/i.test(zipPath)) {
+      setError('请拖入一个 .zip 文件，或使用“选择 ZIP 文件”按钮。')
+      return
+    }
+    updateInput({ zipPath })
   }
 
   const inspect = async () => {
@@ -307,9 +320,13 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
           </div>
           <label className="skills-field"><span>目录路径</span><input autoFocus={!sourceInput.directory} value={sourceInput.directory || ''} onChange={(event) => updateInput({ directory: event.target.value })} placeholder="D:/skills/my-skill" disabled={busy} /></label>
         </>}
-        {sourceKind === 'npx' && <>
-          <label className="skills-field"><span>产物目录 *</span><input autoFocus value={sourceInput.artifactPath || ''} onChange={(event) => updateInput({ artifactPath: event.target.value })} placeholder="D:/skills/baoyu-skills/article-illustrator" disabled={busy} /></label>
-          <div className="skills-message info"><PackageOpen size={14} />请先在受控环境执行 npx skills add ... --copy，再选择生成的产物目录。后台不会执行 npx，只读取、扫描和安装静态文件。</div>
+        {sourceKind === 'zip' && <>
+          <div className="skills-import-directory-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={handleZipFileDrop}>
+            <span className="skills-import-dropzone-icon"><FileArchive size={18} aria-hidden="true" /></span><strong>拖入 Skills ZIP 文件，或选择 ZIP 文件</strong><p>系统会安全解析压缩包，并扫描其中包含 SKILL.md 的目录。</p><button type="button" className="skills-button secondary" onClick={() => void chooseZipFile()} disabled={busy}><FileArchive size={14} />选择 ZIP 文件</button>
+            {sourceInput.zipPath && <span className="skills-import-selected-path" title={sourceInput.zipPath}>{sourceInput.zipPath}</span>}
+          </div>
+          <label className="skills-field"><span>ZIP 文件路径</span><input autoFocus={!sourceInput.zipPath} value={sourceInput.zipPath || ''} onChange={(event) => updateInput({ zipPath: event.target.value })} placeholder="D:/downloads/skills.zip" disabled={busy} /></label>
+          <SubdirectoryField value={sourceInput.subdirectory} onChange={(value) => updateInput({ subdirectory: value })} disabled={busy} />
         </>}
       </div>
       {validationErrors.length > 0 && <div className="skills-message warning"><AlertTriangle size={14} /><span>{validationErrors[0]}</span></div>}
@@ -342,7 +359,7 @@ export function PackageInstallDialog({ onClose, onInstalled, initialInspection, 
 
   if (mode === 'page') {
     return <section className="skills-import-page" aria-labelledby="package-import-page-title">
-      <div className="skills-import-page-heading"><div className="skills-eyebrow">MANAGE / IMPORT</div><h1 id="package-import-page-title">导入 Skill</h1><p>把本地目录、GitHub Archive 或 npx skills 产物转换为可审核的 Skill Version。</p></div>
+      <div className="skills-import-page-heading"><div className="skills-eyebrow">MANAGE / IMPORT</div><h1 id="package-import-page-title">导入 Skill</h1><p>把本地目录、GitHub Archive 或 Skills ZIP 转换为可审核的 Skill Version。</p></div>
       {stepper}
       <div className="skills-import-page-card">{workflow}</div>
     </section>

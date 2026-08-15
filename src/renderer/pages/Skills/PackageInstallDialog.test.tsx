@@ -37,7 +37,7 @@ const review = (status: PackageImportReview['status']): PackageImportReview => (
 })
 
 describe('Package import workflow contract', () => {
-  it('validates and maps GitHub, local directory and npx artifact sources', () => {
+  it('validates and maps GitHub, local directory and ZIP sources', () => {
     expect(validatePackageSourceInput('github', { repositoryUrl: 'not-a-url', ref: 'main' })).toContain('请输入有效的 GitHub 仓库 URL。')
     for (const repositoryUrl of ['https://github.com/acme/demo', 'https://github.com/acme/demo.git']) {
       expect(validatePackageSourceInput('github', { repositoryUrl, ref: 'main' })).toEqual([])
@@ -52,13 +52,13 @@ describe('Package import workflow contract', () => {
       expect(validatePackageSourceInput('github', { repositoryUrl, ref: 'main' })).toContain('请输入有效的 GitHub 仓库 URL。')
     }
     expect(validatePackageSourceInput('local-directory', { directory: '  ' })).toContain('请输入本地目录路径。')
-    expect(validatePackageSourceInput('npx', { artifactPath: '  ' })).toContain('请输入已生成的 npx 产物目录。')
-    expect(validatePackageSourceInput('npx', { artifactPath: 'C:/tmp/demo' })).toEqual([])
+    expect(validatePackageSourceInput('zip', {})).toContain('请选择本地 ZIP 文件。')
+    expect(validatePackageSourceInput('zip', { zipPath: 'C:/downloads/skills.txt' })).toContain('ZIP 文件必须使用 .zip 扩展名。')
+    expect(validatePackageSourceInput('zip', { zipPath: 'C:/downloads/skills.zip' })).toEqual([])
 
     expect(buildPackageSource('github', { repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })).toEqual({ kind: 'github-archive', repositoryUrl: 'https://github.com/acme/demo', ref: 'main' })
     expect(buildPackageSource('local-directory', { directory: 'C:/skills/demo' })).toEqual({ kind: 'local-directory', directory: 'C:/skills/demo' })
-    expect(buildPackageSource('npx', { artifactPath: 'C:/artifacts/demo' })).toEqual({ kind: 'local-directory', directory: 'C:/artifacts/demo', metadata: { origin: 'npx-artifact' } })
-    expect(buildPackageSource('npx', { artifactPath: 'C:/artifacts/demo.zip' })).toEqual({ kind: 'zip', zipPath: 'C:/artifacts/demo.zip', metadata: { origin: 'npx-artifact' } })
+    expect(buildPackageSource('zip', { zipPath: 'C:/downloads/skills.zip', subdirectory: 'skills' })).toEqual({ kind: 'zip', zipPath: 'C:/downloads/skills.zip', subdirectory: 'skills' })
   })
 
   it('renders exactly three source tabs and a page-mode import shell', () => {
@@ -66,28 +66,40 @@ describe('Package import workflow contract', () => {
     expect(dialogMarkup).toContain('role="dialog"')
     expect(dialogMarkup).toContain('GitHub Archive')
     expect(dialogMarkup).toContain('本地目录')
-    expect(dialogMarkup).toContain('npx skills 产物')
-    expect(dialogMarkup).not.toContain('ZIP')
+    expect(dialogMarkup).toContain('导入skills zip')
+    expect(dialogMarkup).not.toContain('npx skills 产物')
 
     const pageMarkup = renderToStaticMarkup(<PackageInstallDialog mode="page" onClose={() => undefined} />)
     const tabs = pageMarkup.match(/<button[^>]*role="tab"[^>]*>[\s\S]*?<\/button>/g) ?? []
     const tabLabels = tabs.map((tab) => tab.match(/<strong>([^<]+)<\/strong>/)?.[1])
 
     expect(tabs).toHaveLength(3)
-    expect(tabLabels).toEqual(['GitHub Archive', '本地目录', 'npx skills 产物'])
+    expect(tabLabels).toEqual(['GitHub Archive', '本地目录', '导入skills zip'])
     expect(tabs[0]).toContain('aria-controls="import-source-panel-github"')
     expect(tabs[1]).toContain('aria-controls="import-source-panel-local-directory"')
-    expect(tabs[2]).toContain('aria-controls="import-source-panel-npx"')
+    expect(tabs[2]).toContain('aria-controls="import-source-panel-zip"')
     expect(pageMarkup).toContain('role="tablist" aria-label="Skill 导入方式"')
     expect(pageMarkup).toContain('导入真实 SKILL.md 目录')
-    expect(pageMarkup).toContain('导入 --copy 生成的目录')
+    expect(pageMarkup).toContain('选择 ZIP 压缩包并扫描其中的 Skills')
     expect(pageMarkup).toContain('class="skills-import-page"')
     expect(pageMarkup).toContain('id="package-import-page-title"')
     expect(pageMarkup).not.toContain('skills-import-page-card-head')
     expect(pageMarkup).toContain('skills-eyebrow">Step 1</div><h3 id="import-source-title">选择导入方式</h3>')
     expect(pageMarkup).not.toContain('skills-modal-backdrop')
     expect(pageMarkup).not.toContain('role="dialog"')
-    expect(pageMarkup).not.toContain('ZIP')
+    expect(pageMarkup).not.toContain('npx skills 产物')
+    expect(pageMarkup).toContain('把本地目录、GitHub Archive 或 Skills ZIP 转换为可审核的 Skill Version。')
+  })
+
+  it('defines a ZIP source form with native selection and ZIP-only drag-and-drop guidance', () => {
+    const source = readFileSync(new URL('./PackageInstallDialog.tsx', import.meta.url), 'utf8')
+
+    expect(source).toContain('选择 ZIP 文件')
+    expect(source).toContain('ZIP 文件路径')
+    expect(source).toContain('扫描其中包含 SKILL.md 的目录')
+    expect(source).toContain('platform.selectZipFile()')
+    expect(source).toContain('请拖入一个 .zip 文件，或使用“选择 ZIP 文件”按钮。')
+    expect(source).not.toContain('npx skills add')
   })
 
   it('keeps scan errors in the import actions area beside the scan button', () => {
@@ -119,8 +131,8 @@ describe('Package import workflow contract', () => {
     expect(markup).toContain('确认安装')
     expect(markup).toContain('GitHub Archive')
     expect(markup).toContain('本地目录')
-    expect(markup).toContain('npx skills 产物')
-    expect(markup).not.toContain('ZIP')
+    expect(markup).toContain('导入skills zip')
+    expect(markup).not.toContain('npx skills 产物')
     expect(markup).toContain('Capability')
     expect(markup).toContain('审计')
     expect(markup).toContain('Rejected 后不可安装')

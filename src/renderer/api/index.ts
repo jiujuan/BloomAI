@@ -721,6 +721,10 @@ export const platform = {
     if (!isElectron() || !window.bloomai?.selectDirectory) return { canceled: true }
     return window.bloomai.selectDirectory()
   },
+  async selectZipFile(): Promise<{ canceled: boolean; path?: string }> {
+    if (!isElectron() || !window.bloomai?.selectZipFile) return { canceled: true }
+    return window.bloomai.selectZipFile()
+  },
   async updateSession(id: string, updates: object) {
     const { data } = await apiFetch(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(updates) })
     return data

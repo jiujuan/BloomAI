@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '@shared/constants'
 
 const handle = vi.fn()
@@ -31,7 +31,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('main directory dialog registration', () => {
+describe('main native dialog registration', () => {
   it('registers the directory picker in the application IPC setup', async () => {
     showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['D:\\skills'] })
     const { setupIPC } = await import('./index')
@@ -44,5 +44,22 @@ describe('main directory dialog registration', () => {
     expect(directoryHandler).toEqual(expect.any(Function))
     await expect(directoryHandler()).resolves.toEqual({ canceled: false, path: 'D:\\skills' })
     expect(showOpenDialog).toHaveBeenCalledWith({ properties: ['openDirectory'] })
+  })
+
+  it('registers the ZIP file picker in the application IPC setup', async () => {
+    showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['D:\\downloads\\skills.zip'] })
+    const { setupIPC } = await import('./index')
+
+    setupIPC()
+
+    const zipHandlerCalls = handle.mock.calls.filter(([channel]) => channel === IPC_CHANNELS.dialogSelectZipFile)
+    expect(zipHandlerCalls).toHaveLength(1)
+    const zipHandler = zipHandlerCalls[0]?.[1]
+    expect(zipHandler).toEqual(expect.any(Function))
+    await expect(zipHandler()).resolves.toEqual({ canceled: false, path: 'D:\\downloads\\skills.zip' })
+    expect(showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      filters: [{ name: 'ZIP files', extensions: ['zip'] }],
+    })
   })
 })

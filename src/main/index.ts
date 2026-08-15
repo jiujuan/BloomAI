@@ -6,7 +6,7 @@ import { fork } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { randomBytes } from 'node:crypto'
 import { BLOOMAI_PORT_ENV, DEFAULT_SERVER_PORT, IPC_CHANNELS } from '../shared/constants'
-import { registerDirectoryDialogHandler } from './ipc/dialogs'
+import { registerDirectoryDialogHandler, registerZipFileDialogHandler } from './ipc/dialogs'
 import { createApprovalToken, getApprovalTokenSecret } from '../server/tools/approval-token'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -151,6 +151,7 @@ export function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.appVersion, () => app.getVersion())
   ipcMain.handle(IPC_CHANNELS.shellOpenExternal, (_e, url: string) => shell.openExternal(url))
   registerDirectoryDialogHandler(ipcMain, (options) => dialog.showOpenDialog(options))
+  registerZipFileDialogHandler(ipcMain, (options) => dialog.showOpenDialog(options))
   ipcMain.handle(IPC_CHANNELS.toolRequestApproval, async (_event, intent: { toolId: string; sessionId: string; input: Record<string, unknown> }) => {
     if (!intent || typeof intent.toolId !== 'string' || !intent.toolId.trim()) throw new Error('Tool id is required')
     if (typeof intent.sessionId !== 'string' || !intent.sessionId.trim()) throw new Error('Session id is required')

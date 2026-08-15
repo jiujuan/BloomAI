@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mapDirectorySelection } from './dialogs'
+import { mapDirectorySelection, mapZipFileSelection } from './dialogs'
 
 describe('mapDirectorySelection', () => {
   it('does not expose a path when the native dialog is cancelled', () => {
@@ -10,6 +10,19 @@ describe('mapDirectorySelection', () => {
     expect(mapDirectorySelection({ canceled: false, filePaths: ['D:\\projects\\alpha', 'D:\\projects\\beta'] })).toEqual({
       canceled: false,
       path: 'D:\\projects\\alpha',
+    })
+  })
+})
+
+describe('mapZipFileSelection', () => {
+  it('does not expose a path when the native ZIP dialog is cancelled', () => {
+    expect(mapZipFileSelection({ canceled: true, filePaths: ['C:\\ignored.zip'] })).toEqual({ canceled: true })
+  })
+
+  it('exposes only the first selected ZIP file', () => {
+    expect(mapZipFileSelection({ canceled: false, filePaths: ['D:\\downloads\\skills.zip', 'D:\\downloads\\ignored.zip'] })).toEqual({
+      canceled: false,
+      path: 'D:\\downloads\\skills.zip',
     })
   })
 })

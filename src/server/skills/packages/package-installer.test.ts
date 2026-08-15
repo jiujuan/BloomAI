@@ -365,6 +365,30 @@ capabilities:
     expect(fs.existsSync(path.join(result.packages[0].packagePath, '.env'))).toBe(false)
   })
 
+  it('imports every discovered Skill from a local ZIP source', async () => {
+    const zipPath = path.join(fixtureDir, 'multi-skills.zip')
+    writeStoredZip(zipPath, [
+      { name: 'bundle/article/SKILL.md', content: '# Article\n' },
+      { name: 'bundle/research/SKILL.md', content: '# Research\n' },
+    ])
+
+    const { PackageInstaller } = await loadInstaller()
+    const installer = new PackageInstaller()
+    const source = { kind: 'zip' as const, zipPath }
+    const inspected = await installer.inspect(source)
+
+    expect(inspected.packages.map((item) => item.relativeSkillPath).sort()).toEqual(['bundle/article', 'bundle/research'])
+
+    const result = await installer.install(source, {
+      reviewId: inspected.reviewId,
+      sourceFingerprint: inspected.sourceFingerprint,
+      confirm: true,
+    })
+
+    expect(result.packages).toHaveLength(2)
+    expect(result.packages.map((item) => item.relativeSkillPath).sort()).toEqual(['bundle/article', 'bundle/research'])
+  })
+
   it('ignores ZIP symbolic links without materializing them and records ignored paths', async () => {
     const zipPath = path.join(fixtureDir, 'symbolic-link.zip')
     writeStoredZip(zipPath, [
