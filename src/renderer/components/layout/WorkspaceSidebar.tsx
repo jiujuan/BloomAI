@@ -18,6 +18,22 @@ import { ProjectSessionSidebar } from '@renderer/pages/Chat/ProjectSessionSideba
 
 type WorkspacePage = 'chat' | 'settings' | 'personas' | 'tools' | 'skills' | 'schedules' | 'image' | 'article-illustration' | 'mcp-servers'
 
+export const DEFAULT_WORKSPACE_SIDEBAR_WIDTH = 300
+export const MIN_WORKSPACE_SIDEBAR_WIDTH = 220
+export const MAX_WORKSPACE_SIDEBAR_WIDTH = 480
+
+const WORKSPACE_SIDEBAR_KEYBOARD_STEP = 16
+const WORKSPACE_SIDEBAR_LARGE_KEYBOARD_STEP = 40
+
+export function clampWorkspaceSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_WORKSPACE_SIDEBAR_WIDTH
+  return Math.min(Math.max(width, MIN_WORKSPACE_SIDEBAR_WIDTH), MAX_WORKSPACE_SIDEBAR_WIDTH)
+}
+
+export function getWorkspaceSidebarWidthFromPointer(startWidth: number, startX: number, currentX: number): number {
+  return clampWorkspaceSidebarWidth(startWidth + currentX - startX)
+}
+
 export const workspaceNavigationItems = [
   { id: 'new-chat', label: '新建聊天', icon: PlusCircle, kind: 'action' as const },
   { id: 'project', label: '项目', icon: FolderPlus, kind: 'action' as const },
@@ -45,8 +61,43 @@ export function WorkspaceSidebar() {
   const { loadMessages } = useChatStore()
   const [moreOpen, setMoreOpen] = useState(false)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WORKSPACE_SIDEBAR_WIDTH)
+  const [isResizing, setIsResizing] = useState(false)
   const moreRegionRef = useRef<HTMLDivElement>(null)
   const moreTriggerRef = useRef<HTMLButtonElement>(null)
+  const resizeStartRef = useRef<{ startX: number; startWidth: number; pointerId: number } | null>(null)
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeStart = resizeStartRef.current
+      if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+      setSidebarWidth(getWorkspaceSidebarWidthFromPointer(resizeStart.startWidth, resizeStart.startX, event.clientX))
+    }
+    const stopResizing = (event: PointerEvent) => {
+      const resizeStart = resizeStartRef.current
+      if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+      resizeStartRef.current = null
+      setIsResizing(false)
+    }
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+    }
+  }, [isResizing])
 
   useEffect(() => {
     if (!moreOpen) return
@@ -90,8 +141,33 @@ export function WorkspaceSidebar() {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMoreOpen(false)
   }
 
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    resizeStartRef.current = { startX: event.clientX, startWidth: sidebarWidth, pointerId: event.pointerId }
+    setIsResizing(true)
+  }
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? WORKSPACE_SIDEBAR_LARGE_KEYBOARD_STEP : WORKSPACE_SIDEBAR_KEYBOARD_STEP
+    let nextWidth: number | undefined
+
+    if (event.key === 'ArrowLeft') nextWidth = clampWorkspaceSidebarWidth(sidebarWidth - step)
+    if (event.key === 'ArrowRight') nextWidth = clampWorkspaceSidebarWidth(sidebarWidth + step)
+    if (event.key === 'Home') nextWidth = MIN_WORKSPACE_SIDEBAR_WIDTH
+    if (event.key === 'End') nextWidth = MAX_WORKSPACE_SIDEBAR_WIDTH
+    if (nextWidth === undefined || nextWidth === sidebarWidth) return
+
+    event.preventDefault()
+    setSidebarWidth(nextWidth)
+  }
+
   return (
-    <aside className="workspace-sidebar" aria-label="工作区侧栏">
+    <aside
+      className={cn('workspace-sidebar', isResizing && 'is-resizing')}
+      style={{ width: sidebarWidth, minWidth: sidebarWidth, flexBasis: sidebarWidth }}
+      aria-label="工作区侧栏"
+    >
       <nav className="workspace-sidebar-navigation" aria-label="工作区快捷入口">
         {workspaceNavigationItems.map((item) => {
           const Icon = item.icon
@@ -183,6 +259,19 @@ export function WorkspaceSidebar() {
           <span>设置</span>
         </button>
       </div>
+
+      <div
+        className="workspace-sidebar-resizer"
+        role="separator"
+        aria-label="调整工作区侧栏宽度"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_WORKSPACE_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_WORKSPACE_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        onPointerDown={handleResizePointerDown}
+        onKeyDown={handleResizeKeyDown}
+      />
     </aside>
   )
 }

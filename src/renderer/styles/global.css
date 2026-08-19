@@ -1831,15 +1831,50 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 /* ── Workspace sidebar ───────────────────────────────────── */
 .workspace-sidebar {
   position: relative;
-  width: 328px;
-  min-width: 328px;
-  flex: 0 0 328px;
+  width: 300px;
+  min-width: 300px;
+  flex: 0 0 300px;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: visible;
   background: var(--bg-secondary);
   border-right: 0.5px solid var(--border-tertiary);
+}
+.workspace-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 10;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.workspace-sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border-secondary);
+  content: '';
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.workspace-sidebar-resizer:hover::after,
+.workspace-sidebar-resizer:focus-visible::after,
+.workspace-sidebar.is-resizing .workspace-sidebar-resizer::after {
+  opacity: 1;
+}
+.workspace-sidebar-resizer:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text-info) 42%, transparent);
+  outline-offset: -1px;
+}
+.workspace-sidebar.is-resizing,
+.workspace-sidebar.is-resizing * {
+  user-select: none;
 }
 .workspace-sidebar-navigation {
   display: grid;
