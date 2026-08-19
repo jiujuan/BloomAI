@@ -7,11 +7,11 @@ export const mainNavigationItems = [
   { id: 'chat' as const, icon: MessageCircle, label: 'Chat' },
   { id: 'image' as const, icon: Image, label: 'AI 画图' },
   { id: 'article-illustration' as const, icon: BookImage, label: '文章配图' },
-  { id: 'tools' as const, icon: Wrench, label: 'Tools' },
   { id: 'mcp-servers' as const, icon: ServerCog, label: 'MCP Servers' },
   { id: 'skills' as const, icon: Puzzle, label: 'Skills' },
   { id: 'schedules' as const, icon: CalendarClock, label: '定时任务' },
   { id: 'personas' as const, icon: User, label: 'Personas' },
+  { id: 'tools' as const, icon: Wrench, label: 'Tools' },
 ]
 
 export function NavSidebar() {
