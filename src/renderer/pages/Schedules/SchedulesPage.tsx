@@ -11,6 +11,9 @@ export function SchedulesPage() {
     selectedTaskId,
     runsByTaskId,
     nextCursorByTaskId,
+    runPageByTaskId,
+    runCursorHistoryByTaskId,
+    runsLoading,
     loading,
     saving,
     runningNow,
@@ -73,6 +76,10 @@ export function SchedulesPage() {
     }
   }
 
+  const selectedRunPage = selectedTask ? runPageByTaskId[selectedTask.id] ?? 1 : 1
+  const selectedRunCursorHistory = selectedTask ? runCursorHistoryByTaskId[selectedTask.id] ?? [undefined] : [undefined]
+  const previousRunCursor = selectedRunPage > 1 ? selectedRunCursorHistory[selectedRunPage - 2] : undefined
+
   return (
     <div className="schedules-page">
       <p className="schedules-runtime-notice" role="status">任务仅在 BloomAI 运行期间执行。</p>
@@ -100,9 +107,13 @@ export function SchedulesPage() {
           )}
           {!mode && selectedTask && (
             <ScheduleTaskDetail
+              key={selectedTask.id}
               task={selectedTask}
               runs={runsByTaskId[selectedTask.id] ?? []}
               nextCursor={nextCursorByTaskId[selectedTask.id]}
+              previousCursor={previousRunCursor}
+              runPage={selectedRunPage}
+              runsLoading={runsLoading}
               saving={saving}
               runningNow={runningNow}
               onEdit={() => { setMode('edit'); setNotice(null) }}
@@ -111,10 +122,7 @@ export function SchedulesPage() {
               onRunNow={requestRun}
               onDelete={remove}
               onRefreshRuns={() => loadTaskRuns(selectedTask.id)}
-              onLoadMoreRuns={() => {
-                const cursor = nextCursorByTaskId[selectedTask.id]
-                return cursor ? loadTaskRuns(selectedTask.id, cursor) : Promise.resolve()
-              }}
+              onLoadPage={(cursor) => loadTaskRuns(selectedTask.id, cursor)}
             />
           )}
           {!mode && !selectedTask && !loading && (

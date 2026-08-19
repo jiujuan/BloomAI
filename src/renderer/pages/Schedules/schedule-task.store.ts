@@ -13,6 +13,9 @@ export interface ScheduleTaskState {
   selectedTaskId: string | null
   runsByTaskId: Record<string, ScheduleTaskRunDto[]>
   nextCursorByTaskId: Record<string, string | null>
+  runPageByTaskId: Record<string, number>
+  runCursorHistoryByTaskId: Record<string, Array<string | undefined>>
+  runsLoading: boolean
   loading: boolean
   saving: boolean
   runningNow: boolean
@@ -37,6 +40,9 @@ export const initialScheduleTaskState: ScheduleTaskState = {
   selectedTaskId: null,
   runsByTaskId: {},
   nextCursorByTaskId: {},
+  runPageByTaskId: {},
+  runCursorHistoryByTaskId: {},
+  runsLoading: false,
   loading: false,
   saving: false,
   runningNow: false,
@@ -137,10 +143,14 @@ export const useScheduleTaskStore = create<ScheduleTaskState & ScheduleTaskActio
           const tasks = state.tasks.filter((task) => task.id !== id)
           const { [id]: _runs, ...runsByTaskId } = state.runsByTaskId
           const { [id]: _cursor, ...nextCursorByTaskId } = state.nextCursorByTaskId
+          const { [id]: _page, ...runPageByTaskId } = state.runPageByTaskId
+          const { [id]: _history, ...runCursorHistoryByTaskId } = state.runCursorHistoryByTaskId
           return {
             tasks,
             runsByTaskId,
             nextCursorByTaskId,
+            runPageByTaskId,
+            runCursorHistoryByTaskId,
             selectedTaskId: state.selectedTaskId === id ? (tasks[0]?.id ?? null) : state.selectedTaskId,
             saving: false,
           }
@@ -153,17 +163,30 @@ export const useScheduleTaskStore = create<ScheduleTaskState & ScheduleTaskActio
     },
 
     loadTaskRuns: async (id, cursor) => {
+      set({ runsLoading: true })
       try {
-        const page = await schedulesApi.listTaskRuns(id, { limit: 25, ...(cursor ? { cursor } : {}) })
-        set((state) => ({
-          runsByTaskId: {
-            ...state.runsByTaskId,
-            [id]: cursor ? [...(state.runsByTaskId[id] ?? []), ...page.items] : page.items,
-          },
-          nextCursorByTaskId: { ...state.nextCursorByTaskId, [id]: page.nextCursor },
-        }))
+        const page = await schedulesApi.listTaskRuns(id, { limit: 20, ...(cursor ? { cursor } : {}) })
+        set((state) => {
+          const cursorHistory = cursor === undefined
+            ? [undefined]
+            : (state.runCursorHistoryByTaskId[id] ?? [undefined])
+          const existingPageIndex = cursor === undefined ? 0 : cursorHistory.indexOf(cursor)
+          const nextCursorHistory = existingPageIndex === -1
+            ? [...cursorHistory, cursor]
+            : cursorHistory
+          const pageNumber = (existingPageIndex === -1 ? nextCursorHistory.length - 1 : existingPageIndex) + 1
+
+          return {
+            runsByTaskId: { ...state.runsByTaskId, [id]: page.items },
+            nextCursorByTaskId: { ...state.nextCursorByTaskId, [id]: page.nextCursor },
+            runPageByTaskId: { ...state.runPageByTaskId, [id]: pageNumber },
+            runCursorHistoryByTaskId: { ...state.runCursorHistoryByTaskId, [id]: nextCursorHistory },
+          }
+        })
       } catch (error) {
         set({ error: scheduleErrorMessage(error) })
+      } finally {
+        set({ runsLoading: false })
       }
     },
 

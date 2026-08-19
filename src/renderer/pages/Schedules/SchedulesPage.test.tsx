@@ -3,6 +3,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ScheduleTaskDto, ScheduleTaskRunDto } from '@shared/schedules/contracts'
+import { ScheduleRunDetail } from './ScheduleRunDetail'
 import { SchedulesPage } from './SchedulesPage'
 import { ScheduleTaskDetail } from './ScheduleTaskDetail'
 import { ScheduleTaskList } from './ScheduleTaskList'
@@ -24,7 +25,7 @@ afterEach(() => {
 })
 
 describe('SchedulesPage', () => {
-  it('renders an independent task list, its state, and latest run summary', () => {
+  it('renders an independent task list, its state, summary cards, and the run list by default', () => {
     const pageMarkup = renderToStaticMarkup(<SchedulesPage />)
     const taskMarkup = renderToStaticMarkup(
       <>
@@ -33,6 +34,9 @@ describe('SchedulesPage', () => {
           task={task}
           runs={[run]}
           nextCursor={null}
+          previousCursor={undefined}
+          runPage={1}
+          runsLoading={false}
           saving={false}
           runningNow={false}
           onEdit={() => undefined}
@@ -41,7 +45,7 @@ describe('SchedulesPage', () => {
           onRunNow={() => undefined}
           onDelete={() => undefined}
           onRefreshRuns={() => undefined}
-          onLoadMoreRuns={() => undefined}
+          onLoadPage={() => undefined}
         />
       </>,
     )
@@ -49,8 +53,24 @@ describe('SchedulesPage', () => {
     expect(pageMarkup).toContain('任务仅在 BloomAI 运行期间执行。')
     expect(taskMarkup).toContain('每日项目简报')
     expect(taskMarkup).toContain('运行中')
-    expect(taskMarkup).toContain('已生成项目简报。')
-    expect(taskMarkup).toContain('运行历史')
+    expect(taskMarkup).toContain('状态')
+    expect(taskMarkup).toContain('下次执行')
+    expect(taskMarkup).toContain('上次触发')
+    expect(taskMarkup).toContain('最近结果')
+    expect(taskMarkup).toContain('结果状态')
+    expect(taskMarkup).toContain('运行状态')
+    expect(taskMarkup).toContain('执行时间')
+    expect(taskMarkup).toContain('操作')
+    expect(taskMarkup).toContain('详情')
+    expect(taskMarkup).not.toContain('已生成项目简报。')
+  })
+
+  it('renders the selected execution detail separately with a return action', () => {
+    const markup = renderToStaticMarkup(<ScheduleRunDetail run={run} onBack={() => undefined} />)
+
+    expect(markup).toContain('执行详情')
+    expect(markup).toContain('返回')
+    expect(markup).toContain('已生成项目简报。')
   })
 
   it('renders an empty state without any Chat session surface', () => {

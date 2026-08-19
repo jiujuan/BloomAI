@@ -71,16 +71,58 @@ describe('useScheduleTaskStore', () => {
     expect(api.pauseTask).toHaveBeenCalledWith(task.id)
     expect(api.resumeTask).toHaveBeenCalledWith(task.id)
     expect(api.runTaskNow).toHaveBeenCalledWith(task.id)
-    expect(api.listTaskRuns).toHaveBeenCalledWith(task.id, { limit: 25 })
+    expect(api.listTaskRuns).toHaveBeenCalledWith(task.id, { limit: 20 })
     expect(useScheduleTaskStore.getState().runsByTaskId[task.id]).toEqual([run])
   })
 
+  it('loads 20 runs per page, replaces visible records, and tracks cursors for previous-page navigation', async () => {
+    const secondPageRun = { ...run, id: 'run-2', triggerFiredAt: 0 }
+    api.listTaskRuns
+      .mockResolvedValueOnce({ items: [run], nextCursor: 'cursor-page-2' })
+      .mockResolvedValueOnce({ items: [secondPageRun], nextCursor: null })
+      .mockResolvedValueOnce({ items: [run], nextCursor: 'cursor-page-2' })
+
+    await useScheduleTaskStore.getState().loadTaskRuns(task.id)
+    expect(useScheduleTaskStore.getState()).toMatchObject({
+      runsByTaskId: { [task.id]: [run] },
+      nextCursorByTaskId: { [task.id]: 'cursor-page-2' },
+      runPageByTaskId: { [task.id]: 1 },
+      runCursorHistoryByTaskId: { [task.id]: [undefined] },
+      runsLoading: false,
+    })
+
+    await useScheduleTaskStore.getState().loadTaskRuns(task.id, 'cursor-page-2')
+    expect(useScheduleTaskStore.getState()).toMatchObject({
+      runsByTaskId: { [task.id]: [secondPageRun] },
+      nextCursorByTaskId: { [task.id]: null },
+      runPageByTaskId: { [task.id]: 2 },
+      runCursorHistoryByTaskId: { [task.id]: [undefined, 'cursor-page-2'] },
+    })
+
+    await useScheduleTaskStore.getState().loadTaskRuns(task.id)
+    expect(useScheduleTaskStore.getState()).toMatchObject({
+      runsByTaskId: { [task.id]: [run] },
+      runPageByTaskId: { [task.id]: 1 },
+      runCursorHistoryByTaskId: { [task.id]: [undefined] },
+    })
+    expect(api.listTaskRuns).toHaveBeenNthCalledWith(1, task.id, { limit: 20 })
+    expect(api.listTaskRuns).toHaveBeenNthCalledWith(2, task.id, { limit: 20, cursor: 'cursor-page-2' })
+    expect(api.listTaskRuns).toHaveBeenNthCalledWith(3, task.id, { limit: 20 })
+  })
+
   it('requires API confirmation before local task removal and surfaces API errors', async () => {
-    useScheduleTaskStore.setState({ ...initialScheduleTaskState, tasks: [task], selectedTaskId: task.id, runsByTaskId: { [task.id]: [run] } })
+    useScheduleTaskStore.setState({
+      ...initialScheduleTaskState,
+      tasks: [task],
+      selectedTaskId: task.id,
+      runsByTaskId: { [task.id]: [run] },
+      runPageByTaskId: { [task.id]: 2 },
+      runCursorHistoryByTaskId: { [task.id]: [undefined, 'cursor-page-2'] },
+    })
     api.deleteTask.mockResolvedValue(undefined)
 
     await expect(useScheduleTaskStore.getState().deleteTask(task.id)).resolves.toBe(true)
-    expect(useScheduleTaskStore.getState()).toMatchObject({ tasks: [], selectedTaskId: null, runsByTaskId: {} })
+    expect(useScheduleTaskStore.getState()).toMatchObject({ tasks: [], selectedTaskId: null, runsByTaskId: {}, runPageByTaskId: {}, runCursorHistoryByTaskId: {} })
 
     api.listTasks.mockRejectedValue(new Error('Network unavailable'))
     await useScheduleTaskStore.getState().loadTasks()

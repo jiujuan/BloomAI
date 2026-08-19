@@ -1,13 +1,17 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Pencil, Play, Pause, RefreshCw, Trash2 } from 'lucide-react'
 import type { ScheduleTaskDto, ScheduleTaskRunDto } from '@shared/schedules/contracts'
 import { formatScheduleTimestamp, statusLabel } from './schedule-task.types'
+import { ScheduleRunDetail } from './ScheduleRunDetail'
 import { ScheduleRunHistory } from './ScheduleRunHistory'
 
 interface ScheduleTaskDetailProps {
   task: ScheduleTaskDto
   runs: ScheduleTaskRunDto[]
-  nextCursor: string | null | undefined
+  nextCursor: string | null
+  previousCursor?: string
+  runPage: number
+  runsLoading: boolean
   saving: boolean
   runningNow: boolean
   onEdit: () => void
@@ -16,13 +20,16 @@ interface ScheduleTaskDetailProps {
   onRunNow: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   onRefreshRuns: () => void | Promise<void>
-  onLoadMoreRuns: () => void | Promise<void>
+  onLoadPage: (cursor?: string) => void | Promise<void>
 }
 
 export function ScheduleTaskDetail({
   task,
   runs,
   nextCursor,
+  previousCursor,
+  runPage,
+  runsLoading,
   saving,
   runningNow,
   onEdit,
@@ -31,9 +38,15 @@ export function ScheduleTaskDetail({
   onRunNow,
   onDelete,
   onRefreshRuns,
-  onLoadMoreRuns,
+  onLoadPage,
 }: ScheduleTaskDetailProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const selectedRun = selectedRunId ? runs.find((run) => run.id === selectedRunId) ?? null : null
+
+  useEffect(() => {
+    setSelectedRunId(null)
+  }, [task.id])
 
   const confirmDelete = () => {
     setConfirmingDelete(false)
@@ -83,12 +96,20 @@ export function ScheduleTaskDetail({
         </button>
       )}
 
-      <ScheduleRunHistory
-        runs={runs}
-        nextCursor={nextCursor ?? null}
-        onRefresh={() => void onRefreshRuns()}
-        onLoadMore={() => void onLoadMoreRuns()}
-      />
+      {selectedRun ? (
+        <ScheduleRunDetail run={selectedRun} onBack={() => setSelectedRunId(null)} />
+      ) : (
+        <ScheduleRunHistory
+          runs={runs}
+          nextCursor={nextCursor ?? null}
+          previousCursor={previousCursor}
+          page={runPage}
+          loading={runsLoading}
+          onRefresh={() => void onRefreshRuns()}
+          onLoadPage={(cursor) => void onLoadPage(cursor)}
+          onViewDetail={(run) => setSelectedRunId(run.id)}
+        />
+      )}
     </section>
   )
 }
