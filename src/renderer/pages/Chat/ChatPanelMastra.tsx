@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Brain, type LucideIcon } from 'lucide-react'
+import { Loader2, Send, ChevronDown, Check, Plus, X, MessageCircle, ListTodo, Brain, FolderOpen, type LucideIcon } from 'lucide-react'
 import { API_BASE } from '@shared/constants'
 import type { WritingConfig } from '@shared/writing'
 import type { ResearchRunDto } from '@shared/deepresearch/contracts'
@@ -47,6 +47,13 @@ const TEAM_TABS: { id: Exclude<TeamTab, ''>; label: string }[] = [
   { id: 'writing', label: 'AI写作' },
   { id: 'coding', label: '编码' },
 ]
+
+export const CHAT_HEADER_TITLE_LIMIT = 20
+
+export function truncateChatHeaderTitle(title: string, maxLength = CHAT_HEADER_TITLE_LIMIT): string {
+  const characters = Array.from(title)
+  return characters.length > maxLength ? `${characters.slice(0, maxLength).join('')}...` : title
+}
 
 export function isDeepResearchWorkbenchActive(team: TeamTab): boolean {
   return team === 'research'
@@ -191,7 +198,9 @@ export function ChatPanelMastra() {
   const { textModels, loadTextModels } = useLlmStore()
   const { activePersonaId } = usePersonaStore()
   const session = sessions.find((s) => s.id === activeSessionId)
+  const project = useProjectStore((state) => session?.project_id ? state.projects.find((item) => item.id === session.project_id) : undefined)
   const workspaceUnavailableProjectIds = useProjectStore((state) => state.workspaceUnavailableProjectIds)
+  const chatTitle = session?.title || 'Chat'
 
   const [mode, setMode] = useState<ChatMode>('chat')
   const [team, setTeam] = useState<TeamTab>('')
@@ -707,8 +716,14 @@ export function ChatPanelMastra() {
     <div className="chat-panel">
       <CopyToast />
       <PasteMenu state={pasteMenu} onClose={() => setPasteMenu(null)} onPaste={pasteIntoInput} />
-      <div className="chat-header">
-        <span className="chat-title">{session?.title || 'Chat'}</span>
+      <div className="chat-header" aria-label="当前聊天位置">
+        {project && <>
+          <span className="chat-breadcrumb-project"><FolderOpen size={14} aria-hidden="true" /><span>项目</span></span>
+          <span className="chat-breadcrumb-separator" aria-hidden="true">/</span>
+          <span className="chat-breadcrumb-project-name" title={project.name}>{project.name}</span>
+          <span className="chat-breadcrumb-separator" aria-hidden="true">/</span>
+        </>}
+        <span className={`chat-title${project ? ' chat-title-project' : ''}`} title={chatTitle}>{project ? truncateChatHeaderTitle(chatTitle) : chatTitle}</span>
       </div>
       <ProjectWorkspaceContext />
 

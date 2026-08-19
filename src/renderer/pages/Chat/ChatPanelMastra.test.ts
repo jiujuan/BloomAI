@@ -7,6 +7,7 @@ import {
   isDeepResearchWorkbenchActive,
   restoreParts,
   shouldQueueMessageUntilSessionIsActive,
+  truncateChatHeaderTitle,
 } from './ChatPanelMastra'
 
 describe('initial chat session activation', () => {
@@ -17,6 +18,19 @@ describe('initial chat session activation', () => {
 })
 
 
+describe('chat header title', () => {
+  it('keeps titles at or below the display limit unchanged', () => {
+    expect(truncateChatHeaderTitle('12345678901234567890')).toBe('12345678901234567890')
+  })
+
+  it('truncates titles over the display limit and appends an ellipsis', () => {
+    expect(truncateChatHeaderTitle('123456789012345678901')).toBe('12345678901234567890...')
+  })
+
+  it('counts unicode characters rather than UTF-16 code units', () => {
+    expect(truncateChatHeaderTitle('😀'.repeat(21))).toBe(`${'😀'.repeat(20)}...`)
+  })
+})
 describe('Deep Research workbench routing', () => {
   it('always renders the research tab as the durable workbench', () => {
     expect(isDeepResearchWorkbenchActive('research')).toBe(true)

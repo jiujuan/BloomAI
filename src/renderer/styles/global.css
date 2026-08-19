@@ -224,14 +224,28 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
 .chat-header {
   display: flex; align-items: center; gap: 8px;
-  padding: 0 14px; height: 46px;
+  min-width: 0; padding: 0 14px; height: 46px;
   border-bottom: 0.5px solid var(--border-tertiary);
   flex-shrink: 0;
 }
-.chat-title {
-  font-size: var(--font-size-base); font-weight: 500; color: var(--text-primary);
-  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.chat-breadcrumb-project {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex: 0 0 auto; color: var(--text-secondary); font-size: 12px;
 }
+.chat-breadcrumb-separator {
+  flex: 0 0 auto; color: var(--text-tertiary); font-size: 12px;
+}
+.chat-breadcrumb-project-name {
+  min-width: 0; max-width: min(260px, 28vw);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-secondary); font-size: 12px;
+}
+.chat-title {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-primary); font-size: var(--font-size-base); font-weight: 500;
+}
+.chat-title-project { font-weight: 600; }
 .hdr-btn {
   width: 28px; height: 28px; border-radius: var(--radius-md);
   border: none; background: transparent; color: var(--text-tertiary);
@@ -2173,10 +2187,6 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .selected-directory { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 0.5px solid var(--border-secondary); border-radius: var(--radius-sm); font-size: 12px; margin-top: 6px; }
 .selected-directory span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-tertiary); }
 .directory-help { margin: 7px 1px 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
-.project-workspace-context { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px 14px; border-bottom: 0.5px solid var(--border-tertiary); background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }
-.project-workspace-context strong { color: var(--text-primary); }
-.project-workspace-context code { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
-.project-workspace-context small { display: block; width: 100%; color: var(--text-tertiary); padding-left: 19px; }
 
 /* ── Skills Center v1.1 single-page workbench ─────────────────────────── */
 .skills-center { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-primary); }
