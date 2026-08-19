@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { ProjectSessionSidebar } from '@renderer/pages/Chat/ProjectSessionSidebar'
 import { ChatPanel } from '@renderer/pages/Chat'
-import { NavSidebar } from '@renderer/components/layout/NavSidebar'
+import { WorkspaceSidebar } from '@renderer/components/layout/WorkspaceSidebar'
 import { SettingsPage } from '@renderer/pages/Settings'
 import { PersonasPage } from '@renderer/pages/Personas'
 import { Onboarding } from '@renderer/pages/Onboarding'
@@ -80,13 +79,8 @@ export function App() {
     <div className="app-root">
       {showOnboarding && <Onboarding />}
       <div className="app-shell">
-        <NavSidebar />
-        {activePage === 'chat' && (
-          <>
-            <ProjectSessionSidebar />
-            <ChatPanel />
-          </>
-        )}
+        <WorkspaceSidebar />
+        {activePage === 'chat' && <ChatPanel />}
         {activePage === 'image' && <ImageStudioPage />}
         {activePage === 'article-illustration' && (
           <div className="image-studio image-studio-article">

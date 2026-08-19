@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BloomAI 工作区侧栏原型</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --sidebar: #f5f5f4;
+      --hover: #eeede9;
+      --text: #1a1a18;
+      --muted: #73726c;
+      --border: #dddbd6;
+      --info: #0c447c;
+      --shadow: 0 12px 28px rgba(26, 26, 24, .13);
+      --radius: 10px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; color: var(--text); background: var(--bg); }
+    button { font: inherit; }
+    .prototype-shell { display: flex; width: 100vw; height: 100vh; min-width: 960px; overflow: hidden; }
+    .workspace-sidebar {
+      position: relative; display: flex; flex: 0 0 328px; flex-direction: column; width: 328px; min-width: 328px;
+      min-height: 0; overflow: visible; background: var(--sidebar); border-right: 1px solid var(--border);
+    }
+    .workspace-navigation { display: grid; gap: 2px; padding: 8px; }
+    .nav-item, .settings-button {
+      display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 12px;
+      border: 0; border-radius: 10px; color: var(--text); background: transparent; cursor: pointer; text-align: left;
+    }
+    .nav-item:hover, .nav-item.active, .settings-button:hover, .settings-button.active { background: var(--hover); }
+    .nav-icon { display: inline-flex; width: 18px; flex: 0 0 18px; justify-content: center; color: #4f4d48; font-size: 18px; }
+    .more-region { position: relative; }
+    .more-menu {
+      position: absolute; top: 0; right: 0; z-index: 10; width: 204px; padding: 7px;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--bg); box-shadow: var(--shadow);
+    }
+    .more-menu button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 35px; padding: 0 9px; border: 0; border-radius: 7px; color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+    .more-menu button:hover { background: var(--sidebar); }
+    .more-menu .menu-icon { width: 18px; color: #4f4d48; text-align: center; }
+    .sidebar-content { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-y: auto; padding: 8px 8px 14px; scrollbar-gutter: stable; }
+    .section + .section { margin-top: 14px; }
+    .section-title { display: flex; align-items: center; min-height: 30px; padding: 0 8px 4px; }
+    .section-title button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; font-weight: 650; }
+    .section-title button:hover { color: var(--text); }
+    .section-content.is-collapsed { display: none; }
+    .chat-row, .project-row, .project-chat-row {
+      display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 7px; color: var(--text); background: transparent; cursor: pointer; text-align: left;
+    }
+    .chat-row { min-height: 44px; padding: 5px 8px; }
+    .chat-row:hover, .chat-row.selected, .project-row:hover, .project-row.expanded { background: var(--hover); }
+    .row-copy { min-width: 0; flex: 1; }
+    .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 520; }
+    .row-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .local-badge { padding: 1px 5px; border: 1px solid #c7c4bd; border-radius: 4px; }
+    .row-time { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+    .project-row { min-height: 34px; padding: 0 8px; }
+    .project-row .project-name { min-width: 0; overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 520; }
+    .project-row .project-add { display: none; margin-left: auto; padding: 1px 6px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+    .project-wrap:hover .project-add, .project-add:focus-visible { display: inline-block; }
+    .project-row .project-add:hover { color: var(--text); background: var(--sidebar); }
+    .project-chats { display: grid; gap: 1px; margin-left: 16px; padding-left: 10px; border-left: 1px solid var(--border); }
+    .project-chat-row { min-height: 40px; padding: 4px 8px; }
+    .project-chat-row:hover, .project-chat-row.selected { background: var(--hover); }
+    .empty-hint { padding: 18px 8px; color: var(--muted); font-size: 11px; text-align: center; }
+    .settings { flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--border); }
+    .main-content { min-width: 0; flex: 1; background: var(--bg); }
+    .main-header { display: flex; align-items: center; gap: 12px; height: 54px; padding: 0 26px; border-bottom: 1px solid var(--border); }
+    .main-header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+    .main-header small { color: var(--muted); font-size: 11px; }
+    .main-placeholder { display: grid; place-items: center; height: calc(100% - 54px); color: var(--muted); }
+    .placeholder-card { width: min(560px, 80%); padding: 30px; border: 1px dashed var(--border); border-radius: 16px; text-align: center; }
+    .placeholder-card strong { display: block; margin-bottom: 8px; color: var(--text); font-size: 16px; }
+    .placeholder-card p { margin: 0; font-size: 12px; line-height: 1.6; }
+    @media (max-width: 1100px) {
+      .prototype-shell { min-width: 800px; }
+      .workspace-sidebar { flex-basis: 328px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell">
+    <aside class="workspace-sidebar" aria-label="工作区侧栏">
+      <nav class="workspace-navigation" aria-label="工作区快捷入口">
+        <button class="nav-item" type="button" data-action="new-chat"><span class="nav-icon">⊕</span><span>新建聊天</span></button>
+        <button class="nav-item" type="button" data-action="new-project"><span class="nav-icon">▱</span><span>项目</span></button>
+        <button class="nav-item" type="button" data-page="skills"><span class="nav-icon">◇</span><span>技能</span></button>
+        <button class="nav-item" type="button" data-page="image"><span class="nav-icon">▧</span><span>AI 画图</span></button>
+        <button class="nav-item" type="button" data-page="schedules"><span class="nav-icon">◷</span><span>定时任务</span></button>
+        <div class="more-region" id="more-region">
+          <button class="nav-item active" type="button" id="more-trigger" aria-haspopup="menu" aria-expanded="true"><span class="nav-icon">⋯</span><span>更多...</span></button>
+          <div class="more-menu" id="more-menu" role="menu" aria-label="更多工具">
+            <button type="button" role="menuitem" data-page="mcp-servers"><span class="menu-icon">▣</span><span>MCP Servers</span></button>
+            <button type="button" role="menuitem" data-page="article-illustration"><span class="menu-icon">▤</span><span>文章配图</span></button>
+            <button type="button" role="menuitem" data-page="personas"><span class="menu-icon">●</span><span>Personas</span></button>
+            <button type="button" role="menuitem" data-page="tools"><span class="menu-icon">⌘</span><span>Tools</span></button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-content">
+        <section class="section" aria-labelledby="chat-title">
+          <div class="section-title"><button type="button" data-toggle="chat"><span class="chevron">⌄</span><span id="chat-title">聊天 (4)</span></button></div>
+          <div class="section-content" data-content="chat">
+            <button class="chat-row" type="button"><span class="row-copy"><span class="row-title">企业AI知识库系统需求与...</span><span class="row-meta"><span class="row-time">17天前</span></span></span></button>
+            <button class="chat-row" type="button"><span class="row-copy"><span class="row-title">创建知识库聊天 Agent</span><span class="row-meta"><span class="row-time">22天前</span></span></span></button>
+            <button class="chat-row" type="button"><span class="row-copy"><span class="row-title">列出YC 2026年最值得做...</span><span class="row-meta"><span class="row-time">23天前</span></span></span></button>
+            <button class="chat-row" type="button"><span class="row-copy"><span class="row-title">基于在线零售数据的电商...</span><span class="row-meta"><span class="row-time">23天前</span></span></span></button>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="project-title">
+          <div class="section-title"><button type="button" data-toggle="projects"><span class="chevron">⌄</span><span id="project-title">项目 (4)</span></button></div>
+          <div class="section-content" data-content="projects">
+            <div class="project-wrap">
+              <div class="project-row expanded" data-project="marketing" role="button" tabindex="0"><span>⌄</span><span class="project-name">营销Agent开发</span><button class="project-add" type="button" aria-label="在营销Agent开发中创建聊天">＋</button></div>
+              <div class="project-chats" data-project-chats="marketing">
+                <button class="project-chat-row" type="button"><span class="row-copy"><span class="row-title">开发Agent...</span><span class="row-meta"><span class="local-badge">本地</span><span class="row-time">4分钟前</span></span></span></button>
+              </div>
+            </div>
+            <div class="project-wrap">
+              <div class="project-row expanded" data-project="product" role="button" tabindex="0"><span>⌄</span><span class="project-name">产品需求</span><button class="project-add" type="button" aria-label="在产品需求中创建聊天">＋</button></div>
+              <div class="project-chats" data-project-chats="product">
+                <button class="project-chat-row" type="button"><span class="row-copy"><span class="row-title">分析跨境电商...</span><span class="row-meta"><span class="local-badge">本地</span><span class="row-time">3天前</span></span></span></button>
+                <button class="project-chat-row selected" type="button"><span class="row-copy"><span class="row-title">分析企业销售AI Agent...</span><span class="row-meta"><span class="local-badge">本地</span><span class="row-time">16天前</span></span></span></button>
+              </div>
+            </div>
+            <div class="project-wrap">
+              <div class="project-row expanded" data-project="aistudy" role="button" tabindex="0"><span>⌄</span><span class="project-name">AIStudy</span><button class="project-add" type="button" aria-label="在AIStudy中创建聊天">＋</button></div>
+              <div class="project-chats" data-project-chats="aistudy">
+                <button class="project-chat-row" type="button"><span class="row-copy"><span class="row-title">分析企业内容...</span><span class="row-meta"><span class="local-badge">本地</span><span class="row-time">3天前</span></span></span></button>
+                <button class="project-chat-row" type="button"><span class="row-copy"><span class="row-title">探讨企业需要的AI...</span><span class="row-meta"><span class="local-badge">本地</span><span class="row-time">29天前</span></span></span></button>
+              </div>
+            </div>
+            <div class="project-wrap">
+              <div class="project-row" data-project="research" role="button" tabindex="0"><span>›</span><span class="project-name">研究资料</span><button class="project-add" type="button" aria-label="在研究资料中创建聊天">＋</button></div>
+              <div class="project-chats" data-project-chats="research" hidden></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="settings"><button class="settings-button" type="button" data-page="settings"><span class="nav-icon">⚙</span><span>设置</span></button></div>
+    </aside>
+
+    <section class="main-content" aria-label="主内容区">
+      <header class="main-header"><h1 id="main-title">工作区侧栏原型</h1><small id="main-subtitle">固定 328px · 不支持拖拽 · 不增加折叠侧栏</small></header>
+      <div class="main-placeholder"><div class="placeholder-card"><strong>主内容区域</strong><p>点击顶部入口、聊天、项目内聊天或“更多...”菜单，会切换对应状态。侧栏中间列表独立滚动，底部设置固定不动。</p></div></div>
+    </section>
+  </main>
+  <script>
+    const moreRegion = document.querySelector('#more-region')
+    const moreTrigger = document.querySelector('#more-trigger')
+    const moreMenu = document.querySelector('#more-menu')
+    let moreOpen = true
+    const setMoreOpen = (open) => {
+      moreOpen = open
+      moreMenu.hidden = !open
+      moreTrigger.setAttribute('aria-expanded', String(open))
+    }
+    moreRegion.addEventListener('mouseenter', () => setMoreOpen(true))
+    moreRegion.addEventListener('mouseleave', () => setMoreOpen(false))
+    moreTrigger.addEventListener('click', () => setMoreOpen(!moreOpen))
+    document.addEventListener('pointerdown', (event) => {
+      if (!moreRegion.contains(event.target)) setMoreOpen(false)
+    })
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { setMoreOpen(false); moreTrigger.focus() }
+    })
+
+    document.querySelectorAll('[data-toggle]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const content = document.querySelector(`[data-content="${button.dataset.toggle}"]`)
+        const collapsed = content.classList.toggle('is-collapsed')
+        button.querySelector('.chevron').textContent = collapsed ? '›' : '⌄'
+        button.setAttribute('aria-expanded', String(!collapsed))
+      })
+    })
+    document.querySelectorAll('[data-project]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        if (event.target.closest('.project-add')) return
+        const project = button.dataset.project
+        const chats = document.querySelector(`[data-project-chats="${project}"]`)
+        const collapsed = chats.hidden
+        chats.hidden = !collapsed
+        button.querySelector('span').textContent = collapsed ? '⌄' : '›'
+        button.parentElement.classList.toggle('expanded', collapsed)
+      })
+    })
+    document.querySelectorAll('[data-page]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item, .settings-button').forEach((item) => item.classList.remove('active'))
+        if (button.matches('.nav-item, .settings-button')) button.classList.add('active')
+        const label = button.querySelector('span:last-child')?.textContent.trim() || button.textContent.trim()
+        document.querySelector('#main-title').textContent = label
+        document.querySelector('#main-subtitle').textContent = '已选择入口 · 更多菜单会在鼠标划入时展开'
+        if (button.closest('#more-menu')) setMoreOpen(false)
+      })
+    })
+    document.querySelectorAll('.chat-row, .project-chat-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        document.querySelectorAll('.chat-row, .project-chat-row').forEach((item) => item.classList.remove('selected'))
+        row.classList.add('selected')
+        document.querySelector('#main-title').textContent = row.querySelector('.row-title').textContent
+        document.querySelector('#main-subtitle').textContent = '已切换到聊天页 · 会话内容占位'
+      })
+    })
+    setMoreOpen(true)
+  </script>
+</body>
+</html>

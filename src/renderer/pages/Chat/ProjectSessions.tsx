@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react'
-import { useChatStore, useProjectStore, useSessionStore } from '@renderer/store'
+import { useChatStore, useProjectStore, useSessionStore, useUIStore } from '@renderer/store'
 import { SessionRow } from './SessionRow'
 import { shouldShowProjectSessionsMore } from './project-sidebar.utils'
 
@@ -12,6 +12,7 @@ export function ProjectSessions({ projectId, expanded }: { projectId: string; ex
   const { sessionIdsByProject, sessionTotalsByProject, projectSessionsLoading, projectSessionsError, loadProjectSessions } = useProjectStore()
   const { sessions, activeSessionId, setActiveSession } = useSessionStore()
   const { loadMessages } = useChatStore()
+  const { setPage } = useUIStore()
   const ids = sessionIdsByProject[projectId] ?? []
   const total = sessionTotalsByProject[projectId] ?? 0
   const loading = projectSessionsLoading[projectId]
@@ -30,7 +31,7 @@ export function ProjectSessions({ projectId, expanded }: { projectId: string; ex
   return <div className="project-sessions" role="list">
     {ids.map((id) => {
       const session = byId.get(id)
-      return session && <SessionRow key={id} session={session} isActive={activeSessionId === id} onSelect={async () => { setActiveSession(id); await loadMessages(id) }} />
+      return session && <SessionRow key={id} session={session} isActive={activeSessionId === id} onSelect={async () => { setPage('chat'); setActiveSession(id); await loadMessages(id) }} />
     })}
     {displayAction === 'expand' && <button className="sidebar-more-button" onClick={() => void loadProjectSessions(projectId, { limit: 'all', replace: true })}>展开显示</button>}
     {displayAction === 'collapse' && <button className="sidebar-more-button" onClick={() => void loadProjectSessions(projectId, { limit: 10, replace: true })}>收起显示</button>}

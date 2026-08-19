@@ -3,6 +3,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { useSessionStore } from '@renderer/store'
 import { cn } from '@renderer/utils'
 import type { Session } from '@shared/schemas'
+import { formatSessionRelativeTime } from './session-time'
 
 export function normalizeSessionTitleInput(title: string): string {
   return title.trim()
@@ -59,7 +60,7 @@ export function SessionRow({ session, isActive, onSelect, onDeleted }: {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void onSelect() }
       }}
     >
-      <div className="session-item-body"><div className="session-item-title">{session.title}</div></div>
+      <div className="session-item-body"><div className="session-item-title" title={session.title}>{session.title}</div><div className="session-item-meta">{session.project_id && <span className="session-local-badge">本地</span>}<span>{formatSessionRelativeTime(session.updated_at)}</span></div></div>
       <div className="session-item-actions">
         <button className="session-item-action" onClick={(event) => { event.stopPropagation(); setDraftTitle(session.title); setTitleError(null); setEditOpen(true) }} title="修改标题" aria-label={`修改标题：${session.title}`}><Pencil size={12} /></button>
         <button className="session-item-action danger" onClick={(event) => { event.stopPropagation(); setDeleteOpen(true) }} title="删除会话" aria-label={`删除会话：${session.title}`}><Trash2 size={12} /></button>
