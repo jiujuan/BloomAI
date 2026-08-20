@@ -25,7 +25,7 @@ export function skillRunStatusLabel(status: string): string {
     cancelled: '已取消',
     interrupted: '已中断',
   }
-  return labels[status] || status
+  return labels[status] || '处理中'
 }
 
 export function SkillRunPart({ data, onOpen }: { data: SkillRunPartData; onOpen?: (runId: string) => void }) {
@@ -57,12 +57,12 @@ export function SkillRunPart({ data, onOpen }: { data: SkillRunPartData; onOpen?
   return (
     <div className={cn('skill-run-card', `skill-run-${status}`)} data-run-id={data.runId}>
       <div className="skill-run-card-header">
-        <strong>Package Skill Run</strong>
+        <strong>技能运行</strong>
         <span className="skill-run-status" role="status">{skillRunStatusLabel(status)}</span>
       </div>
       <div className="skill-run-card-meta">
-        <span>Run {data.runId.slice(0, 8)}</span>
-        <span>Version {data.skillVersionId.slice(0, 8)}</span>
+        <span>运行 {data.runId.slice(0, 8)}</span>
+        <span>版本 {data.skillVersionId.slice(0, 8)}</span>
       </div>
       {waiting && <div className="skill-run-waiting">{status === 'waiting_approval' ? '需要审批后继续' : '需要补充输入后继续'}</div>}
       {error && <div className="skill-run-error" role="alert">{error}</div>}

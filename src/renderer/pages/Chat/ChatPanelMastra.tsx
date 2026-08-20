@@ -9,21 +9,16 @@ import { platform, type ChatSkillReferenceDto } from '@renderer/api'
 import { useSessionStore, useSettingsStore, useLlmStore, usePersonaStore, useProjectStore } from '@renderer/store'
 import { canSendProjectWorkspaceTask, isProjectWorkspaceUnavailableError, PROJECT_WORKSPACE_UNAVAILABLE_MESSAGE, ProjectWorkspaceContext } from './ProjectWorkspaceContext'
 import { cn } from '@renderer/utils'
-import { AssistantMarkdown } from './parts/AssistantMarkdown'
-import { ReasoningPart } from './parts/ReasoningPart'
-import { ToolGroupCard } from './parts/ToolGroupCard'
-import { WorkflowSteps } from './parts/WorkflowSteps'
-import { ApprovalCard, toApprovalRequest } from './parts/ApprovalCard'
-import { PlanCard, type PlanStatus } from './parts/PlanCard'
+import { type PlanStatus } from './parts/PlanCard'
 import { WriterParams, defaultWritingConfig } from './WriterParams'
-import { assistantPlainText, CopyButton, SelectionMenu, LikedBadge, CopyToast, PasteMenu, useSelectionMenu } from './MessageActions'
-import { isToolPart, toToolCallView, slimParts, type ToolCallView } from './parts/tool-part'
+import { CopyToast, PasteMenu } from './MessageActions'
+import { isToolPart, slimParts } from './parts/tool-part'
 import { AttachmentChips, type ChipItem } from './parts/AttachmentChips'
 import { ChatSkillPicker } from './ChatSkillPicker'
 import { DeepResearchWorkbench } from './deepresearch/DeepResearchWorkbench'
-import { ResearchRunPart, type ResearchRunPartData } from './deepresearch/ResearchRunPart'
-import { SkillRunPart } from './parts/SkillRunPart'
+import { type ResearchRunPartData } from './deepresearch/ResearchRunPart'
 import { useDeepResearchStore } from './deepresearch/deep-research.store'
+import { AssistantTurn, PendingAssistantTurn, PlanProposalTurn, UserQuestion } from './parts/ChatTimeline'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_MAX_SIZE, extOf, isAllowedExt, type Attachment } from '@shared/attachments'
 
 // A composer chip plus the resolved server metadata once its upload finishes (`att`).
@@ -121,16 +116,6 @@ function hasAnswerContent(parts: any[]): boolean {
     if (p.type === 'data-tool-call-approval') return true
     return isToolPart(p)
   })
-}
-
-// Animated "thinking" indicator shown while waiting for the assistant's first content.
-function WaitingIndicator() {
-  return (
-    <div className="msg-waiting" role="status" aria-live="polite">
-      <Loader2 size={15} className="msg-waiting-spinner" aria-hidden="true" />
-      <span className="sr-only">正在思考</span>
-    </div>
-  )
 }
 
 // The server already maps failures to short, friendly messages (see stream-error.ts). This is a
@@ -734,55 +719,37 @@ export function ChatPanelMastra() {
         {messages.length === 0 && !isStreaming && plans.length === 0 && (
           <div className="timeline-empty">
             <h2 className="timeline-empty-title">BloomAI</h2>
-            <p className="timeline-empty-desc">Ask anything — streamed directly from the Mastra agent.</p>
+            <p className="timeline-empty-desc">直接向 Mastra 智能体提问，回答会实时显示。</p>
           </div>
         )}
 
-        {messages.map((m, idx) => (
-          <MessageView
-            key={m.id}
-            role={m.role}
-            parts={(m as any).parts || []}
-            streaming={isStreaming && idx === messages.length - 1}
-            decidedApprovals={decidedApprovals}
-            onDecide={handleDecide}
-            onOpenResearchRun={openResearchRun}
-          />
+        {messages.map((message, idx) => (
+          message.role === 'user' ? (
+            <UserQuestion key={message.id} parts={(message as any).parts || []} />
+          ) : (
+            <AssistantTurn
+              key={message.id}
+              messageId={message.id}
+              parts={(message as any).parts || []}
+              streaming={isStreaming && idx === messages.length - 1}
+              decidedApprovals={decidedApprovals}
+              onDecide={handleDecide}
+              onOpenResearchRun={openResearchRun}
+            />
+          )
         ))}
 
-        {waitingForAssistant && (
-          <div className="msg-group">
-            <div className="msg-avatar">AI</div>
-            <div className="msg-col">
-              <div className="msg-bubble streaming waiting">
-                <WaitingIndicator />
-              </div>
-            </div>
-          </div>
-        )}
+        {waitingForAssistant && <PendingAssistantTurn />}
 
-        {plans.map((p) => (
-          <React.Fragment key={p.id}>
-            <div className="msg-group user">
-              <div className="msg-avatar user">You</div>
-              <div className="msg-col">
-                <div className="msg-bubble user"><p className="msg-text">{p.query}</p></div>
-              </div>
-            </div>
-            <div className="msg-group">
-              <div className="msg-avatar">AI</div>
-              <div className="msg-col">
-                <div className="msg-bubble">
-                  <PlanCard
-                    tasks={p.tasks}
-                    status={p.status}
-                    onConfirm={p.status === 'ready' ? () => handleConfirm(p) : undefined}
-                    onReplan={p.status === 'ready' ? () => handleReplan(p) : undefined}
-                  />
-                </div>
-              </div>
-            </div>
-          </React.Fragment>
+        {plans.map((plan) => (
+          <PlanProposalTurn
+            key={plan.id}
+            query={plan.query}
+            tasks={plan.tasks}
+            status={plan.status}
+            onConfirm={plan.status === 'ready' ? () => handleConfirm(plan) : undefined}
+            onReplan={plan.status === 'ready' ? () => handleReplan(plan) : undefined}
+          />
         ))}
 
         </>}
@@ -996,155 +963,4 @@ function ModeMenu({ mode, onSelect }: { mode: ChatMode; onSelect: (m: ChatMode) 
       )}
     </div>
   )
-}
-
-type ApprovalProps = {
-  decidedApprovals: Record<string, boolean>
-  onDecide: (approvalId: string, approved: boolean) => void
-}
-
-function MessageView({ role, parts, streaming, decidedApprovals, onDecide, onOpenResearchRun }: { role: string; parts: any[]; streaming?: boolean; onOpenResearchRun?: (runId: string) => void } & ApprovalProps) {
-  if (role === 'user') {
-    return <UserMessageView parts={parts} />
-  }
-
-  const errorData = errorDataFromParts(parts)
-  if (errorData) {
-    return (
-      <div className="timeline-error-block" role="alert">
-        <div className="timeline-error-title">{errorData.title}</div>
-        <div className="timeline-error-message">{errorData.message}</div>
-      </div>
-    )
-  }
-
-  // While streaming, the assistant message can exist before any real content arrives — show the
-  // animated indicator inside its bubble instead of an empty bubble until the first part lands.
-  const showWaiting = streaming && !hasRenderableContent(parts)
-  // The confirmed plan card streams in before the model starts answering; keep the thinking
-  // indicator visible below it until real answer content (text/tool/reasoning) shows up.
-  const waitingAfterParts = streaming && !showWaiting && !hasAnswerContent(parts)
-  // The stream ended with no content (e.g. the model / attachment parse failed). Show a short
-  // prompt in the bubble instead of leaving it empty; the full error rides in the timeline block.
-  const showEmptyFallback = !streaming && !hasRenderableContent(parts)
-
-  const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
-  const [liked, setLiked] = useState(false)
-  const fullText = assistantPlainText(parts)
-  const canCopy = !streaming && !showWaiting && !!fullText
-
-  return (
-    <div className="msg-group">
-      <div className="msg-avatar">AI</div>
-      <div className="msg-col">
-        <div
-          ref={bubbleRef}
-          onContextMenu={handleContextMenu}
-          className={cn('msg-bubble', streaming && 'streaming', showWaiting && 'waiting')}
-        >
-          {showWaiting ? (
-            <WaitingIndicator />
-          ) : showEmptyFallback ? (
-            <p className="msg-text msg-fallback">本次未能生成回答，请稍后重试。</p>
-          ) : (
-            <>
-              {renderAssistantParts(parts, { decidedApprovals, onDecide }, onOpenResearchRun)}
-              {waitingAfterParts && <WaitingIndicator />}
-            </>
-          )}
-        </div>
-        {(canCopy || liked) && (
-          <div className={cn('msg-actions', liked && 'has-liked')}>
-            {canCopy && <CopyButton getText={() => fullText} />}
-            {liked && <LikedBadge />}
-          </div>
-        )}
-        <SelectionMenu state={menu} onClose={closeMenu} onLike={() => setLiked(true)} />
-      </div>
-    </div>
-  )
-}
-
-/** User's own question bubble. Same right-click 复制 selection menu as answers (点赞 omitted). */
-function UserMessageView({ parts }: { parts: any[] }) {
-  const text = parts.filter((p) => p.type === 'text').map((p) => p.text).join('')
-  const { bubbleRef, menu, handleContextMenu, closeMenu } = useSelectionMenu<HTMLDivElement>()
-  // Attachments sent with this turn (persisted as a data-attachments part) render as read-only chips.
-  const attachmentPart = parts.find((p) => p?.type === 'data-attachments')
-  const files: ChipItem[] = Array.isArray(attachmentPart?.data?.files)
-    ? attachmentPart.data.files.map((f: any) => ({ id: f.id, name: f.name, ext: f.ext, size: f.size }))
-    : []
-
-  return (
-    <div className="msg-group user">
-      <div className="msg-avatar user">You</div>
-      <div className="msg-col">
-        {files.length > 0 && <AttachmentChips items={files} compact />}
-        {text && (
-          <div ref={bubbleRef} onContextMenu={handleContextMenu} className="msg-bubble user">
-            <p className="msg-text">{text}</p>
-          </div>
-        )}
-        <SelectionMenu state={menu} onClose={closeMenu} />
-      </div>
-    </div>
-  )
-}
-
-// Render assistant parts in order, collapsing consecutive same-tool calls into one group card.
-function renderAssistantParts(parts: any[], approval: ApprovalProps, onOpenResearchRun?: (runId: string) => void): React.ReactNode[] {
-  const items: React.ReactNode[] = []
-  let i = 0
-  while (i < parts.length) {
-    const part = parts[i]
-
-    if (isToolPart(part)) {
-      const first = toToolCallView(part)
-      const group: ToolCallView[] = [first]
-      let j = i + 1
-      while (j < parts.length && isToolPart(parts[j]) && toToolCallView(parts[j]).name === first.name) {
-        group.push(toToolCallView(parts[j]))
-        j++
-      }
-      items.push(<ToolGroupCard key={`tool-${i}`} name={first.name} calls={group} />)
-      i = j
-      continue
-    }
-
-    if (part.type === 'reasoning') {
-      items.push(<ReasoningPart key={`r-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
-    } else if (part.type === 'text') {
-      items.push(<AssistantMarkdown key={`t-${i}`} text={part.text || ''} streaming={part.state === 'streaming'} />)
-    } else if (part.type === 'data-workflow' && part.data) {
-      items.push(<WorkflowSteps key={`wf-${i}`} data={part.data} />)
-    } else if (part.type === 'data-research-run' && part.data) {
-      items.push(<ResearchRunPart key={`research-run-${i}`} data={part.data} onOpen={onOpenResearchRun || (() => {})} />)
-    } else if (part.type === 'data-skill-run' && part.data) {
-      items.push(<SkillRunPart key={`skill-run-${i}`} data={part.data} />)
-    } else if (part.type === 'data-plan' && part.data) {
-      const tasks = Array.isArray(part.data.tasks) ? part.data.tasks : []
-      items.push(<PlanCard key={`plan-${i}`} tasks={tasks} status="done" />)
-    } else if (part.type === 'data-error' && part.data) {
-      items.push(
-        <div key={`error-${i}`} className="timeline-error-block" role="alert">
-          <div className="timeline-error-title">{part.data.title || '请求失败'}</div>
-          <div className="timeline-error-message">{part.data.message || '请求出错了，请稍后重试。'}</div>
-        </div>,
-      )
-    } else if (part.type === 'data-tool-call-approval') {
-      const req = toApprovalRequest(part)
-      if (req) {
-        items.push(
-          <ApprovalCard
-            key={`ap-${i}`}
-            request={req}
-            decided={approval.decidedApprovals[req.approvalId]}
-            onDecide={approval.onDecide}
-          />,
-        )
-      }
-    }
-    i++
-  }
-  return items
 }

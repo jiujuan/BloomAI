@@ -17,7 +17,7 @@ type WorkflowData = {
   steps?: Record<string, WorkflowStep>
 }
 
-// Friendly labels for known deep-research steps; falls back to a humanized id.
+// Friendly labels for known deep-research steps; unknown internal ids use a Chinese fallback.
 const STEP_LABELS: Record<string, string> = {
   'plan-questions': '拆解子问题',
   'search-web': '并行检索',
@@ -41,7 +41,7 @@ function stepLabel(id: string, step: WorkflowStep): string {
 }
 
 function humanize(id: string): string {
-  return id.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return /[\u3400-\u9fff]/.test(id) ? id : '工作流步骤'
 }
 
 // Mastra inserts internal mapping steps between user steps; hide them from the timeline.
@@ -60,15 +60,15 @@ function stepStatusIcon(status?: StepStatus): React.ReactNode {
 }
 
 /** Renders a deep-research workflow's step progress (from a `data-workflow` part). */
-export function WorkflowSteps({ data }: { data: WorkflowData }) {
+export function WorkflowSteps({ data, embedded = false }: { data: WorkflowData; embedded?: boolean }) {
   const entries = Object.entries(data.steps || {}).filter(([id, step]) => !isInternalStep(id, step))
   if (entries.length === 0) return null
 
   const overall: StepStatus = data.status || 'running'
-  const title = WORKFLOW_LABELS[data.name || ''] || humanize(data.name || 'workflow')
+  const title = WORKFLOW_LABELS[data.name || ''] || (/^[\u3400-\u9fff]/.test(data.name || '') ? data.name : '工作流')
 
   return (
-    <div className={cn('workflow-card', overall)} data-workflow-status={overall}>
+    <div className={cn('workflow-card', overall, embedded && 'embedded')} data-workflow-status={overall}>
       <div className="workflow-head">
         <span className="workflow-icon"><ListTree size={12} /></span>
         <span className="workflow-name">{title}</span>

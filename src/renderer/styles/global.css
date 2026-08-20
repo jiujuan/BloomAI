@@ -3178,3 +3178,208 @@ input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 .chat-skill-pagination button { border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 11px; }
 .chat-skill-pagination button:hover:not(:disabled) { color: var(--text-info); }
 .chat-skill-pagination button:disabled { cursor: not-allowed; color: var(--text-tertiary); opacity: .55; }
+
+/* ── Chat timeline UI: compact assistant work summary ─────────────────── */
+.msg-group.user {
+  flex-direction: row;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+/* Keep the user's bubble right edge aligned with the centered 70% assistant column.
+ * Relative positioning shifts it visually without changing its measured height. */
+.msg-group.user .msg-col {
+  width: auto;
+  max-width: min(72%, 720px);
+  align-items: flex-end;
+  position: relative;
+  right: calc((100% - 70%) / 2);
+}
+.msg-group.user .msg-bubble.user {
+  max-width: 100%;
+  padding: 9px 14px;
+  border: 0.5px solid var(--border-tertiary);
+  border-radius: 16px 16px 4px 16px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.msg-group.user .attachment-chips { justify-content: flex-end; }
+.msg-group.assistant-turn {
+  width: 100%;
+  margin-bottom: 24px;
+}
+.msg-group.assistant-turn .msg-col,
+.msg-group.assistant-turn-col {
+  width: 100%;
+  max-width: none;
+}
+.assistant-content {
+  width: 70%;
+  margin-inline: auto;
+  min-width: 0;
+  color: var(--text-primary);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.assistant-content > * { max-width: 100%; }
+.assistant-content .msg-markdown { overflow-x: auto; }
+.assistant-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.assistant-activity-summary {
+  width: 70%;
+  margin: 0 auto 16px;
+  color: var(--text-secondary);
+}
+.assistant-activity-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 40px;
+  gap: 10px;
+  padding: 0 0 9px;
+  border: 0;
+  border-bottom: 0.5px solid var(--border-tertiary);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.assistant-activity-summary-head:hover { color: var(--text-primary); }
+.assistant-activity-summary-head.static { cursor: default; }
+.assistant-activity-summary-head[aria-disabled='true'] { cursor: default; }
+.assistant-activity-list,
+.assistant-critical-activity-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.assistant-activity-item { border-bottom: 0.5px solid color-mix(in srgb, var(--border-tertiary) 72%, transparent); }
+.assistant-activity-item:last-child { border-bottom: 0; }
+.assistant-activity-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.assistant-activity-row:hover { color: var(--text-primary); }
+.assistant-activity-row.static { cursor: default; }
+.assistant-activity-row.action { cursor: pointer; }
+.assistant-activity-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--text-tertiary);
+}
+.assistant-activity-icon.running { color: var(--text-info, var(--text-secondary)); }
+.assistant-activity-icon.success { color: var(--text-success, var(--text-secondary)); }
+.assistant-activity-icon.error { color: var(--text-danger, var(--text-secondary)); }
+.assistant-activity-icon.permission { color: var(--text-warning, var(--text-secondary)); }
+.assistant-activity-label {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-activity-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-left: 2px;
+}
+.assistant-activity-chevron { margin-left: 2px; }
+.assistant-activity-status.running { color: var(--text-info, var(--text-secondary)); }
+.assistant-activity-status.success { color: var(--text-success, var(--text-secondary)); }
+.assistant-activity-status.error { color: var(--text-danger, var(--text-secondary)); }
+.assistant-activity-status.permission { color: var(--text-warning, var(--text-secondary)); }
+.assistant-activity-details {
+  padding: 0 0 11px 24px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.assistant-activity-text {
+  padding: 2px 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assistant-critical-activity-list { margin-top: 2px; }
+.assistant-critical-activity-list .assistant-activity-row { min-height: 38px; }
+.assistant-activity-summary-head:focus-visible,
+.assistant-activity-row:focus-visible {
+  outline: 2px solid var(--border-info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 6px);
+}
+.tool-call-group-card.details-only,
+.workflow-card.embedded,
+.skill-run-card.embedded {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.tool-call-group-card.details-only .tcg-body { border-top: 0; background: transparent; }
+.tool-call-group-card.details-only .tcg-call-row { padding: 3px 0; }
+.workflow-card.embedded .workflow-head { padding-left: 0; padding-right: 0; }
+.workflow-card.embedded .workflow-steps { padding-left: 0; padding-right: 0; }
+.plan-proposal-summary { margin-bottom: 0; }
+.plan-proposal-details { padding-left: 0; }
+.plan-proposal-details .plan-card { margin: 10px 0 0; }
+.msg-actions { opacity: 0; transition: opacity .15s; }
+.msg-group.assistant-turn .msg-actions {
+  width: 70%;
+  margin-inline: auto;
+}
+.msg-group:hover .msg-actions,
+.msg-group:focus-within .msg-actions,
+.msg-actions.has-liked { opacity: 1; }
+
+@media (max-width: 620px) {
+  .msg-group.user .msg-col { max-width: 90%; }
+  .assistant-activity-row {
+    align-items: flex-start;
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .assistant-activity-label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .assistant-activity-details { padding-left: 22px; }
+  .assistant-activity-status { white-space: nowrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-activity-summary-head,
+  .assistant-activity-row,
+  .msg-actions { transition: none; }
+  .spin { animation-duration: 1.8s; }
+}
